@@ -44,7 +44,6 @@ let degraded_retry_runtime_of_wire ~keeper_name raw =
 let finalize
     ~config
     ~meta
-    ~generation
     ~manifest_keeper_turn_id
     ~runtime_id
     ~keeper_visible_sandbox_root
@@ -138,12 +137,10 @@ let finalize
     { Keeper_execution_receipt.keeper_name = meta.name
     ; agent_name = meta.agent_name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; generation
     ; turn_count = !receipt_turn_count_ref
     ; agent_core_turn_count = !receipt_turn_count_ref
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; outcome =
         (match turn_result with
          | Ok _ -> `Ok
@@ -251,7 +248,7 @@ let finalize
     in
     Keeper_runtime_manifest.make ~ts:receipt.ended_at
       ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
-      ~trace_id:receipt.trace_id ~generation:receipt.generation
+      ~trace_id:receipt.trace_id
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?agent_core_turn_count
       ~runtime_id:(receipt.runtime_id)

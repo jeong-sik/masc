@@ -1,0 +1,36 @@
+name = "masc_board_sub_board_create"
+description = """
+Create a named SubBoard (subreddit-style space) within the MASC board. \
+Requires a unique slug, name, and description. Owner is auto-filled from \
+the caller's agent identity. Members restrict posting when access is \
+members_only."""
+
+[[params]]
+name = "slug"
+type = "string"
+required = true
+description = "URL-safe lowercase identifier (e.g. ops, research). Must be unique."
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Display name of the SubBoard"
+
+[[params]]
+name = "description"
+type = "string"
+required = true
+description = "Short description of the SubBoard's purpose"
+
+[[params]]
+name = "access"
+type = "string"
+enum = ["open", "members_only", "owner_only"]
+description = "Access policy: open (default), members_only, or owner_only"
+
+[[params]]
+name = "members"
+type = "array"
+items = { type = "string" }
+description = "Agent names allowed to post when access=members_only. Owner is always included."

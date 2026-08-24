@@ -184,11 +184,18 @@
  (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
+  masc
   masc.server
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.fusion_core
+  masc.run_registry_core
+  masc.masc_core
+  masc.config_dir_resolver
+  masc.board_handlers
+  fs_compat
   cmdliner
   unix
   yojson))
@@ -205,6 +212,156 @@
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 
+(library
+ (name masc_tui_operator_projection)
+ (wrapped false)
+ (modules masc_tui_operator_projection)
+ (libraries masc masc.operator masc.masc_core yojson))
+
+(library
+ (name masc_tui_task_selection)
+ (wrapped false)
+ (modules masc_tui_task_selection)
+ (libraries masc.masc_types))
+
+(library
+ (name masc_tui_keeper_chat_projection)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_projection)
+ (libraries
+  masc
+  masc.keeper_chat_operations
+  masc.masc_random_id
+  masc.masc_core
+  masc.masc_types
+  yojson))
+
+(library
+ (name masc_tui_keeper_chat_live)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_live)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_keeper_chat_queue)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_queue)
+ (libraries))
+
+(library
+ (name masc_tui_keeper_chat_history)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_history)
+ (libraries masc_tui_keeper_chat_transcript yojson))
+
+(library
+ (name masc_tui_keeper_chat_transcript)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_transcript)
+ (libraries
+  masc
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection))
+
+(library
+ (name masc_tui_message_layout)
+ (wrapped false)
+ (modules masc_tui_message_layout)
+ (libraries uucp uuseg))
+
+(library
+ (name masc_tui_keeper_chat_recovery)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_recovery)
+ (libraries
+  masc.masc_core
+  masc.masc_process
+  masc.masc_random_id
+  masc
+  masc_tui_keeper_chat_projection
+  eio
+  fs_compat
+  yojson
+  unix))
+
+(library
+ (name masc_tui_frame_presenter)
+ (wrapped false)
+ (modules masc_tui_frame_presenter))
+
+(library
+ (name masc_tui_keeper_activity)
+ (wrapped false)
+ (modules masc_tui_keeper_activity)
+ (libraries masc unix))
+
+(library
+ (name masc_tui_metrics_tail)
+ (wrapped false)
+ (modules masc_tui_metrics_tail)
+ (libraries masc dated_jsonl))
+
+(library
+ (name masc_tui_context_state)
+ (wrapped false)
+ (modules masc_tui_context_state)
+ (libraries masc masc.masc_workspace yojson))
+
+(library
+ (name masc_tui_observation_layout)
+ (wrapped false)
+ (modules masc_tui_observation_layout)
+ (libraries masc))
+
+(library
+ (name masc_tui_render_schedule)
+ (wrapped false)
+ (modules masc_tui_render_schedule))
+
+(library
+ (name masc_tui_board_selection)
+ (wrapped false)
+ (modules masc_tui_board_selection))
+
+(library
+ (name masc_tui_planning_selection)
+ (wrapped false)
+ (modules masc_tui_planning_selection))
+
+(library
+ (name masc_tui_markdown)
+ (wrapped false)
+ (modules masc_tui_markdown)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_composer)
+ (wrapped false)
+ (modules masc_tui_composer)
+ (libraries masc_tui_render_schedule))
+
+(library
+ (name masc_tui_keeper_control)
+ (wrapped false)
+ (modules masc_tui_keeper_control)
+ (libraries masc yojson))
+
+(library
+ (name masc_tui_keeper_selection)
+ (wrapped false)
+ (modules masc_tui_keeper_selection))
+
+(library
+ (name masc_tui_board_detail)
+ (wrapped false)
+ (modules masc_tui_board_detail))
+
+(library
+ (name masc_tui_terminal_write_repair)
+ (wrapped false)
+ (modules masc_tui_terminal_write_repair)
+ (libraries masc_tui_render_schedule unix))
+
 (executable
  (name masc_tui)
  (modules
@@ -218,6 +375,30 @@
  (package masc)
  (libraries
   masc
+  masc.auth
+  masc_tui_context_state
+  masc_tui_frame_presenter
+  masc_tui_keeper_activity
+  masc_tui_keeper_chat_history
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_recovery
+  masc_tui_keeper_chat_transcript
+  masc_tui_composer
+  masc_tui_keeper_control
+  masc_tui_markdown
+  masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observation_layout
+  masc_tui_operator_projection
+  masc_tui_board_detail
+  masc_tui_board_selection
+  masc_tui_keeper_selection
+  masc_tui_planning_selection
+  masc_tui_task_selection
+  masc_tui_render_schedule
+  masc_tui_terminal_write_repair
   masc.dashboard
   masc.server
   masc.config
@@ -230,6 +411,7 @@
   fs_compat
   time_compat
   masc_log
+  masc_goal
   masc_workspace
   masc_backend
   masc_process
@@ -240,6 +422,7 @@
   str
   eio_main
   eio
+  mtime.clock.os
   httpun
   cohttp
   cohttp-eio

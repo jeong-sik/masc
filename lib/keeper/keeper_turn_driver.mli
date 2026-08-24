@@ -28,8 +28,6 @@ include
       Keeper_internal_error.accept_rejection_kind
      and type accept_response_shape =
       Keeper_internal_error.accept_response_shape
-     and type provider_cooldown_cause =
-      Keeper_internal_error.provider_cooldown_cause
      and type transcript_quarantine_reason =
       Keeper_internal_error.transcript_quarantine_reason
      and type gate_replay_repair_stage =
@@ -37,34 +35,6 @@ include
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Turn pipeline records} *)
-
-type provider_attempt_provenance =
-  { model_source : string
-  ; resolved_model_source : string
-  ; capability_source : string
-  ; fallback_authority : string
-  ; provider_source_runtime : string option
-  }
-
-type provider_attempt_started_record =
-  { started_provenance : provider_attempt_provenance
-  ; started_is_last : bool
-  }
-
-type provider_attempt_finished_record =
-  { finished_provenance : provider_attempt_provenance
-  ; finished_status : string
-  ; finished_latency_ms : float
-  ; finished_checkpoint_after_present : bool
-  ; finished_error : Yojson.Safe.t
-  ; finished_exception_kind : string option
-  }
-
-val provider_attempt_started_decision :
-  provider_attempt_started_record -> Yojson.Safe.t
-
-val provider_attempt_finished_decision :
-  provider_attempt_finished_record -> Yojson.Safe.t
 
 (** {1 Named runtime execution} *)
 
@@ -117,6 +87,7 @@ val run_named :
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
   ?raw_trace:Agent_core.Raw_trace.t ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -149,6 +120,8 @@ val run_named :
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
   ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
+  ?on_runtime_attempt_error:
+    (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
   ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
@@ -161,7 +134,12 @@ val run_named :
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
     uses [Runtime_fsm.decide] on failure.
-    The runtime loop runs inside a capacity-managed queue permit. *)
+    The runtime loop runs inside a capacity-managed queue permit.
+
+    [on_runtime_attempt_error] observes every typed candidate failure after
+    its runtime manifest row is emitted. It does not change candidate
+    selection or the final error; verifier callers use it to aggregate
+    retryability across a bare runtime and its terminal default fallback. *)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
@@ -261,6 +239,8 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
+    ?on_attempt_error:
+      (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->

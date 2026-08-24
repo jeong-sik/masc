@@ -85,7 +85,7 @@ let project_replay_message_exn ~base_path
      | Ok [ _canonical; projected ] ->
        Agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
-     | Error detail -> fail detail)
+     | Error detail -> fail (Agent_core.Error.to_string detail))
 ;;
 
 let make_meta ?(name = "keeper-exec-tools") () =
@@ -397,11 +397,16 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (json_contains_tool "masc_board_fake" json);
   check bool "voice tool grouped" true
     (member "voice" "keeper_voice_speak");
+  let is_model_visible name =
+    List.exists
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      (Masc.Keeper_tool_policy.keeper_model_tool_schemas ())
+  in
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
-  check bool "MASC task tool grouped as workspace" true
+  check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
     (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" true
+  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get")
     (member "workspace" "masc_plan_get");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
@@ -907,7 +912,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               ~cell:turn_ctx_cell
               ~agent_name
               ~trace_id
-              ~generation:0
               ~turn:0
               ~keeper_turn_id:1
               ();
@@ -916,7 +920,6 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~config
                 ~meta_ref:(ref meta)
                 ~turn_ctx_cell
-                ~generation:0
                 ~trace_id
                 ~keeper_turn_id:1
                 ~on_after_turn_ordinal:ignore
@@ -3417,7 +3420,6 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3496,7 +3498,6 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -4604,7 +4605,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             let transient_terminal_error =
               Keeper_internal_error.core_error_of_masc_internal_error
                 (Keeper_internal_error.Terminal_effect_failed
-                   { failure_class = Tool_result.Transient_error
+                   { failure_class = Tool_result.Dependency_unavailable
                    ; effect_disposition = Tool_result.Effect_outcome_unknown
                    ; diagnostic = "unknown transient terminal effect"
                    })
@@ -4616,7 +4617,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_transient_failure
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
                  ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
@@ -5240,6 +5241,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5327,6 +5329,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5728,6 +5731,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5841,6 +5845,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -5969,6 +5974,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
@@ -6067,7 +6073,7 @@ let test_async_composition_uses_durable_request_status_surface () =
          | Some tool -> tool
          | None -> fail "async composition status tool was not materialized"
        in
-       (match Agent_core.Tool.execution_mode status_tool with
+       (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
         | Agent_core.Tool_contract.Concurrent -> ()
         | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
        let request_id =

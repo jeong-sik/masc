@@ -62,9 +62,5 @@ val resolve_opt :
 (** [No_factory] when [t option] is [None]. Otherwise delegates to {!resolve}.
     Lets call sites distinguish "factory missing" from "Local profile". *)
 
-val container_cwd_of_host_opt : t option -> host_cwd:string -> string option
-(** Pure Docker CWD projection for response shaping. Unlike {!resolve_opt},
-    this does not create or memoize a turn sandbox runtime. *)
-
 val cleanup : t -> unit
 (** Tears down every runtime created via {!resolve}.  Idempotent. *)

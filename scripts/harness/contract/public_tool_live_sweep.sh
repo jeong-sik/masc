@@ -183,7 +183,7 @@ r_goal_transition="$(
   call_tool 5011 "masc_goal_transition" "$(
     jq -cn \
       --arg goal_id "$GOAL_ID" \
-      '{goal_id:$goal_id,action:"pause",note:"public tool sweep pause"}'
+      '{goal_id:$goal_id,action:"drop",note:"public tool sweep drop"}'
   )"
 )"
 expect_ok "masc_goal_transition" "$r_goal_transition"
@@ -269,7 +269,7 @@ if [[ -z "$comment_id" ]]; then
 fi
 
 next_step "masc_board_vote"
-r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter}')")"
+r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter,direction:"up"}')")"
 expect_ok "masc_board_vote" "$r_board_vote"
 
 next_step "masc_board_comment_vote"

@@ -75,20 +75,31 @@ async function flushUi(): Promise<void> {
 
 function cssMediaBlock(css: string, query: string): string {
   const marker = `@media ${query}`
-  const markerIndex = css.indexOf(marker)
-  if (markerIndex < 0) throw new Error(`Missing CSS media query: ${query}`)
+  const blocks: string[] = []
+  let searchFrom = 0
 
-  const openingBrace = css.indexOf('{', markerIndex + marker.length)
-  if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+  while (true) {
+    const markerIndex = css.indexOf(marker, searchFrom)
+    if (markerIndex < 0) break
 
-  let depth = 0
-  for (let index = openingBrace; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    if (css[index] === '}') depth -= 1
-    if (depth === 0) return css.slice(markerIndex, index + 1)
+    const openingBrace = css.indexOf('{', markerIndex + marker.length)
+    if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+
+    let depth = 0
+    let index = openingBrace
+    for (; index < css.length; index += 1) {
+      if (css[index] === '{') depth += 1
+      if (css[index] === '}') depth -= 1
+      if (depth === 0) break
+    }
+    if (depth !== 0) throw new Error(`Missing closing brace for CSS media query: ${query}`)
+
+    blocks.push(css.slice(markerIndex, index + 1))
+    searchFrom = index + 1
   }
 
-  throw new Error(`Missing closing brace for CSS media query: ${query}`)
+  if (blocks.length === 0) throw new Error(`Missing CSS media query: ${query}`)
+  return blocks.join('\n')
 }
 
 describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
@@ -1879,7 +1890,12 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('keeps runtime provenance and actions in the 800px and 1024px layout', () => {
-    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
+    // Live roster responsive tiers moved from keeper-v2/fleet.css to
+    // v2-monitoring.css (.v2-monitoring-surface scope) in the 2026-08-23
+    // design re-sync; fleet.css now carries only the design mock's tiers
+    // (planned split, docs/DESIGN-PARITY.md).
+    const css = readFileSync(resolve(__dirname, '../styles/v2-monitoring.css'), 'utf8')
+    const fleetCss = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
     const query = '(max-width: 1100px) and (min-width: 721px)'
     const responsiveBlock = cssMediaBlock(css, query)
     const tabletHeaderBlock = cssMediaBlock(css, '(max-width: 900px)')
@@ -1891,12 +1907,157 @@ describe('AgentRoster live-only cards', () => {
 
     expect(css).toContain('@media (max-width: 1500px) and (min-width: 1101px)')
     expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
-    expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-ctx,')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-tool { display: none; }')
     expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')
-    expect(tabletHeaderBlock).toContain('.fl-top { height: auto; flex-wrap: wrap;')
-    expect(tabletHeaderBlock).toContain('.fl-health { width: 100%; order: 3; }')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-top')
+    expect(tabletHeaderBlock).toContain('height: auto')
+    expect(tabletHeaderBlock).toContain('flex-wrap: wrap')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-health')
+    expect(tabletHeaderBlock).toContain('width: 100%')
+    expect(tabletHeaderBlock).toContain('order: 3')
     expect(css).toContain('@media (max-width: 720px)')
-    expect(css).toContain('.fl-attn-list')
-    expect(css).toContain('.fl-attn-item[data-sev="bad"]')
+    expect(fleetCss).toContain('.fl-attn-list')
+    expect(fleetCss).toContain('.fl-attn-item[data-sev="bad"]')
+  })
+})
+
+describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
+  let container: HTMLDivElement
+
+  function seedKeeperRow(overrides: Partial<Keeper> = {}): void {
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'keeper-nick0cave-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_canonical: 'claude',
+        recent_tool_names: ['keeper_tasks_list', 'keeper_board_get'],
+        latest_tool_call_count: 2,
+        ...overrides,
+      } as Keeper,
+    ]
+  }
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = true
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.useRealTimers()
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = false
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  it('groups the header create action under fl-top-actions with the design button class', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const wrap = container.querySelector('.fl-top .fl-top-actions')
+    const create = wrap?.querySelector('[data-testid="keeper-create-entry"]')
+    expect(create?.classList.contains('fl-top-btn')).toBe(true)
+    expect(create?.classList.contains('primary')).toBe(true)
+  })
+
+  it('wraps keeper row actions in the design hover group and adds the chat deep link', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions [data-testid="keeper-action-buttons"]')).not.toBeNull()
+    const chat = cell.querySelector('a.fl-chat') as HTMLAnchorElement
+    expect(chat.getAttribute('href')).toContain('keepers')
+    expect(chat.getAttribute('href')).toContain('nick0cave')
+    expect(chat.getAttribute('title')).toContain('대화 콘솔 열기')
+  })
+
+  it('renders neither the actions group nor the chat link for an agent without a keeper runtime', async () => {
+    agents.value = [makeAgent({ name: 'taskmaster-proud-bear', status: 'active' })]
+    keepers.value = []
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions')).toBeNull()
+    expect(cell.querySelector('a.fl-chat')).toBeNull()
+  })
+
+  it('shows the bound runtime under the aside identity block only when assigned', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')?.textContent).toBe('claude')
+
+    seedKeeperRow({ runtime_canonical: undefined, runtime_id: undefined })
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')).toBeNull()
+  })
+
+  it('lists recent tools as fl-toolrow rows and keeps the live count chip', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('.fl-tools .fl-toolrow')
+    expect(Array.from(rows).map(el => el.textContent)).toEqual([
+      'keeper_tasks_list',
+      'keeper_board_get',
+    ])
+    expect(container.textContent).toContain('2회 관찰됨')
+  })
+
+  it('renders the aside action bar from live keeper action visibility', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const keys = Array.from(
+      container.querySelectorAll('[data-testid="fleet-aside-actions"] .fl-actbar .fl-btn'),
+    ).map(el => (el as HTMLElement).dataset.action)
+    expect(keys).toEqual(['pause', 'wakeup', 'shutdown'])
   })
 })

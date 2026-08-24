@@ -16,10 +16,6 @@ type ide_error =
 
 val ide_error : string -> string -> ide_error
 
-val nonempty_query_param : Uri.t -> string -> string option
-(** Query parameter with surrounding whitespace trimmed, [None] when absent
-    or blank. A blank scope parameter is an absent one, never a match. *)
-
 (** RFC-0378 §5.3b/§5.2: one wire key, one store. [Scope_codebase]
     carries the canonical slug itself — the store directory name and the
     value the co-view context hands the keeper. Full-URL and repo_id

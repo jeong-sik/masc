@@ -16,10 +16,6 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
-  (* RFC-0362: the keeper responsible for turning this Goal into Tasks.
-     [None] is the default and is legitimate -- an unowned Goal is a stated
-     intent nobody has picked up, which is a reportable state, not an error. *)
-  owner : string option;
   created_at : string;
   updated_at : string;
 }
@@ -50,7 +46,6 @@ and goal_to_yojson (goal : goal) =
       ("phase", Goal_phase.to_yojson goal.phase);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
-      ("owner", Json_util.string_opt_to_json goal.owner);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
@@ -87,7 +82,6 @@ and goal_of_yojson = function
         ; "phase"
         ; "last_review_note"
         ; "last_review_at"
-        ; "owner"
         ; "created_at"
         ; "updated_at"
         ]
@@ -143,7 +137,6 @@ and goal_of_yojson = function
                     phase;
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
-                    owner = Json_util.get_string json "owner";
                     created_at;
                     updated_at;
                   }
@@ -156,7 +149,6 @@ and goal_of_yojson = function
 
 type rollup = {
   active_count : int;
-  paused_count : int;
   verifying_count : int;
   done_count : int;
   dropped_count : int;
@@ -300,9 +292,13 @@ let write_state config state =
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
 
+(* The suffix used to be [Hashtbl.hash (gettimeofday ())] masked to 16 bits.
+   Two goals minted in the same millisecond hash near-identical clock values,
+   so the part meant to separate them was the part most correlated with what
+   it was separating. [Random_id] is the entropy source the rest of the tree
+   uses; take 4 bytes from it instead. *)
 let gen_goal_id () =
-  Printf.sprintf "goal-%d-%04x" (now_ms ())
-    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
+  Printf.sprintf "goal-%d-%s" (now_ms ()) (Random_id.hex ~bytes:4)
 
 let find_goal goals id =
   List.find_opt (fun goal -> String.equal goal.id id) goals
@@ -529,7 +525,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         phase = default_phase;
                         last_review_note = None;
                         last_review_at = None;
-                        owner = None;
                         created_at = now;
                         updated_at = now;
                       }
@@ -559,11 +554,6 @@ let compute_rollup goals =
   in
   {
     active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
-    paused_count =
-      count (fun goal ->
-          match goal.phase with
-          | Goal_phase.Paused | Goal_phase.Blocked -> true
-          | _ -> false);
     verifying_count = count (fun goal -> goal.phase = Goal_phase.Verifying);
     done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
     dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);

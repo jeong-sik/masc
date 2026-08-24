@@ -4,11 +4,7 @@ type t
 type publication_error =
   | Registry_not_published
   | Publication_busy
-  | Generation_exhausted
-  | Replacement_base_changed of
-      { expected_generation : int64 option
-      ; actual_generation : int64 option
-      }
+  | Replacement_base_changed
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
@@ -63,9 +59,7 @@ val publish
   -> Agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
 (** Validate and atomically publish one complete resolver-and-lane registry.
-    Each successful publication advances the MASC-local generation
-    monotonically. Invalid declarations are rejected before the Atomic is
-    changed.
+    Invalid declarations are rejected before the Atomic is changed.
 
     Every declaration string present in the frozen catalog is converted to an
     immutable AGENT_CORE admitted-target handle before publication. Credential
@@ -101,12 +95,11 @@ val current : unit -> (t, publication_error) result
     a replacement reservation fences new acquisitions, and
     [Registry_not_published] before bootstrap has published one. *)
 
-val generation : t -> int64
 val rejected_slots : t -> rejected_slot list
 
 val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
 (** Acquire one lane exclusively from the immutable admitted handles retained
-    by the supplied registry generation. This does not resolve credentials or
+    by the supplied registry. This does not resolve credentials or
     select provider targets; AGENT_CORE owns those operations while executing the
     exact flow. Slot declaration order is preserved. *)
 

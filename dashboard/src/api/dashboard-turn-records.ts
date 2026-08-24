@@ -4,15 +4,29 @@
 
 import { get, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
-import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asNumber, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
-export type TurnPromptBlockId =
-  | 'keeper_instructions'
-  | 'dynamic_context'
-  | 'temporal_summary'
-  | 'memory_os_recall'
-  | 'operator_note'
+// The type is derived from the list, and the decoder reads the list, so a
+// block id is added or removed in one place. It used to be a hand-written
+// union with a switch beside it and a second switch in dashboard-keeper-prompt:
+// the persona hard-cut (masc#27048) updated the type and one switch, the twin
+// kept `case 'persona'`, and three adversarial-review rounds ran red on it.
+export const TURN_PROMPT_BLOCK_IDS = [
+  'keeper_instructions',
+  'dynamic_context',
+  'temporal_summary',
+  'memory_os_recall',
+  'operator_note',
+] as const
+
+export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
+
+export function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
+  return (TURN_PROMPT_BLOCK_IDS as readonly unknown[]).includes(raw)
+    ? (raw as TurnPromptBlockId)
+    : null
+}
 
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
@@ -240,7 +254,13 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   latest_ts_unix: number | null
   latest_ts_iso: string | null
   latest_age_s: number | null
-  health: 'empty' | 'incompatible' | 'stale' | 'ok'
+  // 'live' and 'ok' are different answers. A running turn has not written its
+  // record yet, so the newest finished record's age says nothing about whether
+  // the store is keeping up; 'ok' additionally asserts that age is inside the
+  // SLO. The server used to send 'ok' for both, and the age check below read a
+  // live keeper's over-SLO age as a contract violation and dropped the whole
+  // payload (masc#28720).
+  health: 'empty' | 'incompatible' | 'stale' | 'ok' | 'live'
   stale_reason: 'no_entries' | 'incompatible_rows' | 'freshness_slo_exceeded' | null
   keeper: string
   count: number
@@ -248,85 +268,6 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   skipped_rows: number
   memory_os: MemoryOsTurnRecordSnapshot
   entries: TurnRecordRow[]
-}
-
-export type KeeperCompactionSnapshotLinks = {
-  readonly receipt_path: string | null
-  readonly checkpoint_path: string | null
-  readonly tool_call_log_path: string | null
-}
-
-export type KeeperCompactionExactEvidence = {
-  readonly before_checkpoint_bytes: number
-  readonly after_checkpoint_bytes: number
-  readonly before_message_count: number
-  readonly after_message_count: number
-  readonly summarized_message_count: number
-  readonly dropped_message_count: number
-  readonly before_tool_use_count: number
-  readonly after_tool_use_count: number
-  readonly before_tool_result_count: number
-  readonly after_tool_result_count: number
-}
-
-export type KeeperCompactionReinjectionState =
-  | 'not_linked'
-  | 'awaiting_load'
-  | 'checkpoint_not_loaded'
-  | 'loaded_not_injected'
-  | 'reinserted'
-  | 'sequence_incomplete'
-  | 'sequence_reversed'
-  | 'duplicate_receipt'
-
-export type KeeperCompactionReinjectionObservation = {
-  readonly state: KeeperCompactionReinjectionState
-  readonly keeper_turn_id: number | null
-  readonly checkpoint_loaded_receipts: number
-  readonly context_injected_receipts: number
-}
-
-export type KeeperCompactionOutcome =
-  | 'checkpoint_committed'
-  | 'retry_without_checkpoint'
-  | 'lifecycle_cleanup_failed_without_checkpoint'
-
-export type KeeperCompactionSnapshot = {
-  readonly id: string
-  readonly keeper: string
-  readonly ts_iso: string
-  readonly ts_unix: number | null
-  readonly trace_id: string | null
-  readonly keeper_turn_id: number | null
-  readonly source: string
-  readonly trigger: string
-  readonly runtime_id: string | null
-  readonly display_runtime: string
-  readonly before_tokens: number | null
-  readonly after_tokens: number | null
-  readonly saved_tokens: number | null
-  readonly compaction_id: string | null
-  readonly compaction_source: string | null
-  readonly compaction_outcome: KeeperCompactionOutcome | null
-  readonly cause: string | null
-  readonly status: string
-  readonly links: KeeperCompactionSnapshotLinks
-  readonly exact_evidence: KeeperCompactionExactEvidence | null
-  readonly reinjection_observation: KeeperCompactionReinjectionObservation
-}
-
-export type KeeperCompactionSnapshotsResponse = {
-  readonly schema: string
-  readonly keeper: string
-  readonly source: string
-  readonly producer: string
-  readonly limit: number
-  readonly count: number
-  readonly read_error_count: number
-  readonly read_errors: { scope: string; error: string }[]
-  readonly scan_truncated: boolean
-  readonly hydration_status: 'warming' | 'ready' | 'failed'
-  readonly items: KeeperCompactionSnapshot[]
 }
 
 function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -387,19 +328,6 @@ function wholeSecondIsoOfUnixSeconds(raw: number): string | null {
   const date = new Date(Math.floor(raw) * 1000)
   if (!Number.isFinite(date.getTime())) return null
   return date.toISOString().replace('.000Z', 'Z')
-}
-
-function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
-  switch (raw) {
-    case 'keeper_instructions':
-    case 'dynamic_context':
-    case 'temporal_summary':
-    case 'memory_os_recall':
-    case 'operator_note':
-      return raw
-    default:
-      return null
-  }
 }
 
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
@@ -918,6 +846,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || raw.health === 'incompatible'
     || raw.health === 'stale'
     || raw.health === 'ok'
+    || raw.health === 'live'
       ? raw.health
       : null
   const stale_reason =
@@ -961,7 +890,11 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || entries === null
     || count !== entries.length
     || entries.some(row => row.record.keeper !== keeper)
-    || (entries.length === 0) !== (health === 'empty' || health === 'incompatible')
+    // 'live' says nothing about the row count: a keeper's first turn reports it
+    // with no entries yet, and a long-running turn reports it with the previous
+    // turns' rows present.
+    || (health !== 'live'
+      && (entries.length === 0) !== (health === 'empty' || health === 'incompatible'))
     || latest_ts_unix !== latestRecordTs
     || latest_ts_iso !== expectedLatestTsIso
     || (health === 'empty'
@@ -988,6 +921,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
         || latest_age_s === null
         || latest_age_s > freshness_slo_s
         || stale_reason !== null))
+    // No age constraint: that is what 'live' means. It does require that a turn
+    // really is running, and carries no stale reason.
+    || (health === 'live' && (!live_turn_in_progress || stale_reason !== null))
   ) return null
   return {
     source,
@@ -1011,187 +947,6 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   }
 }
 
-function decodeKeeperCompactionSnapshotLinks(raw: unknown): KeeperCompactionSnapshotLinks {
-  if (!isRecord(raw)) {
-    return { receipt_path: null, checkpoint_path: null, tool_call_log_path: null }
-  }
-  return {
-    receipt_path: asNullableString(raw.receipt_path),
-    checkpoint_path: asNullableString(raw.checkpoint_path),
-    tool_call_log_path: asNullableString(raw.tool_call_log_path),
-  }
-}
-
-function nullableNumber(raw: unknown): number | null {
-  return asNumber(raw) ?? null
-}
-
-function decodeCompactionExactEvidence(raw: unknown): KeeperCompactionExactEvidence | null | undefined {
-  if (raw === null) return null
-  if (!isRecord(raw)) return undefined
-  const evidence = {
-    before_checkpoint_bytes: asNumber(raw.before_checkpoint_bytes),
-    after_checkpoint_bytes: asNumber(raw.after_checkpoint_bytes),
-    before_message_count: asNumber(raw.before_message_count),
-    after_message_count: asNumber(raw.after_message_count),
-    summarized_message_count: asNumber(raw.summarized_message_count),
-    dropped_message_count: asNumber(raw.dropped_message_count),
-    before_tool_use_count: asNumber(raw.before_tool_use_count),
-    after_tool_use_count: asNumber(raw.after_tool_use_count),
-    before_tool_result_count: asNumber(raw.before_tool_result_count),
-    after_tool_result_count: asNumber(raw.after_tool_result_count),
-  }
-  if (Object.values(evidence).some(value => value === undefined)) return undefined
-  return evidence as KeeperCompactionExactEvidence
-}
-
-const COMPACTION_REINJECTION_STATES: readonly KeeperCompactionReinjectionState[] = [
-  'not_linked',
-  'awaiting_load',
-  'checkpoint_not_loaded',
-  'loaded_not_injected',
-  'reinserted',
-  'sequence_incomplete',
-  'sequence_reversed',
-  'duplicate_receipt',
-]
-
-function decodeCompactionReinjectionObservation(
-  raw: unknown,
-): KeeperCompactionReinjectionObservation | undefined {
-  if (!isRecord(raw)) return undefined
-  const state = asString(raw.state) as KeeperCompactionReinjectionState | undefined
-  const loaded = asNumber(raw.checkpoint_loaded_receipts)
-  const injected = asNumber(raw.context_injected_receipts)
-  if (!state || !COMPACTION_REINJECTION_STATES.includes(state)
-      || loaded === undefined || injected === undefined) return undefined
-  return {
-    state,
-    keeper_turn_id: nullableNumber(raw.keeper_turn_id),
-    checkpoint_loaded_receipts: loaded,
-    context_injected_receipts: injected,
-  }
-}
-
-function decodeCompactionOutcome(raw: unknown): KeeperCompactionOutcome | null | undefined {
-  if (raw === null) return null
-  const value = asString(raw)
-  switch (value) {
-    case 'checkpoint_committed':
-    case 'retry_without_checkpoint':
-    case 'lifecycle_cleanup_failed_without_checkpoint':
-      return value
-    case undefined:
-    default:
-      return undefined
-  }
-}
-
-function compactionOutcomeContractIsValid(
-  outcome: KeeperCompactionOutcome | null,
-  evidence: KeeperCompactionExactEvidence | null,
-  cause: string | null,
-): boolean {
-  switch (outcome) {
-    case null:
-      return evidence === null && cause === null
-    case 'checkpoint_committed':
-      return evidence !== null && (cause === null || Boolean(cause.trim()))
-    case 'retry_without_checkpoint':
-    case 'lifecycle_cleanup_failed_without_checkpoint':
-      return evidence === null && Boolean(cause?.trim())
-  }
-}
-
-function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const keeper = asString(raw.keeper)
-  const ts_iso = asString(raw.ts_iso)
-  const source = asString(raw.source)
-  const trigger = asString(raw.trigger)
-  const status = asString(raw.status)
-  if (!id || !keeper || !ts_iso || !source || !trigger || !status) return null
-  const runtimeId = asNullableString(raw.runtime_id)
-  const compactionSource = asNullableString(raw.compaction_source)
-  const exactEvidence = decodeCompactionExactEvidence(raw.exact_evidence)
-  const compactionOutcome = decodeCompactionOutcome(raw.compaction_outcome)
-  const cause =
-    raw.cause === null ? null : asString(raw.cause)
-  const reinjectionObservation =
-    decodeCompactionReinjectionObservation(raw.reinjection_observation)
-  if (
-    exactEvidence === undefined
-    || compactionOutcome === undefined
-    || cause === undefined
-    || reinjectionObservation === undefined
-  ) return null
-  if (!compactionOutcomeContractIsValid(compactionOutcome, exactEvidence, cause)) return null
-  return {
-    id,
-    keeper,
-    ts_iso,
-    ts_unix: nullableNumber(raw.ts_unix),
-    trace_id: asNullableString(raw.trace_id),
-    keeper_turn_id: nullableNumber(raw.keeper_turn_id),
-    source,
-    trigger,
-    runtime_id: runtimeId,
-    display_runtime: asString(raw.display_runtime)?.trim() ?? '',
-    before_tokens: nullableNumber(raw.before_tokens),
-    after_tokens: nullableNumber(raw.after_tokens),
-    saved_tokens: nullableNumber(raw.saved_tokens),
-    compaction_id: asNullableString(raw.compaction_id),
-    compaction_source: compactionSource,
-    compaction_outcome: compactionOutcome,
-    cause: cause,
-    status,
-    links: decodeKeeperCompactionSnapshotLinks(raw.links),
-    exact_evidence: exactEvidence,
-    reinjection_observation: reinjectionObservation,
-  }
-}
-
-function decodeReadErrors(raw: unknown): { scope: string; error: string }[] {
-  return asRecordArray(raw)
-    .map((item) => {
-      const scope = asString(item.scope)
-      const error = asString(item.error)
-      return scope && error ? { scope, error } : null
-    })
-    .filter((item): item is { scope: string; error: string } => item !== null)
-}
-
-function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompactionSnapshotsResponse | null {
-  if (!isRecord(raw)) return null
-  const schema = asString(raw.schema)
-  const keeper = asString(raw.keeper)
-  const source = asString(raw.source)
-  const producer = asString(raw.producer)
-  const hydration_status =
-    raw.hydration_status === 'warming'
-    || raw.hydration_status === 'ready'
-    || raw.hydration_status === 'failed'
-      ? raw.hydration_status
-      : null
-  if (!schema || !keeper || !source || !producer || !hydration_status) return null
-  return {
-    schema,
-    keeper,
-    source,
-    producer,
-    limit: asNumber(raw.limit, 0) ?? 0,
-    count: asNumber(raw.count, 0) ?? 0,
-    read_error_count: asNumber(raw.read_error_count, 0) ?? 0,
-    read_errors: decodeReadErrors(raw.read_errors),
-    scan_truncated: asBoolean(raw.scan_truncated) ?? false,
-    hydration_status,
-    items: asRecordArray(raw.items)
-      .map(decodeKeeperCompactionSnapshot)
-      .filter((item): item is KeeperCompactionSnapshot => item !== null),
-  }
-}
-
 function limitQueryString(limit?: number): string {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
@@ -1212,27 +967,6 @@ export async function fetchKeeperTurnRecords(
   ).then((raw) => {
     const decoded = decodeTurnRecordsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
-    return decoded
-  })
-}
-
-export async function fetchKeeperCompactionSnapshots(
-  name: string,
-  limit?: number,
-  opts?: AbortableRequestOptions & { refresh?: boolean },
-): Promise<KeeperCompactionSnapshotsResponse> {
-  const query = new URLSearchParams()
-  if (limit != null) query.set('limit', String(limit))
-  if (opts?.refresh === true) query.set('refresh', 'true')
-  const encoded = query.toString()
-  const params = encoded ? `?${encoded}` : ''
-  await ensureDevToken()
-  return get<Record<string, unknown>>(
-    `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,
-    { signal: opts?.signal },
-  ).then((raw) => {
-    const decoded = decodeKeeperCompactionSnapshotsResponse(raw)
-    if (!decoded) throw new Error('유효하지 않은 keeper compaction snapshot payload')
     return decoded
   })
 }

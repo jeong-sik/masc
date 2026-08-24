@@ -12,7 +12,6 @@ type source_kind =
 type source =
   { kind : source_kind
   ; trace_id : string
-  ; generation : int
   }
 
 type change =
@@ -107,23 +106,21 @@ let source_to_json source =
   `Assoc
     [ "kind", `String (source_kind_to_string source.kind)
     ; "trace_id", `String source.trace_id
-    ; "generation", `Int source.generation
     ]
 ;;
 
 let source_of_json = function
   | `Assoc fields
-    when exact_object_fields [ "kind"; "trace_id"; "generation" ] fields ->
+    when exact_object_fields [ "kind"; "trace_id" ] fields ->
     (match
        List.assoc_opt "kind" fields
        , List.assoc_opt "trace_id" fields
-       , List.assoc_opt "generation" fields
      with
-     | Some (`String kind), Some (`String trace_id), Some (`Int generation) ->
+     | Some (`String kind), Some (`String trace_id) ->
        (match source_kind_of_string kind with
         | Some kind
-          when not (String.equal (String.trim trace_id) "") && generation >= 0 ->
-          Some { kind; trace_id; generation }
+          when not (String.equal (String.trim trace_id) "") ->
+          Some { kind; trace_id }
         | Some _ | None -> None)
      | _ -> None)
   | _ -> None
@@ -661,6 +658,46 @@ let upsert_fact
         current_facts
     in
     let facts = if !found then facts else facts @ [ incoming ] in
+    (* When the rendered payload exceeds the byte budget, evict the oldest
+       facts (by [first_seen]) other than the incoming one until it fits, so an
+       explicit write never deadlocks a full memory. A single incoming fact
+       larger than the whole budget still fails closed below. *)
+    let facts =
+      match
+        Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts
+      with
+      | Fits _ -> facts
+      | Exceeds _ ->
+        let incoming_id = memory_id incoming in
+        let others, incoming_fact =
+          List.partition
+            (fun f -> not (String.equal (memory_id f) incoming_id))
+            facts
+        in
+        let others =
+          List.sort
+            (fun a b -> Float.compare a.first_seen b.first_seen)
+            others
+        in
+        let rec evict_oldest remaining =
+          match remaining with
+          | [] -> remaining
+          | _ :: rest ->
+            (match
+               Keeper_memory_os_budget.measure
+                 ~max_bytes:max_fact_bytes
+                 (incoming_fact @ remaining)
+             with
+             | Fits _ -> remaining
+             | Exceeds _ -> evict_oldest rest)
+        in
+        let evicted = evict_oldest others in
+        Log.Keeper.warn
+          "memory os upsert evicted %d fact(s) to fit byte budget keeper=%s"
+          (List.length others - List.length evicted)
+          keeper_id;
+        incoming_fact @ evicted
+    in
     make_snapshot
       ~max_fact_bytes
       ~previous

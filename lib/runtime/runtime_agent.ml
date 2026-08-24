@@ -109,6 +109,7 @@ type config =
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;
+  tool_approval : Agent_core.Hooks.tool_approval_callback option;
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;
@@ -222,14 +223,14 @@ let observed_http_transport
       (fun req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
+        Log.Runtime_agent.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
         http_transport.complete_sync req);
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
+        Log.Runtime_agent.debug
           "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
         http_transport.complete_stream
           ?on_telemetry
@@ -917,19 +918,19 @@ let record_dashboard_agent_core_response ~config ~total_duration_ms ?serializati
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-      Log.Misc.warn
-        "runtime_agent %s: dashboard agent record failed: %s"
+      Log.Runtime_agent.warn
+        "%s: dashboard agent record failed: %s"
         config.name (Printexc.to_string exn)
 
 let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
   try Agent_core.Agent.close agent with
   | Eio.Cancel.Cancelled _ as e ->
-      Log.Misc.warn
-        "runtime_agent %s: agent close cancelled during cleanup"
+      Log.Runtime_agent.warn
+        "%s: agent close cancelled during cleanup"
         config.name;
       if propagate_cancel then raise e
   | close_exn ->
-      Log.Misc.warn "runtime_agent %s: agent close failed during cleanup: %s"
+      Log.Runtime_agent.warn "%s: agent close failed during cleanup: %s"
         config.name (Printexc.to_string close_exn)
 
 (* ================================================================ *)
@@ -977,8 +978,12 @@ let resume_from_checkpoint
       let prepared_resume =
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
-      Log.Misc.info
-        "runtime_agent %s: resume checkpoint_turn_count=%d turn_limit=unlimited"
+      (* [turn_limit=unlimited] used to ride on this line. Nothing in the
+         runtime agent or in [Agent_core.Agent.resume] carries a turn limit,
+         so the field asserted a configuration that has no producer — 256 of
+         these lines in the two hours to 2026-08-22T02:03Z all repeated it. *)
+      Log.Runtime_agent.info
+        "%s: resume checkpoint_turn_count=%d"
         config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
       Ok
@@ -1085,7 +1090,7 @@ let run_blocks
   (match config.transport with
   | Masc_grpc_transport.Local -> ()
   | t ->
-    Log.Misc.info "runtime_agent %s: transport=%s"
+    Log.Runtime_agent.info "%s: transport=%s"
       config.name (Masc_grpc_transport.to_string t));
   let agent_result =
     select_agent_result
@@ -1212,7 +1217,7 @@ let run_blocks
         (match Agent_core.Raw_trace_query.validate_run ref_ with
          | Ok v -> Some v
          | Error err ->
-           Log.Misc.warn "runtime_agent: run_validation failed: %s"
+           Log.Runtime_agent.warn "run_validation failed: %s"
              (Agent_core.Error.to_string err);
            None)
       | None -> None
@@ -1277,8 +1282,8 @@ let run_blocks
         ~total_duration_ms:run_total_duration_ms
         ~status:(dashboard_status_of_stop_reason stop_reason)
         partial_response;
-      Log.Misc.info
-        "runtime_agent %s: typed input required request_id=%s turns=%d"
+      Log.Runtime_agent.info
+        "%s: typed input required request_id=%s turns=%d"
         config.name
         request.request_id
         turns;
@@ -1311,7 +1316,7 @@ let run_blocks
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered runtimes.  The runtime layer logs [runtime-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
-      Log.Misc.debug "runtime_agent: agent errored: %s" detail;
+      Log.Runtime_agent.debug "agent errored: %s" detail;
       close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
@@ -1331,7 +1336,7 @@ let run_blocks
       ~total_duration_ms:(run_duration_ms_since run_started_at)
       ~status:(Dashboard_agent_core_bridge.Error { transient = false })
       error_response;
-    Log.Misc.error "runtime_agent %s: execution exception: %s\nBacktrace: %s"
+    Log.Runtime_agent.error "%s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
     let typed_internal_error =
       Keeper_internal_error.Internal_unhandled_exception

@@ -6,12 +6,18 @@ SSOT CSS, production-grade, no stub/hardcode/silent-failure.
 
 ## Ground truth (prototype)
 - Source: the keeper-v2 design prototype is now IN-REPO at
-  `dashboard/prototypes/keeper-v2/` (v3 export, #29046) — `$KEEPER_V2_PROTO`
+  `dashboard/prototypes/keeper-v2/` (v5 export, 2026-08-22) — `$KEEPER_V2_PROTO`
   indirection is no longer needed. The vendored SSOT copy of its CSS lives in
   `src/styles/keeper-v2/` (the in-repo source of truth for the skin).
-- Standalone (rendered target): `Keeper Agent v3.html` from that directory,
-  served locally (`?surface=<id>` deep-links) — e.g.
+- Standalone (rendered target): `Keeper Agent v5.html` from that directory —
+  the `data-tone="tempered"` entry point, which is the tone the dashboard runs.
+  Served locally (`?surface=<id>` deep-links) — e.g.
   `python3 -m http.server` inside `dashboard/prototypes/keeper-v2/`.
+- **Measured, not eyeballed:** `docs/DESIGN-PARITY.md` describes the harness that
+  renders the prototype's own DOM under the dashboard's stylesheets, so the SSIM
+  between the two is skin drift with the data variable removed. It also carries
+  the divergence ledger — every surface still short of parity, what holds it
+  there, and what closing it would cost.
 - Maps (transient investigation output, regenerable, not committed):
   proto-data-contract, proto-keepers-dom, proto-css-tokens, live-store-mapping,
   current-shell-inventory.
@@ -67,14 +73,25 @@ REMAINING (re-audited 2026-08-19 against the tree — three of four were stale):
   Divergences now guarded by `styles/keeper-chat-header-divergence.test.ts`.
 
 ## Remaining deltas (adversarial, prioritized)
-- [ ] Keepers roster header: current = verbose stat grid (12/9/0/3) + chips;
-      prototype = compact `.roster-filters` (전체/실행/주의 + search icon + sort).
-- [ ] Keepers roster rows: show time + basepath + phase dot (proto) vs "최근 활동"+summary.
-- [ ] Keepers ctx rail: prototype = 처리량/런타임/컨텍스트(window bar + 지금 컴팩트 +
-      컴팩션 스냅샷 + 메모리 보기)/소유 태스크. Current has "운영 상세" link + "윈도우 사용률 미수신"
-      (live ctx window data gap — keeper.context_ratio/tokens/max).
+- [x] Keepers roster header: STALE as written — `keeper-workspace-roster.ts`
+      already renders the compact `.roster-filters` + sort, and 2026-08-23 added
+      the design's `.roster-head` search band below it (kit rule in v2.css).
+- [x] Keepers roster rows: STALE as written — rows already show time +
+      basepath + phase dot, and 2026-08-23 added the design's `.kp-sandbox` ⬡
+      marker on `sandbox_profile === 'local'` rows.
+- [x] Keepers ctx rail: structure aligned 2026-08-23 — the 컨텍스트 card now
+      uses the design's `.ctx-usage` (마지막 턴 input / 창 크기) and the typed
+      `.ctx-notobs` line. Documented divergences stand: 처리량 removed (#22681),
+      컴팩션 스냅샷 purged (no backend writer, #29503), last-turn meter kept.
+      Live in-flight ctx occupancy is still a marked data gap
+      (keeper.context_ratio/tokens/max) — mark, don't fake.
 - [ ] Keepers 4-col `.v2-body` grid (roster|chat|ctx) vs current single-column internal grid.
-- [ ] Keepers chat header actions = FSM_ACTIONS glyphs (⏸◉⇄■⚙).
+- [x] Keepers chat header actions: done 2026-08-23 — header + composer use the
+      prototype's FSM_ACTIONS glyphs (⏸ ⏹ ▶ ↻ ⚙), dual-emitting `.act.icon`
+      (mobile: `.chat-ovf` + `.chat-ovf-menu`). Two deliberate deviations:
+      boot keeps ⏻ (keeper-action-panel.ts documents why boot must not share
+      resume's ▶), and the utility commands keep their marks — wired operator
+      capability the mock does not have.
 - [ ] Per-surface audit: overview (도메인 현황 cards), board, schedule, runtime,
       monitor, approvals, work, logs, ide, connectors, settings.
 - [x] Mobile bottom tab bar (.v2-nav.is-mnav) + more-sheet — shipped (see above).
@@ -96,10 +113,55 @@ evolution. Per-file disposition of the v2→v3 delta (base `2782405bc3`):
   .sch-reject/…) have zero DOM consumers — the surface renders real projection
   data with shared ActionButton/StatusChip instead of the prototype's mock
   operator actions (mark-don't-fake), so the dead selectors are not vendored.
+  2026-08-23 update: the re-vendor restored the `.sch-decision` tone mapping
+  and the three 720px rules (`.sch-cadsum` / `.sch-poll-list` / `.sch-ev-time`)
+  — those are live-surface styling, not mock-only selectors. The mock
+  operator-action selectors (.sch-act/.sch-reject/…) still have zero DOM
+  consumers and stay unvendored.
 - Still queued (separate PRs): v2.css (PR-2), surfaces.css (PR-3),
   fusion/runtime/keeper-config (PR-4), prompt-book (PR-4b), fleet + monitor.css
   vendoring + agent-roster ctx column (PR-5). PR-6 closed the chat-header item by
   guarding its divergences rather than retargeting — the instruction was stale.
+  2026-08-23 update: the re-sync below closed the v2.css / surfaces.css /
+  keeper-config.css / fleet.css vendoring items.
+
+## v2-masc re-sync (2026-08-23)
+The 2026-08-23 design drop (`~/Downloads/v2-masc`) was diffed against the
+in-repo prototype: identical except two files, both synced in place —
+`prompt-book-data.jsx` (the managed-assets families now list
+`judge.catchup.md`) and `notes/grounding.md` (`moderation` recorded as a
+hidden workspace section).
+
+CSS re-vendor of the five drifted sheets (the other twelve diffed clean apart
+from the repo's font-size tokenization):
+- v2.css: dropped the local `.cmp-coverage*` block (the design never drew it),
+  restored `.wk-kcard-goal` to the design's 10px (`var(--fs-10)`), and moved
+  the `.wka-pulse` / `.wka-done-mark.*` / `.wk-lin-*` / `.wk-kcard-goal` rules
+  out of the appended delta block into their design positions so the copy
+  diffs clean against its source.
+- surfaces.css: restored the design's `.ap-viewseg`/`.ap-viewbtn`/`.on` rule
+  order, put `.ap-hist-dec.warn` back inline with its sibling tone rules, and
+  restored `.bd-stateblock` rule order.
+- schedule.css: see the note above.
+- keeper-config.css: removed the duplicated `.kasm*` block and the dead
+  `.kcf-tool-toggle` rules.
+- fleet.css: adopted the design's responsive tiers (1320px → four tracks,
+  720px → three). The live six-cell row (`.fl-runtime`) keeps its own tiers,
+  moving to `v2-monitoring.css` under `.v2-monitoring-surface` — separate
+  change, same split pattern as the base `--fl-cols`.
+
+Component alignment landed in the same pass:
+- `internal-agents-monitor.ts` rebuilt onto the design's `.ia-*`/`.ai-*`
+  vocabulary (`.ia-head`, `.ia-count`, `.ia-badge`, `.ai-strip`, `.ai-table`),
+  replacing the inline Tailwind assembly.
+- approvals history: decider pills backed by the live `decision_source` field
+  (HITL 수동 / Auto Judge / Always), `.ap-hist-reason` fed by the audit
+  record's `decision_reason` (rendered only when the server recorded one —
+  mark, don't fake), Auto Judge added to the summary stats.
+- keepers roster: `.roster-head` search band and the `.kp-sandbox` glyph
+  (see Remaining deltas above).
+- chat header FSM glyphs + ctx rail `.ctx-usage`/`.ctx-notobs` (see Remaining
+  deltas above).
 
 ## Notes
 - Live data gaps (mark, don't fake): schedule/cron (no signal), context window

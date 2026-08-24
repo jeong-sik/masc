@@ -79,10 +79,6 @@ val forget_mcp_session : string -> unit
     grace period before reaping.  This prevents "Unknown Mcp-Session-Id"
     errors when clients briefly disconnect and reconnect. *)
 
-val grace_period_seconds : float
-(** Seconds to keep a session after SSE disconnect.  Default 300 (5 min).
-    Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var. *)
-
 (** {1 File persistence}
 
     Session state (protocol version, profile, last-active timestamp)
@@ -154,16 +150,9 @@ val protocol_version_from_body : string -> string option
     initialise request body. *)
 
 val get_session_id_query : string -> string option
-(** [get_session_id_query target] extracts a [session_id=...]
-    or [sessionId=...] query parameter from the URL target.
-    Returns [None] when not found.  Both casings are accepted
-    as a backward-compat alias. *)
-
-val title_case_header_name : string -> string
-(** Internal but exposed because the {!get_header_any_case}
-    fallback chain (lower → title-case → upper) depends on
-    the title-case transform.  Pure — useful for tests
-    asserting the case-insensitive header lookup behaviour. *)
+(** [get_session_id_query target] extracts the [session_id=...]
+    query parameter from the URL target.  Returns [None] when
+    not found. *)
 
 val get_header_any_case :
   Httpun.Headers.t -> string -> string option
@@ -190,9 +179,6 @@ val get_session_id_any : Httpun.Request.t -> string option
 val get_protocol_version : Httpun.Request.t -> string
 (** Returns the [Mcp-Protocol-Version] header or
     {!mcp_protocol_version_default} when absent. *)
-
-val get_protocol_version_header_opt :
-  Httpun.Request.t -> string option
 
 type protocol_version_rejection =
   | Unsupported_version of { requested : string }

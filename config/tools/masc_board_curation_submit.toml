@@ -1,0 +1,100 @@
+name = "masc_board_curation_submit"
+description = """
+Submit an AI curation snapshot for the board. This records summary, recommended \
+ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
+without mutating board posts/comments/votes."""
+
+[[params]]
+name = "submitted_by"
+type = "string"
+required = true
+description = "Submitting agent identifier"
+
+[[params]]
+name = "summary"
+type = "string"
+description = "Short TL;DR summary of the current board window"
+
+[[params]]
+name = "ordering"
+type = "array"
+items = { type = "string" }
+description = "Recommended post id reading order"
+
+[[params]]
+name = "highlights"
+type = "array"
+items = { type = "string" }
+description = "Important post ids to highlight"
+
+[[params]]
+name = "tag_suggestions"
+type = "array"
+description = "Objects with post_id, tags[], rationale"
+
+[[params]]
+name = "answer_matches"
+type = "array"
+description = """
+Objects with question_post_id, answer_post_id, score, \
+rationale"""
+
+[[params]]
+name = "rationale"
+type = "string"
+required = true
+description = "Required explanation for the curation decision"
+
+[[params]]
+name = "provenance"
+type = "object"
+description = "Audit metadata such as source window and prompt/run id"
+
+[keeper_projection]
+description = """
+Submit an AI curation snapshot for the current board window. Use after reading \
+recent board activity to publish a summary, recommended reading order, \
+highlights, tag suggestions, answer matches, health score, and rationale. This \
+does not edit board posts/comments/votes."""
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "summary"
+type = "string"
+description = "Short TL;DR summary of the current board window"
+
+[[keeper_projection.params]]
+name = "ordering"
+type = "array"
+items = { type = "string" }
+description = "Recommended post id reading order"
+
+[[keeper_projection.params]]
+name = "highlights"
+type = "array"
+items = { type = "string" }
+description = "Important post ids to highlight"
+
+[[keeper_projection.params]]
+name = "tag_suggestions"
+type = "array"
+description = "Objects with post_id, tags[], rationale"
+
+[[keeper_projection.params]]
+name = "answer_matches"
+type = "array"
+description = """
+Objects with question_post_id, answer_post_id, score, \
+rationale"""
+
+[[keeper_projection.params]]
+name = "rationale"
+type = "string"
+required = true
+description = "Why this curation snapshot is useful now"
+
+[[keeper_projection.params]]
+name = "provenance"
+type = "object"
+description = """
+Audit metadata such as source window and prompt/run id"""

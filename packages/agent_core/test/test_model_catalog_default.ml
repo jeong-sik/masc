@@ -32,6 +32,9 @@ let subscription_model_rows =
   ; "gpt-5.6-terra", "gpt-5.6"
   ; "gpt-5.6-luna", "gpt-5.6"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
+  ; "gemini-3.7-flash-high", "gemini-3.7-flash"
+  ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
+  ; "gemini-3.7-flash-low", "gemini-3.7-flash"
   ; "gemini-3.6-flash-high", "gemini-3.6-flash"
   ; "gemini-3.6-flash-medium", "gemini-3.6-flash"
   ; "gemini-3.6-flash-low", "gemini-3.6-flash"
@@ -70,6 +73,7 @@ let subscription_model_efforts =
   [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
   ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+  ; "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
 ;;

@@ -239,7 +239,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             Keeper_keepalive_launch_transaction.run
               ~base_path
               ~keeper_name:old_entry.name
-              ~expected_generation:old_entry.transition_seq
               ~register:(fun token intake_token ->
                 match Keeper_registry.get ~base_path old_entry.name with
                 | Some current

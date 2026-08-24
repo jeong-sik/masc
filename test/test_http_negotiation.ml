@@ -308,6 +308,19 @@ let test_stateless_headers_do_not_emit_session_id () =
     (Some "2026-07-28")
     (List.assoc_opt "mcp-protocol-version" headers)
 
+(* The transport reads these from Env_config_runtime, not from its own
+   Sys.getenv_opt (#28910). Pinned so a local read cannot come back and drift
+   from the value the rest of the server resolves. *)
+let test_sse_guard_knobs_come_from_the_config_module () =
+  let module Conn = Server_mcp_transport_http_conn in
+  let module Cfg = Env_config_runtime.Sse_connect_guard in
+  check (float 0.0) "min reconnect interval" Cfg.reconnect_min_interval_seconds
+    Conn.sse_reconnect_min_interval_s;
+  check (float 0.0) "connect window" Cfg.connect_window_seconds
+    Conn.sse_connect_window_s;
+  check int "max in window" Cfg.connect_max_in_window Conn.sse_connect_max_in_window
+;;
+
 let test_sse_guard_registry_is_shared_with_cleanup_loop () =
   let module Transport = Server_mcp_transport_http in
   let module Cleanup_view = Server_mcp_transport_http_sse in

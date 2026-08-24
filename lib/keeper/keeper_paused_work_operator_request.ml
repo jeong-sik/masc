@@ -37,10 +37,6 @@ let nonblank field value =
   else Ok value
 ;;
 
-let nonnegative_int field value =
-  if value < 0 then Error (field ^ " must not be negative") else Ok value
-;;
-
 let nonnegative_int64 field value =
   if Int64.compare value 0L < 0
   then Error (field ^ " must not be negative")
@@ -50,22 +46,19 @@ let nonnegative_int64 field value =
 let parse_resume = function
   | [ ("operation", `String "resume_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ]
     when String.equal request_schema schema ->
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
-    Ok (Resume_owner Resume.{ owner_nonce; operator_operation_id })
+    Ok (Resume_owner Resume.{ operator_operation_id })
   | _ -> Error "resume_owner request fields are not exact"
 ;;
 
 let parse_cancel_pending = function
   | [ ("operation", `String "cancel_accepted")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
@@ -80,13 +73,11 @@ let parse_cancel_pending = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* reason = nonblank "reason" reason in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Cancel_pending
          Cancellation.
            { source
            ; source_incarnation
-           ; owner_nonce
            ; operator_operation_id
            ; reason
            })
@@ -97,11 +88,9 @@ let parse_transfer = function
   | [ ("continuation_binding", continuation_binding_json)
     ; ("operation", `String "transfer_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
     ; ("source_incarnation", source_incarnation_json)
-    ; ("target_generation", `Int target_generation)
     ; ("to_keeper", `String to_keeper)
     ]
     when String.equal request_schema schema ->
@@ -115,8 +104,6 @@ let parse_transfer = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* to_keeper = nonblank "to_keeper" to_keeper in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
-    let* target_generation = nonnegative_int "target_generation" target_generation in
     Ok
       (Transfer_owner
          { to_keeper
@@ -124,8 +111,6 @@ let parse_transfer = function
              Transfer.
                { source
                ; source_incarnation
-               ; owner_nonce
-               ; target_generation
                ; continuation_binding
                ; operator_operation_id
                }
@@ -136,7 +121,6 @@ let parse_transfer = function
 let parse_source_terminal = function
   | [ ("operation", `String "ack_source_terminal")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("source", source_json)
     ; ("source_incarnation", source_incarnation_json)
@@ -158,13 +142,11 @@ let parse_source_terminal = function
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Ack_source_terminal
          Source_terminal.
            { source
            ; source_incarnation
-           ; owner_nonce
            ; source_receipt
            ; operator_operation_id
            })

@@ -23,14 +23,9 @@ val of_string : string -> (t, string) result
     ["warn" → Warning], ["bad" → Error], ["fatal" → Critical].
     Returns [Error msg] for unknown inputs. *)
 
-val of_string_default : default:t -> string -> t
-(** Like {!of_string} but yields [default] on parse failure. *)
-
 val to_int : t -> int
 (** Numeric ordering [{Debug = 0 .. Critical = 4}]; higher is more severe. *)
 
 val compare : t -> t -> int
 (** Total order on severity, by {!to_int}. *)
 
-val at_least : threshold:t -> t -> bool
-(** [at_least ~threshold s] is [s >= threshold] under {!compare}. *)

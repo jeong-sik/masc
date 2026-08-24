@@ -60,7 +60,7 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the 2026-07 keeper-v2 export rail order', () => {
+  it('keeps the v2 primary shell aligned to the keeper-v2 prototype rail order', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'keepers',
@@ -74,6 +74,8 @@ describe('dashboard surface navigation', () => {
       'logs',
       'code',
       'connectors',
+      'command',
+      'lab',
       'settings',
     ])
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
@@ -89,6 +91,8 @@ describe('dashboard surface navigation', () => {
       'Logs',
       'IDE',
       'Connectors',
+      'Command',
+      'Lab',
       'Settings',
     ])
   })
@@ -288,7 +292,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces five primary Monitor lanes and keeps support diagnostics routeable', () => {
+  it('surfaces six primary Monitor lanes and keeps support diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
@@ -296,7 +300,7 @@ describe('monitoring navigation labels', () => {
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
     expect(ids).toEqual([
-      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory',
+      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'lanes',
     ])
     expect(ids).toContain('agents')
     expect(ids).toContain('fleet-health')
@@ -329,6 +333,7 @@ describe('monitoring navigation labels', () => {
       'fleet-health',
       'runtime',
       'observatory',
+      'lanes',
     ])
   })
 
@@ -361,11 +366,9 @@ describe('workspace navigation labels', () => {
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
     expect(labelFor('planning')).toBe('Plans & Goals')
-    expect(labelFor('moderation')).toBeUndefined()
     // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
     expect(ids).not.toContain('goals')
-    expect(ids).not.toContain('moderation')
   })
 
   it('hides legacy board-family sections now that Board is top-level', () => {
@@ -382,7 +385,6 @@ describe('workspace navigation labels', () => {
     expect(hiddenIds).toEqual([
       'board',
       'sub-boards',
-      'moderation',
     ])
 
     expect(normalizeRouteParams('workspace', { section: 'board', post: 'post-1' })).toMatchObject({
@@ -390,7 +392,6 @@ describe('workspace navigation labels', () => {
       post: 'post-1',
     })
     expect(normalizeRouteParams('workspace', { section: 'sub-boards' }).section).toBe('sub-boards')
-    expect(normalizeRouteParams('workspace', { section: 'moderation' }).section).toBe('moderation')
   })
 })
 

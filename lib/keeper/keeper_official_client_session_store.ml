@@ -8,12 +8,29 @@ type settlement =
   ; turn_id : string
   }
 
+(* RFC claude-code-context-overflow-bounded-restart §6: the provider rejected the
+   bootstrap input itself as over capacity. Unlike [Provider_rejected], a
+   later automatic claim must not supersede this recovery — replaying the same
+   durable history re-sends a request the provider already proved it will not
+   admit. Only an operator resolution reopens the session.
+
+   [Effect_fenced]: the rejection arrived after a response or tool effect was
+   observed, so no in-run shrink retry was admitted either (§6.3).
+   [Bootstrap_floor_exceeded]: even the smallest provider-bound view was
+   rejected; since the floor already removed every shrinkable prior-history
+   atom, a changed episode cannot fit either — only system prompt, goal, tool
+   surface, or runtime changes can. *)
+type input_rejection_reason =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
+  | Input_rejected of input_rejection_reason
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
@@ -38,6 +55,7 @@ let failure_disposition = function
   | Process_restarted ->
     Ambiguous
   | Provider_rejected -> Fatal
+  | Input_rejected _ -> Fatal
 ;;
 
 type recovery_required =
@@ -357,6 +375,9 @@ let recovery_failure_to_string = function
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"
+  | Input_rejected Bootstrap_floor_exceeded ->
+    "input_rejected_bootstrap_floor_exceeded"
+  | Input_rejected Effect_fenced -> "input_rejected_effect_fenced"
   | Host_hook_failed -> "host_hook_failed"
   | State_persistence_failed -> "state_persistence_failed"
   | Process_restarted -> "process_restarted"
@@ -368,6 +389,9 @@ let recovery_failure_of_string = function
   | "transport_interrupted" -> Ok Transport_interrupted
   | "protocol_failed" -> Ok Protocol_failed
   | "provider_rejected" -> Ok Provider_rejected
+  | "input_rejected_bootstrap_floor_exceeded" ->
+    Ok (Input_rejected Bootstrap_floor_exceeded)
+  | "input_rejected_effect_fenced" -> Ok (Input_rejected Effect_fenced)
   | "host_hook_failed" -> Ok Host_hook_failed
   | "state_persistence_failed" -> Ok State_persistence_failed
   | "process_restarted" -> Ok Process_restarted
@@ -735,6 +759,30 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when binding.client_kind <> client_kind
            || not (String.equal binding.runtime_id runtime_id) ->
       Ok (None, 1, None)
+    (* RFC claude-code-context-overflow-bounded-restart §6.2: an input
+       rejection is not auto-superseded on the same runtime. The provider
+       already proved it will not admit this bootstrap episode, so a fresh
+       claim would re-send the identical over-capacity request every cycle
+       (observed live: two keepers replaying ~1.27M-token requests per
+       heartbeat on 2026-08-23). A different client_kind/runtime_id still
+       starts fresh above — that branch is operator-driven, not a heartbeat
+       replay. Re-entry needs [resolve_recovery] (restart_fresh after the
+       keeper context is compacted, or retry_previous). *)
+    | Some
+        { phase =
+            Recovery_required
+              { failure = Input_rejected reason; recovery_id; _ }
+        ; _
+        } ->
+      Error
+        (Printf.sprintf
+           "official-client session input_rejected(%s): provider rejected the \
+            bootstrap input as over capacity; automatic re-entry is blocked \
+            until recovery %s is resolved by an operator"
+           (match reason with
+            | Bootstrap_floor_exceeded -> "bootstrap_floor_exceeded"
+            | Effect_fenced -> "effect_fenced")
+           recovery_id)
     | Some
         { phase = Settled settlement
         ; turn_count

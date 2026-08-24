@@ -486,7 +486,17 @@ let start
       |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error
-    | Ok _ -> read_operation_inventory operation_store
+    | Ok settled ->
+      (* [interrupted_count] in the inventory is cumulative, so it cannot answer
+         "did this restart cut anything off". That is the question asked right
+         after a bad swap, and the number is only available here. *)
+      if settled > 0
+      then
+        Log.Keeper.routine
+          ~keeper_name
+          "restart interrupted %d running chat operation(s)"
+          settled;
+      read_operation_inventory operation_store
   in
   (match startup_result with
    | Error _ as error ->
@@ -997,10 +1007,6 @@ let claim_next_operation t = request t Claim_next_operation
 
 let succeed_running_operation t ~operation_id ~outcome_ref =
   request t (Succeed_running_operation { operation_id; outcome_ref })
-;;
-
-let fail_running_operation t ~operation_id ~kind ~detail ~outcome_ref =
-  request t (Fail_running_operation { operation_id; kind; detail; outcome_ref })
 ;;
 
 let run_if_idle t lane run =

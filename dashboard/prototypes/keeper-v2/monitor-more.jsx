@@ -27,15 +27,17 @@ const TM_FAILCATS = [
   { category: 'provider_stream_idle_timeout', count: 12 },
   { category: 'path_outside_workspace', count: 9 },
 ];
-const TM_FLEET = { executable: 5, target: 7, shortfall: 2, paused: 2 };
-const TM_FACTS = [
-  { keeper: 'sangsu', task: 'task-7741', label: '실행 불가 · fiber 없음', tone: 'bad',
-    reason: 'fiber_unresolved(unexpected)', truth: 'execution_truth=not_running', cause: 'supervisor 재기동 대기',
-    action: '재시작 후 소유 태스크 재확인' },
-  { keeper: 'nick0cave', task: null, label: 'operator 일시정지', tone: 'warn',
-    reason: 'paused_by_operator', truth: 'execution_truth=paused', cause: 'operator 명령',
-    action: '재개하거나 태스크를 인계' },
-];
+// #29602 이후 서버는 blocked_keepers 를 보내지 않는다 — 안 돌고 있는 keeper 는
+// 아래 두 이름 리스트의 차집합으로 대시보드가 직접 계산한다 (keepersNotRunning).
+const TM_FLEET = {
+  executable: 5, target: 7, shortfall: 2, paused: 2, blocker: 'reaction_capacity_shortfall',
+  autoboot_names: ['nick0cave', 'masc-improver', 'drifter', 'librarian', 'retro-01', 'sangsu'],
+  executable_names: ['nick0cave', 'masc-improver', 'drifter', 'librarian', 'retro-01'],
+};
+// 대시보드 keepersNotRunning 과 같은 뺄셈 — 정렬까지 동일하게.
+const TM_NOT_RUNNING = TM_FLEET.autoboot_names
+  .filter(name => !TM_FLEET.executable_names.includes(name))
+  .sort();
 const TM_PAUSED = [
   { name: 'nick0cave', pause_kind: 'operator', klass: null, detail: null, elapsed: 1840 },
   { name: 'reviewer', pause_kind: 'blocked', klass: 'gate_wait', detail: 'H-041 HITL 응답 대기', elapsed: 265 },
@@ -133,24 +135,23 @@ function TmOperations({ onView }) {
       </div>
 
       <section className="tm-sec">
-        <h4>Keeper operator facts</h4>
-        <div className="ai-tablewrap">
-          <table className="ai-table">
-            <thead><tr><th>키퍼</th><th>현재 사실</th><th>operator 행동</th></tr></thead>
-            <tbody>
-              {TM_FACTS.map(f => (
-                <tr key={f.keeper}>
-                  <td className="mono">{f.keeper}{f.task && <div className="mono dim tm-sub">{f.task}</div>}</td>
-                  <td>
-                    <span className={`ai-b ${f.tone}`}>{f.label}</span>
-                    <div className="mono dim tm-sub">{f.reason} · {f.truth} · {f.cause}</div>
-                  </td>
-                  <td className="ai-d">{f.action}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h4>기동하지 않는 Keeper</h4>
+        {TM_NOT_RUNNING.length === 0
+          ? <div className="dim">모든 Keeper 가 돌고 있습니다.</div>
+          : <div className="ai-tablewrap">
+              <table className="ai-table">
+                <thead><tr><th>키퍼</th><th>상태</th></tr></thead>
+                <tbody>
+                  {TM_NOT_RUNNING.map(name => (
+                    <tr key={name}>
+                      <td className="mono">{name}</td>
+                      <td>기동하지 않음</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {TM_FLEET.blocker && <div className="mono dim tm-sub">blocker: {TM_FLEET.blocker}</div>}
+            </div>}
       </section>
 
       <section className="tm-sec">
@@ -297,8 +298,8 @@ function ToolMonitorPanel() {
   return (
     <div className="ia-wrap">
       <div className="ia-head">
-        <h3>Tool Monitor</h3>
-        <span className="ia-count mono">최근 {TM_WINDOW_H}h</span>
+        <h3>도구 실행</h3>
+        <span className="ia-count mono">최근 {TM_WINDOW_H}시간</span>
         <span className="ia-route mono">monitoring?section=fleet-health{view === 'default' ? '' : `&view=${view}`}</span>
       </div>
       <p className="ia-lede">도구 품질 · 도구 이벤트 증거 · Gate 지표 · keeper 비교를 한 섹션에서 봅니다. 구 <span className="mono">telemetry · fleet · tool-quality · gate · attribution</span> 라우트는 모두 이 섹션의 view 로 정규화됩니다.</p>
@@ -460,8 +461,8 @@ function ObservatoryPanel() {
   return (
     <div className="ia-wrap">
       <div className="ia-head">
-        <h3>Observatory</h3>
-        <span className="ia-count mono">{data.events.length} events</span>
+        <h3>관측</h3>
+        <span className="ia-count mono">이벤트 {data.events.length}건</span>
         <span className="ia-route mono">monitoring?section=observatory&range={range}</span>
       </div>
       <p className="ia-lede">전체 keeper · {range} 창. 하나의 시간축 위에 텔레메트리 이벤트 · 도구 호출 · 성공률 지표를 겹쳐 봅니다. 갱신은 필터 변경 시 폴링이며, 라이브 스트리밍은 아직 없습니다.</p>

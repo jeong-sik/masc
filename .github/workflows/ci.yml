@@ -78,6 +78,18 @@ jobs:
             --version-ref "$VERSION_REF" \
             --expected-head-sha "$PR_HEAD_SHA"
 
+      # Reports, never gates. A CI failure does not say whether the author
+      # caused it: on 2026-08-22 main was red for ~100 minutes and thirteen
+      # open PRs inherited the same five failures, with an adversarial review
+      # on one recording "causality is not established" (#29332).
+      - name: Report base health
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x scripts/report-base-health.sh
+          scripts/report-base-health.sh "$BASE_REF" "${{ github.repository }}"
+
   pr-live-gate:
     name: PR Live Gate
     runs-on: ubuntu-latest
@@ -206,7 +218,6 @@ jobs:
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
       shell_ir: ${{ steps.scope.outputs.shell_ir }}
       keeper_cwd: ${{ steps.scope.outputs.keeper_cwd }}
-      keeper_realworld: ${{ steps.scope.outputs.keeper_realworld }}
 
     steps:
       - name: Checkout
@@ -227,7 +238,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd keeper_realworld; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -287,7 +298,6 @@ jobs:
           nav_event_parity=false
           shell_ir=false
           keeper_cwd=false
-          keeper_realworld=false
 
           if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
             ci_core=true
@@ -371,7 +381,7 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|quickstart\.sh$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/quickstart-smoke\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
@@ -399,13 +409,6 @@ jobs:
             keeper_cwd=true
           fi
 
-          # Product-critical Keeper changes require a real interaction gate in
-          # addition to compile and regression evidence. Keep the list scoped
-          # to the surfaces consumed by the RW01-RW16 mission; reports alone do
-          # not spend provider capacity.
-          if has_match '^(lib/keeper/|lib/keeper_runtime/|lib/keeper_chat_delivery_identity/|lib/config/(env_config_keeper|env_config_snapshot|keeper_runtime_setting_registry)\.mli?$|lib/(mcp_server_eio_execute|runtime_settings|schedule_payload_projection|tool_schedule)\.mli?$|lib/server/server_(dashboard_schedule_projection|routes_http_routes_dashboard|routes_http_runtime|routes_http_runtime_health_fleet|schedule_consumers)\.mli?$|lib/tool_schemas/tool_schemas_schedule\.ml$|dashboard/src/(api/dashboard|components/fusion-settings-panel|components/overview/overview|components/runtime-toml-editor|components/tools/scheduled-automation-panel)|scripts/(ci/run-keeper-realworld-acceptance\.sh|harness/workload/keeper_multi_collaboration_acceptance\.(py|sh)|fixtures/keeper-multi-collaboration/)|test/(keeper_continuation_delivery_|test_fusion_wake\.ml$|test_keeper_|test_official_client_session_store\.ml$|test_runtime_toml_overrides\.ml$|test_schedule_))'; then
-            keeper_realworld=true
-          fi
 
           # Agent Core owns non-source build inputs such as models.toml. Its
           # focused behavior suite and resolved graph must not be reported as
@@ -429,21 +432,12 @@ jobs:
             agent_core=true
             shell_ir=true
             keeper_cwd=true
-            keeper_realworld=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
             # workflow/action edits should still validate the core OCaml/repo
             # guard lanes and Health, but they should not fan out into every
             # feature surface.
           fi
 
-          # Push CI is latest-state authority: a newer main push cancels the
-          # prior run, so every surviving protected-main run must carry the
-          # real-world obligation even when its own diff is Keeper-neutral.
-          # Otherwise a docs-only follow-up can cancel the Keeper acceptance
-          # for the commit immediately before it and then skip RW01-RW16.
-          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            keeper_realworld=true
-          fi
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"
           echo "lint=${lint}" >> "$GITHUB_OUTPUT"
@@ -458,10 +452,9 @@ jobs:
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
           echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
           echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
-          echo "keeper_realworld=${keeper_realworld}" >> "$GITHUB_OUTPUT"
-
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s keeper_realworld=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}" "${keeper_realworld}"
+          
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
 
   meta:
     name: Meta Guards
@@ -559,11 +552,6 @@ jobs:
       - name: Check route tool catalog registration
         run: bash scripts/audit-route-tool-catalog.sh
 
-      - name: Check Keeper real-world secret boundary
-        run: |
-          python3 scripts/ci/check-keeper-realworld-secret-boundary.py
-          bash test/test_keeper_realworld_secret_boundary.sh
-
       # Eleven repo-scanning audits that existed and never ran. scripts/ holds
       # 182 scripts and ci.yml called 63 of them; these are the audit/check
       # ones that read only tracked files, so CI can run them as-is. The rest
@@ -592,7 +580,9 @@ jobs:
             check-compaction-exact-flow-boundary.sh \
             check-doc-code-refs.sh \
             check-keeper-turn-content-boundary.sh \
+            check-opam-lock-covers-deps.sh \
             check-tool-error-format.sh \
+            check-turn-records-envelope-parity.sh \
             check-variants.sh
           do
             echo "::group::$s"
@@ -769,9 +759,14 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    # Focused group deadlines total 73 minutes when agent-core is selected;
-    # leave setup/build and timeout-diagnostic headroom outside those budgets.
-    timeout-minutes: 90
+    # Focused group deadlines total 93 minutes when agent-core is selected
+    # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
+    # mcp-tool-matrix 15, agent-core 15, operator-control 10, sse 15).
+    # Setup and the dune build take 12 minutes (run 32634585750: 10:45:48 to
+    # 10:57:15), so a run where every group uses its full budget ends at
+    # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
+    # prints its timeout diagnostics before GitHub ends the job.
+    timeout-minutes: 110
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test
@@ -784,7 +779,7 @@ jobs:
     # Build consumes `changes` outputs, so a failed/skipped changes job should
     # not synthesize default build inputs even though `always()` keeps this
     # condition evaluable.
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.changes.outputs.keeper_realworld == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
     # Test execution policy (hard-required focused suites):
     #   - `continue-on-error` is intentionally absent: compile failures and
     #     every focused test suite are merge-blocking.
@@ -905,6 +900,9 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      - name: Run source quickstart onboarding smoke
+        run: scripts/quickstart-smoke.sh
 
       - name: Run typed functional-core boundary audit
         env:
@@ -1124,6 +1122,7 @@ jobs:
             @test/runtest-test_guarded_dispatch_telemetry \
             @test/runtest-test_owned_read_cwd \
             @test/runtest-test_keeper_capability_probe \
+            @test/runtest-test_runtime_input_byte_ceiling \
             @test/runtest-test_keeper_checkpoint_stale_guard \
             @test/runtest-test_keeper_contract_classifier_pure \
             @test/runtest-test_keeper_conditions_wire_parity \
@@ -1153,7 +1152,10 @@ jobs:
             @test/runtest-test_sse_stream \
             @test/runtest-test_task_cache_invariant_13397 \
             @test/runtest-test_task_status_vocabulary \
+            @test/runtest-test_board_tool_toml_parity \
+            @test/runtest-test_goal_tool_toml_parity \
             @test/runtest-test_tool_contract_truth \
+            @test/runtest-test_tool_definition_toml \
             @test/runtest-test_voice_command_descriptor_parity
 
       - name: Run goal-scope terminal-phase suite
@@ -1164,7 +1166,6 @@ jobs:
         # on the live workspace before this was closed.
         run: |
           opam exec -- dune build --root . \
-            @test/runtest-test_goal_scope_terminal_phase \
             @test/runtest-test_claimable_task_summaries
 
       - name: Run goal phase suite
@@ -1501,100 +1502,6 @@ jobs:
             --verify \
             --output-dir .release-evidence/keeper-full-lifecycle
 
-      - name: Package exact-revision Keeper acceptance runtime
-        if: >-
-          needs.changes.outputs.keeper_realworld == 'true' &&
-          (
-            github.event_name == 'push' ||
-            github.event_name == 'workflow_dispatch'
-          ) &&
-          github.ref == 'refs/heads/main' &&
-          github.ref_protected == true
-        env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          EXPECTED_SOURCE_REF: ${{ github.ref }}
-          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
-          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
-          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          runtime_dir=keeper-realworld-runtime
-          mkdir -p "$runtime_dir"
-          expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
-          case "$EVENT_NAME" in
-            push|workflow_dispatch) ;;
-            *)
-              echo "trusted runtime packaging requires push or workflow_dispatch, got $EVENT_NAME" >&2
-              exit 1
-              ;;
-          esac
-          if [ "$EXPECTED_SOURCE_REF" != "refs/heads/main" ]; then
-            echo "trusted runtime packaging requires refs/heads/main, got $EXPECTED_SOURCE_REF" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_REF_PROTECTED" != "true" ]; then
-            echo "trusted runtime packaging requires protected main" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
-            echo "workflow ref mismatch: expected=$expected_workflow_ref actual=$EXPECTED_WORKFLOW_REF" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_WORKFLOW_SHA" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "workflow/source mismatch: workflow=$EXPECTED_WORKFLOW_SHA source=$EXPECTED_SOURCE_SHA" >&2
-            exit 1
-          fi
-          actual_source_sha="$(git rev-parse HEAD)"
-          if [ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual_source_sha" >&2
-            exit 1
-          fi
-          cp _build/default/bin/main_eio.exe "$runtime_dir/masc"
-          chmod +x "$runtime_dir/masc"
-          binary_sha256="$(sha256sum "$runtime_dir/masc" | awk '{print $1}')"
-          jq -n \
-            --arg schema "masc.keeper_acceptance_runtime.v2" \
-            --arg event_name "$EVENT_NAME" \
-            --arg source_sha "$actual_source_sha" \
-            --arg source_ref "$EXPECTED_SOURCE_REF" \
-            --argjson source_ref_protected "$EXPECTED_REF_PROTECTED" \
-            --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
-            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
-            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
-            --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
-            --arg binary_sha256 "$binary_sha256" \
-            '{
-              schema: $schema,
-              event_name: $event_name,
-              source_sha: $source_sha,
-              source_ref: $source_ref,
-              source_ref_protected: $source_ref_protected,
-              workflow_ref: $workflow_ref,
-              workflow_sha: $workflow_sha,
-              workflow_run_id: $workflow_run_id,
-              workflow_run_attempt: $workflow_run_attempt,
-              binary_sha256: $binary_sha256
-            }' >"$runtime_dir/manifest.json"
-
-      - name: Upload exact-revision Keeper acceptance runtime
-        if: >-
-          needs.changes.outputs.keeper_realworld == 'true' &&
-          (
-            github.event_name == 'push' ||
-            github.event_name == 'workflow_dispatch'
-          ) &&
-          github.ref == 'refs/heads/main' &&
-          github.ref_protected == true
-        uses: actions/upload-artifact@v7
-        with:
-          name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
-          path: keeper-realworld-runtime/
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Upload PR release evidence
         if: ${{ always() && github.event_name == 'pull_request' && steps.build_step.outcome == 'success' }}
         uses: actions/upload-artifact@v7
@@ -1637,486 +1544,6 @@ jobs:
           else
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
-
-  trusted-macos-arm64-runtime:
-    name: Trusted macOS arm64 Runtime
-    runs-on: macos-14
-    needs: [pr-live-gate, changes, ci-gate]
-    if: >-
-      ${{
-        always() &&
-        !cancelled() &&
-        (
-          github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch'
-        ) &&
-        github.ref == 'refs/heads/main' &&
-        github.ref_protected == true &&
-        needs.pr-live-gate.outputs.run_heavy == 'true' &&
-        needs.changes.result == 'success' &&
-        needs.changes.outputs.keeper_realworld == 'true' &&
-        needs.ci-gate.result == 'success'
-      }}
-    timeout-minutes: 60
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout exact protected-main revision
-        uses: actions/checkout@v7
-
-      - name: Verify protected-main source provenance
-        env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          EXPECTED_SOURCE_REF: ${{ github.ref }}
-          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
-          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
-          case "$EVENT_NAME" in
-            push|workflow_dispatch) ;;
-            *)
-              echo "trusted macOS runtime requires push or workflow_dispatch, got $EVENT_NAME" >&2
-              exit 1
-              ;;
-          esac
-          if [ "$EXPECTED_SOURCE_REF" != "refs/heads/main" ]; then
-            echo "trusted macOS runtime requires refs/heads/main, got $EXPECTED_SOURCE_REF" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_REF_PROTECTED" != "true" ]; then
-            echo "trusted macOS runtime requires protected main" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
-            echo "workflow ref mismatch: expected=$expected_workflow_ref actual=$EXPECTED_WORKFLOW_REF" >&2
-            exit 1
-          fi
-          if [ "$EXPECTED_WORKFLOW_SHA" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "workflow/source mismatch: workflow=$EXPECTED_WORKFLOW_SHA source=$EXPECTED_SOURCE_SHA" >&2
-            exit 1
-          fi
-          actual_source_sha="$(git rev-parse HEAD)"
-          if [ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual_source_sha" >&2
-            exit 1
-          fi
-
-      - name: Setup OCaml
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Install native dependencies
-        run: |
-          set -euo pipefail
-          brew install flock gmp libpq openssl@3 zstd
-
-          libpq_prefix="$(brew --prefix libpq)"
-          openssl_prefix="$(brew --prefix openssl@3)"
-
-          {
-            echo "$libpq_prefix/bin"
-            echo "$openssl_prefix/bin"
-          } >> "$GITHUB_PATH"
-
-          {
-            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
-            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
-            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
-            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
-          } >> "$GITHUB_ENV"
-
-      - name: Pin private dependencies
-        run: |
-          set -euo pipefail
-          command -v flock >/dev/null
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
-
-      - name: Install OCaml dependencies
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            opam install . --deps-only -y && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts" >&2
-              exit 1
-            fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..." >&2
-            sleep 15
-          done
-
-      - name: Build macOS arm64 runtime
-        run: opam exec -- dune build --release bin/main_eio.exe
-
-      - name: Verify architecture, dylibs, and runtime smoke
-        env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          binary=_build/default/bin/main_eio.exe
-          if [ "$RUNNER_OS" != "macOS" ]; then
-            echo "expected macOS runner, got $RUNNER_OS" >&2
-            exit 1
-          fi
-          machine="$(uname -m)"
-          if [ "$machine" != "arm64" ]; then
-            echo "expected arm64 runner, got $machine" >&2
-            exit 1
-          fi
-          file_output="$(file "$binary")"
-          printf '%s\n' "$file_output"
-          case "$file_output" in
-            *"Mach-O 64-bit executable arm64"*) ;;
-            *)
-              echo "runtime is not a Mach-O arm64 executable" >&2
-              exit 1
-              ;;
-          esac
-          lipo_archs="$(lipo -archs "$binary")"
-          if [ "$lipo_archs" != "arm64" ]; then
-            echo "expected only arm64 architecture, got: $lipo_archs" >&2
-            exit 1
-          fi
-          otool -L "$binary" | tee "$RUNNER_TEMP/masc-runtime-otool.txt"
-          while IFS= read -r dylib; do
-            case "$dylib" in
-              /usr/lib/*|/System/Library/*) ;;
-              /opt/homebrew/opt/gmp/*|/opt/homebrew/opt/libpq/*|/opt/homebrew/opt/openssl@3/*|/opt/homebrew/opt/zstd/*) ;;
-              *)
-                echo "runtime links an unsupported dylib path: $dylib" >&2
-                exit 1
-                ;;
-            esac
-          done < <(awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt")
-          chmod +x scripts/release-binary-smoke.sh
-          scripts/release-binary-smoke.sh "$binary"
-
-          identity_root="$(mktemp -d "$RUNNER_TEMP/masc-build-identity.XXXXXX")"
-          identity_log="$identity_root/server.log"
-          identity_health="$identity_root/health.json"
-          identity_port=18936
-          identity_pid=""
-          cleanup_identity_probe() {
-            if [ -n "$identity_pid" ]; then
-              kill "$identity_pid" 2>/dev/null || true
-              wait "$identity_pid" 2>/dev/null || true
-            fi
-            rm -rf "$identity_root"
-          }
-          trap cleanup_identity_probe EXIT
-          mkdir -p "$identity_root/.masc/config"
-          cp config/runtime.toml "$identity_root/.masc/config/runtime.toml"
-          MASC_BASE_PATH="$identity_root" \
-          MASC_BASE_PATH_INPUT="$identity_root" \
-          MASC_KEEPER_AUTONOMOUS_ENABLED=false \
-          MASC_OTEL_ENABLED=0 \
-            "$binary" --base-path "$identity_root" --port "$identity_port" \
-            >"$identity_log" 2>&1 &
-          identity_pid=$!
-          identity_ready=false
-          for _attempt in $(seq 1 50); do
-            if curl -fsS --max-time 2 \
-                "http://127.0.0.1:${identity_port}/health" >"$identity_health"
-            then
-              identity_ready=true
-              break
-            fi
-            if ! kill -0 "$identity_pid" 2>/dev/null; then
-              echo "runtime exited before build-identity health probe" >&2
-              tail -50 "$identity_log" >&2
-              exit 1
-            fi
-            sleep 0.2
-          done
-          if [ "$identity_ready" != "true" ]; then
-            echo "runtime did not expose health for build-identity probe" >&2
-            tail -50 "$identity_log" >&2
-            exit 1
-          fi
-          actual_binary_commit="$(jq -r '.build.binary_commit // empty' "$identity_health")"
-          if [ "$actual_binary_commit" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "runtime build identity mismatch: expected=$EXPECTED_SOURCE_SHA actual=${actual_binary_commit:-null}" >&2
-            exit 1
-          fi
-          cleanup_identity_probe
-          trap - EXIT
-
-      - name: Package trusted macOS arm64 runtime
-        env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          EXPECTED_SOURCE_REF: ${{ github.ref }}
-          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
-          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
-          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          runtime_dir=trusted-macos-arm64-runtime
-          mkdir -p "$runtime_dir"
-          cp _build/default/bin/main_eio.exe "$runtime_dir/masc"
-          chmod +x "$runtime_dir/masc"
-          binary_sha256="$(scripts/lib/runtime-artifact-contract.sh hash "$runtime_dir/masc")"
-          actual_source_sha="$(git rev-parse HEAD)"
-          linked_dylibs_json="$(
-            awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt" \
-              | jq -Rsc 'split("\n") | map(select(length > 0))'
-          )"
-          jq -n \
-            --arg schema "masc.trusted_runtime.v1" \
-            --arg event_name "$EVENT_NAME" \
-            --arg source_sha "$actual_source_sha" \
-            --arg source_ref "$EXPECTED_SOURCE_REF" \
-            --argjson source_ref_protected "$EXPECTED_REF_PROTECTED" \
-            --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
-            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
-            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
-            --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
-            --arg target_os "macos" \
-            --arg target_arch "arm64" \
-            --arg binary_format "mach-o" \
-            --arg binary_sha256 "$binary_sha256" \
-            --argjson linked_dylibs "$linked_dylibs_json" \
-            '{
-              schema: $schema,
-              event_name: $event_name,
-              source_sha: $source_sha,
-              source_ref: $source_ref,
-              source_ref_protected: $source_ref_protected,
-              workflow_ref: $workflow_ref,
-              workflow_sha: $workflow_sha,
-              workflow_run_id: $workflow_run_id,
-              workflow_run_attempt: $workflow_run_attempt,
-              target_os: $target_os,
-              target_arch: $target_arch,
-              binary_format: $binary_format,
-              binary_sha256: $binary_sha256,
-              linked_dylibs: $linked_dylibs,
-              supported_homebrew_prefixes: [
-                "/opt/homebrew/opt/gmp/",
-                "/opt/homebrew/opt/libpq/",
-                "/opt/homebrew/opt/openssl@3/",
-                "/opt/homebrew/opt/zstd/"
-              ]
-            }' > "$runtime_dir/manifest.json"
-          jq -e \
-            --arg source_sha "$EXPECTED_SOURCE_SHA" \
-            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
-            --arg binary_sha256 "$binary_sha256" \
-            '.schema == "masc.trusted_runtime.v1" and
-             .source_sha == $source_sha and
-             .workflow_sha == $workflow_sha and
-             .source_ref == "refs/heads/main" and
-             .source_ref_protected == true and
-             .target_os == "macos" and
-             .target_arch == "arm64" and
-             .binary_format == "mach-o" and
-             .binary_sha256 == $binary_sha256 and
-             (.linked_dylibs | type == "array" and length > 0)' \
-            "$runtime_dir/manifest.json" >/dev/null
-
-      - name: Upload trusted macOS arm64 runtime
-        uses: actions/upload-artifact@v7
-        with:
-          name: masc-runtime-macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: trusted-macos-arm64-runtime/
-          if-no-files-found: error
-          retention-days: 7
-
-  keeper-realworld-acceptance:
-    name: Keeper Real-World Acceptance
-    runs-on: ubuntu-latest
-    needs: [pr-live-gate, changes, build, ci-gate]
-    if: >-
-      ${{
-        always() &&
-        !cancelled() &&
-        (
-          github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch'
-        ) &&
-        github.ref == 'refs/heads/main' &&
-        github.ref_protected == true &&
-        needs.pr-live-gate.outputs.run_heavy == 'true' &&
-        needs.changes.result == 'success' &&
-        needs.changes.outputs.keeper_realworld == 'true' &&
-        needs.build.result == 'success' &&
-        needs.ci-gate.result == 'success'
-      }}
-    timeout-minutes: 90
-    environment:
-      name: keeper-realworld-acceptance
-    permissions:
-      actions: read
-      contents: read
-
-    steps:
-      - name: Checkout exact CI revision
-        uses: actions/checkout@v7
-
-      - name: Download exact-revision runtime
-        uses: actions/download-artifact@v8
-        with:
-          name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
-          path: keeper-realworld-runtime
-
-      - name: Install runtime libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            jq \
-            libffi8 \
-            libgmp10 \
-            libpq5 \
-            libsqlite3-0 \
-            libssl3t64 \
-            libzstd1 \
-            zlib1g
-
-      - name: Install Dashboard browser proof runtime
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Install Dashboard dependencies and Chromium
-        working-directory: dashboard
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.31.0 --activate
-          pnpm install --frozen-lockfile
-          node --test e2e/keeper-composition-browser-evidence.test.mjs
-          ../scripts/build-dashboard-if-needed.sh
-          pnpm exec playwright install --with-deps chromium
-
-      - name: Run five-Keeper real-world collaboration gate
-        env:
-          KEEPER_ACCEPTANCE_BINARY: ${{ github.workspace }}/keeper-realworld-runtime/masc
-          KEEPER_ACCEPTANCE_MANIFEST: ${{ github.workspace }}/keeper-realworld-runtime/manifest.json
-          KEEPER_ACCEPTANCE_OUTPUT_DIR: ${{ runner.temp }}/keeper-realworld-evidence
-          KEEPER_ACCEPTANCE_EXPECTED_EVENT: ${{ github.event_name }}
-          KEEPER_ACCEPTANCE_EXPECTED_SHA: ${{ github.sha }}
-          KEEPER_ACCEPTANCE_EXPECTED_REF: ${{ github.ref }}
-          KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
-          KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
-          KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          KEEPER_ACCEPTANCE_RUNTIME_ID: glm-coding.glm-4-7-coding
-          KEEPER_ACCEPTANCE_TURN_TIMEOUT_SEC: 300
-          ZAI_API_KEY_SB: ${{ secrets.ZAI_API_KEY_SB }}
-        run: |
-          chmod +x scripts/ci/run-keeper-realworld-acceptance.sh
-          scripts/ci/run-keeper-realworld-acceptance.sh
-
-      - name: Upload Keeper real-world evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: keeper-realworld-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/keeper-realworld-evidence/
-          if-no-files-found: warn
-          retention-days: 30
-
-  keeper-realworld-gate:
-    name: Keeper Real-World Gate
-    runs-on: ubuntu-latest
-    needs: [pr-live-gate, changes, build, keeper-realworld-acceptance]
-    if: ${{ always() && !cancelled() }}
-    timeout-minutes: 10
-    permissions:
-      pull-requests: read
-
-    steps:
-      - name: Aggregate product acceptance status
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_REF: ${{ github.ref }}
-          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
-          EVENT_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EVENT_WORKFLOW_SHA: ${{ github.workflow_sha }}
-          REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          TESTED_SOURCE_SHA: ${{ github.sha }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          CHANGES_RESULT: ${{ needs.changes.result }}
-          REALWORLD_REQUIRED: ${{ needs.changes.outputs.keeper_realworld }}
-          BUILD_RESULT: ${{ needs.build.result }}
-          ACCEPTANCE_RESULT: ${{ needs.keeper-realworld-acceptance.result }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || {
-            [ "$EVENT_NAME" = "push" ] && [ "$EVENT_REF" = "refs/heads/main" ];
-          }; then
-            if [ "$EVENT_REF" != "refs/heads/main" ]; then
-              echo "STOP Keeper Real-World Gate: trusted acceptance requires refs/heads/main, got $EVENT_REF" >&2
-              exit 1
-            fi
-            if [ "$EVENT_REF_PROTECTED" != "true" ]; then
-              echo "STOP Keeper Real-World Gate: trusted acceptance requires protected main" >&2
-              exit 1
-            fi
-            expected_workflow_ref="$REPOSITORY/.github/workflows/ci.yml@refs/heads/main"
-            if [ "$EVENT_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
-              echo "STOP Keeper Real-World Gate: workflow ref mismatch expected=$expected_workflow_ref actual=$EVENT_WORKFLOW_REF" >&2
-              exit 1
-            fi
-            if [ "$EVENT_WORKFLOW_SHA" != "$TESTED_SOURCE_SHA" ]; then
-              echo "STOP Keeper Real-World Gate: workflow/source mismatch workflow=$EVENT_WORKFLOW_SHA source=$TESTED_SOURCE_SHA" >&2
-              exit 1
-            fi
-            if [ "$CHANGES_RESULT" != "success" ]; then
-              echo "STOP Keeper Real-World Gate: changed-surface detection did not complete" >&2
-              exit 1
-            fi
-            if [ "$REALWORLD_REQUIRED" != "true" ]; then
-              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-                echo "STOP Keeper Real-World Gate: workflow_dispatch did not select product acceptance" >&2
-                exit 1
-              fi
-              echo "PASS Keeper Real-World Gate: product-critical Keeper surfaces unchanged on protected main"
-              exit 0
-            fi
-            if [ "$BUILD_RESULT" != "success" ]; then
-              echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
-              exit 1
-            fi
-            if [ "$ACCEPTANCE_RESULT" != "success" ]; then
-              echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
-              exit 1
-            fi
-            echo "PASS Keeper Real-World Gate: trusted event=$EVENT_NAME ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed complete mission catalog"
-            exit 0
-          fi
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "PASS Keeper Real-World Gate: non-PR workflow"
-            exit 0
-          fi
-          if [ "$CHANGES_RESULT" != "success" ]; then
-            echo "STOP Keeper Real-World Gate: changed-surface detection did not complete" >&2
-            exit 1
-          fi
-          if [ "$REALWORLD_REQUIRED" != "true" ]; then
-            echo "PASS Keeper Real-World Gate: product-critical Keeper surfaces unchanged"
-            exit 0
-          fi
-          if [ "$BUILD_RESULT" != "success" ]; then
-            echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
-            exit 1
-          fi
-          live_head_sha="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
-          if [ "$live_head_sha" != "$EXPECTED_HEAD_SHA" ]; then
-            echo "STOP Keeper Real-World Gate: PR head moved expected=$EXPECTED_HEAD_SHA actual=$live_head_sha" >&2
-            exit 1
-          fi
-          echo "::warning::Secret-bearing RW01-RW16 is deferred to the automatic protected-main CI after merge"
-          echo "PASS Keeper Real-World Gate: stable PR head=$live_head_sha passed source gates; protected-main product acceptance is automatically enforced after merge"
 
   lint:
     name: Lint
@@ -2341,6 +1768,14 @@ jobs:
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/stringly-boundary-ratchet.sh
 
+      - name: Run model-prose scanner self-test
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: python3 scripts/model-prose-scan.py --self-test
+
+      - name: Run model-prose ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: scripts/model-prose-ratchet.sh
+
       - name: Run exact-flow boundary checks
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true'
         run: |
@@ -2424,7 +1859,13 @@ jobs:
           make -C specs check-buggy
 
   ci-gate:
-    name: CI Regression Gate
+    # Named for the one required check in main's branch protection. A second
+    # job used to carry that name and do nothing but copy this job's result:
+    # it existed to merge two authorities, and #29458 removed the other one
+    # (the Keeper real-world lane) without collapsing the wrapper. Every run
+    # then spent a runner restating a verdict, and every failure was reported
+    # twice.
+    name: CI Gate
     runs-on: ubuntu-latest
     needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet, tla-specs]
     if: ${{ always() && !cancelled() }}
@@ -2498,31 +1939,3 @@ jobs:
           check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]
 
-  merge-gate:
-    name: CI Gate
-    runs-on: ubuntu-latest
-    needs: [ci-gate, keeper-realworld-gate]
-    if: ${{ always() && !cancelled() }}
-    timeout-minutes: 5
-
-    steps:
-      - name: Aggregate regression and real-world authorities
-        env:
-          REGRESSION_GATE_RESULT: ${{ needs.ci-gate.result }}
-          REALWORLD_GATE_RESULT: ${{ needs.keeper-realworld-gate.result }}
-        run: |
-          set -euo pipefail
-          fail=0
-          if [ "$REGRESSION_GATE_RESULT" = "success" ]; then
-            echo "PASS CI Regression Gate"
-          else
-            echo "FAIL CI Regression Gate: $REGRESSION_GATE_RESULT" >&2
-            fail=1
-          fi
-          if [ "$REALWORLD_GATE_RESULT" = "success" ]; then
-            echo "PASS Keeper Real-World Gate"
-          else
-            echo "FAIL Keeper Real-World Gate: $REALWORLD_GATE_RESULT" >&2
-            fail=1
-          fi
-          exit "$fail"

@@ -82,6 +82,17 @@ val run_durable_intake_if_open
   -> (intake_token -> 'a)
   -> 'a durable_intake_result
 
+val run_durable_intake_observing
+  :  base_path:string
+  -> keeper_name:string
+  -> (intake_token -> 'a)
+  -> 'a * Keeper_shutdown_types.Operation_id.t option
+(** Run the intake whatever the slot says, and report which shutdown operation
+    held it, if any. A reservation records that a shutdown began; a shutdown
+    that never finalises never releases it, so refusing on the reservation
+    alone stops the caller forever. Callers that must not be stoppable use
+    this and log what they observed. *)
+
 val run_transfer_intake_if_open
   :  base_path:string
   -> from_keeper:string

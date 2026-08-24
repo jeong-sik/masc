@@ -126,14 +126,6 @@ module For_testing : sig
     generation:int -> Yojson.Safe.t -> bool
 end
 
-val invalidate_execution_cache_with_hooks_for_testing :
-  invalidate_execution_surface:(unit -> unit) ->
-  invalidate_light_cache:(unit -> unit) ->
-  unit ->
-  unit
-(** Test seam for the best-effort invalidation failure path. Production
-    callers should use {!invalidate_execution_cache}. *)
-
 val patch_keeper_dependent_caches :
   keeper_name:string ->
   event:Keeper_lifecycle_events.lifecycle_event ->
@@ -219,7 +211,15 @@ val dashboard_transport_health_http_json :
   state:Mcp_server.server_state -> Yojson.Safe.t
 (** Returns the cached transport-health JSON with the
     cache-source diagnostic block extended.  Does not
-    consume [sw] or [clock] — pure cache read. *)
+    consume [sw] or [clock] — pure cache read.
+
+    Not to be wrapped in a route-level cache. It reads a published cell and
+    derives [cache_state], [stale_reason] and [stale_age_ms] from it against
+    the clock. A cache in front holds the answer to a question about
+    freshness: the route did that for 30s and served the previous "fresh"
+    payload after the surface had gone to an error state, with
+    [stale_age_ms] frozen so the age stood still while the surface aged
+    (#27652). *)
 
 (** {1 Lifecycle-event patchers}
 

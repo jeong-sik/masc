@@ -410,9 +410,9 @@ let test_is_jsonrpc_v2 () =
   let valid = `Assoc [("jsonrpc", `String "2.0"); ("method", `String "test")] in
   let invalid = `Assoc [("jsonrpc", `String "1.0")] in
   let no_version = `Assoc [("method", `String "test")] in
-  Alcotest.(check bool) "valid 2.0" true (Masc.Mcp_server.is_jsonrpc_v2 valid);
-  Alcotest.(check bool) "invalid 1.0" false (Masc.Mcp_server.is_jsonrpc_v2 invalid);
-  Alcotest.(check bool) "no version" false (Masc.Mcp_server.is_jsonrpc_v2 no_version)
+  Alcotest.(check bool) "valid 2.0" true (Mcp_transport_protocol.is_jsonrpc_v2 valid);
+  Alcotest.(check bool) "invalid 1.0" false (Mcp_transport_protocol.is_jsonrpc_v2 invalid);
+  Alcotest.(check bool) "no version" false (Mcp_transport_protocol.is_jsonrpc_v2 no_version)
 
 let test_jsonrpc_request_parsing () =
   let json = `Assoc [
@@ -421,7 +421,7 @@ let test_jsonrpc_request_parsing () =
     ("method", `String "initialize");
     ("params", `Assoc []);
   ] in
-  match Masc.Mcp_server.jsonrpc_request_of_yojson json with
+  match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
   | Ok req ->
       Alcotest.(check string) "method" "initialize" req.method_;
       Alcotest.(check bool) "has id" true (req.id <> None)
@@ -438,27 +438,27 @@ let test_is_notification () =
     ("jsonrpc", `String "2.0");
     ("method", `String "notifications/initialized");
   ] in
-  (match Masc.Mcp_server.jsonrpc_request_of_yojson with_id with
-   | Ok req -> Alcotest.(check bool) "with id" false (Masc.Mcp_server.is_notification req)
+  (match Mcp_transport_protocol.jsonrpc_request_of_yojson with_id with
+   | Ok req -> Alcotest.(check bool) "with id" false (Mcp_transport_protocol.is_notification req)
    | Error _ -> Alcotest.fail "parse error");
-  (match Masc.Mcp_server.jsonrpc_request_of_yojson without_id with
-   | Ok req -> Alcotest.(check bool) "without id" true (Masc.Mcp_server.is_notification req)
+  (match Mcp_transport_protocol.jsonrpc_request_of_yojson without_id with
+   | Ok req -> Alcotest.(check bool) "without id" true (Mcp_transport_protocol.is_notification req)
    | Error _ -> Alcotest.fail "parse error")
 
 let test_protocol_version () =
   let params = Some (`Assoc [("protocolVersion", `String "2025-06-18")]) in
-  let version = Masc.Mcp_server.protocol_version_from_params params in
+  let version = Mcp_transport_protocol.protocol_version_from_params params in
   Alcotest.(check string) "version extracted" "2025-06-18" version;
 
-  (match Mcp.validate_protocol_version "2025-06-18" with
+  (match Mcp_transport_protocol.validate_protocol_version "2025-06-18" with
    | Ok version ->
        Alcotest.(check string) "2025-06-18 is supported" "2025-06-18" version
    | Error msg -> Alcotest.fail msg);
 
-  let normalized = Masc.Mcp_server.normalize_protocol_version "unknown" in
+  let normalized = Mcp_transport_protocol.normalize_protocol_version "unknown" in
   Alcotest.(check string) "normalized to default" "2025-11-25" normalized;
 
-  match Mcp.validate_protocol_version "unknown" with
+  match Mcp_transport_protocol.validate_protocol_version "unknown" with
   | Error msg ->
       Alcotest.(check bool) "unsupported version rejected" true
         (String_util.contains_substring msg "Unsupported protocolVersion")
@@ -467,7 +467,7 @@ let test_protocol_version () =
 (* ===== Unit Tests for Response Builders ===== *)
 
 let test_make_response () =
-  let response = Masc.Mcp_server.make_response ~id:(`Int 42) (`String "result") in
+  let response = Mcp_transport_protocol.make_response ~id:(`Int 42) (`String "result") in
   match response with
   | `Assoc fields ->
       let id = List.assoc "id" fields in
@@ -478,7 +478,7 @@ let test_make_response () =
   | _ -> Alcotest.fail "not an object"
 
 let test_make_error () =
-  let response = Masc.Mcp_server.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
+  let response = Mcp_transport_protocol.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
   match response with
   | `Assoc fields ->
       let error = List.assoc "error" fields in
@@ -1836,7 +1836,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"mu-king" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1849,7 +1849,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
       ~mcp_session_id:"sid-hyphenated-generated-alias"
       ~auth_token:raw_token state
       ~name:"keeper_task_claim"
-      ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
+      ~arguments:(`Assoc [ ("agent_name", `String "mu-king-warm-heron") ])
   in
   Alcotest.(check bool) "claim_next rejected by public MCP path" false
     (Tool_result.is_success result);
@@ -1996,18 +1996,18 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
+let test_execute_tool_argument_token_ignored_without_http_auth () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
   let identity =
     test_agent_identity
-      ~uuid:"legacy-token-ignored-test"
-      ~session_key:"legacy-token-ignored-session"
+      ~uuid:"argument-token-ignored-test"
+      ~session_key:"argument-token-ignored-session"
   in
   let result =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
-      ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
+      ~arguments:(`Assoc [ ("token", `String "argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
@@ -2015,7 +2015,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
-    "legacy argument token ignored without HTTP auth"
+    "argument token ignored without HTTP auth"
     None
     result.token;
   cleanup_dir base_path
@@ -2181,7 +2181,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let keeper_meta =
         make_keeper_meta ~agent_name:keeper_agent_name keeper_name
@@ -2219,7 +2219,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
           Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
             Yojson.Safe.from_file
-              (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
+              (Filename.concat base_path ".masc/keepers/tool_usage/alpha.json")
           in
           let open Yojson.Safe.Util in
           Alcotest.(check int) "persisted schema version" 2
@@ -2239,7 +2239,6 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
               Keeper_lifecycle_reservation.acquire
                 ~base_path
                 ~keeper_name
-                ~expected_generation:registered.transition_seq
                 ~purpose:Keepalive_launch
             with
             | Ok token -> token
@@ -2273,7 +2272,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (Some 1)
             (Option.map (fun restored -> restored.Keeper_types.count) restored);
           let persisted_path =
-            Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json"
+            Filename.concat base_path ".masc/keepers/tool_usage/alpha.json"
           in
           Fs_compat.save_file
             persisted_path
@@ -2389,7 +2388,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
       cleanup_dir base_path)
     (fun () ->
       Keeper_registry.For_testing.clear ();
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
         (Keeper_registry.For_testing.register ~base_path keeper_name
@@ -3209,8 +3208,8 @@ let eio_tests = [
     test_execute_tool_add_task_with_admin_token_without_join;
   "http auth token overrides stale argument token", `Quick,
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
-  "legacy argument token ignored without http auth", `Quick,
-    test_execute_tool_legacy_argument_token_ignored_without_http_auth;
+  "argument token ignored without http auth", `Quick,
+    test_execute_tool_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
 ]

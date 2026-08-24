@@ -17,8 +17,6 @@ type user_input_block =
   | User_document of user_media_block
   | User_audio of user_media_block
 
-val attachment_to_yojson : Keeper_chat_store.attachment -> Yojson.Safe.t
-
 val attachments_to_yojson : Keeper_chat_store.attachment list -> Yojson.Safe.t
 
 val parse_attachments :

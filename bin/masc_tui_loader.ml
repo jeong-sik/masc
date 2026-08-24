@@ -1,152 +1,118 @@
 (** TUI data loading functions — split from masc_tui.ml (#3808) *)
 
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_types_support = Masc.Keeper_types_support
+module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_selection = Masc_tui_keeper_selection
+module Context_state = Masc_tui_context_state
+module Metrics_tail = Masc_tui_metrics_tail
+module Render_schedule = Masc_tui_render_schedule
+
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_http
 
 let report path err =
-  Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!" path err
+  Console_sink.write
+    (Printf.sprintf "[masc-tui] decode failed for %s: %s"
+       (Masc_tui_ansi.Terminal_text.single_line path)
+       (Masc_tui_ansi.Terminal_text.single_line err))
 
-(** Load keepers from .masc/keepers/ *)
-let load_keepers (base_path : string) : keeper list =
-  let keepers_dir = Filename.concat (Filename.concat base_path Common.masc_dirname) Common.keepers_runtime_dirname in
-  if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
-    Sys.readdir keepers_dir
-    |> Array.to_list
-    |> List.filter (fun f ->
-         Filename.check_suffix f ".json"
-         && not (String.contains f '.'))  (* This won't work, use different filter *)
-    |> (fun _ ->
-         (* Re-filter: only files that are exactly <name>.json, not <name>.reward-model.json *)
-         Sys.readdir keepers_dir
-         |> Array.to_list
-         |> List.filter (fun f ->
-              Filename.check_suffix f ".json"
-              && (let base = Filename.chop_suffix f ".json" in
-                  not (String.contains base '.'))))
-    |> List.filter_map (fun f ->
-         try
-           let path = Filename.concat keepers_dir f in
-           let json = Yojson.Safe.from_file path in
-           match Tui_decode.decode_keeper ~filename:f json with
-           | Ok keeper -> Some keeper
-           | Error err ->
-               report path err;
-               None
-         with Yojson.Json_error err ->
-           report (Filename.concat keepers_dir f) ("invalid JSON: " ^ err);
-           None
-         | Sys_error err ->
-           report (Filename.concat keepers_dir f) err;
-           None
-       )
-    |> List.sort (fun a b -> String.compare a.k_name b.k_name)
-  else []
+let summarize_errors label errors =
+  match List.rev errors with
+  | [] -> None
+  | first :: rest ->
+      let suffix =
+        match rest with
+        | [] -> ""
+        | _ -> Printf.sprintf " (+%d more)" (List.length rest)
+      in
+      Some (Printf.sprintf "%s: %s%s" label first suffix)
 
-(** Read the last N lines from a file (tail) *)
-let read_last_lines path n =
-  try
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        (* Read all lines then take last N -- simple for JSONL files < 1MB *)
-        let lines = ref [] in
-        (try while true do
-           lines := input_line ic :: !lines
-         done with End_of_file -> ());
-        let all = List.rev !lines in
-        let len = List.length all in
-        if len <= n then all
-        else
-          List.filteri (fun i _ -> i >= len - n) all)
-  with Sys_error _ -> []
-
-(** Parse a single metrics JSONL line into a log_entry *)
-let parse_log_entry (line : string) : log_entry option =
-  match Tui_decode.parse_log_entry line with
-  | Ok entry -> Some entry
+(** Load keepers through the canonical metadata classifier and typed store.
+    The classifier preserves valid dotted names and excludes sidecars. *)
+let load_keepers (base_path : string) : keeper list * string option =
+  let config = Workspace_core.default_config base_path in
+  match Keeper_meta_store.persisted_keeper_names_result config with
   | Error err ->
-      Printf.eprintf "[masc-tui] log decode failed: %s\n%!" err;
-      None
+      report (Keeper_types_profile.keeper_dir config) err;
+      [], Some ("keeper metadata unavailable: " ^ err)
+  | Ok names ->
+      let keepers, errors =
+        List.fold_left
+          (fun (keepers, errors) name ->
+             let path = Keeper_types_profile.keeper_meta_path config name in
+             match Keeper_meta_store.read_meta config name with
+             | Ok (Some meta) ->
+                 Tui_decode.keeper_of_meta meta :: keepers, errors
+             | Ok None -> keepers, errors
+             | Error err ->
+                 report path err;
+                 keepers, (Printf.sprintf "%s: %s" name err :: errors))
+          ([], []) names
+      in
+      ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers
+      , summarize_errors "keeper metadata read failed" errors )
 
-(** Find the most recent metrics file for a keeper *)
-let find_metrics_files (base_path : string) (keeper_name : string) : string list =
-  let metrics_dir = Filename.concat
-    (Filename.concat
-       (Filename.concat base_path Common.masc_dirname)
-       "keepers")
-    (Filename.concat keeper_name "metrics") in
-  if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
-  else begin
-    (* List year-month directories, pick the most recent *)
-    let months = Sys.readdir metrics_dir
-      |> Array.to_list
-      |> List.filter (fun d ->
-           let full = Filename.concat metrics_dir d in
-           Sys.is_directory full)
-      |> List.sort (fun a b -> String.compare b a)  (* Reverse sort: most recent first *)
-    in
-    match months with
-    | [] -> []
-    | month :: _ ->
-      let month_dir = Filename.concat metrics_dir month in
-      Sys.readdir month_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> List.sort (fun a b -> String.compare b a)  (* Most recent first *)
-      |> List.map (fun f -> Filename.concat month_dir f)
-  end
+(** Load tasks from the canonical workspace backlog: the active rows for the
+    Overview list, plus the full domain rows the detail view reads. Terminal
+    tasks remain available in Planning rollups and the detail view but do not
+    occupy the Overview list. *)
+let load_active_tasks (base_path : string) :
+    task list * Masc_domain.task list * string option =
+  let config = Workspace_core.default_config base_path in
+  let path = Workspace_backlog.backlog_path config in
+  match Workspace_backlog.read_backlog_observation_with_source_r config with
+  | Error err ->
+      report path err;
+      [], [], Some ("task backlog unavailable: " ^ err)
+  | Ok observation ->
+      let recovery_error =
+        match observation.recovered_from with
+        | None -> None
+        | Some recovery ->
+            report path recovery.primary_error;
+            Some ("task backlog recovered from backup: " ^ recovery.primary_error)
+      in
+      ( Tui_decode.active_tasks_of_domain observation.observed_backlog.tasks
+      , observation.observed_backlog.tasks
+      , recovery_error )
 
-(** Load log entries for the currently selected keeper *)
-let load_keeper_logs (base_path : string) (keeper_name : string) (max_entries : int) : log_entry list =
-  let files = find_metrics_files base_path keeper_name in
-  let entries = ref [] in
-  let remaining = ref max_entries in
-  List.iter (fun path ->
-    if !remaining > 0 then begin
-      let lines = read_last_lines path !remaining in
-      let parsed = List.filter_map parse_log_entry lines in
-      entries := parsed @ !entries;
-      remaining := !remaining - List.length parsed
-    end
-  ) files;
-  (* Return in chronological order, limited to max_entries *)
-  let all = List.rev !entries in
-  let len = List.length all in
-  if len <= max_entries then all
-  else List.filteri (fun i _ -> i >= len - max_entries) all
+(** Apply one strict bounded metrics snapshot to the mutable screen state. *)
+let apply_keeper_log_snapshot (state : state)
+    (snapshot : Metrics_tail.snapshot) =
+  state.log_entries <- snapshot.entries;
+  state.log_error <- snapshot.error;
+  state.log_scroll <-
+    min state.log_scroll (max 0 (List.length snapshot.entries - 1))
 
-(** Load live context status from the latest metrics entry *)
-let load_live_context (state : state) (base_path : string) (keeper_name : string) =
-  let files = find_metrics_files base_path keeper_name in
-  match files with
-  | [] ->
-    state.live_context_ratio <- 0.0;
-    state.live_context_tokens <- 0;
-    state.live_context_max <- 0;
-    state.live_message_count <- 0
-  | latest_file :: _ ->
-    (* Read just the last line *)
-    let lines = read_last_lines latest_file 1 in
-    (match lines with
-     | [] ->
-       state.live_context_ratio <- 0.0;
-       state.live_context_tokens <- 0;
-       state.live_context_max <- 0;
-       state.live_message_count <- 0
-     | line :: _ ->
-       match parse_log_entry line with
-       | None ->
-         state.live_context_ratio <- 0.0;
-         state.live_context_tokens <- 0;
-         state.live_context_max <- 0;
-         state.live_message_count <- 0
-       | Some e ->
-         state.live_context_ratio <- e.le_context_ratio;
-         state.live_context_tokens <- e.le_context_tokens;
-         state.live_context_max <- e.le_context_max;
-         state.live_message_count <- e.le_message_count)
+(** Load the newest physical metrics rows across months and rotations. *)
+let load_selected_keeper_logs (state : state) (base_path : string)
+    (max_entries : int) (keeper : keeper option) =
+  let config = Workspace_core.default_config base_path in
+  Metrics_tail.for_selection
+    ~load:(fun keeper ->
+      Keeper_types_support.keeper_metrics_store config keeper.k_name
+      |> fun store ->
+      Metrics_tail.load ~store ~expected_keeper:keeper.k_name
+        ~limit:max_entries)
+    keeper
+  |> apply_keeper_log_snapshot state
+
+(** Apply one exclusive context projection to the mutable screen state. *)
+let apply_live_context_state (state : state) (context_state : Context_state.t) =
+  state.live_context <- context_state.observation;
+  state.live_context_error <- context_state.error
+
+(** Load trace-scoped context occupancy from its current TurnRecord SSOT. *)
+let load_selected_live_context (state : state) (base_path : string)
+    (keeper : keeper option) =
+  let config = Workspace_core.default_config base_path in
+  Context_state.for_selection ~load:(Context_state.load ~config) keeper
+  |> apply_live_context_state state
+
+let load_live_context state base_path keeper =
+  load_selected_live_context state base_path (Some keeper)
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
@@ -178,45 +144,112 @@ let load_from_masc_dir (state : state) (base_path : string) =
     else []
   );
 
-  (* Load tasks *)
-  let tasks_dir = Filename.concat masc_dir "tasks" in
-  state.tasks <- (
-    if Sys.file_exists tasks_dir && Sys.is_directory tasks_dir then
-      Sys.readdir tasks_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-           try
-             let path = Filename.concat tasks_dir f in
-             let json = Yojson.Safe.from_file path in
-             match Tui_decode.decode_task json with
-             | Ok task -> Some task
-             | Error err ->
-                 report path err;
-                 None
-           with Yojson.Json_error err ->
-             report (Filename.concat tasks_dir f) ("invalid JSON: " ^ err);
-             None
-           | Sys_error err ->
-             report (Filename.concat tasks_dir f) err;
-             None
-         )
-      |> List.sort (fun a b -> compare a.priority b.priority)
-    else []
-  );
+  (* Load tasks from their single durable source. The domain rows land first:
+     a detail view open across this refresh keeps its row even when the task
+     just turned terminal, because the projection below drops exactly those. *)
+  let tasks, tasks_domain, tasks_error = load_active_tasks base_path in
+  state.tasks_domain <- tasks_domain;
+  state.tasks <- tasks;
+  state.tasks_error <- tasks_error;
+
+  (* Capture navigation before replacing the roster. Detail and logs are bound
+     to the selected row; message mode is bound to its explicit target. *)
+  let current_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  let selected_keeper_name =
+    if state.keeper_cursor < 0 then None
+    else
+      List.nth_opt state.keepers state.keeper_cursor
+      |> Option.map (fun keeper -> keeper.k_name)
+  in
+  let current_keeper_mode =
+    match state.view with
+    | Keepers mode -> Some mode
+    | Overview | Board | Approvals | Planning | Schedules | Verification
+    | Harness | Repositories | Connectors | Tools | Autonomy | System_logs ->
+        None
+  in
+  let current_navigation =
+    match current_keeper_mode with
+    | Some Keeper_detail ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Detail_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_logs ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Logs_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_message ->
+        (match state.msg_target_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Message_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_list | None ->
+        Keeper_selection.List_cursor state.keeper_cursor
+  in
 
   (* Load keepers *)
-  state.keepers <- load_keepers base_path;
+  let loaded_keepers, keepers_error = load_keepers base_path in
+  let keepers =
+    match keepers_error, current_keeper_mode with
+    | Some _, Some (Keeper_detail | Keeper_logs) ->
+        (* A partial or failed read cannot prove that the focused Keeper was
+           deleted. Keep the last complete roster until a reliable refresh can
+           reconcile that identity. Message mode instead uses its explicit
+           target and can render the unavailable state safely. *)
+        state.keepers
+    | Some _, Some (Keeper_list | Keeper_message) | Some _, None | None, _ ->
+        loaded_keepers
+  in
+  state.keepers <- keepers;
+  state.keepers_error <- keepers_error;
 
-  (* Clamp cursor if keepers changed *)
-  if state.keeper_cursor >= List.length state.keepers then
-    state.keeper_cursor <- max 0 (List.length state.keepers - 1);
+  let next_keeper_ids =
+    List.map (fun keeper -> keeper.k_name) state.keepers
+  in
+  (match
+     Keeper_selection.reconcile ~current_ids:current_keeper_ids
+       ~next_ids:next_keeper_ids ~current:current_navigation
+   with
+   | Keeper_selection.List_cursor cursor ->
+       state.keeper_cursor <- cursor;
+       (match current_keeper_mode with
+        | Some (Keeper_detail | Keeper_logs | Keeper_message) ->
+            state.view <- Keepers Keeper_list;
+            state.detail_scroll <- 0;
+            state.log_scroll <- 0
+        | Some Keeper_list | None -> ())
+   | Keeper_selection.Detail_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_detail
+   | Keeper_selection.Logs_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_logs
+   | Keeper_selection.Message_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_message);
 
-  (* Load live context for selected keeper *)
-  if state.keeper_cursor < List.length state.keepers then begin
-    let k = List.nth state.keepers state.keeper_cursor in
-    load_live_context state base_path k.k_name
-  end;
+  let selected_keeper = List.nth_opt state.keepers state.keeper_cursor in
+
+  (* Load live context for the selected keeper. Metadata-only refresh paths do
+     not read metrics, but an empty roster must clear any cached log state. *)
+  load_selected_live_context state base_path selected_keeper;
+  let current_logs : Metrics_tail.snapshot =
+    { entries = state.log_entries; error = state.log_error }
+  in
+  let selected_keeper_name_after_refresh =
+    Option.map (fun keeper -> keeper.k_name) selected_keeper
+  in
+  Metrics_tail.reconcile_selection ~current:current_logs
+    ~previous_keeper:selected_keeper_name
+    ~selected_keeper:selected_keeper_name_after_refresh
+  |> apply_keeper_log_snapshot state;
 
   state.last_refresh <- Unix.gettimeofday ()
 
@@ -226,7 +259,12 @@ let add_event (state : state) event_type content =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
-  state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
+  let events = ev :: (List.filteri (fun i _ -> i < 10) state.events) in
+  state.overview_event_scroll <-
+    Render_schedule.overview_event_offset_after_prepend
+      ~retained_count:(List.length events)
+      state.overview_event_scroll;
+  state.events <- events
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
@@ -275,31 +313,6 @@ let decode_attention_item json =
 let decode_attention_items json_list =
   decode_list "attention_items" decode_attention_item json_list
 
-let decode_approval_item json =
-  let* ap_token = required_string_field json "confirm_token" in
-  let* ap_actor = required_string_field json "actor" in
-  let* ap_action_type = required_string_field json "action_type" in
-  let* ap_target_type = required_string_field json "target_type" in
-  let* ap_target_id = optional_string_field json "target_id" in
-  let* ap_delegated_tool = required_string_field json "delegated_tool" in
-  let ap_summary =
-    Printf.sprintf "%s on %s (%s)" ap_action_type ap_target_type
-      ap_delegated_tool
-  in
-  Ok
-    {
-      ap_token;
-      ap_actor;
-      ap_action_type;
-      ap_target_type;
-      ap_target_id;
-      ap_delegated_tool;
-      ap_summary;
-    }
-
-let decode_approval_items json_list =
-  decode_list "pending_confirms" decode_approval_item json_list
-
 let decode_board_post ?(require_body = false) json =
   let* bp_id = required_string_field json "id" in
   let* bp_author = required_string_field json "author" in
@@ -312,6 +325,19 @@ let decode_board_post ?(require_body = false) json =
   let* bp_created_at =
     required_display_any_field json [ "created_at_iso"; "created_at" ]
   in
+  let* bp_hearth = optional_string_field json "hearth" in
+  let* raw_kind = optional_string_field json "post_kind" in
+  (* Optional, and an unknown value is carried rather than rejected: the list
+     is a projection for a pane, and a post whose kind this build does not know
+     is still a post the operator should see. *)
+  let bp_kind =
+    match raw_kind with
+    | Some "direct" -> Some Post_by_person
+    | Some "automation" -> Some Post_by_automation
+    | Some "system" -> Some Post_by_system
+    | Some other -> Some (Post_kind_unknown other)
+    | None -> None
+  in
   Ok
     {
       bp_id;
@@ -321,6 +347,8 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_hearth;
+      bp_kind;
     }
 
 let decode_board_posts json_list =
@@ -337,6 +365,88 @@ let decode_board_comment json =
 
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
+
+let decode_schedule_row json =
+  let* sch_schedule_id = required_string_field json "schedule_id" in
+  let* sch_status = required_string_field json "status" in
+  let* sch_source = required_string_field json "source" in
+  let* sch_due_at_iso = optional_string_field json "due_at_iso" in
+  let* sch_recurrence_summary =
+    required_string_field json "recurrence_summary"
+  in
+  let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_summary = optional_string_field json "payload_summary" in
+  Ok
+    { sch_schedule_id
+    ; sch_status
+    ; sch_source
+    ; sch_due_at_iso
+    ; sch_recurrence_summary
+    ; sch_payload_target
+    ; sch_payload_summary
+    }
+
+let decode_schedule_rows json_list =
+  decode_list "requests" decode_schedule_row json_list
+
+(* The snapshot keeps the server's ok/unknown split: on a store read failure
+   the route reports [status = "unknown"] with a null [request_count] and an
+   empty row list, and the pane must not draw that as "no schedules". *)
+let decode_schedule_snapshot json =
+  let* scs_status = required_string_field json "status" in
+  let* scs_read_error =
+    optional_string_field json "schedule_store_read_error"
+  in
+  let* scs_request_count =
+    match Yojson.Safe.Util.member "request_count" json with
+    | `Int value -> Ok (Some value)
+    | `Null -> Ok None
+    | other ->
+        Error
+          (Printf.sprintf "schedules request_count must be an integer: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_truncated =
+    match Yojson.Safe.Util.member "truncated" json with
+    | `Bool value -> Ok value
+    | other ->
+        Error
+          (Printf.sprintf "schedules truncated must be a boolean: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_next_due_iso =
+    match Yojson.Safe.Util.member "fsm" json with
+    | `Assoc fields ->
+        (match List.assoc_opt "next_due_at_iso" fields with
+         | Some (`String value) -> Ok (Some value)
+         | Some `Null | None -> Ok None
+         | Some other ->
+             Error
+               (Printf.sprintf
+                  "schedules fsm next_due_at_iso must be a string: %s"
+                  (Yojson.Safe.to_string other)))
+    | other ->
+        Error
+          (Printf.sprintf "schedules fsm must be an object: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* rows = required_list_field json "requests" in
+  let* scs_rows = decode_schedule_rows rows in
+  Ok
+    { scs_status
+    ; scs_read_error
+    ; scs_request_count
+    ; scs_truncated
+    ; scs_next_due_iso
+    ; scs_rows
+    }
+
+(** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
+let load_schedules ~(host : string) ~(port : int) :
+    (schedule_snapshot, string) result =
+  match fetch_schedules ~host ~port with
+  | Error err -> Error ("schedule load failed: " ^ err)
+  | Ok json -> decode_schedule_snapshot json
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int) :
@@ -363,6 +473,21 @@ let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
       let* comments = decode_board_comments comments_json in
       Ok (post, comments)
 
+(** Load the actor-scoped pending confirmation envelope from the operator
+    surface. Missing or malformed envelopes remain explicit errors. *)
+let load_approvals ~(host : string) ~(port : int) :
+    (approval_snapshot, string) result =
+  match fetch_operator_snapshot ~host ~port with
+  | Error err -> Error ("approvals load failed: " ^ err)
+  | Ok json -> Masc_tui_operator_projection.decode_snapshot json
+
+(** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
+let load_transport_health ~(host : string) ~(port : int) :
+    (Tui_decode.transport_health, string) result =
+  match fetch_transport_health ~host ~port with
+  | Error err -> Error ("transport health load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_transport_health json
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -382,14 +507,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* attention_items =
         let* items = optional_list_field json "attention_items" in
         decode_attention_items items
-      in
-      let* pending_confirms =
-        let* operator_targets = optional_object_field json "operator_targets" in
-        match operator_targets with
-        | None -> Ok []
-        | Some operator_targets ->
-            let* items = optional_list_field operator_targets "pending_confirms" in
-            decode_approval_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* top_attention =
@@ -415,15 +532,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* ov_active_agents =
         int_field_or summary "active_agents" ~default:(List.length agent_briefs)
       in
-      let* ov_pending_approvals =
-        match command_focus with
-        | Some command_focus ->
-            int_field_or command_focus "pending_approvals"
-              ~default:(List.length pending_confirms)
-        | None ->
-            int_field_or summary "pending_approvals"
-              ~default:(List.length pending_confirms)
-      in
       let* ov_incident_count =
         int_field_or summary "incident_count" ~default:(List.length incidents)
       in
@@ -434,83 +542,97 @@ let load_overview ~(host : string) ~(port : int) :
           ov_cluster;
           ov_project;
           ov_active_agents;
-          ov_pending_approvals;
           ov_incident_count;
           ov_attention_items = incidents @ attention_queue @ attention_items;
           ov_top_attention = top_attention;
-          ov_pending_confirms = pending_confirms;
           ov_generated_at;
         }
 
-let decode_planning_goal json =
-  let* pg_id = required_string_field json "id" in
-  let* pg_title = required_string_field json "title" in
-  let* raw_status = required_string_field json "status" in
-  let* pg_status =
-    match String.lowercase_ascii raw_status with
-    | "active" -> Ok Planning_goal_active
-    | "paused" -> Ok Planning_goal_paused
-    | "done" -> Ok Planning_goal_done
-    | "dropped" -> Ok Planning_goal_dropped
-    | other ->
-        Error
-          (Printf.sprintf
-             "unknown planning goal status %S (normalized %S)"
-             raw_status
-             other)
-  in
-  let* pg_phase = required_string_field json "phase" in
-  let* pg_priority = required_int_field json "priority" in
-  let* pg_due_date = optional_string_field json "due_date" in
-  let* pg_metric = optional_string_field json "metric" in
-  let* pg_target_value = optional_string_field json "target_value" in
-  Ok
-    {
-      pg_id;
-      pg_title;
-      pg_status;
-      pg_phase;
-      pg_priority;
-      pg_due_date;
-      pg_metric;
-      pg_target_value;
-    }
+(** Load the system log page from /api/v1/dashboard/logs *)
+let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
+    (system_log_snapshot, string) result =
+  match fetch_dashboard_logs ~host ~port ~limit with
+  | Error err -> Error ("system logs load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_system_log_snapshot json
 
-let decode_planning_goals json_list =
-  decode_list "goals" decode_planning_goal json_list
+(** Load the tool inventory from /api/v1/dashboard/tools *)
+let load_tools ~(host : string) ~(port : int) :
+    (Tui_decode.tool_snapshot, string) result =
+  match fetch_dashboard_tools ~host ~port with
+  | Error err -> Error ("tool inventory load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_snapshot json
 
-let decode_planning_rollup json =
-  let* pr_active = required_int_field json "active_count" in
-  let* pr_paused = required_int_field json "paused_count" in
-  let* pr_done = required_int_field json "done_count" in
-  let* pr_dropped = required_int_field json "dropped_count" in
-  Ok { pr_active; pr_paused; pr_done; pr_dropped }
+(** Load connector status from /api/v1/gate/connectors *)
+let load_connectors ~(host : string) ~(port : int) :
+    (Tui_decode.connector_snapshot, string) result =
+  match fetch_connectors ~host ~port with
+  | Error err -> Error ("connector load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_connector_snapshot json
 
-let decode_planning_backlog json =
-  let* pb_todo = required_int_field json "todo" in
-  let* pb_claimed = required_int_field json "claimed" in
-  let* pb_running = required_int_any_field json [ "in_progress"; "running" ] in
-  let* pb_done = required_int_field json "done" in
-  let* pb_cancelled = required_int_field json "cancelled" in
-  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
+(** Load the repository list from /api/v1/repositories *)
+let load_repositories ~(host : string) ~(port : int) :
+    (Tui_decode.repository_snapshot, string) result =
+  match fetch_repositories ~host ~port with
+  | Error err -> Error ("repository load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_repository_snapshot json
+
+(** Load the harness snapshot from /api/v1/dashboard/harness-health *)
+let load_harness ~(host : string) ~(port : int) :
+    (Tui_decode.harness_snapshot, string) result =
+  match fetch_harness_health ~host ~port with
+  | Error err -> Error ("harness load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_harness_snapshot json
+
+(** Load the autonomy feature-proof report from
+    /api/v1/dashboard/keeper-feature-proof *)
+let load_autonomy ~(host : string) ~(port : int) :
+    (Tui_decode.autonomy_snapshot, string) result =
+  match fetch_keeper_feature_proof ~host ~port with
+  | Error err -> Error ("autonomy load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_autonomy_snapshot json
+
+(** Load the verification queue from /api/v1/verification/requests *)
+let load_verification ~(host : string) ~(port : int) ~(limit : int) :
+    (Tui_decode.verification_snapshot, string) result =
+  match fetch_verification_requests ~host ~port ~limit with
+  | Error err -> Error ("verification load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_verification_snapshot json
 
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :
     (planning_snapshot, string) result =
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
-  | Ok json ->
-      let* goals_json = required_list_field json "goals" in
-      let* goals = decode_planning_goals goals_json in
-      let* rollup_json = required_object_field json "rollup" in
-      let* rollup = decode_planning_rollup rollup_json in
-      let* backlog_json = required_object_field json "task_backlog" in
-      let* backlog = decode_planning_backlog backlog_json in
-      let* generated_at = required_string_field json "generated_at" in
-      Ok
-        {
-          pl_goals = goals;
-          pl_rollup = rollup;
-          pl_backlog = backlog;
-          pl_generated_at = generated_at;
-        }
+  | Ok json -> Tui_decode.decode_planning_snapshot json
+
+(* The fleet reading answers what the keeper list cannot: a keeper that never
+   started has no row, so the roster shows nine keepers whether the tenth is
+   absent by design or blocked. *)
+let load_fleet_safety ~(host : string) ~(port : int) :
+    (Tui_decode.fleet_safety, string) result =
+  match fetch_fleet_safety ~host ~port with
+  | Error err -> Error ("fleet safety load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fleet_safety json
+
+(** Load the live keeper roster. Truncation is carried into the typed roster
+    rather than dropped: a clamped list cannot answer whether a keeper the TUI
+    knows from disk has a running fiber, and the lifecycle actions depend on
+    that answer. *)
+let load_keeper_roster ~(host : string) ~(port : int) :
+    (Masc_tui_keeper_control.roster, Masc_tui_keeper_control.roster_failure)
+    result =
+  match fetch_keeper_runtimes ~host ~port with
+  | Error transport ->
+      Error (Masc_tui_keeper_control.Roster_unreachable transport)
+  | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
+      Error (Masc_tui_keeper_control.roster_failure_of_status ~status ~body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error (Masc_tui_keeper_control.Roster_malformed detail)
+      | json -> (
+          match Tui_decode.decode_keeper_runtime_list json with
+          | Error detail ->
+              Error (Masc_tui_keeper_control.Roster_malformed detail)
+          | Ok (rows, truncated, total) ->
+              Ok (Masc_tui_keeper_control.roster_of_reading ~rows ~truncated ~total)))

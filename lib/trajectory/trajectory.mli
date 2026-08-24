@@ -26,16 +26,6 @@ type tool_call_entry = {
           that have not adopted the id yet (and historical rows). *)
 }
 
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
-
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
-}
-
 type trajectory_outcome =
   | Completed
   | Failed of string
@@ -47,7 +37,6 @@ type trajectory = {
   scenario_id : string option;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
@@ -87,10 +76,8 @@ type trajectory_line =
 
 (** {1 JSON serialization} *)
 
-val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val default_result_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
   ?runtime_contract:Yojson.Safe.t ->
@@ -98,14 +85,7 @@ val entry_to_json :
   tool_call_entry ->
   Yojson.Safe.t
 
-val tool_call_entry_of_json :
-  Yojson.Safe.t -> (tool_call_entry * bool) option
-(** Decode one persisted JSONL row back into a [tool_call_entry].
-    Returns [None] for non-entry rows (summary/thinking) and malformed
-    JSON. The [bool] is true when the gate field parsed from a
-    persisted value rather than the legacy default. Exposed for
-    RFC-0233 consumers that join rows on [execution_id]. *)
-val withheld_thinking_entry_to_json : withheld_thinking_entry -> Yojson.Safe.t
+val tool_call_entry_of_json : Yojson.Safe.t -> tool_call_entry option
 val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
@@ -179,7 +159,6 @@ type accumulator = {
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -192,7 +171,7 @@ type accumulator = {
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> unit -> accumulator
+  unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
@@ -263,8 +242,4 @@ val read_entries_since :
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
 
-val read_entries_since_result :
-  masc_root:string -> keeper_name:string -> since:float ->
-  entries_read_result
-(** Like {!read_entries_since}, plus whether the persisted gate object was
-    parsed or defaulted for legacy rows that had no readable gate payload. *)
+

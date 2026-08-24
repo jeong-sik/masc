@@ -90,9 +90,9 @@ let test_load_records_malformed_row_drops () =
     (fun () ->
       let keeper_name = "keeper-chat-drop" in
       let path = chat_path ~base_dir ~keeper_name in
-      let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
-      let before_entry_error = drop_value entry_error in
+      let syntax_error = Read_drop_reason.to_wire Read_drop_reason.Json_syntax_error in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+      let before_syntax_error = drop_value syntax_error in
       let before_invalid_payload = drop_value invalid_payload in
       write_file path
         (String.concat "\n"
@@ -120,9 +120,9 @@ let test_load_records_malformed_row_drops () =
       Alcotest.(check (list string)) "content order"
         [ "hello"; "world" ]
         (List.map (fun (msg : K.chat_message) -> msg.content) messages);
-      Alcotest.(check (float 0.001)) "malformed json increments entry error"
+      Alcotest.(check (float 0.001)) "malformed json increments json syntax error"
         1.0
-        (drop_value entry_error -. before_entry_error);
+        (drop_value syntax_error -. before_syntax_error);
       Alcotest.(check (float 0.001)) "missing content increments invalid payload"
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
@@ -233,6 +233,32 @@ let test_missing_id_rows_are_rejected () =
         ^ {|{"role":"assistant","content":"world","ts":1.0}|} ^ "\n");
       Alcotest.(check int) "rows without current id are dropped" 0
         (K.load ~base_dir ~keeper_name |> List.length))
+
+(* [encode_line] always writes a float [ts]; a row without one cannot be
+   ordered, paged or joined, so the reader drops it as an invalid payload
+   instead of stamping it with a default. *)
+let test_rows_without_float_ts_are_dropped_and_counted () =
+  let base_dir = temp_base_path "keeper-chat-store-missing-ts" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-missing-ts" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"id":"no-ts","role":"user","content":"hello"}|} ^ "\n"
+        ^ {|{"id":"string-ts","role":"assistant","content":"world","ts":"1.0"}|} ^ "\n"
+        ^ {|{"id":"int-ts","role":"user","content":"again","ts":1}|} ^ "\n"
+        ^ {|{"id":"float-ts","role":"assistant","content":"kept","ts":2.0}|} ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [ m ] ->
+           Alcotest.(check string) "only the float-ts row loads" "float-ts" m.K.id;
+           Alcotest.(check (float 0.0)) "ts reads back as written" 2.0 m.K.ts
+       | messages ->
+           Alcotest.failf "expected one row, got %d" (List.length messages));
+      Alcotest.(check (float 0.0)) "each ts-less row is one invalid_payload drop"
+        (before +. 3.0) (drop_value invalid_payload))
 
 (* R3: every persisted row carries a producer-assigned id that is
    non-empty, unique within a turn, and stable across reloads. *)
@@ -696,7 +722,7 @@ let test_unknown_speaker_authority_reported_not_guessed () =
     (fun () ->
       let keeper_name = "keeper-chat-speaker-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"unknown-authority","role":"user","content":"hi","ts":1.0,"speaker_id":"x","speaker_authority":"admin"}|}
@@ -721,7 +747,7 @@ let test_unknown_role_row_dropped () =
     (fun () ->
       let keeper_name = "keeper-chat-role-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"role-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
@@ -741,7 +767,7 @@ let test_tool_row_missing_name_dropped () =
     (fun () ->
       let keeper_name = "keeper-chat-toolname" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"tool-name-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
@@ -1048,7 +1074,7 @@ let test_unknown_kind_reported_reads_utterance () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-kind-unknown" in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       let path = chat_path ~base_dir ~keeper_name in
       write_file path
@@ -1890,7 +1916,7 @@ let test_malformed_stream_lifecycle_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-store-lifecycle-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"bad-lifecycle","role":"assistant","content":"x","ts":1.0,"turn_ref":"trace-life#7","stream_lifecycle":["RUN_STARTED","NOT_A_REAL_EVENT"]}|}
@@ -1937,7 +1963,7 @@ let test_half_provenance_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-half-provenance" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"half-pair","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"operation","operation_id":"kmsg-half-pair"}}|}
@@ -2096,9 +2122,7 @@ let test_delivery_key_malformed_reads_none () =
     (fun () ->
       let keeper_name = "keeper-chat-delivery-key-bad" in
       let path = chat_path ~base_dir ~keeper_name in
-      let invalid_payload =
-        Safe_ops.persistence_read_drop_reason_invalid_payload
-      in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       let before = drop_value invalid_payload in
       write_file path
         ({|{"id":"bad-delivery-key","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"not_a_kind","request_id":"kmsg-1"}}|}
@@ -2360,6 +2384,8 @@ let () =
             `Quick test_structured_only_assistant_row_survives_reload;
           Alcotest.test_case "missing-id rows rejected" `Quick
             test_missing_id_rows_are_rejected;
+          Alcotest.test_case "rows without a float ts are dropped and counted" `Quick
+            test_rows_without_float_ts_are_dropped_and_counted;
           Alcotest.test_case "message id minted unique and stable (R3)" `Quick
             test_message_id_minted_unique_and_stable;
           Alcotest.test_case "chat_path size grows on append (cache key)" `Quick

@@ -1,8 +1,8 @@
 (** Goal_verification_agent — the RFC-0387 stage-2 verifier caller.
 
     Application-owned LLM agent (not a Keeper) that drains the goal
-    verification ledger's durable pending requests — [Criterion_pending] (B2)
-    and [Proof_pending] (B3) — judges each through
+    verification ledger's durable [Proof_pending] requests (B3), judges each
+    through
     {!Task.Anti_rationalization.review} on the [verifier_exact] lane, and
     commits the verdict through {!Workspace_goals.commit_verifier_decision},
     the typed internal FSM+ledger+phase+event boundary, under the fixed
@@ -11,41 +11,27 @@
 
     Typed non-verdicts (evaluator unavailable, malformed reply after all
     slots failed, verdict without a stated reason, refused commit) leave the
-    pending row durable and schedule a maintenance-pulse retry — a pending
-    row is never consumed on failure, and there is no wall-clock expiry. *)
+    pending row durable and stop — a pending row is never consumed on
+    failure, nothing re-runs the same review on a clock, and there is no
+    wall-clock expiry. *)
 
 val start :
   sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Workspace_utils_backend_setup.config ->
   unit
 
 module For_testing : sig
-  type pending_kind =
-    | Criterion_check
-    | Completion_proof
+  type pending_work = { goal_id : string }
 
-  type pending_work = {
-    goal_id : string;
-    kind : pending_kind;
-  }
-
-  (** How one review ended, decoupled from the Eio scheduling loop so the
-      retry decision is a pure function of it. *)
+  (** How one review ended. [Deferred] carries the reason no verdict was
+      committed; the pending row it names is still durable. *)
   type process_outcome =
     | Committed
-    | Deferred of {
-        retryable : bool;
-        reason : string;
-      }
-
-  val should_schedule_retry : process_outcome -> bool
-  (** Whether the maintenance-pulse retry timer should arm for this outcome.
-      [false] for [Committed] and for non-retryable deferrals. *)
+    | Deferred of string
 
   val group_pending_by_goal : pending_work list -> pending_work list list
-  (** Stable grouping used by the daemon: criterion work precedes proof work
-      for the same goal, so no goal has concurrent verifier transitions. *)
+  (** Stable grouping used by the daemon: one group per goal, so no goal has
+      concurrent verifier transitions. *)
 
   val collect_pending :
     Workspace_utils_backend_setup.config ->

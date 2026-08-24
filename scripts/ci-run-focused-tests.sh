@@ -78,7 +78,10 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 fi
 
 paused_targets=(
+  @test/runtest-test_exec_dispatch_file_redirect
+  @test/runtest-test_process_file_redirects
   @test/runtest-test_keeper_turn_outcome
+  @test/runtest-test_keeper_shutdown_blocked_purge_release
   @test/runtest-test_keeper_paused_work_transfer_transaction
   @test/runtest-test_keeper_paused_work_source_terminal_transaction
   @test/runtest-test_keeper_paused_work_operator
@@ -95,6 +98,7 @@ normal_targets=(
   @test/runtest-test_http_auth_strict_flag
   @test/runtest-test_keeper_chat_broadcast
   @test/runtest-test_keeper_chat_slack
+  @test/runtest-test_keeper_chat_tool_trail
   @test/runtest-test_keeper_memory_lane
   @test/runtest-test_server_dashboard_http_keeper_chat_page
   @test/runtest-test_keeper_codex_effort_clamp
@@ -157,6 +161,7 @@ normal_targets=(
   @test/runtest-test_dashboard_feature_health
   @test/runtest-test_dashboard_gate_metrics
   @test/runtest-test_dashboard_goal_id_projection
+  @test/runtest-test_goal_timeline_projection
   @test/runtest-test_dashboard_k2_feeds
   @test/runtest-test_dashboard_keeper_cost_aggregates
   @test/runtest-test_dashboard_keeper_metrics_10286
@@ -194,6 +199,7 @@ normal_targets=(
   @test/runtest-test_backend
   @test/runtest-test_backend_coverage
   @test/runtest-test_blocker_class_exhaustiveness
+  @test/runtest-test_blocker_class_mirror
   @test/runtest-test_board_author_identity_10297
   @test/runtest-test_board_collect_pause_gate
   @test/runtest-test_board_context_inference_resolution
@@ -228,6 +234,7 @@ normal_targets=(
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request
   @test/runtest-test_tool_input_validation
+  @test/runtest-test_keeper_tool_execute_typed_input
   @test/runtest-test_tool_schema_agent_core_boundary
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity
@@ -237,7 +244,6 @@ normal_targets=(
   @test/runtest-test_keeper_tool_execute_exit_result
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection
-  @test/runtest-test_keeper_goal_reconciliation_target
   @test/runtest-test_keeper_tool_descriptor_registry_integrity
   @test/runtest-test_schedule_runner
   @test/runtest-test_schedule_store
@@ -246,6 +252,7 @@ normal_targets=(
   @test/runtest-test_keeper_reaction_ledger
   @test/runtest-test_exact_lane_run_registry
   @test/runtest-test_ci_run_tests_script
+  @test/runtest-test_telemetry_gate_handler_detection
   @test/runtest-test_keeper_unified_verification_surface
   @test/runtest-test_schedule_tool_wiring
   @test/runtest-test_keeper_system_prompt_bytes
@@ -266,6 +273,9 @@ normal_targets=(
   @test/runtest-test_keeper_wire_capture
   @test/runtest-test_runtime_provider_auth_headers
   @test/runtest-test_keeper_official_client_host
+  @test/runtest-test_keeper_tool_approval_gate
+  @test/runtest-test_keeper_tool_approval_policy
+  @test/runtest-test_keeper_tool_approval_registry
   @test/runtest-test_runtime_codex_app_server
   @test/runtest-test_runtime_antigravity
   @test/runtest-test_runtime_antigravity_home
@@ -310,10 +320,10 @@ normal_targets=(
   @test/runtest-test_agent_api_query_params
   @test/runtest-test_h2_mode_vocabulary
   @test/runtest-test_agent_transport_vocabulary
-  @test/runtest-test_keeper_catchup_digest
   @test/runtest-test_workspace_root_state_parity
   @test/runtest-test_dashboard_keeper_name
   @test/runtest-test_dashboard_briefing
+  @test/runtest-test_broadcast_stores_raw_text
   @test/runtest-test_keeper_model_input_demotion
   @test/runtest-test_tool_type_label
   @test/runtest-test_telemetry_eio_pbt
@@ -338,6 +348,8 @@ normal_targets=(
   @test/runtest-test_board_karma_ledger
   @test/runtest-test_board_vote_persistence
   @test/runtest-test_log_ring_bounds
+  @test/runtest-test_log_seq_restart_continuity
+  @test/runtest-test_runtime_log_sink_render
   @test/runtest-test_board_comment_post_write_ahead
   @test/runtest-test_board_sub_board_write_ahead
   @test/runtest-test_keeper_event_queue
@@ -388,13 +400,531 @@ agent_core_targets=(
 )
 
 operator_targets=(
+  @test/runtest-test_tui_operator_projection
   @test/runtest-test_operator_control_snapshot_state
   @test/runtest-test_operator_control_snapshot
   @test/runtest-test_operator_control_snapshot_cache
   @test/runtest-test_model_map_of_keeper_rows
 )
 
+# Suites that test/dune declared and CI never ran. Each one here was built
+# and run before being listed, alone and then all together in one dune
+# invocation, so wiring them adds coverage without adding a known-red target.
+# The list is the alphabetical head of the declared-but-unrun set: it ends at
+# test_safe_ops because that is where the sweep stopped, not because the
+# suites after it fail. Of the 160 still unwired, the 125 sorting after
+# test_safe_ops were measured at 121 passing and 4 failing
+# (test_server_mcp_session_persist, test_telemetry_task_transition_10358,
+# test_tools_coverage, test_voice_runtime_overlay); the 121 are follow-up
+# wiring, not triage. The 35 sorting before it are 17 failing, 5 that are not
+# runnable tests (4 e2e stanzas gated on MASC_E2E_TESTS, 1 plain executable),
+# test_fusion_wake (case 12 times out in CI, #29064), and the rest unmeasured.
+# The ratchet in scripts/audit-ci-test-targets.sh holds the line at 160.
+newly_wired_targets=(
+  @test/runtest-test_board_explicit_writes
+  @test/runtest-test_board_metrics_labels
+  @test/runtest-test_board_persistence_schema
+  @test/runtest-test_board_rest_routes
+  @test/runtest-test_board_sort
+  @test/runtest-test_board_sse_canonical_event_type
+  @test/runtest-test_board_ttl
+  @test/runtest-test_boundary_redaction_runtime_lane
+  @test/runtest-test_briefing_compactors
+  @test/runtest-test_briefing_gaps
+  @test/runtest-test_briefing_json_helpers
+  @test/runtest-test_briefing_sections
+  @test/runtest-test_broadcast_wakeup_policy
+  @test/runtest-test_build_identity
+  @test/runtest-test_cache_eio
+  @test/runtest-test_cache_eio_coverage
+  @test/runtest-test_cache_metrics_wiring
+  @test/runtest-test_completion_trust_harness
+  @test/runtest-test_dashboard_render_timing_9766
+  @test/runtest-test_dashboard_resilience_coverage
+  @test/runtest-test_dashboard_runtime_probe_nonblocking
+  @test/runtest-test_dashboard_snapshot
+  @test/runtest-test_dashboard_tla_specs
+  @test/runtest-test_dashboard_tool_host_events
+  @test/runtest-test_dated_jsonl_count_cache
+  @test/runtest-test_dated_jsonl_mutex_registry_10372
+  @test/runtest-test_discord_gateway_client
+  @test/runtest-test_discord_presence_bridge
+  @test/runtest-test_discord_tls_config_cache
+  @test/runtest-test_discord_wss_bridge
+  @test/runtest-test_discord_wss_lifecycle
+  @test/runtest-test_disk_hygiene_script
+  @test/runtest-test_dispatch_observer_validation_failure
+  @test/runtest-test_dispatch_outcome_total
+  @test/runtest-test_dispatch_telemetry_gap
+  @test/runtest-test_distributed_lock_acquire_failed_counter
+  @test/runtest-test_distributed_lock_backlog_namespace
+  @test/runtest-test_distributed_lock_backoff_jitter_9645
+  @test/runtest-test_docker_playground_gc_script
+  @test/runtest-test_domain_pool
+  @test/runtest-test_dune_local_script
+  @test/runtest-test_eio_context_fiber_local
+  @test/runtest-test_eio_mutex_concurrency
+  @test/runtest-test_eio_resource_scope
+  @test/runtest-test_env_config_dashboard_compute_timeouts
+  @test/runtest-test_env_config_dashboard_execution_timeouts
+  @test/runtest-test_env_config_dashboard_shell_prewarm
+  @test/runtest-test_env_config_get_ratio
+  @test/runtest-test_env_config_keeper_bootstrap_intervals
+  @test/runtest-test_env_config_keeper_poll_intervals
+  @test/runtest-test_env_config_nonneg
+  @test/runtest-test_env_config_sandbox
+  @test/runtest-test_env_config_schedule_runner
+  @test/runtest-test_env_config_sidecar_timeouts
+  @test/runtest-test_env_config_voice_bridge_timeouts
+  @test/runtest-test_env_keeper_scrub
+  @test/runtest-test_error_logging_coverage
+  @test/runtest-test_eval_feed
+  @test/runtest-test_eval_harness
+  @test/runtest-test_eval_tool_selector_boundary
+  @test/runtest-test_event_kind
+  @test/runtest-test_event_priority_monotone_pbt
+  @test/runtest-test_exact_output_catalog_precedence
+  @test/runtest-test_exec_core
+  @test/runtest-test_exec_dispatch
+  @test/runtest-test_exec_shell_command_gate
+  @test/runtest-test_exec_tap
+  @test/runtest-test_executor_pool_eio_mutex
+  @test/runtest-test_fact_retention_reachability
+  @test/runtest-test_fd_accountant
+  @test/runtest-test_feature_flag_registry
+  @test/runtest-test_field_resolution
+  @test/runtest-test_field_validation
+  @test/runtest-test_file_lock_eio
+  @test/runtest-test_fs_atomic_orphan_sweep_10130
+  @test/runtest-test_fs_compat_append_jsonl_atomicity
+  @test/runtest-test_fs_compat_durable_append
+  @test/runtest-test_fs_compat_fd_cache
+  @test/runtest-test_fs_compat_mkdir_memo
+  @test/runtest-test_fs_compat_publication_reconciliation
+  @test/runtest-test_gate_hitl_runtime_info
+  @test/runtest-test_gate_keeper_backend
+  @test/runtest-test_gate_protocol
+  @test/runtest-test_gate_surface
+  @test/runtest-test_gc_sampler
+  @test/runtest-test_git_fetch_retry_script
+  @test/runtest-test_git_fetch_timeout_9587
+  @test/runtest-test_goal_task_assignment
+  @test/runtest-test_goal_tools
+  @test/runtest-test_goal_upsert_fsm_bypass_10247
+  @test/runtest-test_graphql_api
+  @test/runtest-test_graphql_api_coverage
+  @test/runtest-test_graphql_endpoint
+  @test/runtest-test_grpc_client
+  @test/runtest-test_health
+  @test/runtest-test_health_status
+  @test/runtest-test_heartbeat_qw
+  @test/runtest-test_host_config_resolution
+  @test/runtest-test_http_negotiation
+  @test/runtest-test_http_pages_asset_read
+  @test/runtest-test_http_protocol_detect
+  @test/runtest-test_http_server_eio_coverage
+  @test/runtest-test_ide_annotations
+  @test/runtest-test_ide_canonical_url_join
+  @test/runtest-test_ide_diagnostics
+  @test/runtest-test_ide_paths
+  @test/runtest-test_identity_e2e
+  @test/runtest-test_identity_edge_cases
+  @test/runtest-test_inference_inflight_observation
+  @test/runtest-test_inference_utils
+  @test/runtest-test_install_script
+  @test/runtest-test_json_field
+  @test/runtest-test_json_util
+  @test/runtest-test_jsonl_incremental_projection
+  @test/runtest-test_k2_pipeline_e2e
+  @test/runtest-test_k3_tool_pipeline_e2e
+  @test/runtest-test_keeper_agent_run_sandbox_source
+  @test/runtest-test_keeper_allowed_paths
+  @test/runtest-test_keeper_board_unavailable
+  @test/runtest-test_keeper_callback_hardening
+  @test/runtest-test_keeper_chat_blocks
+  @test/runtest-test_keeper_chat_delivery_identity
+  @test/runtest-test_keeper_chat_discord
+  @test/runtest-test_keeper_chat_media_store
+  @test/runtest-test_keeper_chat_store
+  @test/runtest-test_keeper_chat_store_append_result
+  @test/runtest-test_keeper_checkpoint_classify
+  @test/runtest-test_keeper_classifier_helper
+  @test/runtest-test_keeper_compact_recovery_tool_surface
+  @test/runtest-test_keeper_compaction_outcome_counters
+  @test/runtest-test_keeper_composite_live_turn_surface
+  @test/runtest-test_keeper_context_core_dedup
+  @test/runtest-test_keeper_context_isolation
+  @test/runtest-test_keeper_context_layers
+  @test/runtest-test_keeper_context_observation_projection
+  @test/runtest-test_keeper_core_error_typed_bridge
+  @test/runtest-test_keeper_cwd_response
+  @test/runtest-test_keeper_cycle_channel
+  @test/runtest-test_keeper_decision_event
+  @test/runtest-test_keeper_diagnostic_stale_last_error
+  @test/runtest-test_keeper_disk_pressure
+  @test/runtest-test_keeper_effective_meta_overlay
+  @test/runtest-test_keeper_efficiency_protocol
+  @test/runtest-test_keeper_exact_flow_detail
+  @test/runtest-test_keeper_execution_receipt_observation_wire
+  @test/runtest-test_keeper_failed_selection_disposition
+  @test/runtest-test_keeper_fd_pressure_fleet
+  @test/runtest-test_keeper_fs
+  @test/runtest-test_keeper_fs_edit_containment
+  @test/runtest-test_keeper_fs_systhread_cancellation
+  @test/runtest-test_keeper_global_shared_refs_atomic
+  @test/runtest-test_keeper_hooks_agent_core_log_shape
+  @test/runtest-test_keeper_id
+  @test/runtest-test_keeper_identity_drift_counter
+  @test/runtest-test_keeper_identity_id
+  @test/runtest-test_keeper_identity_normalize
+  @test/runtest-test_keeper_identity_outcome_label
+  @test/runtest-test_keeper_identity_parse
+  @test/runtest-test_keeper_invalid_request_auto_recover
+  @test/runtest-test_keeper_latched_reason
+  @test/runtest-test_keeper_lifecycle_chaos
+  @test/runtest-test_keeper_lifecycle_gate
+  @test/runtest-test_keeper_lifecycle_registry_dispatch
+  @test/runtest-test_keeper_local_profile_docker_playground
+  @test/runtest-test_keeper_long_turn_9943
+  @test/runtest-test_keeper_memory_write
+  @test/runtest-test_keeper_mention_scope
+  @test/runtest-test_keeper_meta_current_keyset
+  @test/runtest-test_keeper_meta_cwd_resilience
+  @test/runtest-test_keeper_misc_mutable_refs
+  @test/runtest-test_keeper_noop_backoff
+  @test/runtest-test_keeper_path_check_error
+  @test/runtest-test_keeper_path_containment_objective
+  @test/runtest-test_keeper_path_rejection
+  @test/runtest-test_keeper_paused_work_cancellation_transaction
+  @test/runtest-test_keeper_paused_work_resume_surface
+  @test/runtest-test_keeper_person_note_set_handler
+  @test/runtest-test_keeper_person_notes
+  @test/runtest-test_keeper_proactive_skip_counter
+  @test/runtest-test_keeper_raw_task_signal_wake
+  @test/runtest-test_keeper_receipt_authoritative
+  @test/runtest-test_keeper_receipt_authoritative_matrix
+  @test/runtest-test_keeper_registry_admission_no_suspend
+  @test/runtest-test_keeper_registry_provenance
+  @test/runtest-test_keeper_replay_checkpoint
+  @test/runtest-test_keeper_repo_mapping
+  @test/runtest-test_keeper_request_wire_observation
+  @test/runtest-test_keeper_response_feedback
+  @test/runtest-test_keeper_running_reconcile_attempt
+  @test/runtest-test_keeper_runtime_attempt
+  @test/runtest-test_keeper_runtime_config_leaf
+  @test/runtest-test_keeper_runtime_failure_route
+  @test/runtest-test_keeper_runtime_manifest_clock_separation
+  @test/runtest-test_keeper_runtime_manifest_completeness
+  @test/runtest-test_keeper_runtime_observation_boundaries
+  @test/runtest-test_keeper_runtime_trust_snapshot
+  @test/runtest-test_keeper_sandbox_containment
+  @test/runtest-test_keeper_sandbox_read_runner
+  @test/runtest-test_keeper_sandbox_runner
+  @test/runtest-test_keeper_secret_projection
+  @test/runtest-test_keeper_self_authored_task_exclusion
+  @test/runtest-test_keeper_shutdown_reconciliation_settlement
+  @test/runtest-test_keeper_state_machine
+  @test/runtest-test_keeper_state_machine_mermaid
+  @test/runtest-test_keeper_state_machine_pbt
+  @test/runtest-test_keeper_state_machine_tla_correspondence
+  @test/runtest-test_keeper_stream_media_accum
+  @test/runtest-test_keeper_stream_tool_accum
+  @test/runtest-test_keeper_structured_output_schema
+  @test/runtest-test_keeper_subprocess_registry
+  @test/runtest-test_keeper_supervisor
+  @test/runtest-test_keeper_supervisor_observability_10125
+  @test/runtest-test_keeper_surface_post
+  @test/runtest-test_keeper_surface_read
+  @test/runtest-test_keeper_surface_status
+  @test/runtest-test_keeper_tag_dispatch
+  @test/runtest-test_keeper_task_cancellation_wake
+  @test/runtest-test_keeper_telemetry_consumer
+  @test/runtest-test_keeper_terminal_reason_typed
+  @test/runtest-test_keeper_timing
+  @test/runtest-test_keeper_toml_loader
+  @test/runtest-test_keeper_toml_parser
+  @test/runtest-test_keeper_tool_call_sse_io_preview
+  @test/runtest-test_keeper_tool_duration_buckets
+  @test/runtest-test_keeper_tool_emission_hook
+  @test/runtest-test_keeper_tool_execute_descriptor_variant
+  @test/runtest-test_keeper_tool_name
+  @test/runtest-test_keeper_tool_policy_masc_surface
+  @test/runtest-test_keeper_tool_read_window
+  @test/runtest-test_keeper_tool_search_files_containment
+  @test/runtest-test_keeper_tool_search_files_via_field
+  @test/runtest-test_keeper_tool_use_failure_counter
+  @test/runtest-test_keeper_transition_audit_types
+  @test/runtest-test_keeper_turn_disposition
+  @test/runtest-test_keeper_turn_fsm_emit
+  @test/runtest-test_keeper_turn_helpers_side_effect_metric
+  @test/runtest-test_keeper_turn_terminal_disposition_field
+  @test/runtest-test_keeper_typed_labels
+  @test/runtest-test_keeper_unified_claim_progress
+  @test/runtest-test_keeper_unified_context_overflow
+  @test/runtest-test_keeper_unified_turn_event_bus
+  @test/runtest-test_keeper_usage_trust_counter
+  @test/runtest-test_keeper_visible_path_projection
+  @test/runtest-test_keeper_waiting_inventory
+  @test/runtest-test_keeper_wire_capture_suppression
+  @test/runtest-test_keeper_workspace_ops
+  @test/runtest-test_keeper_yield_observability
+  @test/runtest-test_legacy_protocol_alias_rejected
+  @test/runtest-test_lifecycle
+  @test/runtest-test_limit_schema_widen
+  @test/runtest-test_llm_metric_bridge
+  @test/runtest-test_local_review_script
+  @test/runtest-test_local_runtime_pool
+  @test/runtest-test_lockfree_atomic
+  @test/runtest-test_log_file_sink_self_heal
+  @test/runtest-test_log_ring_encoder
+  @test/runtest-test_log_severity_outcome_level
+  @test/runtest-test_lsp_process_manager
+  @test/runtest-test_masc_agent_core_bridge_observation
+  @test/runtest-test_masc_error_dashboard_auth_code
+  @test/runtest-test_masc_error_is_retryable
+  @test/runtest-test_masc_log_utc_filename_10392
+  @test/runtest-test_masc_runtime_events
+  @test/runtest-test_mcp_auth_gate
+  @test/runtest-test_mcp_protocol_coverage
+  @test/runtest-test_mcp_server_eio_bind_state
+  @test/runtest-test_mcp_server_eio_call_tool
+  @test/runtest-test_mcp_server_eio_coverage
+  @test/runtest-test_mcp_server_eio_tool_dispatch
+  @test/runtest-test_mcp_session_coverage
+  @test/runtest-test_mcp_session_id_header
+  @test/runtest-test_mcp_telemetry
+  @test/runtest-test_mcp_tool_runtime_workspace_path
+  @test/runtest-test_mention
+  @test/runtest-test_metrics_rotation
+  @test/runtest-test_metrics_store_eio
+  @test/runtest-test_metrics_store_eio_pbt
+  @test/runtest-test_mid_turn_resume
+  @test/runtest-test_minted_name_gate
+  @test/runtest-test_misc_coverage
+  @test/runtest-test_multi_workspace
+  @test/runtest-test_nickname_coverage
+  @test/runtest-test_normalized_actor
+  @test/runtest-test_notify_coverage
+  @test/runtest-test_observability_redact_private_material
+  @test/runtest-test_operator_control_judgment
+  @test/runtest-test_orchestrator_coverage
+  @test/runtest-test_orphan_surfacer
+  @test/runtest-test_otel_dispatch_hook
+  @test/runtest-test_otel_histogram_bucket_labels
+  @test/runtest-test_otel_otlp_export_e2e
+  @test/runtest-test_otel_runtime_observables
+  @test/runtest-test_otel_tick_poison_source
+  @test/runtest-test_otel_trace_context
+  @test/runtest-test_otel_zero_fill
+  @test/runtest-test_parse_outcome
+  @test/runtest-test_pbt_context_overflow
+  @test/runtest-test_pbt_text_processing
+  @test/runtest-test_pbt_validation
+  @test/runtest-test_planning_eio
+  @test/runtest-test_playground_paths
+  @test/runtest-test_pool_metrics
+  @test/runtest-test_pr_b_shell_paths_migration
+  @test/runtest-test_pr_c_coreutils_migration
+  @test/runtest-test_pr_d_agent_runtime_migration
+  @test/runtest-test_pr_f_test_mode_migration
+  @test/runtest-test_process_eio_detached
+  @test/runtest-test_process_timeout_counter
+  @test/runtest-test_progress
+  @test/runtest-test_progress_coverage
+  @test/runtest-test_prompt_registry_dune_fallback
+  @test/runtest-test_provider_diag_log_sink
+  @test/runtest-test_provider_http_error
+  @test/runtest-test_provider_prefix_boundary
+  @test/runtest-test_pulse
+  @test/runtest-test_rate_limit_coverage
+  @test/runtest-test_read_drop_reason
+  @test/runtest-test_relation_materializer
+  @test/runtest-test_repo_e2e
+  @test/runtest-test_repo_git
+  @test/runtest-test_repo_store
+  @test/runtest-test_repo_sync
+  @test/runtest-test_resilience
+  @test/runtest-test_resilience_coverage
+  @test/runtest-test_response_model_empty_10083
+  @test/runtest-test_rfc_0085_pr10_home_assets_purge
+  @test/runtest-test_rfc_0085_pr11_deprecation_purge
+  @test/runtest-test_rfc_0085_pr12_tool_spec_rename
+  @test/runtest-test_rfc_0085_pr13_underscore_rename
+  @test/runtest-test_rfc_0085_pr14_dispatch_inline
+  @test/runtest-test_rfc_0085_pr17_dead_purge_and_rename
+  @test/runtest-test_rfc_0085_pr3_server_runtime_paths
+  @test/runtest-test_rfc_0085_pr4_tool_library_proof_store
+  @test/runtest-test_rfc_0085_pr6_host_config_from_env
+  @test/runtest-test_rfc_0085_pr8_config_dir_resolver_host_config
+  @test/runtest-test_rfc_0085_pr9_base_path_opt_purge
+  @test/runtest-test_run_eio_coverage
+  @test/runtest-test_run_local_script
+  @test/runtest-test_runtime_agent_close_cancel_source
+  @test/runtest-test_runtime_agent_core_eio_context_classify
+  @test/runtest-test_runtime_attempt_fsm
+  @test/runtest-test_runtime_defaults_json
+  @test/runtest-test_runtime_event_bus
+  @test/runtest-test_runtime_lane_preference
+  @test/runtest-test_runtime_missing_catalog_report
+  @test/runtest-test_runtime_model_temperature_toml
+  @test/runtest-test_runtime_params
+  @test/runtest-test_runtime_provider_projection_boundary
+  @test/runtest-test_safe_ops
+)
+
+newly_wired_followup_targets=(
+  @test/runtest-test_sandbox_inspect_trim_10488
+  @test/runtest-test_schedule_domain
+  @test/runtest-test_schedule_service
+  @test/runtest-test_server_activity_http
+  @test/runtest-test_server_auth_warn_log_bound
+  @test/runtest-test_server_base_path_diagnostics
+  @test/runtest-test_server_dashboard_http_keeper_api_trace
+  @test/runtest-test_server_dashboard_http_keeper_memory_health
+  @test/runtest-test_server_dashboard_http_schedule_actions
+  @test/runtest-test_server_discord_trigger_policy
+  @test/runtest-test_server_hibernation
+  @test/runtest-test_server_ide_http
+  @test/runtest-test_server_ide_lsp_proxy
+  @test/runtest-test_server_request_authority
+  @test/runtest-test_server_runtime_bootstrap
+  @test/runtest-test_server_slack_gateway_attention
+  @test/runtest-test_server_slack_trigger_policy
+  @test/runtest-test_server_startup_takeover
+  @test/runtest-test_server_state_product
+  @test/runtest-test_server_timing
+  @test/runtest-test_server_utils_bounded_cache
+  @test/runtest-test_session
+  @test/runtest-test_session_coverage
+  @test/runtest-test_session_lifecycle_event
+  @test/runtest-test_set_util
+  @test/runtest-test_shutdown_benign_termination
+  @test/runtest-test_shutdown_flag
+  @test/runtest-test_slack_gateway_state
+  @test/runtest-test_slack_rest_client
+  @test/runtest-test_sse
+  @test/runtest-test_sse_external_sub
+  @test/runtest-test_sse_pumps
+  @test/runtest-test_sse_qw
+  @test/runtest-test_sse_registration_auth
+  @test/runtest-test_start_masc_mcp_script
+  @test/runtest-test_start_masc_script
+  @test/runtest-test_stop_reason_label
+  @test/runtest-test_streamable_http_upgrade
+  @test/runtest-test_string_util
+  @test/runtest-test_subscriptions
+  @test/runtest-test_surface_ref
+  @test/runtest-test_system_error_class
+  @test/runtest-test_system_log_atomicity
+  @test/runtest-test_tag_dispatch_typed
+  @test/runtest-test_task_status_label_10421
+  @test/runtest-test_task_transition_broadcast
+  @test/runtest-test_telemetry_eio_coverage
+  @test/runtest-test_telemetry_error_occurred_wire_10358
+  @test/runtest-test_telemetry_observe
+  @test/runtest-test_telemetry_unified
+  @test/runtest-test_telemetry_unified_source
+  @test/runtest-test_tempo_coverage
+  @test/runtest-test_thinking_control_format_unknown_error
+  @test/runtest-test_time_codec
+  @test/runtest-test_timeout_origin
+  @test/runtest-test_tool_agent_coverage
+  @test/runtest-test_tool_agent_timeline_build
+  @test/runtest-test_tool_agent_timeline_name_match
+  @test/runtest-test_tool_args_envelope
+  @test/runtest-test_tool_assignment_telemetry
+  @test/runtest-test_tool_bridge_externalize
+  @test/runtest-test_tool_call_replay_harness
+  @test/runtest-test_tool_capability_typed
+  @test/runtest-test_tool_control_coverage
+  @test/runtest-test_tool_descriptors_gen
+  @test/runtest-test_tool_dispatch
+  @test/runtest-test_tool_dispatch_emit
+  @test/runtest-test_tool_diversity
+  @test/runtest-test_tool_error
+  @test/runtest-test_tool_help_metadata_rfc_0195
+  @test/runtest-test_tool_help_registry_shard_coverage_10101
+  @test/runtest-test_tool_hooks
+  @test/runtest-test_tool_library_coverage
+  @test/runtest-test_tool_local_runtime_probe
+  @test/runtest-test_tool_metrics
+  @test/runtest-test_tool_metrics_persist
+  @test/runtest-test_tool_output_washing_e2e
+  @test/runtest-test_tool_plan_coverage
+  @test/runtest-test_tool_quality_classify
+  @test/runtest-test_tool_registry
+  @test/runtest-test_tool_resolution_runtime_projection
+  @test/runtest-test_tool_result
+  @test/runtest-test_tool_task_args
+  @test/runtest-test_tool_token
+  @test/runtest-test_tool_unified
+  @test/runtest-test_trajectory
+  @test/runtest-test_trajectory_atomicity
+  @test/runtest-test_transport_bridge_seal
+  @test/runtest-test_transport_coverage
+  @test/runtest-test_transport_read_model
+  @test/runtest-test_turn_id_propagation
+  @test/runtest-test_turn_record
+  @test/runtest-test_types_coverage
+  @test/runtest-test_types_utils_coverage
+  @test/runtest-test_validation
+  @test/runtest-test_validation_coverage
+  @test/runtest-test_verify_handoff_tool
+  @test/runtest-test_voice_bridge_error
+  @test/runtest-test_voice_config
+  @test/runtest-test_web_dashboard_coverage
+  @test/runtest-test_with_cleanups_on_release
+  @test/runtest-test_with_process_coverage
+  @test/runtest-test_work_as_heartbeat
+  @test/runtest-test_workspace_base_path_cache
+  @test/runtest-test_workspace_bind_fail_closed
+  @test/runtest-test_workspace_bootstrap
+  @test/runtest-test_workspace_coverage
+  @test/runtest-test_workspace_file_confidentiality
+  @test/runtest-test_workspace_goal_index
+  @test/runtest-test_workspace_handoff_boundary
+  @test/runtest-test_workspace_messages_raw
+  @test/runtest-test_workspace_routes_keeper
+  @test/runtest-test_workspace_state_recovery
+  @test/runtest-test_workspace_task_delete
+  @test/runtest-test_workspace_task_lifecycle
+  @test/runtest-test_workspace_task_verification_phase_e
+  @test/runtest-test_workspace_telemetry_drop_non_eio
+  @test/runtest-test_workspace_tree_exclusions
+  @test/runtest-test_workspace_utils_coverage
+  @test/runtest-test_worktree_detection
+  @test/runtest-test_yojson_type_error_board
+)
+
 sse_targets=(
+  @test/runtest-test_tui_board_detail
+  @test/runtest-test_tui_board_selection
+  @test/runtest-test_tui_context_state
+  @test/runtest-test_tui_decode
+  @test/runtest-test_tui_frame_presenter
+  @test/runtest-test_tui_keeper_chat_history
+  @test/runtest-test_tui_keeper_chat_queue
+  @test/runtest-test_tui_chat_queue_wiring
+  @test/runtest-test_tui_chat_surface_mirror
+  @test/runtest-test_tui_keeper_chat_live
+  @test/runtest-test_tui_keeper_chat_transcript
+  @test/runtest-test_tui_keeper_chat_projection
+  @test/runtest-test_tui_keeper_chat_recovery
+  @test/runtest-test_tui_composer
+  @test/runtest-test_tui_markdown
+  @test/runtest-test_tui_keeper_control
+  @test/runtest-test_tui_keeper_selection
+  @test/runtest-test_tui_keyboard_input
+  @test/runtest-test_tui_keeper_activity
+  @test/runtest-test_tui_transport_health
+  @test/runtest-test_tui_message_layout
+  @test/runtest-test_tui_metrics_tail
+  @test/runtest-test_tui_observation_layout
+  @test/runtest-test_tui_planning_selection
+  @test/runtest-test_tui_task_detail
+  @test/runtest-test_tui_http_ast
+  @test/runtest-test_tui_render_schedule
+  @test/runtest-test_tui_terminal_write_repair
   @test/runtest-test_sse_coverage
   @test/runtest-test_ag_ui_coverage
   @test/runtest-test_sse_storm_e2e
@@ -419,6 +949,10 @@ run_shell_group focused-failure-reporting \
 
 run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
 run_group normal 1200 "${normal_targets[@]}" || overall_status=1
+# 350 suites ran in 103s on the first CI pass (08:49:02 to 08:50:45, run
+# 32628548472); 300s is that measurement with headroom, not a guess.
+run_group newly-wired 300 "${newly_wired_targets[@]}" || overall_status=1
+run_group newly-wired-followup 300 "${newly_wired_followup_targets[@]}" || overall_status=1
 
 # Own group, not part of [normal_targets]: the matrix's tools/call sweep is an
 # Alcotest `Slow case, so it must run without ALCOTEST_QUICK_TESTS, and it

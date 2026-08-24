@@ -566,8 +566,6 @@ describe('fetchBoard', () => {
           updated_at: 1_713_000_000,
           current_vote: 'up',
           has_voted: true,
-          report_count: 2,
-          moderation_status: 'flagged',
           reactions: [
             {
               emoji: '🔥',
@@ -602,8 +600,6 @@ describe('fetchBoard', () => {
     expect(result.posts[0]).toMatchObject({
       current_vote: 'up',
       has_voted: true,
-      report_count: 2,
-      moderation_status: 'flagged',
       reactions: [
         {
           emoji: '🔥',
@@ -641,43 +637,6 @@ describe('fetchBoard', () => {
     expect(url).toContain('/api/v1/board?')
     expect(url).toContain('hearth=ops')
     expect(url).toContain('limit=150')
-  })
-
-  it('normalizes vote-blind rows and opts into the board projection when requested', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        posts: [
-          {
-            id: 'post-blind',
-            author: 'analyst',
-            title: 'Blind score',
-            body: 'Working',
-            created_at: 1_713_000_000,
-            updated_at: 1_713_000_000,
-            votes: null,
-            score: null,
-            votes_up: null,
-            votes_down: null,
-            vote_blind: true,
-            vote_blind_reason: 'vote_before_score',
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchBoard('hot', { blindVotes: true })
-
-    expect(result.posts[0]).toMatchObject({
-      id: 'post-blind',
-      vote_blind: true,
-      vote_blind_reason: 'vote_before_score',
-    })
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toContain('blind_votes=true')
   })
 
   it('normalizes the RFC-0233 origin (turn_ref / source / fusion_run_id)', async () => {
@@ -911,8 +870,6 @@ describe('fetchBoardPost', () => {
           score: 3,
           current_vote: 'up',
           has_voted: true,
-          report_count: 1,
-          moderation_status: 'hidden',
           reactions: [
             {
               emoji: '🚀',
@@ -943,8 +900,6 @@ describe('fetchBoardPost', () => {
       votes_down: 2,
       current_vote: 'up',
       has_voted: true,
-      report_count: 1,
-      moderation_status: 'hidden',
       reactions: [
         {
           emoji: '🚀',
@@ -970,7 +925,6 @@ describe('fetchBoardPost', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 
@@ -1179,10 +1133,9 @@ describe('voteComment', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/tools/masc_board_comment_vote')
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(JSON.parse(String(init.body))).toEqual({
       comment_id: 'comment-1',
       direction: 'down',
-      vote: 'down',
       voter: 'dashboard-reviewer',
     })
   })

@@ -38,8 +38,5 @@ val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
 (** Sanitize text content blocks in a message. *)
 val sanitize_message_utf8 : Agent_core.Types.message -> Agent_core.Types.message
 
-(** Sanitize text content blocks in a list of messages. *)
-val sanitize_messages_utf8 : Agent_core.Types.message list -> Agent_core.Types.message list
-
 (** Maximum concurrent model calls (from [MASC_MAX_CONCURRENT_MODELS], default 8). *)
 val max_concurrent_models : int

@@ -66,6 +66,3 @@ val api_format_of_protocol : string -> (Runtime_schema.api_format, string) resul
     are NOT silently canonicalized — so a checked-in config still using them
     fails to load. Locked by [test_legacy_protocol_alias_rejected]. *)
 
-val transport_of_provider :
-  Otoml.t -> string -> (Runtime_schema.transport, string) result
-(** Extract transport ([Http] or [Cli]) from a provider TOML table. *)

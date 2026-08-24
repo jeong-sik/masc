@@ -63,49 +63,18 @@ type frontmatter = {
 }
 
 let parse_frontmatter content =
-  (* Simple YAML parser for frontmatter between --- delimiters *)
-  let lines = String.split_on_char '\n' content in
-  let rec find_end acc = function
-    | [] -> (List.rev acc, [])
-    | "---" :: rest when Stdlib.List.length acc > 0 -> (List.rev acc, rest)
-    | line :: rest -> find_end (line :: acc) rest
-  in
-  match lines with
-  | "---" :: rest ->
-      let yaml_lines, _body = find_end [] rest in
-      let _yaml = String.concat "\n" yaml_lines in
-      (* Extract fields with simple pattern matching *)
-      let get_field name =
-        let pattern = name ^ ":" in
-        List.find_map (fun line ->
-          if String.length line > String.length pattern &&
-             String.equal (Stdlib.String.sub line 0 (String.length pattern)) pattern then
-            Some (String.trim (String.sub line (String.length pattern)
-                    (String.length line - String.length pattern)))
-          else None
-        ) yaml_lines |> Option.value ~default:""
-      in
-      let get_tags () =
-        let raw = get_field "tags" in
-        (* Parse [tag1, tag2] format *)
-        let stripped = String.trim raw in
-        if String.length stripped > 2 &&
-           Char.equal stripped.[0] '[' &&
-           Char.equal stripped.[String.length stripped - 1] ']' then
-          let inner = String.sub stripped 1 (String.length stripped - 2) in
-          String.split_on_char ',' inner
-          |> List.map String.trim
-          |> List.filter (fun s -> not (String.equal s ""))
-        else []
-      in
-      Some {
-        title = get_field "title";
-        source = get_field "source";
-        author = get_field "author";
-        created = get_field "created";
-        tags = get_tags ();
-      }
-  | _ -> None
+  if not (Frontmatter.has_frontmatter content)
+  then None
+  else (
+    let parsed = Frontmatter.parse content in
+    Some
+      { title = Frontmatter.field parsed "title"
+      ; source = Frontmatter.field parsed "source"
+      ; author = Frontmatter.field parsed "author"
+      ; created = Frontmatter.field parsed "created"
+      ; tags = Frontmatter.list_field parsed "tags"
+      })
+;;
 
 (* List documents *)
 let list_documents () =

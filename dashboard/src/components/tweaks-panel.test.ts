@@ -4,6 +4,7 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import { fireEvent } from '@testing-library/preact'
 import {
+  TweakRadio,
   TweaksPanel,
   TweaksPanelToggle,
   tweaksBubble,
@@ -142,6 +143,50 @@ describe('TweaksPanel', () => {
 
     await fireEvent.click(toggle)
     expect(chatShowAutonomous.value).toBe(false)
+  })
+
+  it('renders the design seg thumb over the selected segment and moves it on change', async () => {
+    tweaksOpen.value = true
+    tweaksDensity.value = 'regular'
+    render(html`<${TweaksPanel} />`, container)
+
+    const seg = container.querySelector('[data-testid="twk-seg"]') as HTMLElement
+    const thumb = seg.querySelector('.twk-seg-thumb') as HTMLElement
+    expect(thumb).not.toBeNull()
+    // 'regular' is index 1 of 3 — design formula 2px + idx * (100% - 4px) / n,
+    // distributed: idx * 100/n % + (2 - idx * 4/n) px.
+    expect(thumb.style.left).toBe(`calc(${100 / 3}% + ${2 - 4 / 3}px)`)
+    expect(thumb.style.width).toBe(`calc(${100 / 3}% - ${4 / 3}px)`)
+
+    const compactBtn = Array.from(seg.querySelectorAll('button')).find(
+      b => b.getAttribute('data-value') === 'compact',
+    ) as HTMLButtonElement
+    await fireEvent.click(compactBtn)
+    render(html`<${TweaksPanel} />`, container)
+    const thumbAfter = container.querySelector('[data-testid="twk-seg"] .twk-seg-thumb') as HTMLElement
+    expect(thumbAfter.style.left).toBe(`calc(${(2 * 100) / 3}% + ${2 - (2 * 4) / 3}px)`)
+  })
+
+  it('falls back to a select.twk-field when segment labels exceed the design budget', async () => {
+    // Design budget (tweaks-panel.jsx): 3 options fit ~10 chars each; a longer
+    // label renders TweakSelect instead of wrapping mid-word.
+    render(html`
+      <${TweakRadio}
+        label="테스트"
+        value=${'a'}
+        options=${[
+          { value: 'a', label: '아주아주긴옵션레이블' },
+          { value: 'b', label: '또다른아주긴옵션레이블' },
+          { value: 'c', label: '세번째아주긴옵션레이블' },
+        ]}
+        onChange=${() => {}}
+      />
+    `, container)
+
+    const select = container.querySelector('select.twk-field') as HTMLSelectElement
+    expect(select).not.toBeNull()
+    expect(select.querySelectorAll('option').length).toBe(3)
+    expect(container.querySelector('[data-testid="twk-seg"]')).toBeNull()
   })
 })
 // Keeper Agent v2 sync: coverage ratchet trigger

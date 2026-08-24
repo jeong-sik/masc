@@ -36,26 +36,43 @@ let stderr_write line =
   flush stderr
 
 let writer_override : (string -> unit) option Atomic.t = Atomic.make None
+let after_write_observer : (unit -> unit) option Atomic.t = Atomic.make None
 
 let current_writer () =
   match Atomic.get writer_override with
   | Some w -> w
   | None -> stderr_write
 
+let set_after_write_observer observer =
+  Atomic.set after_write_observer observer
+
+let notify_after_write () =
+  match Atomic.get after_write_observer with
+  | None -> ()
+  | Some observe ->
+    (try observe () with
+     | _ -> ())
+
+let write_line line =
+  (* A partial fd write can corrupt an interactive screen before raising, so
+     notify after every attempt. Observer failure is isolated while the
+     writer's original result or exception remains unchanged. *)
+  Fun.protect ~finally:notify_after_write (fun () -> current_writer () line)
+
 let write_batch ~last_reported_drops batch =
   Queue.iter
     (fun line ->
-       try current_writer () line with
-       | _ ->
-         (* A failing console writer must never take the process down;
-            the file sink still has the record. *)
-         ())
+      try write_line line with
+      | _ ->
+        (* A failing console writer must never take the process down;
+           the file sink still has the record. *)
+        ())
     batch;
   let d = Atomic.get dropped in
   if d > !last_reported_drops
   then begin
     (try
-       current_writer ()
+       write_line
          (Printf.sprintf
             "[console-sink] dropped %d console line(s) while the console writer \
              was blocked (file sink unaffected)"
@@ -102,7 +119,7 @@ let write line =
      [Log] hands it the raw pre-[Ring.push] line. *)
   let line = Secret_patterns.redact_text line in
   if not (Atomic.get enqueue_active)
-  then current_writer () line
+  then write_line line
   else begin
     Mutex.lock mu;
     let full = Queue.length queue >= capacity in
@@ -125,14 +142,18 @@ module For_testing = struct
      read that same function, not a second copy of its body. *)
   let queued_count = queue_depth
 
-  let drain_now () =
+  let drain_now_since last_reported_drops =
     Mutex.lock mu;
     let batch = Queue.create () in
     Queue.transfer queue batch;
     Mutex.unlock mu;
     let n = Queue.length batch in
-    write_batch ~last_reported_drops:(ref (Atomic.get dropped)) batch;
-    n
+    let last_reported_drops = ref last_reported_drops in
+    write_batch ~last_reported_drops batch;
+    n, !last_reported_drops
+
+  let drain_now () =
+    fst (drain_now_since (Atomic.get dropped))
 
   let reset () =
     Mutex.lock mu;
@@ -140,5 +161,6 @@ module For_testing = struct
     Mutex.unlock mu;
     Atomic.set enqueue_active false;
     Atomic.set dropped 0;
-    Atomic.set writer_override None
+    Atomic.set writer_override None;
+    Atomic.set after_write_observer None
 end

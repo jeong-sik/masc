@@ -12,8 +12,6 @@
 (** Goal lifecycle phases. *)
 type t =
   | Executing
-  | Blocked
-  | Paused
   | Verifying
       (** Completion requested; the proof verdict is pending out-of-band
           (RFC-0387 B3). *)
@@ -45,10 +43,6 @@ val admits_self_directed_progress : t -> bool
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete
-  | Pause
-  | Resume
-  | Block
-  | Unblock
   | Drop
   | Reopen
   | Record_proof_proven
@@ -58,16 +52,12 @@ type action =
       (** Verifier commit: the completion proof failed. [Verifying ->
           Executing]; the refutation reason stays in the ledger and
           goal_events. *)
-  | Record_criterion_viable
-  | Record_criterion_unreachable
       (** Phase-neutral creation-time criterion verdicts (RFC-0387 B2): legal
           in every non-terminal phase as [Already <same phase>] — the handler
           commits the ledger and never writes the phase. *)
 
 val action_to_string : action -> string
 val action_of_string : string -> action option
-val parse_action : string -> action option
-
 val all_actions : action list
 (** Every internal action in declaration order. Includes verifier-only ledger
     commits and is the SSOT for the exhaustive transition matrix. *)
@@ -78,10 +68,6 @@ module Public_action : sig
       authority boundary, never through an MCP caller. *)
   type t =
     | Request_complete
-    | Pause
-    | Resume
-    | Block
-    | Unblock
     | Drop
     | Reopen
 

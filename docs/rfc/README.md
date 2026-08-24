@@ -154,7 +154,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0235 | Stale-base revert guard: block PRs that silently revert recently-merged work (`RFC-0235-stale-base-revert-guard.md`)<br>Voice output transport: browser-addressed audio delivery with device-routed p... (`RFC-0235-voice-output-browser-transport-device-routing.md`) | Draft<br>Draft | - |
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | - |
 | 0239 | Concurrency ownership model (per-site mutex/atomic → protection by construction) | Draft | - |
-| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | - |
+| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Implemented | - |
 | 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... | Draft | - |
 | 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | - |
 | 0252 | Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장) | Draft | - |
@@ -190,7 +190,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | - |
 | 0315 | Typed wake-turn context and self-directed work lane | Active | - |
 | 0316 | Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog | Draft | - |
-| 0317 | In-process Slack connector (Socket Mode) | In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending) | - |
+| 0317 | In-process Slack connector (Socket Mode) | Implemented | - |
 | 0320 | Keeper connector-aware continuation: carry the originating channel through wa... | Draft | - |
 | 0324 | keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거) | Draft | - |
 | 0333 | Deterministic cost↔success frontier join for the eval harness | Draft | - |
@@ -235,12 +235,14 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0386 | 툴 종류(tool kind)는 닫힌 합타입으로 선언한다 | Draft | - |
 | 0387 | Goal verifier 게이트 — 성공조건 필수화, 생성 시 실재성 검증, 완료의 2단계 증명 | Draft | - |
 | 0388 | awaiting_tool 대기의 liveness — 취소 도달과 시간 기반 만료 | Draft | - |
+| 0389 | Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다 | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
 | RFC-compaction-deterministic-floor | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
+| RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
@@ -248,6 +250,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-workspace-root-only | 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기) | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
+| RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 
 ### 신규 RFC

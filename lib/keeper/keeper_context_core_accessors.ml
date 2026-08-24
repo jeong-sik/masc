@@ -139,10 +139,15 @@ let serialize_context (ctx : working_context) : string =
 let serialized_bytes (ctx : working_context) : int =
   String.length (serialize_context ctx)
 
+(* Naming a session does not open one. Every writer under this directory goes
+   through [Keeper_fs.save_atomic], which creates the parent it needs, so the
+   directory appears when something is actually stored in it. Creating it here
+   meant a failed boot — which never reaches a write — still left an empty
+   session behind, and autoboot retries left one per round: 39,594 directories
+   had accumulated by 2026-08-23, 96.7% of the recent ones belonging to no
+   keeper meta at all (#29586). *)
 let create_session ~session_id ~base_dir =
-  let session_dir = Filename.concat base_dir session_id in
-  ensure_dir session_dir;
-  { session_id; session_dir }
+  { session_id; session_dir = Filename.concat base_dir session_id }
 
 include Keeper_context_core_history
 

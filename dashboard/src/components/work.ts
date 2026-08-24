@@ -10,7 +10,6 @@ import { goals, tasks, keepers, executionTaskTotal } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
-import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
@@ -21,6 +20,7 @@ import { KeeperPersistenceProofPanel } from './keeper-persistence-proof-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { SectionNav } from './common/section-nav'
+import { TimeAgo } from './common/time-ago'
 import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
@@ -29,18 +29,19 @@ import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
+import { VerifyQueue } from './verification/verify-queue'
 import { showToast } from './common/toast'
 import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
-type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
+type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'moderation' || v === 'planning' || v === 'repositories' || v === 'verification'
+  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification'
 }
 
 // ── Task state mapping ──────────────────────────────────────────────────────
@@ -169,9 +170,6 @@ function keeperByName(name: string | null | undefined): Keeper | undefined {
 }
 
 function leadNameForGoal(goal: Goal): string | undefined {
-  const active = keepers.value.find(k => k.active_goal_ids?.includes(goal.id))
-  if (active) return active.name
-
   const goalTasks = tasks.value.filter(t => t.goal_id === goal.id)
   const counts = new Map<string, number>()
   for (const t of goalTasks) {
@@ -437,93 +435,178 @@ function TaskEvidenceLedger({ rows }: { rows: readonly TaskEvidenceLedgerRow[] }
   `
 }
 
-function GoalProjectionDossier({ node }: { node: GoalTreeNode | null | undefined }) {
+// ── Goal detail panel (expanded goal card body) ─────────────────────────────
+//
+// The card header already says what the goal is — priority, phase, title, due
+// date, lead badge, done/total progress and the metric chip — and the card's
+// `data-goal-id` carries the id. The panel holds only what the header does not:
+// the progress review note (when there is one), the linked keepers, pending
+// approvals, and one activity row with the three instants (created, last
+// changed, last active) as relative time, the goal-event history behind a
+// toggle. There is no owner row: the goals endpoint serves no owner field.
+//
+// It carries no "완료 조건" section. The metric and its target value ride the
+// card header next to the progress bar, and the task counts there were a
+// second, worse tally of what the header already prints: the header drops
+// cancelled tasks from the denominator (`goalProgressCounts`, and the comment
+// there says why) while `task_summary` keeps them, so one card showed 6/6 in
+// the header and 전체 7 in the panel. Two answers to one question, with
+// nothing reconciling them.
+//
+// The backend also used to hand down a verdict — observed / target * 100,
+// where "observed" was the count of finished linked tasks and "target" was
+// the first number scraped out of free text like "5 PRs" — labelled with a
+// basis naming the metric it never read. Every goal that declared a metric
+// came back unevaluated, so the number was always a task-count stand-in
+// wearing a metric's name. That projection is gone (#29303); whether the goal
+// is done is a judgement the operator makes from the declaration and the
+// tasks themselves.
+//
+// The history toggle appears only when the node carries at least one timeline
+// event; there is no "기록 0건" line. The goals endpoint serves those rows
+// through the goal-event normalizer (`goal_event_timeline_json` in
+// lib/dashboard/dashboard_goals_types_timeline.ml), so each row is
+// {ts, kind, lane, title, summary, severity} — the shape
+// `decodeGoalDetailTimelineEvent` (api/dashboard-goals.ts) reads.
+//
+// The goal_fsm triple (state / source / activity_observation) and its
+// `next_actions` labels are deliberately not rendered here. `state` repeats the
+// phase pill in the card header, `source` was the constant `goal.phase` on
+// every node the API serves, `activity_observation` names which projection lane
+// last moved — none of which changes what an operator does — and the
+// `next_actions` strings were rendered as plain labels next to no control that
+// performs them.
+
+type GoalDetailRowTone = 'ok' | 'warn' | 'bad'
+
+function GoalDetailRow({
+  label,
+  tone,
+  testHook,
+  children,
+}: {
+  label: string
+  tone?: GoalDetailRowTone
+  testHook: string
+  children: unknown
+}) {
+  return html`
+    <div class=${`wk-dossier-row${tone ? ` ${tone}` : ''}`} data-goal-detail-row=${testHook}>
+      <span class="wk-dossier-k">${label}</span>
+      <span class="wk-dossier-v">${children}</span>
+    </div>
+  `
+}
+
+function GoalDetailSection({ title, children }: { title?: string; children: unknown }) {
+  return html`
+    <section class="wk-dossier-sec">
+      ${title ? html`<h4 class="wk-dossier-h">${title}</h4>` : null}
+      ${children}
+    </section>
+  `
+}
+
+// One labelled instant of the activity row: relative text, absolute time on
+// hover and on the <time> element (TimeAgo). The goals endpoint serves ISO-8601
+// for all three instants (`tree_node_to_json`), so the value goes to TimeAgo
+// as served.
+function GoalDossierInstant({ label, at, testHook }: { label: string; at: string; testHook: string }) {
+  return html`
+    <span data-goal-detail-when=${testHook}>
+      ${label} <${TimeAgo} timestamp=${at} />
+    </span>
+  `
+}
+
+function GoalProjectionDossier({
+  node,
+  reviewNote,
+}: {
+  node: GoalTreeNode | null | undefined
+  reviewNote?: string | null
+}) {
   const [timelineOpen, setTimelineOpen] = useState(false)
   if (!node) return null
 
-  const completion = node.completion_summary ?? null
+  const keeperLinks = node.linked_keeper_names
 
   return html`
     <div
       class="wk-dossier"
       data-testid="goal-dossier"
       data-goal-dossier=${node.id}
-      data-goal-dossier-fsm-state=${node.goal_fsm.state}
+      data-goal-dossier-phase=${node.phase}
       data-goal-dossier-timeline-count=${node.timeline_events.length}
     >
-      <div class="wk-dossier-row">
-        <span class="wk-dossier-k">FSM</span>
-        <span class="wk-dossier-chip mono">state ${node.goal_fsm.state}</span>
-        <span class="wk-dossier-chip mono">source ${node.goal_fsm.source}</span>
-        <span class="wk-dossier-chip mono">activity ${node.goal_fsm.activity_observation}</span>
-      </div>
-
-      ${node.goal_fsm.next_actions.length > 0 ? html`
-        <div class="wk-dossier-row">
-          <span class="wk-dossier-k">next actions</span>
-          ${node.goal_fsm.next_actions.map((action) => html`
-            <span key=${action} class="wk-dossier-chip mono">${action}</span>
-          `)}
-        </div>
+      ${reviewNote ? html`
+        <${GoalDetailSection} title="진행 판정 메모">
+          <p class="wk-dossier-text" data-goal-detail-review-note>${reviewNote}</p>
+        <//>
       ` : null}
 
-      ${completion ? html`
-        <div class="wk-dossier-row">
-          <span class="wk-dossier-k">completion</span>
-          <span class="wk-dossier-chip mono">state ${completion.state}</span>
-          <span class="wk-dossier-chip mono">tasks ${completion.task_done}/${completion.task_total}</span>
-          <span class="wk-dossier-chip mono">pct ${completion.pct == null ? 'unmeasured' : `${completion.pct}%`}</span>
-          ${completion.ready_to_request_completion ? html`
-            <span class="wk-dossier-chip ok mono">ready to request</span>
-          ` : null}
-        </div>
-      ` : null}
-
-      <div class="wk-dossier-row">
-        <span class="wk-dossier-k">activity</span>
-        ${node.last_activity_at ? html`
-          <span class="wk-dossier-chip mono">last ${node.last_activity_at}</span>
-        ` : html`
-          <span class="wk-dossier-chip mono">last unavailable</span>
-        `}
-        <span class="wk-dossier-chip mono">events ${node.timeline_events.length}</span>
-        ${node.timeline_events.length > 0 ? html`
-          <button
-            type="button"
-            class="wk-dossier-chip mono"
-            style="cursor: pointer"
-            onClick=${() => setTimelineOpen(open => !open)}
-            aria-expanded=${timelineOpen}
-            data-goal-dossier-timeline-toggle=${node.id}
-          >
-            ${timelineOpen ? 'hide timeline' : 'show timeline'}
-          </button>
+      <${GoalDetailSection}>
+        ${keeperLinks.length > 0 ? html`
+          <${GoalDetailRow} label="키퍼" testHook="keepers">
+            ${keeperLinks.map((name) => html`
+              <button
+                key=${name}
+                type="button"
+                class="wk-dossier-link mono"
+                data-goal-detail-keeper=${name}
+                onClick=${() => openKeeperWorkspace(name)}
+                title=${`${name} 작업 공간 열기`}
+              >${name}</button>
+            `)}
+          <//>
         ` : null}
-        <span class="wk-dossier-chip mono">stagnation ${node.stagnation_seconds == null ? 'unavailable' : `${node.stagnation_seconds}s`}</span>
-        ${node.owner ? html`<span class="wk-dossier-chip mono">owner ${node.owner}</span>` : null}
-        ${node.latest_keeper_ref ? html`<span class="wk-dossier-chip mono">keeper ${node.latest_keeper_ref}</span>` : null}
-        ${node.latest_turn_ref != null ? html`<span class="wk-dossier-chip mono">turn ${node.latest_turn_ref}</span>` : null}
-        ${node.linked_keeper_names.map((name) => html`
-          <span key=${name} class="wk-dossier-chip mono">linked ${name}</span>
-        `)}
         ${node.pending_approval_count > 0 ? html`
-          <span class="wk-dossier-chip warn mono">approvals ${node.pending_approval_count}</span>
+          <${GoalDetailRow} label="승인 대기" tone="warn" testHook="approvals">
+            <button
+              type="button"
+              class="wk-dossier-link"
+              data-goal-detail-approvals
+              onClick=${() => navigate('approvals')}
+              title="승인 화면 열기"
+            >${node.pending_approval_count}건 승인 대기 →</button>
+          <//>
         ` : null}
-      </div>
-
-      ${timelineOpen
-        ? node.timeline_events.map(event => html`
-          <div
-            key=${`${event.kind}:${event.lane}:${event.ts}`}
-            class="wk-dossier-row"
-            data-goal-dossier-timeline-event
-          >
-            <span class="wk-dossier-k">${event.kind}</span>
-            <span class="wk-dossier-chip mono">${event.ts}</span>
-            <span class=${`wk-dossier-chip ${event.severity} mono`}>${event.summary}</span>
-          </div>
-        `)
-        : null}
+        <${GoalDetailRow} label="활동" testHook="activity">
+          <span>
+            <${GoalDossierInstant} label="만든 날" at=${node.created_at} testHook="created" />
+            ${' · '}
+            <${GoalDossierInstant} label="마지막 변경" at=${node.updated_at} testHook="updated" />
+            ${' · '}
+            <${GoalDossierInstant} label="마지막 활동" at=${node.last_activity_at} testHook="last-activity" />
+          </span>
+          ${node.timeline_events.length > 0 ? html`
+            <button
+              type="button"
+              class="wk-dossier-link"
+              onClick=${() => setTimelineOpen(open => !open)}
+              aria-expanded=${timelineOpen}
+              data-goal-dossier-timeline-toggle=${node.id}
+            >
+              ${timelineOpen ? '기록 접기' : `기록 ${node.timeline_events.length}건 보기`}
+            </button>
+          ` : null}
+        <//>
+        ${timelineOpen
+          ? node.timeline_events.map(event => html`
+            <div
+              key=${`${event.kind}:${event.lane}:${event.ts}`}
+              class="wk-dossier-row"
+              data-goal-dossier-timeline-event
+            >
+              <span class="wk-dossier-k mono">${event.kind}</span>
+              <span class="wk-dossier-v">
+                <span class="mono">${event.ts}</span>
+                <span class=${`wk-dossier-sub ${event.severity}`}>${event.summary}</span>
+              </span>
+            </div>
+          `)
+          : null}
+      <//>
     </div>
   `
 }
@@ -552,6 +635,13 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
         <span class="wk-task-id mono">${task.id}</span>
         <span class="wk-task-title">
           ${task.title}
+          ${task.predecessor_task_id ? html`
+            <span
+              class="wk-rerun"
+              data-testid="job-rerun"
+              title=${`RFC-0323 재실행 · predecessor_task_id = ${task.predecessor_task_id}`}
+            >↻ 재실행 ← ${task.predecessor_task_id}</span>
+          ` : null}
           ${blocker ? html`<span class="wk-task-block" data-testid="job-blocker">⚠ ${blocker}</span>` : null}
           ${hasDetail ? html`<span class="wk-task-chev">${open ? '\u25BE' : '\u25B8'}</span>` : null}
         </span>
@@ -643,13 +733,20 @@ function GoalCard({
         <span class="wk-prog-lbl mono">
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
-        ${goal.phase ? html`<span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>` : null}
-        ${goal.metric ? html`<span class="wk-metric mono" title="목표 지표">${goal.metric}</span>` : null}
+        <span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>
+        ${goal.metric ? html`
+          <span
+            class="wk-metric mono"
+            data-goal-metric
+            title=${`목표 지표${goal.target_value ? ` · 목표치 ${goal.target_value}` : ''}`}
+          >
+            ${goal.metric}${goal.target_value ? ` · ${goal.target_value}` : ''}
+          </span>
+        ` : null}
       </div>
       ${open ? html`
-        <div class="wk-jobs">
-          ${goal.last_review_note ? html`<div class="wk-note">${goal.last_review_note}</div>` : null}
-          <${GoalProjectionDossier} node=${goalNode} />
+        <div class="wk-tasks">
+          <${GoalProjectionDossier} node=${goalNode} reviewNote=${goal.last_review_note} />
           ${goalTasks.map(t => html`<${TaskRow} key=${t.id} task=${t} onClaim=${onClaim} />`)}
         </div>
       ` : null}
@@ -783,13 +880,13 @@ interface WorkAsideProps {
 }
 
 // ── View mode persistence ───────────────────────────────────────────────────
-type WorkView = 'list' | 'kanban'
+type WorkView = 'list' | 'kanban' | 'verify'
 const WK_VIEW_KEY = 'v2.workView'
 
 function readStoredWorkView(): WorkView {
   try {
     const v = localStorage.getItem(WK_VIEW_KEY)
-    if (v === 'kanban') return 'kanban'
+    if (v === 'kanban' || v === 'verify') return v
   } catch (_) { /* storage unavailable */ }
   return 'list'
 }
@@ -876,6 +973,13 @@ function KanbanCard({
         <span class=${`wk-kcard-prio prio-${normalizedPrio}`}>P${p}</span>
       </div>
       <div class="wk-kcard-title">${task.title}</div>
+      ${task.predecessor_task_id ? html`
+        <div
+          class="wk-kcard-rerun"
+          data-testid="kanban-rerun"
+          title=${`predecessor_task_id = ${task.predecessor_task_id}`}
+        >↻ 재실행 ← ${task.predecessor_task_id}</div>
+      ` : null}
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
       ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
       ${task._goalId
@@ -890,6 +994,8 @@ function KanbanCard({
         `
         : null}
       <div class="wk-kcard-foot">
+        ${task.handoff_context?.summary ? html`<span class="wk-kcard-ho" data-testid="kanban-handoff" title="핸드오프 이력">⇄</span>` : null}
+        <span class="wk-spacer"></span>
         ${task.assignee
           ? html`
             <button
@@ -1493,7 +1599,7 @@ function WorkSurfaceV2() {
   }, [])
 
   return html`
-    <main class=${`ov ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
+    <main class=${`ov ov-flush ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
         <header class="ov-head wk-head">
           <div>
@@ -1519,6 +1625,14 @@ function WorkSurfaceV2() {
                 data-testid="work-view-kanban"
                 onClick=${() => switchView('kanban')}
               >칸반</button>
+              <button
+                type="button"
+                class=${view === 'verify' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'verify'}
+                data-testid="work-view-verify"
+                onClick=${() => switchView('verify')}
+              >검증</button>
             </div>
             <button
               type="button"
@@ -1586,10 +1700,12 @@ function WorkSurfaceV2() {
             </section>
           ` : null}
 
-          ${view === 'list'
+          ${view === 'verify'
+            ? html`<${VerifyQueue} />`
+            : view === 'list'
             ? /* flat priority-sorted list */
               displayGoals.length > 0 ? html`
-                <div class="wk-list" data-testid="work-goal-list">
+                <div class="wk-list wk-tree" data-testid="work-goal-list">
                   ${[...displayGoals]
                     .sort((a, b) => (a.priority ?? GOAL_PRIORITY_MAX) - (b.priority ?? GOAL_PRIORITY_MAX) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
                     .map(g => html`
@@ -1643,7 +1759,6 @@ export function Work() {
         ${current === 'work' ? html`<${WorkSurfaceV2} />`
           : current === 'board' ? html`<${BoardSurface} />`
           : current === 'sub-boards' ? html`<${SubBoardSurface} />`
-          : current === 'moderation' ? html`<${BoardModerationSurface} />`
           : current === 'planning' ? html`<${PlanningPanel} />`
           : current === 'repositories' ? html`
             <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>

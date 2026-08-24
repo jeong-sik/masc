@@ -41,7 +41,7 @@ function SchCard({ s, onOpen, onAct, onOpenKeeper }) {
           <span className="sch-kind">{pl.glyph} {pl.lbl}</span>
           <span className="sch-id mono">{s.schedule_id}</span>
           <SchCadenceTag cad={window.schedCadence(s)} />
-
+          
           <span className="sch-rec mono" title="recurrence">{'↻'} {window.schedRecurrenceText(s.recurrence)}</span>
           <span className="sch-head-sp"></span>
           <SchStatusPill status={s.status} />
@@ -129,7 +129,7 @@ function SchPollingStrip({ list, onOpen }) {
                   <div className="sch-poll-foot">
                     {k && <SigilBadge k={k} size={18} />}
                     <span className="mono sch-poll-by">{s.scheduled_by.id}</span>
-
+                    
                     <span className="sch-poll-next mono" title="다음 tick 예상 시각">다음 ~{hh}:{mm}</span>
                   </div>
                 </button>
@@ -182,7 +182,7 @@ function SchAgenda({ list, filter, onOpen }) {
                           <span className="sch-ev-meta">
                             {k && <SigilBadge k={k} size={16} />}
                             <span className="mono sch-ev-by">{s.scheduled_by.id}</span>
-
+                            
                             {pending && <span className="sch-ev-need mono">⊙ 승인 필요</span>}
                           </span>
                         </span>
@@ -216,14 +216,14 @@ function SchDetail({ s, onClose, onAct, onOpenKeeper }) {
           <span className="tid">{s.schedule_id}</span>
           <span className="sch-hd-sp" style={{ marginLeft: 'auto' }}></span>
           <SchStatusPill status={s.status} />
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="turn-sec">
             <h4>{pl.glyph} {pl.lbl}</h4>
             <p className="sch-d-summary">{s.summary}</p>
             <div className="sch-badges">
-
+              
               <span className="sch-rec mono">{'↻'} {window.schedRecurrenceText(s.recurrence)}</span>
               <span className="sch-src mono">{s.source}</span>
             </div>
@@ -376,7 +376,7 @@ function SchKeeperBg({ onOpenKeeper }) {
           <span className="sch-bg-meta">
             {k && <SigilBadge k={k} size={16} />}
             <span className="mono sch-bg-by">{b.keeper}</span>
-
+            
             {b.kind === 'poll' ? <span className="sch-bg-since mono">since {b.since}</span> : <span className="sch-bg-since mono">{b.eta}</span>}
           </span>
         </span>
@@ -450,8 +450,8 @@ function ScheduleSurface({ statusMap, onSchedule, onOpenKeeper, onNav }) {
 
         <div className="sch-viewbar">
           <div className="sch-viewseg">
-            <button className={`sch-viewbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => setView('calendar')}>{'▦'} 캘린더</button>
-            <button className={`sch-viewbtn ${view === 'list' ? 'on' : ''}`} onClick={() => setView('list')}>{'≡'} 목록</button>
+            <button className={`sch-viewbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => setView('calendar')}>{'\u25A6'} 캘린더</button>
+            <button className={`sch-viewbtn ${view === 'list' ? 'on' : ''}`} onClick={() => setView('list')}>{'\u2261'} 목록</button>
           </div>
           <SchCadenceSummary list={list} filter={cadFilter} onFilter={setCadFilter} />
         </div>
@@ -461,7 +461,7 @@ function ScheduleSurface({ statusMap, onSchedule, onOpenKeeper, onNav }) {
             <span className="sch-banner-ico">{banner.action === 'approve' ? '✓' : banner.action === 'reject' ? '✕' : '◌'}</span>
             <span className="sch-banner-txt"><b className="mono">{banner.id}</b> {banner.lbl}{banner.action === 'approve' ? ' · grant 발급 — due 시각에 runner가 실행' : ''}</span>
             {banner.toTab && <button className="sch-banner-go" onClick={() => { setView('list'); setTab(banner.toTab); setBanner(null); }}>{banner.tabLbl} 탭 보기 →</button>}
-            <button className="sch-banner-x" onClick={() => setBanner(null)} title="닫기">{'✕'}</button>
+            <button className="sch-banner-x" onClick={() => setBanner(null)} title="닫기">{'\u2715'}</button>
           </div>
         )}
 
@@ -499,7 +499,7 @@ function ScheduleSurface({ statusMap, onSchedule, onOpenKeeper, onNav }) {
                   <span className="sch-sig-at mono">{sig.at}</span>
                   <span className={`sch-sig-kind ${d.cls}`}>{d.lbl}</span>
                   <button className="sch-sig-id mono" onClick={() => { const s = list.find(x => x.schedule_id === sig.schedule_id); if (s) setDetail(s); }}>{sig.schedule_id}</button>
-
+                  
                 </div>
               );
             })}

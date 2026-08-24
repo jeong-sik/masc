@@ -131,7 +131,7 @@ let clear_agent_current_task_cache config ~task_id =
            if path_exists config path
            then
              with_file_lock config path (fun () ->
-               match read_agent_with_repair config path with
+               match read_agent config path with
                | Ok agent when agent.current_task = Some task_id ->
                  let status =
                    match agent.status with
@@ -161,15 +161,13 @@ let clear_agent_current_task_cache config ~task_id =
       agent_files)
 ;;
 
-(* #13460: cache desync invalidation counter. Workspace_broadcast emits this when
-   it replaces an active-claim/release message for a terminal backlog task with
-   a cache_invalidated broadcast.  Clear workspace-owned current_task caches so the
-   same stale claim does not re-emit every taskmaster cycle.  Keep labels
-   fleet-bounded; the task id stays in the replacement message/event, not the
-   Otel_metric_store series key. *)
-let record_cache_desync_cleared config ~module_name:_ ~task_id ~status =
-  if not (String.equal status "backlog_unavailable")
-  then clear_agent_current_task_cache config ~task_id
+(* #13460: fires only after a broadcast replaced a message about a task the
+   canonical backlog reports as terminal or absent. A backlog the reader could
+   not open never reaches here — it fails the broadcast instead — so every
+   call means the task really is over and the workspace-owned current_task
+   caches for it can go. *)
+let record_cache_desync_cleared config ~module_name:_ ~task_id ~status:_ =
+  clear_agent_current_task_cache config ~task_id
 ;;
 
 let () = Atomic.set Workspace_hooks.cache_desync_cleared_fn record_cache_desync_cleared
@@ -220,7 +218,6 @@ let () =
                   ()))
          active_agents)
 ;;
-
 
 
 

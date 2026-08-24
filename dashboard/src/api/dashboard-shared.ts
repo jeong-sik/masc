@@ -62,10 +62,6 @@ export type DashboardSurfaceEnvelope = {
     latest_age_s?: number | null
     health?: string | null
   }
-  migration?: {
-    body_shape?: string
-    rule?: string
-  }
 }
 
 export type TelemetryCoverageGap = {
@@ -80,11 +76,11 @@ export type TelemetryCoverageGap = {
   keeper_name?: string | null
   trace_id?: string | null
   error?: string | null
-  // RFC-0154 PR-2: backend-classified typed tag. Absent on v1 rows; present
-  // on v2 rows. Values are the short tags from `System_error_class.to_short_tag`
-  // ("fd_exhaustion" / "disk_exhaustion" / "permission_denied" /
-  // "connection_refused" / "timeout" / "other"). Consumers should fall back to
-  // substring matching on `error` when this field is null (legacy / pre-PR-2).
+  // RFC-0154 PR-2: backend-classified typed tag. Values are the short tags
+  // from `System_error_class.to_short_tag` ("fd_exhaustion" /
+  // "disk_exhaustion" / "permission_denied" / "connection_refused" /
+  // "timeout" / "other"). Null means the row carries no classification --
+  // consumers read no hint rather than matching substrings in `error`.
   error_class?: string | null
 }
 
@@ -101,12 +97,6 @@ function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope 
         health: asNullableString(raw.cache.health),
       }
     : undefined
-  const migration = isRecord(raw.migration)
-    ? {
-        body_shape: asString(raw.migration.body_shape),
-        rule: asString(raw.migration.rule),
-      }
-    : undefined
   return {
     schema: asString(raw.schema),
     schema_version: asNumber(raw.schema_version),
@@ -114,7 +104,6 @@ function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope 
     source: asString(raw.source),
     generated_at_iso: asString(raw.generated_at_iso),
     cache,
-    migration,
   }
 }
 

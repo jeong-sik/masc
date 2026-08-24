@@ -24,7 +24,7 @@ let with_keepers_dir f =
     (fun () -> f dir)
 ;;
 
-let keeper_id = "masc-improver"
+let keeper_id = "omicron-improver"
 
 let append_raw ~keepers_dir line =
   let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -264,7 +264,7 @@ let test_committed_line_decodes_as_a_commit () =
         ~keeper_id
         ~expected_revision:None
         ~now:1_700_000_000.0
-        ~source:{ kind = Librarian; trace_id = "trace-commit"; generation = 1 }
+        ~source:{ kind = Librarian; trace_id = "trace-commit" }
         ~facts:[ fact ]
         ()
     with

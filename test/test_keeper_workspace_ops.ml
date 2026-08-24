@@ -98,7 +98,7 @@ let test_process_status_exited_nonzero () =
        |> fun opt -> Option.bind opt (function `Int i -> Some i | _ -> None))  | other ->
     Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 let test_process_status_exited_124 () =
-  let json = Keeper_alerting_path.process_status_to_json (Unix.WEXITED 124) in
+  let json = Keeper_alerting_path.process_status_to_json (Process_eio.timed_out_status) in
   match json with
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = exit"

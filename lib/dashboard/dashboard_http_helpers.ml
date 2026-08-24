@@ -17,13 +17,6 @@ let operator_snapshot_recent_completed_limit () =
   int_of_env_default "MASC_OPERATOR_SNAPSHOT_RECENT_COMPLETED_LIMIT"
     ~default:5 ~min_v:1 ~max_v:50
 
-let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
-  let delta = now_ts -. event_ts in
-  if Float.is_nan delta || Float.is_infinite delta then None
-  else
-    let bounded = max 0.0 (min delta (float_of_int max_int)) in
-    Some (int_of_float bounded)
-
 let safe_member = Safe_ops.safe_member
 
 let keeper_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
@@ -78,5 +71,5 @@ let count_where items predicate =
     identical forks. *)
 let normalize_text raw =
   raw |> String.trim |> String.split_on_char '\n'
-  |> List.filter_map String_util.trim_to_option
+  |> List.filter_map String_util.trim_nonempty
   |> String.concat " " |> String.trim

@@ -306,10 +306,9 @@ let test_external_attention_projects_to_prompt_event () =
    | WO.Board_post_created
    | WO.Board_comment_added
    | WO.Board_reaction_changed _
+   | WO.Board_vote_cast _
    | WO.Fusion_completed
    | WO.Schedule_due _
-   | WO.Goal_assigned
-   | WO.Goal_reconciliation_ready
    | WO.Completion_authority_rejected _
    | WO.Task_cancelled _ ->
      fail "connector attention must retain its typed counterpart projection")

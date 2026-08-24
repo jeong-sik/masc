@@ -72,43 +72,6 @@ let default_resolution ?getenv provider_name ~requested_model_id =
   | None -> unresolved_auto requested_model_id
 ;;
 
-let env_fragment value =
-  value
-  |> String.map (function
-    | 'a' .. 'z' as c -> Char.uppercase_ascii c
-    | 'A' .. 'Z' | '0' .. '9' as c -> c
-    | _ -> '_')
-;;
-
-let csv_items raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun value -> not (String.equal value ""))
-;;
-
-let default_auto_models_for_profile (profile : Provider_runtime_projection.provider_profile)
-  =
-  match profile.supported_models, profile.runtime_kind with
-  | _ :: _ as models, _ -> Some models
-  | [], (Provider_runtime_projection.Local | Provider_runtime_projection.Direct_api) ->
-    None
-;;
-
-let auto_models_for_runtime_prefix ?getenv provider_name =
-  match Provider_runtime_projection.provider_profile_for_runtime_prefix provider_name with
-  | None -> None
-  | Some profile ->
-    let defaults = default_auto_models_for_profile profile in
-    let env_var = "MASC_" ^ env_fragment profile.id ^ "_AUTO_MODELS" in
-    (match env_value_opt ?getenv env_var with
-     | Some raw ->
-       (match csv_items raw with
-        | [] -> defaults
-        | items -> Some items)
-     | None -> defaults)
-;;
-
 (** Resolve "auto" and aliases to concrete model IDs.
     Cloud APIs generally require concrete model names, and local
     providers (llama, ollama) also cannot accept the literal "auto" model ID.
@@ -145,10 +108,6 @@ let resolve_auto_model
     (match selector with
      | Auto -> unresolved_auto model_id
      | Concrete _ -> explicit_resolution model_id (String.trim model_id))
-;;
-
-let resolve_auto_model_id provider_name model_id =
-  (resolve_auto_model provider_name (model_selector_of_string model_id)).resolved_model_id
 ;;
 
 let parse_custom_model model_id =

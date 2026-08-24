@@ -151,12 +151,87 @@ let evidence_access_failure_to_string ~request_id = function
   | Request_scope_mismatch ->
     "verification request does not match the awaiting task and producer"
 
+(* Bounded snapshot cap for producer-owned evidence artifacts. Raised from
+   20_000 to 200_000 so contract artifacts in the observed 40-128KB range are
+   persisted in full (truncated=false) instead of being marked unusable by the
+   completion authority. The cap stays bounded to bound verifier memory and
+   backlog storage. *)
+let verification_evidence_max_bytes = 200_000
+
 let submitted_evidence_access_to_yojson = function
   | Evidence_available { request; items } ->
     `Assoc
       [ "access", `String "available"
       ; "request", request_header_to_yojson request
       ; "items", `List (List.map submitted_evidence_item_to_yojson items)
+      ]
+  | Evidence_unavailable { request_id; reason } ->
+    `Assoc
+      [ "access", `String "unavailable"
+      ; "request_id", `String request_id
+      ; "reason", `String (evidence_access_failure_to_string ~request_id reason)
+      ]
+;;
+
+(* Judge-transport projection. The serializer above persists the truncated
+   prefix so the audit record keeps what was readable at submission time. The
+   review request must not carry it: the instructions already order the judge
+   to treat [truncated=true] as unavailable evidence, so transmitting the
+   prefix ships bytes the judgement cannot use — and one 22 MB artifact
+   (200 KB prefix, listed under two references) inflated the review turn past
+   every verifier_exact slot's input budget this way (#29615). The prefix
+   stays in the store; the judge receives the size, the fact, and how to read
+   the real file. *)
+let submitted_evidence_item_transport_to_yojson = function
+  | Evidence_note note ->
+    `Assoc [ "kind", `String "note"; "content", `String note ]
+  | Evidence_artifact { reference; content; bytes; truncated } ->
+    if truncated
+    then
+      `Assoc
+        [ "kind", `String "artifact"
+        ; "reference", `String reference
+        ; "bytes", `Int bytes
+        ; "truncated", `Bool true
+        ; "content_omitted", `Bool true
+        ; ( "content_note"
+          , `String
+              (Printf.sprintf
+                 "file is %d bytes; only a %d-byte prefix fits the evidence \
+                  snapshot and that prefix is withheld from this request; \
+                  treat the item as unavailable and read ranges of the actual \
+                  file with the listed verification tools"
+                 bytes
+                 verification_evidence_max_bytes) )
+        ]
+    else
+      `Assoc
+        [ "kind", `String "artifact"
+        ; "reference", `String reference
+        ; "content", `String content
+        ; "bytes", `Int bytes
+        ; "truncated", `Bool false
+        ]
+  | Evidence_invalid_reference ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reason", `String invalid_reference_code
+      ]
+  | Evidence_artifact_unreadable { reference; reason } ->
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String reference
+      ; "reason", `String (evidence_read_failure_code reason)
+      ]
+;;
+
+let submitted_evidence_access_transport_to_yojson = function
+  | Evidence_available { request; items } ->
+    `Assoc
+      [ "access", `String "available"
+      ; "request", request_header_to_yojson request
+      ; "items"
+      , `List (List.map submitted_evidence_item_transport_to_yojson items)
       ]
   | Evidence_unavailable { request_id; reason } ->
     `Assoc
@@ -197,7 +272,6 @@ let submitted_evidence_access_metadata_to_yojson = function
       ; "task_id", `String request.task_id
       ; "worker", `String request.worker
       ; "created_at", `Float request.created_at
-      ; "item_count", `Int (List.length items)
       ; ( "items"
         , `List (List.map submitted_evidence_item_metadata_to_yojson items) )
       ]
@@ -425,8 +499,6 @@ let load_request_for_evidence base_path req_id =
     | exn ->
       Error (Request_load_error (Printexc.to_string exn))
 
-let verification_evidence_max_bytes = 20_000
-
 type utf8_scan =
   | Utf8_valid
   | Utf8_incomplete_at of int
@@ -552,6 +624,43 @@ let valid_producer_relative_path path =
            || String.equal segment "."
            || String.equal segment "..")))
 
+(* Resolve a producer-relative artifact path against the producer's repository
+   checkouts when the direct [ownership_root / relative_path] read misses.
+
+   A producer may reference a file checkout-relative (e.g. [lib/foo.ml] rather
+   than [repos/masc/lib/foo.ml]). The direct concat then points at a path that
+   does not exist under the ownership root, so we fall back to enumerating the
+   [repos/*] checkouts and resolving the path inside each. We only accept the
+   resolution when exactly one checkout contains the file; zero matches is a
+   plain miss and multiple matches is ambiguous, both of which we refuse rather
+   than silently picking an arbitrary checkout. *)
+let resolve_checkout_relative_artifact ~ownership_root ~reference relative_path =
+  let repos_dir = Filename.concat ownership_root "repos" in
+  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then
+    None
+  else
+    let is_regular_file path =
+      try (Unix.stat path).Unix.st_kind = Unix.S_REG
+      with Unix.Unix_error _ | Sys_error _ -> false
+    in
+    let candidates =
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        let candidate =
+          Filename.concat (Filename.concat repos_dir name) relative_path
+        in
+        is_regular_file candidate)
+    in
+    match candidates with
+    | [ name ] ->
+      let target = Filename.concat (Filename.concat repos_dir name) relative_path in
+      (match read_regular_file_prefix ~ownership_root target with
+       | Ok (content, bytes, truncated) ->
+         Some (Evidence_artifact { reference; content; bytes; truncated })
+       | Error _ -> None)
+    | [] | _ :: _ :: _ -> None
+
 let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
   then Evidence_invalid_reference
@@ -565,10 +674,25 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     in
     let target = Filename.concat ownership_root relative_path in
     match read_regular_file_prefix ~ownership_root target with
-    | Error reason ->
-      Evidence_artifact_unreadable { reference; reason }
     | Ok (content, bytes, truncated) ->
       Evidence_artifact { reference; content; bytes; truncated }
+    | Error (Evidence_missing as reason) ->
+      (* Direct path missed: try checkout-relative resolution before giving up. *)
+      (match
+         resolve_checkout_relative_artifact
+           ~ownership_root
+           ~reference
+           relative_path
+       with
+       | Some artifact -> artifact
+       | None -> Evidence_artifact_unreadable { reference; reason })
+    | Error (Evidence_not_regular_file as reason)
+    | Error (Evidence_outside_worker_playground as reason)
+    | Error (Evidence_invalid_utf8 as reason)
+    | Error (Evidence_symbolic_link as reason)
+    | Error (Evidence_changed_during_read as reason)
+    | Error (Evidence_read_error _ as reason) ->
+      Evidence_artifact_unreadable { reference; reason }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
   match classify_evidence_reference reference with
@@ -625,6 +749,27 @@ let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
       items
     |> Result.map List.rev
   | _ -> Error "submitted evidence must be an array"
+;;
+
+(* Decoded through this module's own snapshot decoder for the same reason as
+   the identity lines above: the typed value is the one truth about which
+   items are truncated, so a shape change is a compile error here rather than
+   a silently empty warning at the submit site. *)
+let truncated_snapshot_items (json : Yojson.Safe.t) : (string * int) list =
+  match json with
+  | `List items ->
+    List.filter_map
+      (fun item ->
+         match submitted_evidence_item_of_yojson item with
+         | Ok (Evidence_artifact { reference; bytes; truncated = true; _ }) ->
+           Some (reference, bytes)
+         | Ok (Evidence_artifact { truncated = false; _ }) -> None
+         | Ok (Evidence_note _) -> None
+         | Ok Evidence_invalid_reference -> None
+         | Ok (Evidence_artifact_unreadable _) -> None
+         | Error _ -> None)
+      items
+  | _ -> []
 ;;
 
 let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id

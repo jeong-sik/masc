@@ -28,6 +28,7 @@ import type {
   KeeperRecoverResult,
   KeeperStatusDetail,
   SurfaceRef,
+  SurfaceRefKind,
   ChatBlock,
   ChatBroadcastRecipient,
   ChatShellLine,
@@ -684,13 +685,12 @@ const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_sta
 
 const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
   new Set<NonNullable<KeeperDiagnostic['quiet_reason']>>([
-    'quiet_hours', 'min_gap', 'no_recent_activity', 'disabled',
-    'startup', 'model_error', 'graphql_error', 'never_started', 'unknown',
+    'disabled', 'not_running', 'startup', 'never_started',
   ])
 
 const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
   new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
-    'direct_message', 'probe', 'recover',
+    'auto_restart', 'recover', 'probe', 'direct_message',
   ])
 
 const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =
@@ -787,6 +787,58 @@ function deliveryProvenanceFromRaw(raw: Record<string, unknown>): KeeperChatDeli
   return { status: 'absent', value: null }
 }
 
+function isSurfaceRefKind(value: string): value is SurfaceRefKind {
+  switch (value) {
+    case 'dashboard':
+    case 'discord':
+    case 'slack':
+    case 'webhook':
+    case 'agent':
+    case 'broadcast':
+    case 'gate':
+      return true
+    default:
+      return false
+  }
+}
+
+const SURFACE_REF_STRING_FIELDS = [
+  'session_id',
+  'guild_id',
+  'channel_id',
+  'parent_channel_id',
+  'thread_id',
+  'team_id',
+  'thread_ts',
+  'source',
+  'event_id',
+  'label',
+] as const
+
+/** Closed parse of the wire surface payload, mirroring
+ * lib/keeper/surface_ref.ml `of_json`: an unknown or missing `kind`
+ * yields no surface — the row keeps rendering with no origin badge,
+ * the same policy keeper_chat_store.load applies to an invalid
+ * persisted surface. Never a default kind. */
+function normalizeSurfaceRef(raw: unknown): SurfaceRef | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  if (!kind || !isSurfaceRefKind(kind)) return null
+  const surface: SurfaceRef = { kind }
+  for (const field of SURFACE_REF_STRING_FIELDS) {
+    const value = asString(raw[field])
+    if (value !== null) surface[field] = value
+  }
+  if (isRecord(raw.address)) {
+    const address: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw.address)) {
+      if (typeof value === 'string') address[key] = value
+    }
+    if (Object.keys(address).length > 0) surface.address = address
+  }
+  return surface
+}
+
 function normalizeHistoryEntry(
   raw: unknown,
   keeperName?: string,
@@ -810,7 +862,7 @@ function normalizeHistoryEntry(
   if (!text && !attachments?.length && !audio && !hasRenderableBlocks) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
-  const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const surface = normalizeSurfaceRef(raw.surface)
   const conversationId = asString(raw.conversation_id) ?? null
   const externalMessageId = asString(raw.external_message_id) ?? null
   const speakerId = asString(raw.speaker_id) ?? null
@@ -1412,7 +1464,9 @@ interface RestChatHistoryMessage {
   tool_call_id?: string
   tool_call_name?: string
   source?: string
-  surface?: SurfaceRef
+  // Raw wire payload — decoded once by normalizeSurfaceRef at each
+  // consuming entry builder; never asserted into SurfaceRef.
+  surface?: unknown
   conversation_id?: string
   external_message_id?: string
   speaker_id?: string
@@ -1511,7 +1565,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
       reason: 'tool history rows carry arguments, not live stream lifecycle',
     }),
     details: null,
-    surface: message.surface ?? null,
+    surface: normalizeSurfaceRef(message.surface),
     conversationId: asString(message.conversation_id) ?? null,
     externalMessageId: asString(message.external_message_id) ?? null,
     speakerId: asString(message.speaker_id) ?? null,

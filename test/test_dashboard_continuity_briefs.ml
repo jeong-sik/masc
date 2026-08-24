@@ -8,18 +8,16 @@ let keeper ?(status = "offline") ?(last_autonomous_action_at = "")
     ?(autonomous_turn_count = 0) ?(paused = false) () =
   `Assoc
     [
-      ("name", `String "executor");
-      ("agent_name", `String "executor");
+      ("name", `String "omega");
+      ("agent_name", `String "omega");
       ("keeper_id", `String "k-executor");
       ("status", `String status);
       ("paused", `Bool paused);
       ("keepalive_running", `Bool keepalive_running);
-      ("generation", `Int 0);
       ("turn_count", `Int turn_count);
       ("autonomous_turn_count", `Int autonomous_turn_count);
       ("autonomous_action_count", `Int 0);
       ("noop_turn_count", `Int 0);
-      ("active_goal_ids", `List []);
       ("last_autonomous_action_at", `String last_autonomous_action_at);
       ("updated_at", `String updated_at);
       ("tool_audit_at", `String "");

@@ -118,3 +118,25 @@ let max_process_capture_tail_bytes = 256 * 1024
 
 (** BUG-016: Truncate large tool responses to prevent MCP transport overload.
     Default max: 64KB. Appends truncation metadata when trimmed. *)
+
+(* One spelling of "this string is going into a path component". It lived in
+   [Workspace_utils_ops], which sits above [masc_auth], so the auth layer built
+   its credential paths by concatenating [agent_name] raw while the workspace
+   layer sanitised the same value. Two answers for one question, and the
+   unsanitised one was the layer holding tokens. *)
+let safe_filename name =
+  let buf = Buffer.create (String.length name * 3) in
+  String.iter
+    (fun c ->
+      let c_lower = Char.lowercase_ascii c in
+      let valid =
+        (c_lower >= 'a' && c_lower <= 'z')
+        || (c_lower >= '0' && c_lower <= '9')
+        || c_lower = '.'
+        || c_lower = '_'
+        || c_lower = '-'
+      in
+      if valid then Buffer.add_char buf c_lower
+      else Printf.bprintf buf "_%02x" (Char.code c))
+    name;
+  Buffer.contents buf

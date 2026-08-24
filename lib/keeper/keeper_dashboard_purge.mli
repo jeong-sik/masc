@@ -45,6 +45,17 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+  | Keeper_purge_blocked of
+      { keeper_name : string
+      ; operation_id : Keeper_shutdown_types.Operation_id.t
+      ; detail : string
+      }
+      (** A prior purge holds the admission fence in [Blocked]. It is not in
+          flight and no retry advances it: the fence stops the Keeper's meta
+          being materialized, and {!resolve} needs that meta. Reporting it as
+          an accepted operation told the dashboard a purge was running that
+          had already stopped for good. The exit is an operator supersession,
+          which releases the fence and lets the purge be reissued. *)
       (** The lane is still taking turns. Purge deletes the Keeper and every
           store it owns, so a Keeper that can still execute is refused here
           rather than raced: stop or pause it first. The dashboard hides the

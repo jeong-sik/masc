@@ -3,7 +3,7 @@
 
    Lives beside [Goal_store] rather than inside it: the goal record is
    constructed by literal in external callers (goal_store.mli), so the
-   criterion/completion verification state gets its own store, the same way
+   completion verification state gets its own store, the same way
    [Workspace_goal_index] keeps goal-task links out of goals.json.
 
    RFC-0387 stage 1 shipped this as a RECORD-ONLY evidence store; stage 2
@@ -36,12 +36,6 @@ type verdict = {
   recorded_at : string;
 }
 
-type criterion_state =
-  | Criterion_unchecked
-  | Criterion_pending of { requested_at : string }
-  | Criterion_viable of verdict
-  | Criterion_unreachable of verdict
-
 type completion_state =
   | Completion_idle
   | Proof_pending of { requested_at : string }
@@ -50,7 +44,6 @@ type completion_state =
 
 type record = {
   goal_id : string;
-  criterion : criterion_state;
   completion : completion_state;
   updated_at : string;
 }
@@ -63,7 +56,6 @@ type state = {
 
 let default_record ~goal_id =
   { goal_id
-  ; criterion = Criterion_unchecked
   ; completion = Completion_idle
   ; updated_at = Masc_domain.now_iso ()
   }
@@ -186,36 +178,6 @@ let verdict_of_yojson = function
   | json ->
       Error ("goal_verification.verdict_of_yojson: " ^ Yojson.Safe.to_string json)
 
-let criterion_state_to_yojson = function
-  | Criterion_unchecked -> `Assoc [ "state", `String "unchecked" ]
-  | Criterion_pending { requested_at } ->
-      `Assoc
-        [ "state", `String "pending"; "requested_at", `String requested_at ]
-  | Criterion_viable verdict ->
-      `Assoc [ "state", `String "viable"; "verdict", verdict_to_yojson verdict ]
-  | Criterion_unreachable verdict ->
-      `Assoc
-        [ "state", `String "unreachable"; "verdict", verdict_to_yojson verdict ]
-
-let criterion_state_of_yojson json =
-  match Json_util.assoc_member_opt "state" json with
-  | Some (`String "unchecked") -> Ok Criterion_unchecked
-  | Some (`String "pending") -> (
-      match Json_util.assoc_member_opt "requested_at" json with
-      | Some (`String requested_at) -> Ok (Criterion_pending { requested_at })
-      | _ -> Error "goal_verification: criterion pending has no requested_at")
-  | Some (`String "viable") -> (
-      match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
-      | Ok verdict -> Ok (Criterion_viable verdict)
-      | Error _ as error -> error)
-  | Some (`String "unreachable") -> (
-      match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
-      | Ok verdict -> Ok (Criterion_unreachable verdict)
-      | Error _ as error -> error)
-  | Some (`String other) ->
-      Error ("goal_verification: unknown criterion state " ^ other)
-  | _ -> Error "goal_verification: criterion state missing"
-
 let completion_state_to_yojson = function
   | Completion_idle -> `Assoc [ "state", `String "idle" ]
   | Proof_pending { requested_at } ->
@@ -252,7 +214,6 @@ let completion_state_of_yojson json =
 let record_to_yojson (record : record) =
   `Assoc
     [ "goal_id", `String record.goal_id
-    ; "criterion", criterion_state_to_yojson record.criterion
     ; "completion", completion_state_to_yojson record.completion
     ; "updated_at", `String record.updated_at
     ]
@@ -264,7 +225,7 @@ let record_of_yojson = function
           (fun (field, _) ->
             (* strict wire-boundary decoder: this membership test *rejects*
                unknown record fields (constitution strict-parse). STR-OK *)
-            if List.mem field [ "goal_id"; "criterion"; "completion"; "updated_at" ]
+            if List.mem field [ "goal_id"; "completion"; "updated_at" ]
             then None
             else Some field)
           fields
@@ -282,14 +243,11 @@ let record_of_yojson = function
           with
           | Some (`String goal_id), Some (`String updated_at) -> (
               match
-                ( criterion_state_of_yojson (Yojson.Safe.Util.member "criterion" json)
-                , completion_state_of_yojson (Yojson.Safe.Util.member "completion" json)
-                )
+                completion_state_of_yojson
+                  (Yojson.Safe.Util.member "completion" json)
               with
-              | Ok criterion, Ok completion ->
-                  Ok { goal_id; criterion; completion; updated_at }
-              | Error _ as error, _ -> error
-              | _, (Error _ as error) -> error)
+              | Ok completion -> Ok { goal_id; completion; updated_at }
+              | Error _ as error -> error)
           | _ ->
               Error "goal_verification.record_of_yojson: goal_id and updated_at \
                      are required"))
@@ -484,59 +442,17 @@ let get_record config ~goal_id : (record option, string) result =
 let ledger_error_to_yojson detail =
   `Assoc [ "state", `String "ledger_error"; "detail", `String detail ]
 
-let record_criterion_verdict config ~goal_id (verdict : verdict) =
-  update_record config ~goal_id (fun current ->
-      let committable =
-        match current.criterion, verdict.outcome with
-        | Criterion_pending _, _ -> true
-        | Criterion_viable _, Proven -> true
-        | Criterion_unreachable _, Refuted _ -> true
-        | ( Criterion_viable _, Refuted _ )
-        | ( Criterion_unreachable _, Proven )
-        | ( Criterion_unchecked, _ ) -> false
-      in
-      if not committable
-      then
-        Error
-          (Printf.sprintf
-             "goal_verification: criterion verdict for %s has no matching pending \
-              criterion request"
-             goal_id)
-      else
-        let criterion =
-          match verdict.outcome with
-          | Proven -> Criterion_viable verdict
-          | Refuted _ -> Criterion_unreachable verdict
-        in
-        Ok { current with criterion })
+(* {1 Durable proof request (RFC-0387 §4.1)}
 
-(* {1 Stage-2 durable requests (RFC-0387 §3.2 / §4.1)}
-
-   These are the writers the verifier gate persists BEFORE any model call:
-   [mark_criterion_pending] runs at goal creation, [mark_proof_pending] runs
-   before the phase enters [Verifying]. Both are locked read-modify-writes via
-   [update_record], idempotent on an already-pending state (a repeated
-   [request_complete] re-arms rather than failing), and refuse to overwrite a
-   committed verdict — except that a new proof request supersedes a standing
-   [Proof_refuted], per this module's header: a refuted verdict stays on the
-   record until the next request supersedes it, and the refuted goal returns
-   to [Executing] where re-requesting completion is the way forward. *)
-
-let mark_criterion_pending config ~goal_id =
-  update_record config ~goal_id (fun current ->
-      match current.criterion with
-      | Criterion_pending _ -> Ok current
-      | Criterion_unchecked ->
-          Ok
-            { current with
-              criterion = Criterion_pending { requested_at = current.updated_at }
-            }
-      | Criterion_viable _ | Criterion_unreachable _ ->
-          Error
-            (Printf.sprintf
-               "goal_verification: criterion verdict for %s is already \
-                committed; refusing to overwrite it with a pending request"
-               goal_id))
+   [mark_proof_pending] runs before the phase enters [Verifying], so the
+   request survives a crash between the ledger write and the phase write. It
+   is a locked read-modify-write via [update_record], idempotent on an
+   already-pending state (a repeated [request_complete] re-arms rather than
+   failing), and refuses to overwrite a committed [Proof_proven] verdict — a
+   new request does supersede a standing [Proof_refuted], per this module's
+   header: a refuted verdict stays on the record until the next request
+   supersedes it, and the refuted goal returns to [Executing] where
+   re-requesting completion is the way forward. *)
 
 let mark_proof_pending config ~goal_id =
   update_record config ~goal_id (fun current ->
@@ -563,12 +479,17 @@ let mark_proof_pending config ~goal_id =
 
 (* A proof verdict is only committable against a pending proof — or against
    the same outcome already committed. The latter is the crash-between-writes
-   case the stage-2 gate needs: the ledger write landed but the phase write
-   did not, and the retried transition must be able to re-commit the
-   identical outcome rather than wedge the goal. A commit in the OPPOSITE
-   direction of a standing verdict is a stale verifier answer and stays an
-   [Error]. The [Proof_pending] rows this matches against are written by the
-   stage-2 gate ([mark_proof_pending], persist-before-model-call). *)
+   case: the ledger write landed but the phase write did not, and the retried
+   transition must be able to re-commit the identical outcome rather than
+   wedge the goal. A commit in the OPPOSITE direction of a standing verdict is
+   a stale verifier answer and stays an [Error]. The [Proof_pending] rows this
+   matches against are written by [mark_proof_pending]
+   (persist-before-model-call).
+
+   This is the only thing the commit refuses, and it is about the record's own
+   history: whether this verdict can follow the one already standing. It does
+   not read any other fact and decline on that basis. Whether the goal reached
+   its target is what the verdict says; nothing here decides that for it. *)
 let record_proof_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
       let committable =
@@ -588,19 +509,9 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
               request"
              goal_id)
       else
-        match current.criterion with
-        | Criterion_viable _ ->
         let completion =
           match verdict.outcome with
           | Proven -> Proof_proven verdict
           | Refuted _ -> Proof_refuted verdict
         in
-        Ok { current with completion }
-        | Criterion_unchecked
-        | Criterion_pending _
-        | Criterion_unreachable _ ->
-          Error
-          (Printf.sprintf
-             "goal_verification: proof verdict for %s requires a viable \
-              criterion"
-             goal_id))
+        Ok { current with completion })

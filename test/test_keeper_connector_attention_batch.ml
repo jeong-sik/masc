@@ -1,7 +1,7 @@
 (* test_keeper_connector_attention_batch.ml — RFC-0377: conversation-batched
    stimulus intake.
 
-   sangsu live data (2026-08-08..08-13) showed every delivered continuation
+   Live data (2026-08-08..08-13) showed every delivered continuation
    obligation (48/48) bound 1:1 to a single distinct inbound message: a turn
    admitted exactly one Connector_attention stimulus (RFC-0020 Rule 4), so a
    backlog of N pending messages in the same conversation took N turns to
@@ -184,10 +184,13 @@ let connector_attention_stimulus
 (* A Board_signal distractor that is never expected to be read: it exists
    only to prove the batch filter skips a non-[Connector_attention] entry
    sitting between two conversation matches instead of taking a naive
-   contiguous prefix. *)
+   contiguous prefix. It shares the connector entries' [Low] urgency so the
+   pending list keeps it between them: a [Normal] entry would sort ahead of
+   both and be admitted first, which is urgency order working as designed,
+   not the case this fixture isolates. *)
 let board_distractor_stimulus ~post_id ~arrived_at : Q.stimulus =
   { Q.post_id
-  ; urgency = Q.Normal
+  ; urgency = Q.Low
   ; arrived_at
   ; payload =
       Q.Board_signal
@@ -208,8 +211,8 @@ let connector_event_ids_of_queue queue =
        | Q.Connector_attention { event_id; _ } -> Some event_id
        | Q.Board_signal _ | Q.Board_attention _ | Q.Bootstrap
        | Q.Fusion_completed _ | Q.Schedule_due _ | Q.Hitl_resolved _
-       | Q.Manual_compaction_requested | Q.Goal_assigned _
-       | Q.Goal_reconciliation_ready _ | Q.Completion_authority_rejected _
+       | Q.Manual_compaction_requested
+       | Q.Completion_authority_rejected _
        | Q.Task_cancelled _ | Q.Workspace_message _ -> None)
   |> List.sort String.compare
 ;;
@@ -301,19 +304,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
      fail
        "a deterministic-rejection route with no deferred lane must drive \
         Batch_quarantine with the route's detail");
-  (match
-     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some
-          (failed_outcome
-             ~source_disposition:
-               (Keeper_unified_turn.Pause_after_transcript_corruption
-                  { detail = "corrupt transcript" })
-             ~route:transient_retry_route
-             ~deferred_runtime_lane:None
-             meta))
-   with
-   | Keeper_heartbeat_loop.Batch_no_action -> ()
-   | _ -> fail "transcript-corruption pause must drive Batch_no_action, not ack/defer/quarantine");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
@@ -578,7 +568,6 @@ let test_batch_completion_acks_every_member () =
                 Keeper_registry_event_queue.terminalize_pending_turn_completed_result
                   ~base_path
                   keeper_name
-                  ~current_owner_nonce:meta.Keeper_meta_contract.runtime.nonce
                   ~applied_at:1000.0
                   ~selection
               with
@@ -599,6 +588,54 @@ let test_batch_completion_acks_every_member () =
     in
     check int "turn completion acks all 3 batch members: none remain queued" 0
       (Q.length queued))
+;;
+
+(* The queue entry and the external-attention row are separate writes, and the
+   wake is edge-triggered: once a disposition terminalizes the entry, only a new
+   ambient message ever arms another stimulus for that row. So a disposition
+   that terminalizes must name a terminal event. Quarantine used to name none,
+   which left the row pending with nothing able to drain it. *)
+let test_every_terminalizing_disposition_settles_its_attention_rows () =
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" })
+   with
+   | Keeper_heartbeat_loop.Settle_quarantined { detail = "deterministic rejection" } ->
+     ()
+   | Keeper_heartbeat_loop.Settle_pending_in_queue ->
+     fail
+       "quarantine drops the queue entry, so leaving the row pending strands it \
+        forever"
+   | _ -> fail "quarantine must settle as Settle_quarantined carrying its detail");
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_ack_completed
+          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved })
+   with
+   | Keeper_heartbeat_loop.Settle_resolved -> ()
+   | _ -> fail "a completed addressed turn must settle as Settle_resolved");
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       (Keeper_heartbeat_loop.Batch_ack_completed
+          { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored })
+   with
+   | Keeper_heartbeat_loop.Settle_ignored -> ()
+   | _ -> fail "a completed unaddressed turn must settle as Settle_ignored");
+  (* These two keep the entry queued, so the turn that drains it settles the
+     row. Settling here would retire a row that is still live. *)
+  List.iter
+    (fun disposition ->
+       match
+         Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+           disposition
+       with
+       | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
+       | _ ->
+         fail
+           "a disposition that leaves the entry queued must not settle the row")
+    [ Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" }
+    ; Keeper_heartbeat_loop.Batch_no_action
+    ]
 ;;
 
 let () =
@@ -628,6 +665,10 @@ let () =
             "pins every branch of the pure disposition function"
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
+        ; test_case
+            "every terminalizing disposition settles its attention rows"
+            `Quick
+            test_every_terminalizing_disposition_settles_its_attention_rows
         ] )
     ]
 ;;

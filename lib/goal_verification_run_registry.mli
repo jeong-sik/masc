@@ -3,17 +3,12 @@
     independent reviewer did, including lookup tool calls, without becoming a
     second lifecycle store. *)
 
-type review_kind =
-  | Criterion
-  | Proof
+type review_kind = Proof
 
 type outcome =
   | Reviewed
   | Committed
-  | Deferred of
-      { retryable : bool
-      ; detail : string
-      }
+  | Deferred of { detail : string }
   | Raised of { detail : string }
 
 type run_status =
@@ -61,7 +56,6 @@ val mark_completed :
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option
-val review_kind_label : review_kind -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
 
@@ -72,3 +66,7 @@ type global_install_error = Already_installed
 val global : unit -> t
 val install_global : t -> (unit, global_install_error) result
 val max_completed_retained : int
+
+val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
+(** Deployment-time store cut for {!storage_filename}. See
+    {!Run_registry_core.Make.cut_replay_log}. *)

@@ -123,11 +123,9 @@ type t =
   { keeper_name : string
   ; agent_name : string
   ; trace_id : string
-  ; generation : int
   ; turn_count : int option
   ; agent_core_turn_count : int option
   ; current_task_id : string option
-  ; goal_ids : string list
   ; outcome : outcome_kind
   ; terminal_reason_code : string
   ; response_text_present : bool
@@ -181,7 +179,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
@@ -232,15 +229,6 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
 (** [needs_operator_broadcast disposition] returns true when the disposition
     indicates a silent dead-end that operators must be notified about. *)
 val needs_operator_broadcast : operator_disposition_kind -> bool
-
-(** Structured payload emitted for [keeper.operator_broadcast_required].
-    Exposed so tests can pin the diagnostic fields of a durable receipt whose
-    disposition requires operator attention. *)
-val operator_broadcast_payload
-  :  t
-  -> disposition:operator_disposition_kind
-  -> reason:operator_disposition_reason
-  -> Yojson.Safe.t
 
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option

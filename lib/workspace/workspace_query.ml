@@ -101,15 +101,31 @@ let list_leaf_json_names config dir =
          && not (String.contains name '/')
          && Filename.check_suffix name ".json")
 
+let agents_persistence_surface = "workspace_agents"
+
+(* A file under [agents/] that does not decode is dropped from the listing
+   and counted on [masc_persistence_read_drops_total]; nothing rewrites it.
+   An open() that failed under fd pressure is not a loss (RFC-0134) and is
+   logged without the data-integrity counter. *)
 let load_agents_from_dir config dir ~include_inactive =
   list_leaf_json_names config dir
   |> List.filter_map (fun name ->
          safe_yield ();
          let path = Filename.concat dir name in
-         match read_agent_with_repair config path with
+         match read_agent_result config path with
          | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
              Some agent
-         | Ok _ | Error _ -> None)
+         | Ok _ -> None
+         | Error (Agent_fd_pressure exn) ->
+             Log.Workspace.warn "agent listing skipped %s under fd pressure: %s"
+               path (Printexc.to_string exn);
+             None
+         | Error (Agent_read_error detail) ->
+             Safe_ops.report_persistence_read_drop_counted
+               ~surface:agents_persistence_surface
+               ~reason:Read_drop_reason.Entry_load_error
+               ~path ~detail;
+             None)
 
 let state_backed_agent_type = "workspace-state"
 

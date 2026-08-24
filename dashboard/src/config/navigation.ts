@@ -58,6 +58,7 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
+  | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -69,7 +70,6 @@ type SurfaceSectionId =
   | 'work'           // Goal/job breakdown surface
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
-  | 'moderation'     // Board moderation queue and actions
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // Contract follow-up (#7531): Mission detail verification table
@@ -111,13 +111,13 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
-// Order mirrors the 2026-07 keeper-v2 standalone export's rail: 개요 · Keepers ·
-// Monitor · 작업 · 승인 · 예약 · 보드 · Fusion · 로그 · IDE · 커넥터 · 설정.
-// That export restored Monitor to the primary rail and moved Logs before IDE,
-// so the earlier #21525 operator-restored-Logs deviation is now the design
-// itself. Settings stays pinned in the rail footer, so it renders outside the
-// main list even though it closes this set.
-const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
+// Order mirrors the keeper-v2 prototype rail (shell.jsx, #29046): 개요 ·
+// Keepers · 레지스트리 · Monitor · 작업 · Gate · 예약 · 보드 · Fusion · 로그 ·
+// IDE · 커넥터 · 명령 · Lab · 설정. The prototype's rail is the design SSOT the
+// parity probes measure; the older 2026-07 standalone export predates its
+// 명령/Lab group. Settings stays pinned in the rail footer, so it renders
+// outside the main list even though it closes this set.
+export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
   'registry',
@@ -130,6 +130,8 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'logs',
   'code',
   'connectors',
+  'command',
+  'lab',
   'settings',
 ]
 
@@ -355,6 +357,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'observatory' },
     },
     {
+      id: 'lanes',
+      label: 'Lane · Queue',
+      description: 'Keeper 실행 타임라인과 대기 큐.',
+      params: { section: 'lanes' },
+    },
+    {
       id: 'transport-health',
       label: 'Transport Health',
       description: 'Transport diagnostics.',
@@ -414,13 +422,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Sub-Boards',
       description: 'Named spaces within the board with distinct access policies.',
       params: { section: 'sub-boards' },
-      hidden: true,
-    },
-    {
-      id: 'moderation',
-      label: 'Moderation',
-      description: 'Flagged board posts and moderation actions.',
-      params: { section: 'moderation' },
       hidden: true,
     },
     {

@@ -226,7 +226,6 @@ export {
   DEFAULT_MCP_TIMEOUT_MS,
   NAMESPACE_TRUTH_GET_TIMEOUT_MS,
 } from '../config/constants'
-const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 export class ApiRequestError extends Error {
   method: string
@@ -403,7 +402,6 @@ export async function fetchJsonWithTimeout(
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
   '/api/v1/dashboard/project-snapshot',
-  '/api/v1/dashboard/namespace-truth',
   '/api/v1/dashboard/execution',
   '/api/v1/dashboard/planning',
   '/api/v1/dashboard/briefing',
@@ -578,8 +576,13 @@ async function parseJsonResponse<T>(
   }
 }
 
+// The server answers a warm-up read with `{"status":"initializing"}` on
+// /api/v1/dashboard/* paths and `{"error":"not initialized"}` elsewhere
+// (lib/server/server_auth.ml not_initialized_response). Both mean the same
+// thing: no state yet, try again.
 function isNotInitializedEnvelope(raw: unknown): boolean {
   if (!isRecord(raw)) return false
+  if (typeof raw.status === 'string' && raw.status === 'initializing') return true
   return typeof raw.error === 'string' && raw.error.trim().toLowerCase() === 'not initialized'
 }
 
@@ -604,7 +607,6 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         runtime_resolution: null,
       }
     case '/api/v1/dashboard/project-snapshot':
-    case '/api/v1/dashboard/namespace-truth':
       return {
         status: 'initializing',
         generated_at: generatedAt,
@@ -765,58 +767,8 @@ export async function getWithResponse<T>(
   return { data, headers: res.headers }
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function parseStatusFromMessage(message: string): number | null {
-  const match = message.match(/\b(\d{3})\b/)
-  if (!match) return null
-  const statusToken = match[1]
-  if (!statusToken) return null
-  const status = Number.parseInt(statusToken, 10)
-  return Number.isFinite(status) ? status : null
-}
-
-function isRetryableError(err: unknown): boolean {
-  if (err instanceof ApiRequestError) {
-    if (err.errorCode === 'computation_timeout' || err.errorCode === 'timeout') {
-      return false
-    }
-    return err.timeout || (typeof err.status === 'number' && RETRYABLE_STATUS_CODES.has(err.status))
-  }
-
-  if (!(err instanceof Error)) return false
-  if (/timeout after \d+ms/i.test(err.message)) return true
-
-  // Network-level failures (server unreachable, connection reset, DNS failure).
-  // Browser fetch() throws TypeError on these — they are transient.
-  if (err instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(err.message)) {
-    return true
-  }
-
-  const parsedStatus = parseStatusFromMessage(err.message)
-  return parsedStatus !== null && RETRYABLE_STATUS_CODES.has(parsedStatus)
-}
-
-export async function withRetries<T>(
-  operation: string,
-  run: () => Promise<T>,
-  retries = 2,
-): Promise<T> {
-  let attempt = 0
-
-  while (true) {
-    try {
-      return await run()
-    } catch (err) {
-      if (!isRetryableError(err) || attempt >= retries) throw err
-      const delayMs = 250 * (attempt + 1)
-      console.warn(`[dashboard/api] ${operation} failed (attempt ${attempt + 1}), retrying in ${delayMs}ms`, err)
-      await sleep(delayMs)
-      attempt += 1
-    }
-  }
+export function runRequest<T>(_operation: string, run: () => Promise<T>): Promise<T> {
+  return run()
 }
 
 export async function post<T>(

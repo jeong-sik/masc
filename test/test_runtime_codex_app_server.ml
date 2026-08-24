@@ -620,7 +620,7 @@ let test_failed_turn_uses_official_context_error_enum () =
 
 (* The named-field form could not distinguish "the server sent no scalar" from
    "the scalar is called something else": both printed the sentence with no
-   annotation. That is what live sangsu produced on 2026-08-11 after the narrow
+   annotation. That is what a live Keeper produced on 2026-08-11 after the narrow
    form deployed. This fixture carries no [code] and no [type], so it renders
    the sentence unannotated under the named form and fails there. The
    expectations are literals rather than a re-render of the function, and one
@@ -1100,8 +1100,8 @@ let test_item_output_deltas_are_typed_and_unbounded () =
    this decoder never reads the payload. It used to reject both, which ended
    the turn, put the official-client session into Recovery_required, and made
    every later turn for that keeper fail closed until an operator resolved it
-   by hand: three such chunks accounted for 3,236 rejected turns across sangsu,
-   kidsnote and taskmaster in one retained log window (#27967).
+   by hand: three such chunks accounted for 3,236 rejected turns across three
+   Keepers in one retained log window (#27967).
 
    The rejections that must survive are in the same test, because widening a
    decoder is only correct if it stops accepting nothing else: an empty
@@ -1461,7 +1461,6 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                 ~user_message
                                 ~turn_kind:Turn_record.Direct
                                 ~runtime_id:"codex.codex"
-                                ~generation:1
                                 ()))))))
 ;;
 

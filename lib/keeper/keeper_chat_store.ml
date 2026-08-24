@@ -37,8 +37,9 @@ let record_persistence_read_drop ~reason () =
     ()
 
 let report_persistence_read_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> record_persistence_read_drop ~reason ())
+    ~on_drop:(fun () -> record_persistence_read_drop ~reason:reason_wire ())
     ~surface:persistence_surface
     ~reason
     ~path
@@ -188,7 +189,7 @@ type chat_message = {
          are rejected at the read boundary. *)
   role : Role.t;
   content : string;
-  ts : float option;
+  ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
@@ -255,7 +256,10 @@ let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
 let persisted_attachment_ref (att : attachment) =
-  let digest = Digest.to_hex (Digest.string att.data) in
+  (* SHA-256, not Stdlib.Digest (MD5): this is attachment content identity,
+     not a display checksum (#26720). Nothing reads the digest back out of the
+     URI — [att.id] is the locator — so rows written before this keep working. *)
+  let digest = Digestif.SHA256.(digest_string att.data |> to_hex) in
   Printf.sprintf "masc://attachment/%s/%s" att.id digest
 
 let persisted_attachment (att : attachment) =
@@ -485,7 +489,7 @@ let stream_lifecycle_fields = function
 let parse_stream_lifecycle ~path json =
   let invalid detail =
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+      ~reason:Read_drop_reason.Invalid_payload
       ~path ~detail;
     None
   in
@@ -1322,8 +1326,10 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let content = Json_util.get_string_with_default json ~key:"content" ~default:"" in
     let ts =
-      (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in
+      match Json_util.assoc_member_opt "ts" json with
+      | Some (`Float f) -> Some f
+      | Some _ | None -> None
+    in
     let opt_string key =
       match Json_util.assoc_member_opt key json with
       | Some (`String value) when String.trim value <> "" -> Some value
@@ -1341,7 +1347,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown/invalid surface payload: surface it and keep the
                  row as unscoped chat content. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid surface field: %s" detail);
               None)
@@ -1361,7 +1367,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown authority label: surface it instead of guessing
                  a class; the row itself stays valid. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:
                   (Printf.sprintf "unknown speaker_authority %S" label);
@@ -1373,7 +1379,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* id/name without an authority class never comes from our
                   writer; report so the producer gets fixed. *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority");
           None
@@ -1406,7 +1412,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* audio without token+mime is malformed; drop the field but
                   keep the row (text-only render). *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"audio field missing token/mime";
                None)
@@ -1452,7 +1458,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                   | None ->
                       report_persistence_read_drop
                         ~reason:
-                          Safe_ops.persistence_read_drop_reason_invalid_payload
+                          Read_drop_reason.Invalid_payload
                         ~path:file_path
                         ~detail:
                           (Printf.sprintf "empty mention entry %S" value);
@@ -1460,14 +1466,14 @@ let parse_line ~file_path (line : string) : chat_message option =
               | _ ->
                   report_persistence_read_drop
                     ~reason:
-                      Safe_ops.persistence_read_drop_reason_invalid_payload
+                      Read_drop_reason.Invalid_payload
                     ~path:file_path
                     ~detail:"non-string mention entry";
                   None)
             items
       | Some _ ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"mentions field is not a list";
           []
@@ -1480,7 +1486,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as blocks -> blocks
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:"invalid blocks field";
               None)
@@ -1498,7 +1504,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some kind -> kind
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "unknown chat row kind %S" label);
               Row_kind.Utterance)
@@ -1513,7 +1519,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as tr -> tr
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid turn_ref %S" s);
               None)
@@ -1541,7 +1547,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Ok (Some provenance) -> Some provenance
           | Error detail ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid delivery provenance: %s" detail);
               None)
@@ -1554,7 +1560,7 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~reason:Read_drop_reason.Invalid_payload
         ~path:file_path
         ~detail:"chat row missing role and readable text/structured payload";
       None)
@@ -1565,25 +1571,33 @@ let parse_line ~file_path (line : string) : chat_message option =
              semantics (watermark, pending, rendering); surface it
              instead of carrying an untyped row. *)
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
           None
       | Some Role.Tool when tool_call_name = None ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
-          (match opt_string "id" with
-           | None ->
+          (match opt_string "id", ts with
+           | None, _ ->
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"chat row missing nonblank id";
                None
-           | Some id ->
+           | Some _, None ->
+               (* [encode_line] always writes a float [ts]; a row without one
+                  cannot be ordered, paged or joined, so it is dropped. *)
+               report_persistence_read_drop
+                 ~reason:Read_drop_reason.Invalid_payload
+                 ~path:file_path
+                 ~detail:"chat row missing float ts";
+               None
+           | Some id, Some ts ->
                Some
                  { id; role; content; ts; attachments; tool_call_id;
                    tool_call_name; surface; conversation_id;
@@ -1592,7 +1606,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                    delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Json_syntax_error
       ~path:file_path
       ~detail;
     None
@@ -1708,12 +1722,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       match before with
       | None -> (size, fun (_ : chat_message) -> true)
       | Some b ->
-          (* Rows without ts (legacy) are unorderable and stay
-             unreachable through paging; the tail window still serves
-             them. *)
-          ( find_cut ~path ~size ~before:b,
-            fun (m : chat_message) ->
-              match m.ts with Some t -> t < b | None -> false )
+          (find_cut ~path ~size ~before:b, fun (m : chat_message) -> m.ts < b)
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
@@ -1753,7 +1762,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
   with
   | Sys_error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       { messages = []; has_more = false }
@@ -1776,7 +1785,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
     match Safe_ops.read_file_safe path with
     | Error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       []
@@ -1916,9 +1925,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
            ([ ("id", `String m.id);
               ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
-            ] @ (match m.ts with
-                 | Some t -> [("ts", `Float t)]
-                 | None -> [])
+              ("ts", `Float m.ts);
+            ]
               (* Dashboard history: surface the writer-declared kind for
                  non-utterance rows so a reload can tell a transport
                  failure apart from keeper speech. *)
@@ -2031,8 +2039,8 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
   `Assoc
     ([ ("role", `String (Role.to_label m.role));
        ("content", `String m.content);
+       ("ts", `Float m.ts);
      ]
-    @ (match m.ts with Some t -> [ ("ts", `Float t) ] | None -> [])
       (* Surface the writer-declared kind so the inspector can tell a
          transport failure apart from a real keeper utterance, exactly as
          the chat history endpoint does — a failure marker is never quoted

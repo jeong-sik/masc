@@ -16,14 +16,6 @@ val since_last_progress_ms : now_ts:float -> last_progress_at:float -> float
     floored at 0. A turn making steady progress stays near zero even when
     long-running; a stalled provider call grows unbounded. *)
 
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'a) ->
-  'a
-
 val emit_in_turn_liveness_pulse :
   ctx:_ context -> meta:keeper_meta -> unit
 

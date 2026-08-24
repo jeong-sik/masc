@@ -109,7 +109,6 @@ type pending_approval =
   ; request_context : Yojson.Safe.t option
   ; task_id : string option
   ; goal_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; summary_status : summary_status
@@ -208,13 +207,6 @@ let authorization_source_of_string = function
   | "exact_always_rule" -> Some Exact_always_rule
   | "keeper_always_allow" -> Some Keeper_always_allow
   | "workspace_always_allow" -> Some Workspace_always_allow
-  | _ -> None
-;;
-
-let string_opt_of_json = function
-  | `String value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
   | _ -> None
 ;;
 

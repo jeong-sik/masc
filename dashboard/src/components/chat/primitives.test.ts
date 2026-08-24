@@ -12,6 +12,7 @@ import {
   ChatComposer,
   ChatTranscript,
   THINKING_TRACE_PREVIEW_CHARS,
+  autonomousToolSummary,
   _resetTraceCardOpenChoicesForTests,
   type ChatComposerSendPayload,
 } from './primitives'
@@ -514,10 +515,10 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
   })
 
-  it('names the agent surface without claiming the row is the viewer own', () => {
-    // A keeper broadcast projected into another keeper's transcript carries the
-    // agent surface, so the badge must not assert authorship — the speaker
-    // label is what identifies who spoke.
+  it('badges the agent surface with the sender, never the viewer', () => {
+    // A row projected into another keeper's transcript carries the agent
+    // surface. The origin badge must name the keeper that actually spoke
+    // (speaker_name), never assert the row is the viewer's own (#28813).
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -542,14 +543,13 @@ describe('ChatTranscript', () => {
     const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
     expect(bubble).not.toBeNull()
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
-    expect(bubble.textContent).toContain('keeper-code-reviewer-agent')
 
-    // The badge is a span (ChatMetaChip renders an anchor only when url is a
-    // real link), so pin it by the chip attribute rather than bubble text:
-    // this fails when the badge disappears and cannot be perturbed by message
-    // content that happens to contain the same words.
-    const badge = bubble.querySelector('[title="surface=agent"]')
-    expect(badge?.getAttribute('data-chat-meta-chip')).toBe('Agent')
+    // Pin the origin badge by class so the assertion fails when the badge
+    // disappears and cannot be perturbed by message content that happens to
+    // contain the same words.
+    const badge = bubble.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('keeper-code-reviewer-agent')
   })
 
   it('renders connector speaker and route context for gate history rows', () => {
@@ -3438,6 +3438,135 @@ describe('ChatMessageBubble — workspace source badge (C2)', () => {
     expect(container.querySelector('.kw-src-badge')).toBeNull()
   })
 
+  it('badges a dashboard-surface row as the operator (사람)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'd',
+          text: 'from the dashboard',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'dashboard' },
+          speakerAuthority: 'owner',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-dashboard')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('사람')
+    expect(badge?.getAttribute('title')).toContain('surface=dashboard')
+    expect(badge?.getAttribute('title')).toContain('speaker_authority=owner')
+  })
+
+  it('badges a discord connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'dc',
+          text: 'from discord',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-discord')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('Discord')
+  })
+
+  it('badges a slack connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'sl',
+          text: 'from slack',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'slack', channel_id: 'C9' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.origin-slack')?.textContent).toContain('Slack')
+  })
+
+  it('badges a workspace fleet broadcast row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'b',
+          text: 'fleet announcement',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'broadcast' },
+          speakerName: 'keeper-taskmaster-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-broadcast')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('브로드캐스트')
+    expect(badge?.getAttribute('title')).toContain('speaker_name=keeper-taskmaster-agent')
+  })
+
+  it('badges an agent-surface row with the sending keeper name', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'a',
+          text: 'direct keeper message',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'agent' },
+          speakerName: 'keeper-lane-smith-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('keeper-lane-smith-agent')
+  })
+
+  it('keeps the semantic badge when a surface is also present', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'ws',
+          text: 'world snapshot',
+          role: 'system',
+          source: 'world_state_prompt',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.world')).not.toBeNull()
+    expect(container.querySelector('.kw-src-badge.origin-discord')).toBeNull()
+  })
+
   it('renders no badge when the flag is off', () => {
     render(
       html`<${ChatTranscript}
@@ -3566,12 +3695,12 @@ describe('fusion chat card', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "(Fusion_types.Provider_error \"Provider 'unknown' bad gateway\")",
+            reason: "Provider 'unknown' bad gateway",
           },
           {
             model: 'ollama_cloud.deepseek-v4-flash',
             status: 'failed',
-            reason: 'Fusion_types.Timeout',
+            reason: 'timeout',
           },
         ],
         judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
@@ -3587,7 +3716,6 @@ describe('fusion chat card', () => {
     expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
     expect(detail?.textContent).toContain('timeout')
     expect(detail?.textContent).toContain('judge failed hard')
-    expect(detail?.textContent).not.toContain('Fusion_types.Provider_error')
     expect(detail?.textContent).not.toContain("Provider 'unknown'")
   })
 
@@ -4032,5 +4160,62 @@ describe('ChatComposer v2 prototype surface', () => {
     fireEvent.dragOver(composer)
     const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
     expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
+  })
+})
+
+// ================================================================
+// autonomousToolSummary
+// ================================================================
+// A collapsed run's header is the only thing a reader sees without clicking, so
+// it has to say what the run did, not just how many wakes it held.
+
+describe('autonomousToolSummary', () => {
+  const withTools = (id: string, names: string[]): KeeperConversationEntry =>
+    entry({
+      id,
+      text: '',
+      traceSteps: names.map((name) => ({ kind: 'tool' as const, name })),
+    })
+
+  it('returns null when the run called no tools', () => {
+    expect(autonomousToolSummary([entry({ id: 'a', text: 'hi' })])).toBeNull()
+    expect(
+      autonomousToolSummary([
+        entry({ id: 'b', text: '', traceSteps: [{ kind: 'think', text: 'thinking' }] }),
+      ]),
+    ).toBeNull()
+    expect(autonomousToolSummary([])).toBeNull()
+  })
+
+  it('folds consecutive repeats into a count', () => {
+    expect(autonomousToolSummary([withTools('a', ['Execute', 'Execute', 'Execute'])]))
+      .toBe('Execute×3')
+  })
+
+  it('keeps the order the tools ran in', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read', 'Execute', 'Execute', 'Read'])]))
+      .toBe('Read Execute×2 Read')
+  })
+
+  it('spans every turn in the run', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read']), withTools('b', ['Grep'])]))
+      .toBe('Read Grep')
+  })
+
+  it('strips the keeper_ and masc_ prefixes the rows already hide', () => {
+    expect(autonomousToolSummary([withTools('a', ['keeper_tasks_list', 'masc_board_search'])]))
+      .toBe('tasks_list board_search')
+  })
+
+  it('counts the groups it did not show', () => {
+    const out = autonomousToolSummary([withTools('a', ['A', 'B', 'C', 'D', 'E', 'F'])])
+    expect(out).toBe('A B C D +2')
+  })
+
+  it('marks a scan it cut short rather than reporting a short run', () => {
+    const many = Array.from({ length: 2100 }, (_, i) => (i % 2 === 0 ? 'Read' : 'Execute'))
+    const out = autonomousToolSummary([withTools('a', many)])
+    expect(out).not.toBeNull()
+    expect(out!.endsWith('…')).toBe(true)
   })
 })

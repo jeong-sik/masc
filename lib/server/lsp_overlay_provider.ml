@@ -237,7 +237,7 @@ let enrich_hover ~base_dir ~codebase ~file_path ~line (result : Yojson.Safe.t) =
 
 
 let completion_items ~base_dir ~codebase ~file_path ~line:_ : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~codebase ~file_path in
+  let (_ : annotation list) = Cache.get ~base_dir ~codebase ~file_path in
   let kinds = [ "Comment"; "Decision"; "Question"; "Bookmark" ] in
   List.mapi (fun i kind ->
     let label = Printf.sprintf "masc:%s" (String.lowercase_ascii kind) in
@@ -250,7 +250,6 @@ let completion_items ~base_dir ~codebase ~file_path ~line:_ : Yojson.Safe.t list
       ("sortText", `String (Printf.sprintf "zzz_masc_%02d" i));
       ("data", `Assoc [
         ("file_path", `String file_path);
-        ("annotations_count", `Int (List.length annotations));
       ]);
     ]
   ) kinds

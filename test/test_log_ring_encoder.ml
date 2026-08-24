@@ -40,14 +40,14 @@ let test_round_trip_all_sources () =
 
 let test_round_trip_optional_fields () =
   let with_optional =
-    entry_of ~keeper_name:"analyst" ~turn_id:7
+    entry_of ~keeper_name:"delta" ~turn_id:7
       ~details:(`Assoc [("k", `String "v")]) ()
   in
   let decoded =
     Log.Ring.entry_of_json (Log.Ring.entry_to_json with_optional)
   in
   Alcotest.(check (option string)) "keeper_name"
-    (Some "analyst") decoded.keeper_name;
+    (Some "delta") decoded.keeper_name;
   Alcotest.(check (option int)) "turn_id" (Some 7) decoded.turn_id;
   Alcotest.(check bool) "details preserved" true
     (decoded.details = `Assoc [("k", `String "v")])

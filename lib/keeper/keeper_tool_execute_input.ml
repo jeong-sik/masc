@@ -40,26 +40,29 @@ let typed_stage_command_text argv =
   argv |> List.map shell_quote_for_policy |> String.concat " "
 ;;
 
-let typed_input_command_text = function
-  | Keeper_tool_execute_typed_input.Exec { argv; _ } ->
-    typed_stage_command_text argv
-  | Keeper_tool_execute_typed_input.Pipeline { stages; _ } ->
-    stages
+let typed_input_command_text
+      ({ source; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  match source with
+  (* The script is already the command line this wants to render. *)
+  | Keeper_tool_execute_typed_input.Script script -> script
+  | Keeper_tool_execute_typed_input.Staged { program = { head; tail }; _ } ->
+    head :: tail
     |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
       typed_stage_command_text stage.argv)
     |> String.concat " | "
 ;;
 
-let typed_input_has_env = function
-  | Keeper_tool_execute_typed_input.Exec { env; _ }
-  | Keeper_tool_execute_typed_input.Pipeline { env; _ } ->
-    env <> []
+let typed_input_has_env
+      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  env <> []
 ;;
 
-let typed_input_timeout_sec = function
-  | Keeper_tool_execute_typed_input.Exec { timeout_sec; _ }
-  | Keeper_tool_execute_typed_input.Pipeline { timeout_sec; _ } ->
-    timeout_sec
+let typed_input_timeout_sec
+      ({ timeout_sec; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  timeout_sec
 ;;
 
 let typed_validation_error_text error =

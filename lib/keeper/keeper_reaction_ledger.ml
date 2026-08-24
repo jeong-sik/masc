@@ -7,9 +7,6 @@ type stimulus_kind =
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Manual_compaction
-  | Goal_assigned
-      (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message
@@ -36,8 +33,6 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Manual_compaction -> "manual_compaction"
-  | Goal_assigned -> "goal_assigned"
-  | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
@@ -55,8 +50,6 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "manual_compaction" -> Some Manual_compaction
-  | "goal_assigned" -> Some Goal_assigned
-  | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
@@ -91,9 +84,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
-  | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
-    Goal_reconciliation_ready
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
@@ -167,7 +157,18 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
            reaction.target_id
            reaction.user_id
            reaction.emoji
-           reaction.reacted)
+           reaction.reacted
+       | Keeper_event_queue.Vote_cast vote ->
+         Printf.sprintf
+           "vote_cast target=%s target_author=%s voter=%s direction=%s"
+           (match vote.target with
+            | Keeper_event_queue.Vote_on_post post_id -> "post:" ^ post_id
+            | Keeper_event_queue.Vote_on_comment comment_id -> "comment:" ^ comment_id)
+           vote.target_author
+           vote.voter
+           (match vote.direction with
+            | Keeper_event_queue.Vote_up -> "up"
+            | Keeper_event_queue.Vote_down -> "down"))
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
@@ -189,16 +190,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
   | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
-  | Keeper_event_queue.Goal_assigned ga ->
-    Printf.sprintf
-      "goal_assigned goal_id=%s assigned_by=%s"
-      ga.ga_goal_id
-      ga.ga_assigned_by
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Printf.sprintf
-      "goal_reconciliation_ready goal_id=%s triggering_task_id=%s"
-      ready.gr_goal_id
-      ready.gr_triggering_task_id
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Printf.sprintf
       "completion_authority_rejected task_id=%s verification_id=%s"
@@ -230,8 +221,6 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Manual_compaction_requested
-    | Keeper_event_queue.Goal_assigned _
-    | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
@@ -844,8 +833,6 @@ let decode_current_row ~keeper_name row =
       | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved
         | Manual_compaction
-        | Goal_assigned
-        | Goal_reconciliation_ready
         | Completion_authority_rejected
         | Task_cancelled
         | Workspace_message ),
@@ -1315,11 +1302,27 @@ let board_stimulus_token metadata stimulus_kind =
   | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved
   | Manual_compaction
-  | Goal_assigned
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message -> None
+;;
+
+(* The per-keeper status this module publishes. The fleet roll-up used to
+   recover it by reading back the JSON it had just written and comparing the
+   string, so a renamed value or a missing field read as "not degraded" with
+   nothing to fail the build (#27560). The value travels beside the JSON now
+   and the string exists only at the boundary. *)
+type keeper_summary_status =
+  | Summary_empty
+  | Summary_ok
+  | Summary_degraded
+  | Summary_unknown
+
+let keeper_summary_status_to_string = function
+  | Summary_empty -> "empty"
+  | Summary_ok -> "ok"
+  | Summary_degraded -> "degraded"
+  | Summary_unknown -> "unknown"
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =
@@ -1424,16 +1427,16 @@ let summarize_rows ~keeper_name ~limit rows =
   let pending_stimulus_count = List.length pending_stimulus_ids in
   let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
   let status =
-    if !row_count = 0 && !quarantined_row_count = 0 then "empty"
-    else if degraded_signal_count = 0 then "ok"
-    else "degraded"
+    if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
+    else if degraded_signal_count = 0 then Summary_ok
+    else Summary_degraded
   in
-  `Assoc
+  ( status
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "operator_action_required", `Bool (degraded_signal_count > 0)
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int scanned_row_count
     ; "row_count", `Int !row_count
     ; "stimulus_count", `Int !stimulus_count
@@ -1454,16 +1457,16 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
-    ]
+    ] )
 ;;
 
 let error_summary ~keeper_name ~limit error =
-  `Assoc
+  ( Summary_unknown
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String "unknown"
+    ; "status", `String (keeper_summary_status_to_string Summary_unknown)
     ; "operator_action_required", `Bool true
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1479,10 +1482,12 @@ let error_summary ~keeper_name ~limit error =
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
-    ]
+    ] )
 ;;
 
-let summary_for_keeper ~base_path ~keeper_name ~limit =
+(* The status travels with the JSON so the fleet roll-up can read it without
+   parsing what this module just wrote. *)
+let summary_with_status ~base_path ~keeper_name ~limit =
   try
     match
       Dated_jsonl.read_recent_result
@@ -1500,10 +1505,8 @@ let summary_for_keeper ~base_path ~keeper_name ~limit =
   | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)
 ;;
 
-let summary_status json =
-  match string_field "status" json with
-  | Some value -> value
-  | None -> "unknown"
+let summary_for_keeper ~base_path ~keeper_name ~limit =
+  snd (summary_with_status ~base_path ~keeper_name ~limit)
 ;;
 
 let summary_read_error_count json =
@@ -1520,7 +1523,6 @@ let unavailable_fleet_summary_json () =
     ; "operator_action_required", `Bool false
     ; "keeper_count", `Int 0
     ; "keeper_names", `List []
-    ; "scanned_row_limit_per_keeper", `Int 0
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1567,11 +1569,13 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   (* NDT-OK: fleet summary health renders stale-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
-  let summaries =
+  let summaries_with_status =
     List.map
-      (fun keeper_name -> summary_for_keeper ~base_path ~keeper_name ~limit:limit_per_keeper)
+      (fun keeper_name ->
+        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
       keeper_names
   in
+  let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
   in
@@ -1755,13 +1759,12 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       || durable_event_queue_read_error_count > 0
     then "unknown"
     else if
-      pending_count > 0
-      || quarantined_row_count > 0
+      List.exists
+        (fun (status, _) -> status = Summary_degraded)
+        summaries_with_status
       || durable_event_queue_stale_count > 0
     then "degraded"
     else if row_count = 0 && durable_event_queue_count = 0 then "empty"
-    else if List.exists (fun summary -> summary_status summary = "degraded") summaries
-    then "degraded"
     else "ok"
   in
   `Assoc
@@ -1773,7 +1776,6 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
           (status_reasons <> []) )
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
-    ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
     ; "scanned_row_count", `Int (total_int "scanned_row_count")
     ; "row_count", `Int row_count
     ; "stimulus_count", `Int (total_int "stimulus_count")

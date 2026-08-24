@@ -32,43 +32,87 @@
       which does not exist).  Absolute-path enforcement happens in
       {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
 
-type exec_stage = { argv : string list }
+type input_source =
+  | Inherit_input  (** default; the child keeps the parent's stdin *)
+  | Empty_input  (** read nothing — [/dev/null] *)
+  | Read_file of { path : string }  (** absolute path opened for reading *)
+      (** stdin cannot duplicate another descriptor: a merge is carried out on
+          captured output and stdin is not a capture. *)
 
-type redirect_target =
-  | Inherit
-      (** default; child inherits the parent's file descriptor *)
-  | Discard
-      (** discard output / read empty input — equivalent to [/dev/null] *)
-  | File of string
-      (** absolute filesystem path.  stdout/stderr open for writing,
-          stdin opens for reading. *)
+type output_sink =
+  | Inherit_output  (** default; the child keeps the parent's descriptor *)
+  | Discard_output  (** throw the bytes away — [/dev/null] *)
+  | Truncate_file of { path : string }  (** absolute path, shell [>] *)
+  | Append_file of { path : string }  (** absolute path, shell [>>] *)
+  | Output_to_fd of int
+      (** duplicate another standard descriptor of the same stage, which is
+          how [2>&1] is expressed without a shell. The dispatcher captures the
+          two streams separately and joins them afterwards, so the merged text
+          is grouped by stream rather than ordered by time. *)
 
-type execute_input =
-  | Exec of {
-      argv : string list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-      stdin : redirect_target;
-      stdout : redirect_target;
-      stderr : redirect_target;
+type exec_stage = {
+  argv : string list;
+  stdin : input_source;
+  stdout : output_sink;
+  stderr : output_sink;
+}
+(** One process and where its three standard streams attach. Every stage owns
+    its own redirections, including stages inside a pipeline. *)
+
+type program = {
+  head : exec_stage;
+  tail : exec_stage list;
+}
+(** One or more stages joined by pipes. The head/tail split makes the empty
+    program unrepresentable, so emptiness is not something {!validate} has to
+    check, and a single process is a program whose tail is empty. *)
+
+type conditional =
+  | And_then  (** run the next program only if the one before it exited zero *)
+  | Or_else  (** run the next program only if the one before it did not *)
+
+type source =
+  | Staged of {
+      program : program;
+      next : (conditional * program) list;
+          (** programs to run after [program], each guarded by how the one
+              before it ended. Empty for a single program. The guard looks at
+              whatever ran last, so a run of them reads left to right, as a
+              shell reads [a && b || c]. *)
     }
-      (** [stdin], [stdout], [stderr] default to {!Inherit} when absent
-          from JSON. They express redirection in the typed schema rather
-          than as shell syntax inside an execve-style argv. *)
-  | Pipeline of {
-      stages : exec_stage list;
-      cwd : string option;
-      env : (string * string) list;
-      timeout_sec : float option;
-    }
-      (** Per-stage redirects are intentionally not exposed here — pipe
-          construction owns the inter-stage fd plumbing.  Out-of-stage
-          redirects on the pipeline's endpoints are a deferred extension. *)
+  | Script of string
+      (** one command line, lowered by the bash parser to the same
+          {!Masc_exec.Shell_ir.t} the staged form builds. A construct the IR
+          cannot represent is refused by name; nothing reaches a shell. *)
+(** Where the work comes from. The schema says [argv], [pipeline] and [script]
+    exclude each other; saying it here too makes "both" and "neither"
+    unrepresentable rather than something {!validate} has to catch. *)
+
+type execute_input = {
+  source : source;
+  cwd : string option;
+  env : (string * string) list;
+  timeout_sec : float option;
+}
+(** [cwd] and [env] apply to every stage of every program. [timeout_sec] is an
+    explicit optional execution boundary; absence means unbounded execution. *)
 
 type validation_error =
   | Empty_argv
   | Empty_program
+  | Redirect_outside_the_sandbox_mount of {
+      path : string;
+      visible_root : string;
+    }
+      (** A sandboxed command's redirect target has to sit inside the mount
+          that the sandbox and this host share; outside it, the same path
+          names two different files and only one of them is reachable here. *)
+  | Directory_change_is_not_a_program of { requested : string }
+      (** [cd] changes the shell's own directory. Run as a program it changes
+          the directory of a child that exits immediately, so the command the
+          caller meant never runs — and [cd] ignores its extra arguments and
+          exits zero, so the call is reported successful with no output. Use
+          the [cwd] field. *)
   | Argv_contains_nul of {
       index : int;
       token : string;
@@ -81,20 +125,33 @@ type validation_error =
           relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
-  | Pipeline_empty
-  | Pipeline_too_short
+  | Script_not_a_command_line of {
+      token : string;
+      expected : string list;
+    }
+  | Script_unreadable of Masc_exec.Parsed.reason_aborted
+  | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
+  | Script_nested_pipeline
+  | Script_rejected_by_the_gate of string
+  | Redirect_fd_unknown of {
+      fd : int;
+      target : int;
+    }
+      (** A {!Fd} redirect may only duplicate a descriptor the stage owns:
+          0, 1 or 2. *)
   | Env_key_invalid of string
 
 val of_json : Yojson.Safe.t -> (execute_input, string) result
-(** Parse the typed Execute JSON boundary.  Accepts either
-    [{argv = [program; arg...], cwd?, env?, timeout_sec?}] for [Exec] or
-    [{pipeline = [{argv = [program; arg...]}, ...], cwd?, env?}] for [Pipeline].
-    [timeout_sec] is preserved as an explicit optional execution boundary;
-    absence means unbounded execution.
-    [argv] and [pipeline] together, raw command-string fields, [{stages =
-    ...}], and other unsupported fields are intentionally rejected here.  No
-    compatibility normalization is applied at parse time.  The removed
-    [executable] field is rejected as an unsupported field. *)
+(** Parse the typed Execute JSON boundary into a {!program}.
+
+    [{argv, stdin?, stdout?, stderr?}] at the top level is a one-stage
+    program; [{pipeline = [stage, ...]}] is an n-stage one. A stage carries
+    its own redirections in both forms, so piping and redirecting are not
+    alternatives.
+
+    [argv] and [pipeline] together, raw command-string fields and other
+    unsupported fields are rejected here. No compatibility normalization is
+    applied at parse time. *)
 
 val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
@@ -102,8 +159,22 @@ val validate : execute_input -> (unit, validation_error) result
     inferred, rejected as shell syntax, or rewritten.  No side effects, no
     exceptions. *)
 
+(** Which filesystem a redirect target names. A keeper running in a container
+    writes paths as the container sees them; [Bound_mount] carries the two
+    roots that make one of those a path on this host, which holds only inside
+    the shared mount. Without it the target stays in the command's namespace
+    and a sandboxed dispatch refuses it rather than opening whatever this host
+    has at that path. *)
+type redirect_namespace =
+  | Command_filesystem
+  | Bound_mount of {
+      visible_root : string;
+      host_root : string;
+    }
+
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
+  ?namespace:redirect_namespace ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Lower [input] into {!Masc_exec.Shell_ir.t} without structural validation.
@@ -113,6 +184,7 @@ val to_shell_ir_unvalidated :
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
+  ?namespace:redirect_namespace ->
   execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]

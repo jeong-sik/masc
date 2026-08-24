@@ -112,6 +112,19 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
 
+val handle_keeper_tool_approval :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/tool-approval].
+
+    Reads [{"name", "tool_call_id", "decision"}] where decision is
+    ["approve"] or ["deny"], and releases the matching held tool call.
+
+    Returns [{settled: true}] when a wait was actually released, and
+    [{settled: false}] when none was: the call had already timed out, was
+    answered, or was never held. That is reported rather than treated as
+    success, so an operator is not told a call was approved when nothing was
+    listening for it. *)
+
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
@@ -177,8 +190,6 @@ type turn_submission =
       ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
 
-val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
-
 val process_single_turn :
   user_row_origin:Keeper_chat_store.user_row_origin ->
   submission:turn_submission ->
@@ -231,6 +242,9 @@ type canonical_reply_payload =
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
   ; external_effect_target : Keeper_surface_post.delivery_target option
+      (** [Some] iff [turn_outcome] is [External_effect_completed]: the
+          decoder rejects the outcome without a target and a target on any
+          other outcome. *)
   ; visible_reply : string
   ; poll_body : string
   }

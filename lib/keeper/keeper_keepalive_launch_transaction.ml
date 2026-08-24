@@ -77,7 +77,6 @@ let run
       ?intake_token
       ~base_path
       ~keeper_name
-      ~expected_generation
       ~register
       ~rollback
       launch
@@ -104,7 +103,6 @@ let run
            Keeper_lifecycle_reservation.acquire
              ~base_path
              ~keeper_name
-             ~expected_generation
              ~purpose:Keeper_lifecycle_reservation.Keepalive_launch
          with
          | Ok token -> Ok (token, true)
@@ -195,14 +193,22 @@ let run
     else Error Intake_token_not_live
   | None ->
     (match
-       Keeper_shutdown_intake_fence.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_observing
          ~base_path
          ~keeper_name
          run_admitted
      with
-     | Keeper_shutdown_intake_fence.Intake_committed result -> result
-     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
-       Error (Shutdown_reserved operation_id))
+     | result, None -> result
+     | result, Some operation_id ->
+       (* Observed, not obeyed: a reservation left by a shutdown that never
+          finalised would otherwise refuse every launch for as long as the
+          process lives (#29566). *)
+       Log.Keeper.warn
+         "keepalive lane launched while a shutdown reservation stood: \
+          keeper=%s operation=%s"
+         keeper_name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id);
+       result)
 ;;
 
 type exit_boundary =

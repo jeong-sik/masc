@@ -206,10 +206,6 @@ val clear_error : base_path:string -> string -> unit
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 
-(** [set_compaction_decision ~base_path name decision] stamps [decision] onto the
-    keeper's [compaction_rt.last_decision] so provider-overflow compaction
-    outcomes are observable in status (surfaced as [last_compaction_decision]). *)
-val set_compaction_decision : base_path:string -> string -> string -> unit
 
 (** Store the AGENT_CORE Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit
@@ -381,9 +377,6 @@ val set_last_error_exact : registry_entry -> string -> exact_update_result
     [site], and a newer same-name lane is never mutated. *)
 val exact_update_succeeded :
   registry_entry -> site:string -> exact_update_result -> bool
-
-(** Set or clear the gRPC close callback. *)
-val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool

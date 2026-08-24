@@ -23,7 +23,7 @@
     [runtime_counter] type, [StringMap],
     [runtime_max_keys], [create_runtime_counter],
     [runtime_eviction] type, [find_runtime_eviction_candidate],
-    [display_provider_name_of_config], [runtime_observation_of_candidates],
+    [runtime_observation_of_candidates],
     [runtime_attempt_to_json],
     [update_first_attempt_if], [record_attempt_start],
     [ensure_terminal_attempt],
@@ -81,13 +81,6 @@ val provider_name_of_config :
     the runtime counter key; the function does not enumerate
     specific providers. *)
 
-val model_label_of_config :
-  Llm_provider.Provider_config.t -> string
-(** Canonical [provider:model] label (e.g.
-    ["anthropic:claude-opus"]).  Compatibility helper for legacy
-    tests and callers; current public attempt/fallback projections use
-    runtime-lane labels instead. *)
-
 (** {1 Runtime metrics capture} *)
 
 type runtime_metrics_capture
@@ -100,25 +93,6 @@ type runtime_metrics_capture
     through a direct [Llm_provider.Metrics.t] record, then materialise
     a {!runtime_observation} via
     {!runtime_observation_with_metrics}. *)
-
-val runtime_attempt_terminal_event_json :
-  ?slot_release_at_phase:string ->
-  ?productive_phase_elapsed_ms:int ->
-  ?retry_phase_elapsed_ms:int ->
-  model_id:string ->
-  model_label:string option ->
-  latency_ms:int option ->
-  error:string option ->
-  unit ->
-  Yojson.Safe.t
-(** Builds the structured JSON payload emitted to system_log for one
-    runtime candidate's terminal state. Exposed for tests so the shape
-    contract (`event`, `model_id`, `model_label`, `latency_ms`, `outcome`,
-    `error_message`, `slot_release_at_phase`,
-    `productive_phase_elapsed_ms`, `retry_phase_elapsed_ms`) is locked
-    against silent drift; downstream operators grep on these field names
-    when tracing why a runtime exhausted or why a keeper released its turn
-    slot instead of scheduling another degraded retry. *)
 
 val record_attempt_terminal :
   runtime_metrics_capture ->
@@ -188,9 +162,3 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     [Runtime_agent] re-exposes it via the
     [include Runtime_observation] module. *)
 
-val runtime_observation_to_json :
-  runtime_observation -> Yojson.Safe.t
-(** Wire encoder for {!runtime_observation} — flattens
-    [attempts] / outcome metadata into a single [`Assoc].
-    Pinned because the runtime-include consumer
-    ([Runtime_agent]) re-exposes it. *)

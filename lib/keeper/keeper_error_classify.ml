@@ -240,8 +240,8 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      (* Legacy [cooldown_cause] values are diagnostic-only. A decoded receipt
-         from the retired pre-dispatch gate must not regain lifecycle authority. *)
+      (* A decoded receipt from the retired pre-dispatch gate carries no
+         lifecycle authority. *)
       true
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
@@ -328,85 +328,6 @@ type degraded_retry =
   { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
-
-let is_declared_phase_alias raw phase_name =
-  String.equal (String.trim raw) phase_name
-
-let fallback_runtime_for_unavailable_profile
-    ~(base_runtime : string)
-    ~(effective_runtime : string) : string option =
-  let normalized_base =
-    String.trim base_runtime
-  in
-  let normalized_effective =
-    String.trim effective_runtime
-  in
-  if not (String.equal normalized_effective normalized_base)
-  then Some normalized_base
-  else if String.equal normalized_effective (Keeper_config.default_runtime_id ())
-  then None
-  else Some (Keeper_config.default_runtime_id ())
-
-let degraded_retry_after_recoverable_error
-    ~(effective_runtime : string)
-    (err : Agent_core.Error.t) : degraded_retry option =
-  let normalized_effective =
-    String.trim effective_runtime
-  in
-  let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_runtime (Keeper_config.default_runtime_id ())
-  in
-  let effective_is_declared_phase_recovery =
-    is_declared_phase_alias
-      effective_runtime
-      (Keeper_config.default_runtime_id ())
-  in
-  let phase_recovery_retry fallback_reason =
-    Some
-      {
-        next_runtime = (Keeper_config.default_runtime_id ());
-        fallback_reason;
-      }
-  in
-  if effective_is_declared_phase_buffer
-     || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
-  then None
-  else if Keeper_runtime_failure_route.core_error_is_hard_quota err then
-    phase_recovery_retry Hard_quota
-  else
-    match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        phase_recovery_retry Resumable_cli_session
-    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        phase_recovery_retry Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-        phase_recovery_retry Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
-        phase_recovery_retry Runtime_candidates_filtered
-    | Some (Keeper_turn_driver.Accept_rejected _) ->
-        (match accept_rejection_degraded_retry_reason err with
-         | Some reason -> phase_recovery_retry reason
-         | None -> None)
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted _)
-    (* RFC-0159 Phase A: opaque internal failures have no
-       local-recovery retry mapping. *)
-    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-    | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _)
-    | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
-    | Some (Keeper_turn_driver.Terminal_effect_failed _)
-    | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
-    | Some (Keeper_turn_driver.Tool_correction_lost _)
-    | Some (Keeper_turn_driver.Receipt_persistence_failed _)
-    | Some (Keeper_turn_driver.Gate_replay_repair_required _)
-    | None ->
-        None
 
 let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
   if Keeper_runtime_failure_route.core_error_is_hard_quota err then

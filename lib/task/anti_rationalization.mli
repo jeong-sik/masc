@@ -20,22 +20,14 @@ type review_request =
     are the upper bound of what could be checked, and an approval says only
     that the submitted excerpt reads as real work. This module deliberately
     does not build the surface itself: the tools that read a producer's tree
-    belong above the containment primitives, not inside the review protocol. *)
-type lookup_scope =
-  | Producer_tree
-      (** Every advertised filesystem tool is already bound to the one
-          producer named by the review request. *)
-  | Producer_forest of { producers : string list }
-      (** Filesystem calls must select one producer from this closed set. Used
-          by Goal proof review, where linked Tasks may have different
-          performers and therefore different owned trees. *)
-
+    belong above the containment primitives, not inside the review protocol.
+    Every advertised filesystem tool is bound to the one producer named by the
+    review request. *)
 type lookup_surface =
   | No_lookup_surface
   | Lookup_tools of
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
-      ; scope : lookup_scope
       ; root_layout : string list
             (** Paths the lookup tools actually resolve against, listed from
                 disk at review time and relative to the root they are rooted
@@ -47,9 +39,7 @@ type lookup_surface =
                 entries were [repos/], [artifacts/], [mind/] and [poc/]
                 (masc task-403, vrf-8bac5f46, 2026-08-21). Empty when the
                 root could not be listed — the prompt then says so rather
-                than implying an empty tree. For a [Producer_forest] scope
-                this is the forest root, so a producer name is one of the
-                entries. *)
+                than implying an empty tree. *)
       }
 
 type verdict =
@@ -57,8 +47,6 @@ type verdict =
   | Reject of string
 
 val verdict_constructor_name : verdict -> string
-val valid_verdict_strings : string list
-
 type gate =
   | Structured_tool
   | Invalid_verdict
@@ -73,18 +61,42 @@ type review_result =
   ; gate : gate
   ; fallback_reason : string option
   ; evaluator_error_retryable : bool option
-        (** [Some b] only where a typed {!Agent_core.Error.t} existed to
-            classify — the [Error error] arm of [run_llm_reviewer_fn] — and
-            [b] is then [Agent_core.Error.is_retryable error]. [None]
-            everywhere else: a produced verdict, a reply without exactly one
-            verdict tool call, a prompt or slot resolution failure. [None] is
-            not "retry": nothing about those outcomes says a repeat of the
-            same request would end differently, and a caller that wants to
-            repeat one must say so on its own evidence. This was a plain
-            [bool] defaulting to [true], which is why an [Invalid_verdict]
-            review re-ran on the maintenance pulse forever without telling
-            anyone. *)
+        (** [Some true] when a verdict-less exhausted lane observed at least
+            one typed retryable {!Agent_core.Error.t}; a later non-retryable
+            fallback cannot mask that transient candidate. [Some false] when
+            typed evaluator errors existed but all were non-retryable. [None]
+            for a produced verdict, an invalid-verdict-only reply, or a prompt
+            or slot resolution failure. [None] is not "retry": nothing about
+            those outcomes says a repeat of the same request would end
+            differently. This was once a plain [bool] defaulting to [true],
+            which is why an [Invalid_verdict] review re-ran on the maintenance
+            pulse forever without telling anyone. *)
   }
+
+val run
+  :  ?evaluator_runtime:string
+  -> ?generator_runtime:string
+  -> ?on_verdict:(review_result -> unit)
+  -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?sw:Eio.Switch.t option
+  -> log_info:(string -> unit)
+  -> log_warn:(string -> unit)
+  -> render_prompt:(unit -> (string, string) result)
+  -> lookup:lookup_surface
+  -> base_path:string
+  -> unit
+  -> review_result
+(** Run one review over an already-rendered prompt. This is the whole of what
+    a verification lane shares: evaluator slot resolution, frozen-order slot
+    failover, the model call, and the structured verdict channel. What the
+    prompt says, and what subject the log lines name, belong to the lane.
+
+    [~render_prompt] is called after the slots resolve, so a render failure is
+    still reported against the slot that would have run.
+
+    Task completion review is {!review}. Goal proof review renders its own
+    template and calls this directly: the two lanes judge different things and
+    share no prompt variables. *)
 
 val review
   :  ?evaluator_runtime:string
@@ -94,7 +106,6 @@ val review
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
-  -> ?prompt_name:string
   -> ?sw:Eio.Switch.t option
   -> lookup:lookup_surface
   -> base_path:string
@@ -108,22 +119,14 @@ val review
     declaration order: a slot that fails or returns no valid verdict tool call
     yields to the next slot, and the terminal result describes the last
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
-    failover.
+    failover. *)
 
-    [~prompt_name] selects the prompt-registry template rendered for the
-    review; it defaults to {!Prompt_names.verification} (the task completion
-    review). The goal verification lane (RFC-0387) passes its own templates —
-    provider selection, failover, and the verdict channel are unchanged. *)
-
-(** Render the single prompt-registry SSOT. There is no inline fallback prompt;
-    an error keeps the Task nonterminal. [~prompt_name] defaults to
-    {!Prompt_names.verification}; other callers (RFC-0387 goal verification)
-    select their own registered template. *)
+(** Render {!Prompt_names.verification}, the task completion review prompt.
+    There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
   :  ?few_shot_block:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
-  -> ?prompt_name:string
   -> lookup:lookup_surface
   -> review_request
   -> (string, string) result
@@ -140,6 +143,8 @@ val run_llm_reviewer_fn
       -> report_tool_schema:Types_core.tool_schema
       -> lookup:lookup_surface
       -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+      -> on_runtime_attempt_error:
+        (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit)
       -> unit
       -> (verdict option, Agent_core.Error.t) result)
        Atomic.t

@@ -239,12 +239,13 @@ let test_real_three_stage_pipeline_ordering () =
     Alcotest.(check bool) "is_pipeline" true (Gate.is_pipeline context);
     (* AST shape must be Pipeline of Simples — no nesting. *)
     (match context.Gate.ast with
+     | Masc_exec.Shell_ir.Sequence _ -> Alcotest.fail "unexpected sequence AST"
      | Masc_exec.Shell_ir.Pipeline stages ->
        List.iter
          (function
            | Masc_exec.Shell_ir.Simple _ -> ()
-           | Masc_exec.Shell_ir.Pipeline _ ->
-             Alcotest.fail "stage was nested Pipeline — should be Simple")
+           | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
+             Alcotest.fail "stage was nested — should be Simple")
          stages
      | Masc_exec.Shell_ir.Simple _ ->
        Alcotest.fail "expected Pipeline AST, got Simple")
@@ -313,7 +314,7 @@ let test_lower_typed_single_stage () =
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
     (match context.Gate.ast with
      | Masc_exec.Shell_ir.Simple _ -> ()
-     | Masc_exec.Shell_ir.Pipeline _ ->
+     | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
        Alcotest.fail "single stage typed input must lower to Simple AST")
   | other ->
     Alcotest.failf

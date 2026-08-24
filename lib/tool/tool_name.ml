@@ -131,20 +131,17 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_assign
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
-    | Goal_assign -> "masc_goal_assign"
   ;;
 
   let of_string = function
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
-    | "masc_goal_assign" -> Some Goal_assign
     | _ -> None
   ;;
 
@@ -302,6 +299,3 @@ let is_masc = function
   | Masc _ -> true
 ;;
 
-let is_board = function
-  | Masc m -> Masc.is_board m
-;;

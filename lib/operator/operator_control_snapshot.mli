@@ -10,10 +10,8 @@
     (cycle 187 rationale).
 
     External surface:
-    - {!merge_json_objects}, {!invalidate_snapshot_cache}
-      (production callers
-      [server_bootstrap_loops] /
-      [server_dashboard_http_keeper_api]).
+    - {!invalidate_snapshot_cache}
+      (production caller [server_dashboard_http_keeper_api]).
     - {!valid_snapshot_view_strings},
       {!snapshot_view_of_string_opt}, {!snapshot_view}
       (consumed by the [tool_operator] tool schema; no suite pins
@@ -54,15 +52,6 @@ include module type of struct
   include Operator_digest
 end
 
-(** {1 JSON object merge} *)
-
-val merge_json_objects :
-  Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Concatenates the field lists of two [`Assoc] objects.
-    Returns the right operand untouched when either side
-    is not an [`Assoc].  Used by
-    [server_bootstrap_loops] when extending the operator
-    snapshot envelope with downstream-derived metadata. *)
 
 (** {1 Snapshot cache} *)
 

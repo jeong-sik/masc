@@ -30,14 +30,6 @@ val collect_keepalive_board_events :
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
 
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'b) ->
-  'b
-
 val emit_in_turn_liveness_pulse :
   ctx:'a context -> meta:keeper_meta -> unit
 
@@ -134,6 +126,10 @@ val decide_keepalive_cycle_action :
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. The loop reads it to
+          skip the cadence sleep while more entries are pending. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -143,12 +139,6 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val compaction_outcomes_of_cycle_outcome :
-  Keeper_heartbeat_loop_cycle.cycle_outcome ->
-  [ `Manual_committed of int * int * int | `Failed ] list
-(** [`Manual_committed (commit_count, before_checkpoint_bytes,
-    after_checkpoint_bytes)] — the sizes come from the preparation's evidence
-    so the owner projection can record what a commit saved (#29109). *)
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
@@ -157,7 +147,6 @@ type failed_source_disposition =
   | Preserve_for_deferred_runtime
   | Defer_to_queue_tail
   | Quarantine_source of { detail : string }
-  | Pause_keeper_for_integrity of { detail : string }
 
 val failed_source_disposition :
   Keeper_unified_turn.turn_failure -> failed_source_disposition
@@ -190,6 +179,24 @@ val batch_disposition_of_cycle_outcome :
     shares one disposition by construction. Pure: composes the route ->
     [connector_attention_outcome] mapping with {!failed_source_disposition},
     both already pure. *)
+
+type connector_attention_settlement =
+  | Settle_resolved
+  | Settle_ignored
+  | Settle_quarantined of { detail : string }
+  | Settle_pending_in_queue
+
+val connector_attention_settlement_of_disposition :
+  batch_disposition -> connector_attention_settlement
+(** The terminal external-attention event a disposition owes the rows behind its
+    Connector_attention stimuli. The queue entry and the attention row are two
+    separate writes, and the wake is edge-triggered
+    (RFC-connector-ambient-attention-wake): once a disposition terminalizes the
+    entry, only a *new* ambient message in that conversation ever arms another
+    stimulus. So every disposition that terminalizes must name a terminal event
+    here — [Settle_pending_in_queue] is correct only while the entry stays
+    queued for a later turn to settle. Pure, and split from the append so the
+    mapping is checkable without running a turn. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

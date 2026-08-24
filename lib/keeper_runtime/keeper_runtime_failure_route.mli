@@ -64,10 +64,11 @@ type terminal_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / sub-500 unclassified server errors *)
-  | Terminal_effect_transient_failure
+  | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
   | Provider_attempt_effect_fenced
   | Tool_correction_lost
   | Internal_opaque
@@ -125,8 +126,6 @@ val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
     "exhausted_visible_alive"]. *)
 
-val retry_class_label : retry_class -> string
-val rotate_class_label : rotate_class -> string
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
     [terminal_class_label] respectively). *)

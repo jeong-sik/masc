@@ -12,7 +12,6 @@ let trace_id =
 let create bytes =
   Keeper_checkpoint_ref.create
     ~trace_id
-    ~generation:2
     ~turn_count:7
     ~canonical_checkpoint_bytes:bytes
   |> result_ok
@@ -25,28 +24,20 @@ let test_exact_bytes_identity () =
   Alcotest.(check bool) "same exact bytes" true (Keeper_checkpoint_ref.equal first same);
   Alcotest.(check bool) "re-encoded bytes differ" false (Keeper_checkpoint_ref.equal first changed);
   Alcotest.(check string) "typed trace" "trace-1" (Keeper_id.Trace_id.to_string first.trace_id);
-  Alcotest.(check int) "generation" 2 first.generation;
   Alcotest.(check int) "turn count" 7 first.turn_count
 ;;
 
 let test_typed_rejections () =
-  let make generation turn_count =
+  let make turn_count =
     Keeper_checkpoint_ref.create
       ~trace_id
-      ~generation
       ~turn_count
       ~canonical_checkpoint_bytes:"{}"
   in
   Alcotest.(check bool)
-    "negative generation"
-    true
-    (match make (-1) 0 with
-     | Error (Keeper_checkpoint_ref.Negative_generation (-1)) -> true
-     | Ok _ | Error _ -> false);
-  Alcotest.(check bool)
     "negative turn"
     true
-    (match make 0 (-2) with
+    (match make (-2) with
      | Error (Keeper_checkpoint_ref.Negative_turn_count (-2)) -> true
      | Ok _ | Error _ -> false)
 ;;
@@ -56,7 +47,6 @@ let test_persisted_roundtrip_is_canonical () =
   let restore sha256 =
     Keeper_checkpoint_ref.of_persisted
       ~trace_id
-      ~generation:expected.generation
       ~turn_count:expected.turn_count
       ~sha256
   in

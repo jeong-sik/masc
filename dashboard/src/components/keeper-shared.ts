@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
-import { formatTimeAgo, relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
   ChatBlock,
@@ -46,12 +46,6 @@ import {
   advanceKeeperLastSeen,
   newestConversationEntryUnix,
 } from '../keeper-last-seen'
-import { refreshKeeperCatchupDigest } from '../keeper-digest-actions'
-import { keeperCatchupDigests } from '../keeper-digest-signals'
-import {
-  KeeperCatchupDigestCard,
-  shouldShowKeeperCatchupDigest,
-} from './keeper-catchup-digest-card'
 import { stableAttachmentId } from './chat/attachments'
 import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
@@ -77,16 +71,10 @@ import {
 import {
   cancelKeeperChatOperation,
   editQueuedKeeperChatOperation,
-  fetchKeeperEventQueuePending,
-  KeeperEventQueueOperationError,
   listQueuedKeeperChatOperations,
   moveQueuedKeeperChatOperationToEnd,
-  operateKeeperEventQueue,
   type DashboardKeeperWaitingKeeper,
   type KeeperChatOperation,
-  type KeeperEventQueueOperatorAction,
-  type KeeperEventQueuePendingSnapshot,
-  type KeeperEventQueueReplayableAction,
 } from '../api'
 
 
@@ -116,36 +104,30 @@ function GhostButton({
   `
 }
 
-function quietReasonLabel(reason?: string | null): string {
+function quietReasonLabel(
+  reason: NonNullable<KeeperDiagnostic['quiet_reason']>,
+): string {
   switch (reason) {
-    case 'quiet_hours':
-      return 'quiet hours'
-    case 'min_gap':
-      return 'cooldown gate'
-    case 'no_recent_activity':
-      return 'waiting for activity'
     case 'disabled':
       return 'runtime disabled'
+    case 'not_running':
+      return 'keepalive not running'
     case 'startup':
       return 'warming up'
-    case 'model_error':
-      return 'model error'
-    case 'graphql_error':
-      return 'graphql error'
     case 'never_started':
       return 'never started'
-    default:
-      return 'unknown'
   }
 }
 
-function nextActionLabel(path: string): string {
+function nextActionLabel(path: KeeperDiagnostic['next_action_path']): string {
   switch (path) {
-    case 'probe':
-      return 'probe'
+    case 'auto_restart':
+      return 'auto restart'
     case 'recover':
       return 'recover'
-    default:
+    case 'probe':
+      return 'probe'
+    case 'direct_message':
       return 'message'
   }
 }
@@ -359,7 +341,7 @@ export function KeeperDiagnosticSummary({
       </div>
       ${diagnostic?.last_error
         ? html`<${AgentFailure}
-            type=${failureTypeFromDiagnostic(diagnostic.last_error, diagnostic.recoverable)}
+            type=${failureTypeFromDiagnostic(diagnostic.last_error)}
             message=${diagnostic.last_error}
           />`
         : null}
@@ -433,27 +415,15 @@ function KeeperQueueControlPanel({
   onClose: () => void
 }) {
   const [operations, setOperations] = useState<readonly KeeperChatOperation[]>([])
-  const [eventSnapshot, setEventSnapshot] = useState<KeeperEventQueuePendingSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
-  const [eventRecoveries, setEventRecoveries] = useState<readonly {
-    operation: KeeperEventQueueReplayableAction
-    commitState: 'committed' | 'unknown'
-    message: string
-  }[]>([])
 
   const load = async (clearError = true) => {
     try {
       if (clearError) setError(null)
-      const [chatOperations, events] = await Promise.all([
-        listQueuedKeeperChatOperations(keeperName),
-        fetchKeeperEventQueuePending(keeperName),
-      ])
-      setOperations(chatOperations)
-      setEventSnapshot(events)
+      setOperations(await listQueuedKeeperChatOperations(keeperName))
     } catch (cause) {
       setOperations([])
-      setEventSnapshot(null)
       if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
@@ -483,44 +453,7 @@ function KeeperQueueControlPanel({
     }
   }
 
-  const mutateEvent = async (
-    key: string,
-    operation: KeeperEventQueueOperatorAction,
-  ) => {
-    setPendingAction(key)
-    try {
-      await operateKeeperEventQueue(keeperName, operation)
-      if (operation.action !== 'reprioritize' && operation.operationId) {
-        setEventRecoveries(recoveries => recoveries.filter(
-          recovery => recovery.operation.operationId !== operation.operationId,
-        ))
-      }
-      await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      if (cause instanceof KeeperEventQueueOperationError) {
-        const recovery = {
-          operation: cause.operation,
-          commitState: cause.commitState,
-          message,
-        }
-        setEventRecoveries(recoveries => [
-          ...recoveries.filter(
-            item => item.operation.operationId !== cause.operation.operationId,
-          ),
-          recovery,
-        ])
-      }
-      await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
-      setError(message)
-      showToast(message, 'error')
-    } finally {
-      setPendingAction(null)
-    }
-  }
-
   const currentExecution = keeper?.current_execution ?? null
-  const eventRows = eventSnapshot?.pending ?? []
 
   return html`
     <section
@@ -636,101 +569,6 @@ function KeeperQueueControlPanel({
           : null}
       </div>
 
-      <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-          자율 이벤트 대기 ${eventSnapshot?.totalPending ?? keeper?.sources?.event_queue_pending ?? 0}
-        </div>
-        ${eventRecoveries.map(recovery => {
-          const operationId = recovery.operation.operationId
-          const key = `event-recovery:${operationId}`
-          return html`
-            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-2">
-              <div class="text-2xs text-[var(--color-status-err)]">
-                ${recovery.commitState === 'committed' ? 'source commit 완료 · 후속 확인 필요' : 'commit 결과 확인 필요'}
-                · ${recovery.operation.action}
-              </div>
-              <div class="break-words text-3xs text-[var(--color-fg-secondary)]">${recovery.message}</div>
-              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">${operationId}</div>
-              <button
-                type="button"
-                disabled=${pendingAction === key}
-                class="w-fit rounded-[var(--r-0)] border border-[var(--danger-20)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                onClick=${() => void mutateEvent(key, recovery.operation)}
-              >동일 작업 결과 확인</button>
-            </div>
-          `
-        })}
-        ${eventRows.map(item => {
-          const key = `event:${item.sourceRef}`
-          const busy = pendingAction === key
-          return html`
-            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
-              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1} · ${item.postId}</div>
-              <div class="text-2xs text-[var(--color-fg-secondary)]">
-                wake reason ${item.payloadKind} · urgency ${item.urgency}
-                · 도착 ${formatTimeAgo(item.arrivedAt)}
-              </div>
-              ${item.rejectionReason
-                ? html`<div class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]">${item.rejectionTaskId ? `${item.rejectionTaskId}: ` : ''}${item.rejectionReason}</div>`
-                : null}
-              ${item.messageFrom
-                ? html`<div class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]">${item.messageFrom} 님의 메시지${item.messageRequestId ? ` · ${item.messageRequestId}` : ''}</div>`
-                : null}
-              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
-                source ref ${item.sourceRef}
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
-                  <button
-                    type="button"
-                    disabled=${busy}
-                    class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                    onClick=${() => void mutateEvent(key, {
-                      action: 'reprioritize',
-                      sourceIncarnation: item.sourceIncarnation,
-                      sourceRef: item.sourceRef,
-                      urgency,
-                    })}
-                  >${urgency}</button>
-                `)}
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                  onClick=${() => {
-                    const targetKeeper = window.prompt('이 이벤트를 넘길 Keeper 이름을 입력하세요.')
-                    if (targetKeeper === null) return
-                    void mutateEvent(key, {
-                      action: 'transfer',
-                      sourceIncarnation: item.sourceIncarnation,
-                      sourceRef: item.sourceRef,
-                      targetKeeper,
-                    })
-                  }}
-                >이관</button>
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => {
-                    const reason = window.prompt('이벤트 취소 이유를 입력하세요.')
-                    if (reason === null) return
-                    void mutateEvent(key, {
-                      action: 'cancel',
-                      sourceIncarnation: item.sourceIncarnation,
-                      sourceRef: item.sourceRef,
-                      reason,
-                    })
-                  }}
-                >취소</button>
-              </div>
-            </div>
-          `
-        })}
-        ${eventRows.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">—</div>`
-          : null}
-      </div>
     </section>
   `
 }
@@ -777,21 +615,22 @@ export function KeeperConversationPanel({
     return inv.keepers.find(k => k.keeper_name === keeperName) ?? null
   }, [keeperName, inventoryState.inventory])
 
+  // The unread divider anchors on the last-seen cursor as it stood when this
+  // keeper's panel was entered. Captured during the first render for the
+  // keeper — before ChatTranscript's layout effect or the hydration below can
+  // advance the cursor — and held for the whole visit, so advances while the
+  // operator reads do not move the "여기까지 읽음" line. A keeper switch on
+  // the same panel instance is a new visit and re-captures.
+  const unreadAfterTs = useMemo(() => getKeeperLastSeen(keeperName), [keeperName])
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
   // survives full page reloads. Once-per-keeper inside the action.
   useEffect(() => {
-    // Capture the last-seen cursor BEFORE anything advances it, and fetch the
-    // since-last-seen digest against that frozen baseline. The card and the
-    // unread divider anchor on the server's echoed since_unix, not the live
-    // cursor, so the advance below does not move them mid-visit.
-    const baseline = getKeeperLastSeen(keeperName)
-    if (baseline !== null) void refreshKeeperCatchupDigest(keeperName, baseline)
     void (async () => {
       await hydrateKeeperChatHistory(keeperName)
       // The server transcript is now merged: mark the newest merged entry as
-      // seen so the NEXT visit's baseline is current. First-ever visits (no
-      // prior cursor) also land here, seeding the cursor without a card.
+      // seen so the NEXT visit's anchor is current. First-ever visits (no
+      // prior cursor) also land here, seeding the cursor without a divider.
       const newest = newestConversationEntryUnix(keeperThreads.value[keeperName] ?? [])
       if (newest !== null) advanceKeeperLastSeen(keeperName, newest)
     })()
@@ -832,14 +671,6 @@ export function KeeperConversationPanel({
     () => filterConversationEntries(visibleThread, searchQuery),
     [visibleThread, searchQuery],
   )
-  // Since-last-seen digest (fetched once on mount against the frozen baseline).
-  // Reading the signal here subscribes the panel so the card appears when the
-  // fetch resolves. Card + divider anchor on digest.since_unix, not the cursor.
-  const catchupDigest = keeperCatchupDigests.value[keeperName] ?? null
-  const digestCard = shouldShowKeeperCatchupDigest(catchupDigest)
-    ? html`<${KeeperCatchupDigestCard} digest=${catchupDigest} />`
-    : null
-  const unreadAfterTs = catchupDigest?.since_unix ?? null
   const newestEntryTsUnix = useMemo(
     () => newestConversationEntryUnix(transcriptEntries),
     [transcriptEntries],
@@ -1033,8 +864,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="mx-10 mt-3">${digestCard}</div>` : null}
-
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
@@ -1151,8 +980,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="shrink-0">${digestCard}</div>` : null}
-
         <${ChatTranscript}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
@@ -1160,6 +987,7 @@ export function KeeperConversationPanel({
           variant="messenger"
           size="primary"
           groupToolCalls=${true}
+          showSourceBadge=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
           toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
@@ -1258,7 +1086,6 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
-          ${digestCard ? html`<div class="mb-4">${digestCard}</div>` : null}
           <${ChatTranscript}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}
@@ -1266,6 +1093,7 @@ export function KeeperConversationPanel({
             variant="messenger"
             size="default"
             groupToolCalls=${true}
+            showSourceBadge=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
             toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}

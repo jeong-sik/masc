@@ -103,6 +103,26 @@ let warn_contract_gap (task : Masc_domain.task) =
        task.id
    | Some _ -> ())
 
+(* A truncated artifact cannot be judged from the snapshot — the review
+   instructions order the judge to treat it as unavailable and its prefix is
+   not transmitted (#29615). The producer can still act at submit time: split
+   the artifact, summarize it, or expect the verdict to rest on the readable
+   evidence alone. Saying so here is the earliest honest place. *)
+let warn_oversized_evidence ~(task : Masc_domain.task) ~(snapshot : Yojson.Safe.t) =
+  List.iter
+    (fun (reference, bytes) ->
+       Log.Task.warn
+         ~keeper_name:task.id
+         "[verification-submit] task=%s evidence %s is %d bytes — over the \
+          %d-byte snapshot cap; the judge treats it as unavailable. Split or \
+          summarize the artifact, or the verdict rests on the readable \
+          evidence alone"
+         task.id
+         reference
+         bytes
+         Workspace_verification_store.verification_evidence_max_bytes)
+    (Workspace_verification_store.truncated_snapshot_items snapshot)
+
 let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Workspace.base_path in
@@ -114,6 +134,7 @@ let create_submit_request ~(config : Workspace.config)
       ~worker:assignee
       spec.submitted_evidence
   in
+  warn_oversized_evidence ~task ~snapshot:evidence_snapshot;
   let output =
     match spec.output with
     | `Assoc fields ->
@@ -196,14 +217,6 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ("timestamp", `Float (Time_compat.now ()));
   ] @ spec.evidence_fields));
   ()
-
-let on_submit_for_verification ~(config : Workspace.config)
-    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
-  match create_submit_request ~config ~task ~assignee ~verification_id ~evidence_refs with
-  | Error e -> Error e
-  | Ok () ->
-    notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
-    Ok ()
 
 let completion_authority_fields (authority : Masc_domain.completion_authority) =
   [ ( "authority_kind"

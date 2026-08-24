@@ -56,10 +56,14 @@ let make_tool_bundle_for_descriptors
   : tool_bundle
   =
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
-     instances with a factory.  in_playground/cwd are unknown at
-     turn-start, so the factory defers
-     [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
-     each tool call site that already knows its [cwd]. *)
+     instances with a factory. in_playground and the runtime cache key need
+     the call site's [cwd], which is unknown at turn start, so the factory
+     defers creating the runtime until a call site supplies it.
+
+     The profile itself is not deferred in any meaningful sense:
+     [Keeper_sandbox_runner.effective_sandbox_profile] takes only [~meta] and
+     projects [meta.sandbox_profile], so every call in this turn gets the same
+     answer from the [meta] captured here. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
@@ -350,7 +354,6 @@ let make_tool_bundle_for_descriptors
                ~base_path:config.base_path
                ~model_projection:descriptor.model_output_projection
                ?on_externalization_error
-               ~externalization_error_recoverable:descriptor.policy.retryable
                ~name:model_name
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema

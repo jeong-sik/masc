@@ -51,6 +51,7 @@ let classify ~visibility signal =
       Board.audience_for_comment ~content:signal.content
     | Board_dispatch.Board_reaction_changed _ ->
       Ok Board.audience_for_reaction
+    | Board_dispatch.Board_vote_cast _ -> Ok Board.audience_for_vote
   in
   match board_audience with
   | Error error -> Error (Invalid_board_audience error)

@@ -39,18 +39,19 @@ scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 
 #### Formatting
 
-CI checks `.ml` and `.mli` files with `ocamlformat` directly, on changed files
-only. Match it:
+CI checks `.ml` and `.mli` files with `ocamlformat`, on changed files only.
+Either command matches it:
 
 ```bash
-opam exec -- ocamlformat -i <changed .ml/.mli files>
+opam exec -- dune build --root . @fmt --auto-promote   # whole tree
+opam exec -- ocamlformat -i <changed .ml/.mli files>   # just what you touched
 ```
 
-Do **not** run `dune build @fmt --auto-promote`. It also rewrites `dune` files
-— 18 of them from a clean tree, including a blank line in `lib/dune` that puts
-the file one line over the `lib_dune_lines` baseline and fails the OCaml
-Structure Ratchet. CI never asks for those rewrites, so they are diff noise
-that costs a round trip. See #29253.
+`dune-project` scopes formatting to `ocaml`, so `dune fmt` leaves `dune` files
+alone. Without that scope it rewrote 18 of them from a clean tree, and the
+blank line it added to `lib/dune` put the file one over its `lib_dune_lines`
+baseline and failed the OCaml Structure Ratchet — the repo's own formatter
+breaking the repo's own gate. See #29253.
 
 ### Project Structure
 
@@ -155,30 +156,39 @@ chore: bump version to 0.9.0
 
 ## GitHub Planning Rules
 
-`masc` uses GitHub issues, labels, and PRs for product planning.
+Issue classification comes from a `masc-triage` declaration block in the issue body, and nothing else.
+Labels are a projection of that block, applied by the `Issue Taxonomy` workflow.
+The vocabulary SSOT is `.github/issue-taxonomy.json`; a value that is not in that file does not exist.
 
-Every new issue should end with:
+````text
+```masc-triage
+kind: defect
+area: turn
+impact: breaks-continuity
+root: silent
+must-do: true
+```
+````
 
-- exactly one `type:*`
-- exactly one `area:*`
-- exactly one `target:*`
-- optional `release-blocker`
-- optional `product-gap`
-- temporary automation label `triage-required` while one of the required planning labels is missing
+Axes:
 
-Current label groups:
+- `kind` (required, exactly one) - `defect` implementation breaks its contract, `gap` the contract or wiring is absent,
+  `capability` a new surface, `erosion` dead code or stale artifacts to delete, `inquiry` not yet known to be a defect
+- `area` (required, exactly one) - `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime`
+  `transport` `dashboard` `connector` `observability` `persistence` `ci`
+- `impact` (required, exactly one) - this order *is* the priority order.
+  `breaks-continuity` turns stop or memory does not carry across them, `breaks-collab` keepers stop reaching each other, or output lands where nobody reads it,
+  `blinds-operator` it runs but nobody can see it, `degrades` friction, performance, or accuracy, `internal` development flow only
+- `root` (optional, zero or more) - `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt`
+- `must-do` (optional) - `true` when this breaks the product promise right now
 
-- `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs`
-- `area:workspace collaboration`, `area:keeper`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
-- `target:now`, `target:next`, `target:later`
+Pick `impact` from what the issue breaks in the product, not from how severe the issue claims to be.
+The product fails when turns stop, when a keeper cannot recall its own last ten turns, when keepers stop talking
+to each other, or when output lands somewhere nobody reads. `impact` names which of those is at stake.
 
-Triage defaults:
-
-- `target:now` for current product-promise blockers
-- `target:next` for advanced workflow improvements
-- `target:later` for extraction, speculative platform work, or deep architecture cleanup
-
-See [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) for the detailed planning model.
+Filing with `gh issue create` uses the same block, so the web form and the CLI produce one shape and one parser.
+Do not edit labels by hand; edit the block and the workflow reconciles them.
+To reconcile repository labels with the SSOT, run `APPLY=1 bash scripts/sync-issue-labels.sh`.
 
 ## PR Description Expectations
 

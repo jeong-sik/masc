@@ -23,7 +23,6 @@ type field =
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -49,9 +48,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_compaction_check_ts
-  | Last_compaction_decision
-  | Active_goal_ids
   | Last_autonomous_action_at
   | Autonomous_action_count
   | Autonomous_turn_count
@@ -61,7 +57,6 @@ type field =
   | Mention_reactive_turn_count
   | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason
@@ -78,7 +73,6 @@ let all_fields =
   ; Trace_id
   ; Multimodal_policy
   ; Trace_history
-  ; Generation
   ; Last_handoff_ts
   ; Created_at
   ; Updated_at
@@ -104,9 +98,6 @@ let all_fields =
   ; Last_proactive_reason
   ; Last_proactive_preview
   ; Consecutive_noop_count
-  ; Last_compaction_check_ts
-  ; Last_compaction_decision
-  ; Active_goal_ids
   ; Last_autonomous_action_at
   ; Autonomous_action_count
   ; Autonomous_turn_count
@@ -116,7 +107,6 @@ let all_fields =
   ; Mention_reactive_turn_count
   ; Noop_turn_count
   ; Message_scope_ack_id
-  ; Last_blocker
   ; Last_runtime_attempt
   ; Paused
   ; Latched_reason
@@ -134,7 +124,6 @@ let field_name = function
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"
-  | Generation -> "generation"
   | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"
   | Updated_at -> "updated_at"
@@ -160,9 +149,6 @@ let field_name = function
   | Last_proactive_reason -> "last_proactive_reason"
   | Last_proactive_preview -> "last_proactive_preview"
   | Consecutive_noop_count -> "consecutive_noop_count"
-  | Last_compaction_check_ts -> "last_compaction_check_ts"
-  | Last_compaction_decision -> "last_compaction_decision"
-  | Active_goal_ids -> "active_goal_ids"
   | Last_autonomous_action_at -> "last_autonomous_action_at"
   | Autonomous_action_count -> "autonomous_action_count"
   | Autonomous_turn_count -> "autonomous_turn_count"
@@ -172,7 +158,6 @@ let field_name = function
   | Mention_reactive_turn_count -> "mention_reactive_turn_count"
   | Noop_turn_count -> "noop_turn_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
-  | Last_blocker -> "last_blocker"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"
   | Latched_reason -> "latched_reason"

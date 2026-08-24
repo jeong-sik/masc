@@ -61,17 +61,13 @@ let with_config_dir dir f =
       Config_dir_resolver.reset ();
       f ~config_dir ~keepers_dir)
 
-(* Instructions come from [keepers/<name>/AGENT.md]; [keeper.instructions] is
-   an unknown TOML key and rejecting it leaves the profile unloaded. *)
 let write_keeper_toml ~keepers_dir ~name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "local"
-|};
-  let dir = Filename.concat keepers_dir name in
-  mkdir_p dir;
-  write_file (Filename.concat dir "AGENT.md") "Dashboard keeper fixture\n"
+instructions = "Dashboard keeper fixture"
+|}
 
 let test_runtime_toml =
   {|
@@ -156,6 +152,71 @@ let create_keeper env sw state name =
   | Some result when Tool_result.is_success result -> ()
   | Some result -> fail (Tool_result.message result)
   | None -> fail "missing masc_keeper_up dispatch"
+
+(* A held tool call is the one attention row that expires: the keeper's turn is
+   parked on it and is denied when the wait ends. So it has to appear while the
+   wait is open and stop appearing once it is not -- a stale row would send an
+   operator to answer a call that is already gone. *)
+let attention_kinds json =
+  let open Yojson.Safe.Util in
+  json |> member "attention_events" |> to_list
+  |> List.filter_map (fun event ->
+       match event |> member "kind" with
+       | `String kind -> Some kind
+       | _ -> None)
+
+let held_call_rows json =
+  attention_kinds json
+  |> List.filter (String.equal "tool_approval_held")
+  |> List.length
+
+let namespace_truth_json ~state ~sw ~clock =
+  Server_dashboard_http.dashboard_namespace_truth_http_json ~state ~sw ~clock
+    (request "/api/v1/dashboard/namespace-truth")
+
+let test_a_held_tool_call_is_an_attention_row () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let clock = Eio.Stdenv.clock env in
+      let registry = Masc.Keeper_tool_approval_registry.shared () in
+      Eio.Switch.run (fun sw ->
+        warm_execution_cache ();
+        check int "nothing held, nothing to answer" 0
+          (held_call_rows (namespace_truth_json ~state ~sw ~clock));
+        (* Park a wait the way a keeper turn does, answer it from another
+           fiber, and read the snapshot while it is open. *)
+        Eio.Fiber.both
+          (fun () ->
+            ignore
+              (Masc.Keeper_tool_approval_registry.await registry ~clock
+                 ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
+                 ~timeout_sec:5.0
+               : Masc.Keeper_tool_approval_registry.outcome))
+          (fun () ->
+            let rec wait attempts =
+              if
+                Masc.Keeper_tool_approval_registry.pending registry = []
+                && attempts > 0
+              then begin
+                Eio.Time.sleep clock 0.005;
+                wait (attempts - 1)
+              end
+            in
+            wait 100;
+            check int "the held call is one row to answer" 1
+              (held_call_rows (namespace_truth_json ~state ~sw ~clock));
+            ignore
+              (Masc.Keeper_tool_approval_registry.settle registry
+                 ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
+                 Masc.Keeper_tool_approval_registry.Approve
+               : bool));
+        check int "answered, so the row is gone" 0
+          (held_call_rows (namespace_truth_json ~state ~sw ~clock))))
 
 let test_dashboard_namespace_truth_empty_workspace () =
   let dir = test_dir () in
@@ -277,7 +338,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
-      write_keeper_toml ~keepers_dir ~name:"sangsu";
+      write_keeper_toml ~keepers_dir ~name:"alpha";
       with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -298,15 +359,15 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
         ignore (Lib.Workspace.init config ~agent_name:None);
         ignore
           (Lib.Workspace.bind_session config
-             ~agent_name:"keeper-sangsu-agent"
+             ~agent_name:"keeper-alpha-agent"
              ~agent_type_override:(Some "keeper")
              ~capabilities:["keeper"]
              ());
         Fun.protect
           ~finally:(fun () ->
-            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+            Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
-            create_keeper env sw state "sangsu";
+            create_keeper env sw state "alpha";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -332,7 +393,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
-      write_keeper_toml ~keepers_dir ~name:"sangsu";
+      write_keeper_toml ~keepers_dir ~name:"alpha";
       with_runtime_default_for_tests dir @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -359,15 +420,15 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
              ());
         ignore
           (Lib.Workspace.bind_session config
-             ~agent_name:"keeper-sangsu-agent"
+             ~agent_name:"keeper-alpha-agent"
              ~agent_type_override:(Some "keeper")
              ~capabilities:["keeper"]
              ());
         Fun.protect
           ~finally:(fun () ->
-            Lib.Keeper_keepalive.stop_keepalive "sangsu")
+            Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
-            create_keeper env sw state "sangsu";
+            create_keeper env sw state "alpha";
             warm_execution_cache ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -647,6 +708,8 @@ let () =
             test_dashboard_namespace_truth_mixed_runtime_counts;
           test_case "operator pending-confirm shape matches namespace-truth" `Quick
             test_operator_pending_confirm_shape_matches_namespace_truth;
+        test_case "a held tool call is an attention row" `Quick
+          test_a_held_tool_call_is_an_attention_row;
           test_case "cached snapshot matches HTTP projection blocks" `Quick
             test_namespace_truth_cached_snapshot_matches_http_projection_blocks;
           test_case "warm request uses stale shell while refreshing" `Quick

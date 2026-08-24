@@ -13,10 +13,6 @@ val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
 val set_mono_clock : Eio.Time.Mono.ty Eio.Resource.t -> unit
 (** Set the global Eio monotonic clock. *)
 
-val get_mono_clock : unit -> (Eio.Time.Mono.ty Eio.Resource.t, string) result
-(** Get the global Eio monotonic clock.
-    Returns Error if not initialized. *)
-
 val get_mono_clock_opt : unit -> Eio.Time.Mono.ty Eio.Resource.t option
 (** Get the global Eio monotonic clock if available. *)
 

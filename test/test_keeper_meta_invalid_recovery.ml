@@ -73,6 +73,12 @@ let replace_field field value json =
   | _ -> fail "keeper meta fixture must be a JSON object"
 ;;
 
+let remove_field field json =
+  match json with
+  | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+  | _ -> fail "keeper meta fixture must be a JSON object"
+;;
+
 let write_corrupted_meta config name ~field ~value =
   let json =
     Masc_test_deps.current_meta_json_fixture ~name () |> replace_field field value
@@ -192,15 +198,26 @@ let test_scan_warns_on_state_transitions_only () =
   with_temp_workspace @@ fun config ->
   let name = "meta-dedupe-canary" in
   write_keeper_toml config name;
-  (* A zero generation is non-enumerated corruption: no canonical default
-     exists, so the file stays unreadable and the WARN state persists. *)
+  (* [generation] is a field this binary no longer writes (#29590), so the
+     file is undecodable; there is no canonical default to repair to. Since
+     #29610 the reader fails open — one WARN names the loss and the meta
+     reads as absent — and that WARN is deduped on the (path, detail)
+     state. *)
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
   let base_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
   let first_episode =
     warns (entries_about name (keeper_entries_since base_seq))
   in
-  check int "first failure is logged" 2 (List.length first_episode);
+  check int "first failure is logged once" 1 (List.length first_episode);
+  check
+    bool
+    "the WARN says the meta is being treated as absent"
+    true
+    (List.exists
+       (fun (entry : Log.Ring.entry) ->
+          Astring.String.is_infix ~affix:"treating as absent" entry.message)
+       first_episode);
   (* Repeated scans of the same (path, failure-reason) state are silent. *)
   let repeat_seq = latest_seq () in
   ignore (Keeper_meta_store.keepalive_keeper_names config);
@@ -229,24 +246,35 @@ let test_scan_warns_on_state_transitions_only () =
   check
     int
     "identical failure after recovery logs again"
-    2
+    1
     (List.length (warns (entries_about name (keeper_entries_since relapse_seq))))
 ;;
 
-let test_non_enumerated_corruption_fails_loud () =
+(* #29610: a meta this binary cannot decode reads as absent instead of
+   refusing the keeper. The loss is named in a WARN, the corrupt file is left
+   for the operator, and nothing is silently rewritten. *)
+let test_non_enumerated_corruption_reads_as_absent () =
   with_temp_workspace @@ fun config ->
-  let name = "meta-fail-loud-canary" in
+  let name = "meta-fail-open-canary" in
   write_keeper_toml config name;
   let path = write_corrupted_meta config name ~field:"generation" ~value:(`Int 0) in
   let before = Masc_test_deps.read_file path in
+  let base_seq = latest_seq () in
   (match Keeper_meta_store.read_meta config name with
-   | Error detail ->
-     check
-       bool
-       "non-enumerated corruption still requires reset"
-       true
-       (Astring.String.is_infix ~affix:"runtime reset required" detail)
-   | Ok _ -> fail "non-enumerated corruption was silently accepted");
+   | Ok None -> ()
+   | Ok (Some _) -> fail "undecodable meta was served as a keeper"
+   | Error detail -> failf "undecodable meta was refused instead of read as absent: %s" detail);
+  let episode = warns (entries_about name (keeper_entries_since base_seq)) in
+  check int "the loss is logged once" 1 (List.length episode);
+  check
+    bool
+    "the WARN carries the decode detail"
+    true
+    (List.exists
+       (fun (entry : Log.Ring.entry) ->
+          Astring.String.is_infix ~affix:"treating as absent" entry.message
+          && Astring.String.is_infix ~affix:"generation" entry.message)
+       episode);
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
@@ -300,6 +328,91 @@ let test_recognized_misspelling_repairs_to_canonical_spelling () =
    | _ -> fail "repaired meta file is not a JSON object")
 ;;
 
+(* The deployment gate and the runtime read share one decode decision
+   ([Keeper_meta_store.decode_current_meta_with_repair]); this pins that the
+   gate passes a file exactly when the runtime would serve it, names a
+   rejection in the words the runtime logs, and never writes. The corpus is
+   derived from the writer's current field set, so a schema change reshapes it
+   instead of silently leaving a stale literal behind. *)
+let test_gate_verdict_matches_runtime_read () =
+  with_temp_workspace @@ fun config ->
+  let name = "meta-gate-twin-canary" in
+  write_keeper_toml config name;
+  let path = keeper_meta_path config name in
+  let current () = Masc_test_deps.current_meta_json_fixture ~name () in
+  let write_json json = write_file path (Yojson.Safe.pretty_to_string json) in
+  (* The production callers all scope the repair write to the workspace root. *)
+  let runtime_read () =
+    Keeper_meta_store.read_meta_file_path
+      ~ownership_root:config.Workspace.base_path
+      path
+  in
+  let expect_accepted label =
+    let before = Masc_test_deps.read_file path in
+    (match Keeper_meta_store.validate_current_meta_file_result path with
+     | Ok () -> ()
+     | Error (Keeper_meta_store.Unreadable detail)
+     | Error (Keeper_meta_store.Not_current detail) ->
+       failf "%s: gate rejected a meta the runtime serves: %s" label detail);
+    check string (label ^ ": gate left the file untouched") before
+      (Masc_test_deps.read_file path);
+    match runtime_read () with
+    | Ok (Some _) -> ()
+    | Ok None -> failf "%s: runtime read as absent a meta the gate passed" label
+    | Error detail -> failf "%s: runtime refused a meta the gate passed: %s" label detail
+  in
+  let expect_not_current label =
+    let gate_detail =
+      match Keeper_meta_store.validate_current_meta_file_result path with
+      | Error (Keeper_meta_store.Not_current detail) -> detail
+      | Error (Keeper_meta_store.Unreadable detail) ->
+        failf "%s: gate classed decodable JSON as unreadable: %s" label detail
+      | Ok () -> failf "%s: gate passed a meta the runtime discards" label
+    in
+    let base_seq = latest_seq () in
+    (match runtime_read () with
+     | Ok None -> ()
+     | Ok (Some _) -> failf "%s: runtime served a meta the gate rejected" label
+     | Error detail -> failf "%s: runtime refused instead of reading as absent: %s" label detail);
+    check
+      bool
+      (label ^ ": the gate detail is the runtime's fail-open detail")
+      true
+      (List.exists
+         (fun (entry : Log.Ring.entry) ->
+            Astring.String.is_infix ~affix:"treating as absent" entry.message
+            && Astring.String.is_infix ~affix:gate_detail entry.message)
+         (warns (entries_about name (keeper_entries_since base_seq))))
+  in
+  write_json (current ());
+  expect_accepted "current meta";
+  write_json (current () |> replace_field "generation" (`Int 0));
+  expect_not_current "retired field";
+  List.iter
+    (fun key ->
+       write_json (current () |> remove_field key);
+       expect_not_current ("missing " ^ key))
+    Keeper_meta_json.current_field_names;
+  (* The issue #28844 shape: the runtime repairs it in place and serves it,
+     so the gate passes it without writing — the repair stays the runtime's. *)
+  write_json
+    (current () |> replace_field "last_proactive_outcome" (`String "not-an-outcome"));
+  expect_accepted "non-canonical enumerated value";
+  (* Not JSON: the runtime read returns [Error] (the boot path refuses the
+     keeper instead of re-materialising it), and the gate names that class. *)
+  let pretty = Yojson.Safe.pretty_to_string (current ()) in
+  write_file path (String.sub pretty 0 64);
+  (match Keeper_meta_store.validate_current_meta_file_result path with
+   | Error (Keeper_meta_store.Unreadable _) -> ()
+   | Error (Keeper_meta_store.Not_current detail) ->
+     failf "truncated JSON classed as a schema mismatch: %s" detail
+   | Ok () -> fail "gate passed truncated JSON");
+  match runtime_read () with
+  | Error _ -> ()
+  | Ok None -> fail "runtime read truncated JSON as absent instead of refusing it"
+  | Ok (Some _) -> fail "runtime served truncated JSON"
+;;
+
 let () =
   run
     "keeper_meta_invalid_recovery"
@@ -317,9 +430,15 @@ let () =
             `Quick
             test_scan_warns_on_state_transitions_only
         ; test_case
-            "non-enumerated corruption still fails loud"
+            "non-enumerated corruption reads as absent"
             `Quick
-            test_non_enumerated_corruption_fails_loud
+            test_non_enumerated_corruption_reads_as_absent
+        ] )
+    ; ( "deploy-gate-twin"
+      , [ test_case
+            "gate verdict matches the runtime read on the current-schema corpus"
+            `Quick
+            test_gate_verdict_matches_runtime_read
         ] )
     ]
 ;;

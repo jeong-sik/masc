@@ -10,12 +10,6 @@
     2. Railway proxy (ELEVENLABS_PROXY_URL)
     3. Voice MCP session endpoint (HTTP /mcp)
     4. text_fallback (silent)
-
-    Eio Migration Notes:
-    - Direct style (no monads)
-    - Cohttp_eio.Client for HTTP
-    - Eio.Time.sleep for delays
-    - Eio.Fiber.first for timeouts
 *)
 
 (** ============================================
@@ -23,9 +17,6 @@
     ============================================ *)
 
 let default_timeout_seconds = 5.0
-let default_max_retries = 3
-let default_initial_backoff_seconds = 1.0
-let default_backoff_multiplier = 2.0
 
 let playback_dedup_window_sec = 30.0
 
@@ -58,9 +49,6 @@ let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
 let load_voice_config () = Voice_config.load ()
 
 let request_timeout_seconds () = default_timeout_seconds
-let max_retries () = default_max_retries
-let initial_backoff_seconds () = default_initial_backoff_seconds
-let backoff_multiplier () = default_backoff_multiplier
 
 let agent_voices () =
   match load_voice_config () with
@@ -91,27 +79,6 @@ let voice_mcp_uri () =
           | Error _ -> default_voice_uri "/mcp" )
       | Error _ -> default_voice_uri "/mcp")
   | Error _ -> default_voice_uri "/mcp"
-
-let voice_health_uri () =
-  match load_voice_config () with
-  | Ok config -> (
-      match Voice_runtime_overlay.session_endpoint_result config with
-      | Ok endpoint -> (
-          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-          | Ok url -> Uri.of_string url
-          | Error _ -> default_voice_uri "/health" )
-      | Error _ -> default_voice_uri "/health")
-  | Error _ -> default_voice_uri "/health"
-
-let voice_mcp_host () =
-  match Uri.host (voice_mcp_uri ()) with
-  | Some host -> host
-  | None -> Env_config_runtime.Voice.default_host
-
-let voice_mcp_port () =
-  match Uri.port (voice_mcp_uri ()) with
-  | Some port -> port
-  | None -> Env_config_runtime.Voice.default_port
 
 (** ============================================
     Structured Logging
@@ -251,11 +218,8 @@ let audio_duration_seconds ~audio_file =
     - [`Skipped reason] if playback was intentionally skipped.
     - [`Failed reason] if playback was requested but unavailable or failed.
     - [`Opened dur] if playback was handed off to macOS [open(1)].
-    - [`Played dur] if playback succeeded with the given duration.
-
-    When [message] is [None] the dedup re-check is skipped (legacy callers that
-    do not propagate the message string). *)
-let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
+    - [`Played dur] if playback succeeded with the given duration. *)
+let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
   match load_voice_config () with
   | Error e ->
     Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e;
@@ -280,11 +244,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             ~duration_sec:(audio_duration_seconds ~audio_file)
         in
         File_lock_eio.with_lock (playback_lock_path ()) (fun () ->
-          let dedup_hit =
-            match message with
-            | Some m -> is_dedup_hit ~agent_id ~message:m
-            | None -> false
-          in
+          let dedup_hit = is_dedup_hit ~agent_id ~message in
           if dedup_hit then begin
             log_info (Printf.sprintf
               "voice dedup skip inside mutex: agent=%s (same message within %.0fs window)"
@@ -294,9 +254,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
           else begin
             (* Record BEFORE playing so concurrent callers waiting on this mutex
                will observe the in-flight playback when they acquire it. *)
-            (match message with
-             | Some m -> record_playback ~agent_id ~message:m
-             | None -> ());
+            record_playback ~agent_id ~message;
             let rec try_candidates failures = function
               | [] ->
                 let reason =
@@ -333,9 +291,11 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                            agent_id audio_file executable dur);
                       `Played dur
                     end
-                  | Unix.WEXITED 124, _ ->
-                    (* WEXITED 124 is Process_eio's synthesized status for a
-                       timeout kill: the player ran past the probed duration
+                  | status', _
+                    when Process_eio.exit_reason_of_status status'
+                         = Process_eio.Timed_out ->
+                    (* Process_eio classifies the timeout kill: the player ran
+                       past the probed duration
                        + margin, so partial audio has almost certainly been
                        heard. Terminal on purpose — falling through to the
                        next candidate would replay the SAME file from 0:00. *)
@@ -406,15 +366,6 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             try_candidates [] candidates
           end)
 
-let start_local_playback ~sw ~agent_id ~audio_file =
-  ignore
-    (run_local_playback ~sw ~agent_id ~audio_file ()
-      : [ `Dedup_hit
-        | `Failed of string
-        | `Opened of float
-        | `Played of float
-        | `Skipped of string
-        ])
 
 (** Voice used when [load_voice_config ()] itself fails. This is the
     only remaining hardcoded fallback; the normal "agent not listed"

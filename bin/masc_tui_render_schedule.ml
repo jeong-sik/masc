@@ -1,0 +1,382 @@
+type decision =
+  | Idle
+  | Wait_until of int64
+  | Render
+
+type request =
+  | Input
+  | Background
+  | Force
+
+type t = {
+  min_interval_ns : int64;
+  mutable pending : request option;
+  mutable preempt_deadline : bool;
+  mutable last_rendered_at_ns : int64 option;
+}
+
+let create ~min_interval_ns () =
+  if Int64.compare min_interval_ns 0L < 0 then
+    invalid_arg "render interval must be non-negative";
+  { min_interval_ns;
+    pending = Some Force;
+    preempt_deadline = true;
+    last_rendered_at_ns = None;
+  }
+
+let request schedule request =
+  match request, schedule.pending with
+  | Force, _ ->
+      schedule.pending <- Some Force;
+      schedule.preempt_deadline <- true
+  | Input, Some Background ->
+      (* User input supersedes a scheduled background paint, matching pi's
+         immediate-render path without turning a byte burst into one write per
+         byte. Subsequent input inside the same frame window still coalesces. *)
+      schedule.pending <- Some Input;
+      schedule.preempt_deadline <- true
+  | Input, Some Force -> ()
+  | Input, Some Input | Input, None -> schedule.pending <- Some Input
+  | Background, None -> schedule.pending <- Some Background
+  | Background, Some (Input | Background | Force) -> ()
+
+let deadline schedule =
+  Option.map
+    (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
+    schedule.last_rendered_at_ns
+
+let take schedule ~now_ns =
+  match schedule.pending with
+  | None -> Idle
+  | Some _ ->
+    match deadline schedule with
+    | Some due
+      when (not schedule.preempt_deadline) && Int64.compare now_ns due < 0 ->
+        Wait_until due
+    | None | Some _ ->
+        schedule.pending <- None;
+        schedule.preempt_deadline <- false;
+        schedule.last_rendered_at_ns <- Some now_ns;
+        Render
+
+let input_timeout_seconds schedule ~now_ns ~maximum =
+  let maximum = max 0.0 maximum in
+  match schedule.pending with
+  | None -> maximum
+  | Some _ when schedule.preempt_deadline -> 0.0
+  | Some _ ->
+    match deadline schedule with
+    | None -> 0.0
+    | Some due ->
+        let remaining_ns = Int64.sub due now_ns in
+        if Int64.compare remaining_ns 0L <= 0 then 0.0
+        else
+          min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0)
+
+let nonnegative_width width = max 0 width
+
+let keeper_context_bar_width ~inner_width =
+  nonnegative_width (min 30 (inner_width - 40))
+
+let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
+  let line_count = max 0 line_count in
+  let content_height = max 0 content_height in
+  let maximum_scroll = max 0 (line_count - content_height) in
+  max 0 (min scroll maximum_scroll)
+
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+let project_overview_event_window ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let maximum_offset = max 0 (event_count - visible_rows) in
+  let oew_offset = max 0 (min scroll maximum_offset) in
+  let visible_count = min visible_rows (event_count - oew_offset) in
+  let oew_first_position = if visible_count = 0 then 0 else oew_offset + 1 in
+  let oew_last_position = if visible_count = 0 then 0 else oew_offset + visible_count in
+  { oew_offset; oew_first_position; oew_last_position }
+
+let scroll_overview_events_older ~event_count ~visible_rows scroll =
+  let event_count = max 0 event_count in
+  let visible_rows = max 0 visible_rows in
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  let next_offset =
+    if current.oew_offset >= event_count then current.oew_offset
+    else current.oew_offset + 1
+  in
+  (project_overview_event_window ~event_count ~visible_rows
+     next_offset).oew_offset
+
+let scroll_overview_events_newer ~event_count ~visible_rows scroll =
+  let current = project_overview_event_window ~event_count ~visible_rows scroll in
+  (project_overview_event_window ~event_count ~visible_rows
+     (current.oew_offset - 1)).oew_offset
+
+let overview_event_offset_after_prepend ~retained_count scroll =
+  let retained_count = max 0 retained_count in
+  let maximum_offset = if retained_count = 0 then 0 else retained_count - 1 in
+  if scroll <= 0 || maximum_offset = 0 then 0
+  else
+    let bounded = min scroll maximum_offset in
+    if bounded = maximum_offset then maximum_offset else bounded + 1
+
+module Input_wait = struct
+  type 'a poll_result =
+    | Ready of 'a
+    | Timed_out
+    | Interrupted
+
+  let nanoseconds_per_second = 1_000_000_000.0
+
+  let await ~now_ns ~timeout_ns ~poll =
+    if Int64.compare timeout_ns 0L < 0 then
+      invalid_arg "input wait must be non-negative";
+    let deadline_ns = Int64.add (now_ns ()) timeout_ns in
+    let rec loop () =
+      let remaining_ns = Int64.sub deadline_ns (now_ns ()) in
+      let remaining_seconds =
+        if Int64.compare remaining_ns 0L <= 0 then 0.0
+        else Int64.to_float remaining_ns /. nanoseconds_per_second
+      in
+      match poll remaining_seconds with
+      | Ready value -> Some value
+      | Timed_out -> None
+      | Interrupted ->
+          if Int64.compare (now_ns ()) deadline_ns >= 0 then None else loop ()
+    in
+    loop ()
+end
+
+module Input_shortcut = struct
+  let is_quit ~message_mode key =
+    (not message_mode) && (String.equal key "q" || String.equal key "Q")
+
+  let opens_keepers ~message_mode key =
+    (not message_mode) && String.equal key "2"
+end
+
+module Viewport = struct
+  (* This is the largest fixed-row budget declared by a surface, not a promise
+     that every variable section already accounts for the viewport. *)
+  let minimum_fixed_chrome_rows = 14
+  let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
+end
+
+type overview_allocation = {
+  attention_rows : int;
+  task_error_rows : int;
+  task_rows : int;
+  filler_rows : int;
+}
+
+(* Rows the Attention / Recent Events panel may take. A reader scans this panel
+   for what needs attention now, not for history; past six rows the older rows
+   are scrolled to, not read at a glance. *)
+let overview_panel_row_cap = 6
+
+let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
+    ~task_count ~has_task_error =
+  (* Ten rows are invariant chrome; the cluster/project row is present only
+     after a briefing has loaded. What is left is shared by the Attention /
+     Recent Events panel and the task block, and whatever neither needs becomes
+     filler so the frame reaches the bottom of the terminal.
+
+     The blocks are bounded by how many items they have, not by a constant.
+     They used to stop at six and five rows whatever the terminal offered, so a
+     44-row window drew 22 rows of frame and left its own footer sitting in the
+     middle of the screen with the backlog cut off above it. *)
+  let fixed_rows = 10 + (if has_cluster then 1 else 0) in
+  let available = max 0 (terminal_rows - fixed_rows) in
+  let desired_panel_rows = max 1 (max attention_count event_count) in
+  let desired_task_error_rows = if has_task_error then 1 else 0 in
+  let desired_task_rows =
+    if task_count <= 0 then if has_task_error then 0 else 1 else task_count
+  in
+  let desired_task_block_rows =
+    desired_task_error_rows + desired_task_rows
+  in
+  (* The task block is held back before the panel is measured: what it wants,
+     but never more than half the viewport. The panel then takes what is left.
+
+     The panel used to stop at six rows whatever the terminal offered, which
+     wasted a tall window; removing that cap let it grow without bound, and on
+     a short viewport it starved the backlog -- eight events pushed the fifth
+     task off a 23-row screen. Reserving by what the tasks want rather than by
+     a fixed fraction keeps all three cases: a tall terminal gives both blocks
+     everything they ask for and turns the rest into filler, a 23-row one still
+     shows five tasks however many events arrive, and a viewport with three
+     spare rows still spends two of them on attention, which is the alert
+     surface and wins when almost nothing fits. *)
+  (* The panel keeps its six-row ceiling. #29696 removed it so a tall window
+     would not waste rows, but the rows it wasted were the frame's, not the
+     panel's -- the filler below fixes that -- and letting the panel grow
+     changed how a contended viewport is shared, which cost the backlog rows
+     the Overview scenarios pin. Growth here bought nothing the filler does not
+     already give and broke what the cap was holding. *)
+  let desired_panel_rows = min overview_panel_row_cap desired_panel_rows in
+  let reserved_task_rows = min desired_task_block_rows 1 in
+  let attention_rows =
+    min desired_panel_rows (max 0 (available - reserved_task_rows))
+  in
+  let task_block_rows =
+    min desired_task_block_rows (max 0 (available - attention_rows))
+  in
+  let task_error_rows = min desired_task_error_rows task_block_rows in
+  let task_rows =
+    min desired_task_rows (max 0 (task_block_rows - task_error_rows))
+  in
+  let filler_rows =
+    max 0 (available - attention_rows - task_error_rows - task_rows)
+  in
+  { attention_rows; task_error_rows; task_rows; filler_rows }
+
+type board_read_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
+  (* Eight rows are invariant chrome. A visible Comments section adds its
+     divider and heading; keep one body row when the post has body text, then
+     give comments their existing five-row cap. *)
+  let comment_count = max 0 comment_count in
+  let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
+  let available = max 0 (terminal_rows - 8 - comment_chrome_rows) in
+  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+  let comment_rows =
+    min (min 5 comment_count) (max 0 (available - minimum_body_rows))
+  in
+  let body_rows = max 0 (available - comment_rows) in
+  { body_rows; comment_rows }
+
+type board_read_scroll = {
+  normalized_scroll : int;
+  body_offset : int;
+  comment_offset : int;
+}
+
+let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
+    ~comment_rows scroll =
+  let body_line_count = max 0 body_line_count in
+  let body_rows = max 0 body_rows in
+  let comment_count = max 0 comment_count in
+  let comment_rows = max 0 comment_rows in
+  let maximum_body_offset = max 0 (body_line_count - body_rows) in
+  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
+  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
+  let normalized_scroll = max 0 (min scroll maximum_scroll) in
+  let body_offset = min normalized_scroll maximum_body_offset in
+  let comment_offset =
+    min maximum_comment_offset (normalized_scroll - body_offset)
+  in
+  { normalized_scroll; body_offset; comment_offset }
+
+(* Keeper roster columns.
+
+   Cell widths, not text. Every width here is a plain-text budget the renderer
+   fits its cells to, so a long keeper name or model id cannot push the columns
+   to its right out of the frame.
+
+   Columns drop from the right as the terminal narrows, and the two that never
+   drop are what the surface exists to answer: which keeper, and what state it
+   is in. Above the minimum, slack goes to the columns that hold identifiers
+   worth reading whole -- the keeper's name first, then the runtime it is on --
+   before it goes to the task id, which is short by construction. *)
+
+let keeper_marker_width = 3
+let keeper_status_width = 10
+let keeper_flags_width = 3
+let keeper_turns_width = 6
+let keeper_minimum_name_width = 16
+let keeper_maximum_name_width = 32
+let keeper_minimum_runtime_width = 20
+let keeper_maximum_runtime_width = 34
+let keeper_minimum_task_width = 10
+let keeper_flags_minimum_inner_width = 96
+let keeper_runtime_minimum_inner_width = 118
+
+type keeper_columns = {
+  kcol_show_flags : bool;
+  kcol_show_runtime : bool;
+  kcol_name : int;
+  kcol_runtime : int;
+  kcol_task : int;
+}
+
+let keeper_columns_used_width columns =
+  keeper_marker_width + keeper_status_width + 1 + columns.kcol_name
+  + (if columns.kcol_show_flags then 1 + keeper_flags_width else 0)
+  + 1 + keeper_turns_width
+  + (if columns.kcol_show_runtime then 1 + columns.kcol_runtime else 0)
+  + 1 + columns.kcol_task
+
+let allocate_keeper_columns ~inner_width =
+  let inner_width = max 0 inner_width in
+  let show_flags = inner_width >= keeper_flags_minimum_inner_width in
+  let show_runtime = inner_width >= keeper_runtime_minimum_inner_width in
+  let base =
+    { kcol_show_flags = show_flags
+    ; kcol_show_runtime = show_runtime
+    ; kcol_name = keeper_minimum_name_width
+    ; kcol_runtime = (if show_runtime then keeper_minimum_runtime_width else 0)
+    ; kcol_task = keeper_minimum_task_width
+    }
+  in
+  let slack = inner_width - keeper_columns_used_width base in
+  if slack <= 0 then base
+  else
+    let take budget available = (min budget available, available - budget) in
+    let name_growth, slack =
+      take
+        (min (keeper_maximum_name_width - keeper_minimum_name_width) slack)
+        slack
+    in
+    let runtime_growth, slack =
+      if show_runtime then
+        take
+          (min (keeper_maximum_runtime_width - keeper_minimum_runtime_width)
+             slack)
+          slack
+      else (0, slack)
+    in
+    { base with
+      kcol_name = base.kcol_name + name_growth
+    ; kcol_runtime = base.kcol_runtime + runtime_growth
+    ; kcol_task = base.kcol_task + slack
+    }
+
+module Terminal_size_cache = struct
+  type t = {
+    fallback : int * int;
+    mutable cached : (int * int) option;
+  }
+
+  (* Box rows require two borders and one space on each side. Clamping a
+     transient tiny resize keeps every renderer total without inventing
+     surface-specific fallbacks. *)
+  let normalize (rows, cols) = max 1 rows, max 4 cols
+
+  let valid (rows, cols) = rows > 0 && cols > 0
+
+  let create ~fallback =
+    if not (valid fallback) then invalid_arg "terminal fallback must be positive";
+    { fallback = normalize fallback; cached = None }
+
+  let invalidate cache = cache.cached <- None
+
+  let get cache ~probe =
+    match cache.cached with
+    | Some size -> size
+    | None ->
+        let size =
+          match probe () with
+          | Some size when valid size -> normalize size
+          | Some _ | None -> cache.fallback
+        in
+        cache.cached <- Some size;
+        size
+end

@@ -23,6 +23,25 @@
 let wire_api_error_timeout = "api_error_timeout"
 let wire_api_error_network = "api_error_network"
 
+(* The [provider_error_*] family. Producer and classifier used to spell these
+   at fifteen call sites across three modules with nothing tying them
+   together, so a renamed code changed what the classifier saw without
+   changing what it matched (#26584). Only the codes both sides name are here;
+   the producer-only ones reach the classifier through
+   [wire_provider_error_prefix] and do not drift individually.
+
+   The frozen copies in test_keeper_terminal_reason_typed are deliberate: they
+   are the pre-typing reference the typed classifier is checked against, so
+   they must stay independent of these constants. *)
+let wire_provider_error_prefix = "provider_error_"
+let wire_provider_error_auth = "provider_error_auth"
+let wire_provider_error_authorization = "provider_error_authorization"
+let wire_provider_error_invalid_config_prefix = "provider_error_invalid_config:"
+let wire_provider_error_timeout = "provider_error_timeout"
+let wire_provider_error_timeout_prefix = "provider_error_timeout:"
+let wire_provider_error_network_timeout = "provider_error_network:timeout"
+let wire_provider_error_network_timeout_prefix = "provider_error_network:timeout:"
+
 type t =
   | Runtime_exhausted of string
   | Capacity_backpressure of string
@@ -35,13 +54,13 @@ type t =
   | Pre_dispatch_success of string
   | Unknown of string
 
-let is_config_or_auth_wire = function
-  | "config_error"
-  | "api_error_auth"
-  | "api_error_authorization"
-  | "provider_error_auth"
-  | "provider_error_authorization" -> true
-  | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
+let is_config_or_auth_wire wire =
+  match wire with
+  | "config_error" | "api_error_auth" | "api_error_authorization" -> true
+  | _ ->
+    String.equal wire wire_provider_error_auth
+    || String.equal wire wire_provider_error_authorization
+    || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
 ;;
 
 (* Priority-ranked partition. The bucket order replicates the [if/else]
@@ -66,7 +85,7 @@ let of_wire wire =
   else if
     String.starts_with ~prefix:"api_error_" wire
     || String.equal wire "provider_error"
-    || String.starts_with ~prefix:"provider_error_" wire
+    || String.starts_with ~prefix:wire_provider_error_prefix wire
   then Provider_runtime_failure wire
   else if
     String.equal wire Keeper_internal_error.incomplete_tool_transcript_kind
@@ -115,10 +134,10 @@ let is_transient_provider_runtime_failure = function
   | Provider_runtime_failure wire ->
     String.equal wire wire_api_error_timeout
     || String.equal wire wire_api_error_network
-    || String.equal wire "provider_error_timeout"
-    || String.starts_with ~prefix:"provider_error_timeout:" wire
-    || String.equal wire "provider_error_network:timeout"
-    || String.starts_with ~prefix:"provider_error_network:timeout:" wire
+    || String.equal wire wire_provider_error_timeout
+    || String.starts_with ~prefix:wire_provider_error_timeout_prefix wire
+    || String.equal wire wire_provider_error_network_timeout
+    || String.starts_with ~prefix:wire_provider_error_network_timeout_prefix wire
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Config_or_auth _

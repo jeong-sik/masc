@@ -363,59 +363,6 @@ let test_contains_substring_special_chars () =
   check bool "special chars" true (String_util.contains_substring "a<b>c" "<b>")
 
 (* ============================================================
-   sanitize_html Tests
-   ============================================================ *)
-
-let test_sanitize_html_no_special () =
-  check string "no change" "hello world" (Workspace_utils.sanitize_html "hello world")
-
-let test_sanitize_html_less_than () =
-  check string "escape <" "&lt;script&gt;" (Workspace_utils.sanitize_html "<script>")
-
-let test_sanitize_html_greater_than () =
-  check string "escape >" "a &gt; b" (Workspace_utils.sanitize_html "a > b")
-
-let test_sanitize_html_ampersand () =
-  check string "escape &" "a &amp; b" (Workspace_utils.sanitize_html "a & b")
-
-let test_sanitize_html_double_quote () =
-  check string "escape \"" "say &quot;hi&quot;" (Workspace_utils.sanitize_html "say \"hi\"")
-
-let test_sanitize_html_single_quote () =
-  check string "escape '" "it&#x27;s" (Workspace_utils.sanitize_html "it's")
-
-let test_sanitize_html_all_special () =
-  let input = "<script>alert('xss' & \"evil\")</script>" in
-  let expected = "&lt;script&gt;alert(&#x27;xss&#x27; &amp; &quot;evil&quot;)&lt;/script&gt;" in
-  check string "all escaped" expected (Workspace_utils.sanitize_html input)
-
-let test_sanitize_html_empty () =
-  check string "empty" "" (Workspace_utils.sanitize_html "")
-
-let test_sanitize_html_unicode () =
-  check string "unicode preserved" "안녕하세요" (Workspace_utils.sanitize_html "안녕하세요")
-
-(* ============================================================
-   sanitize_agent_name Tests
-   ============================================================ *)
-
-let test_sanitize_agent_name_normal () =
-  check string "normal name" "claude" (Workspace_utils.sanitize_agent_name "claude")
-
-let test_sanitize_agent_name_xss () =
-  check string "xss attempt" "&lt;script&gt;" (Workspace_utils.sanitize_agent_name "<script>")
-
-(* ============================================================
-   sanitize_message Tests
-   ============================================================ *)
-
-let test_sanitize_message_normal () =
-  check string "normal message" "Hello world" (Workspace_utils.sanitize_message "Hello world")
-
-let test_sanitize_message_html () =
-  check string "html stripped" "&lt;b&gt;bold&lt;/b&gt;" (Workspace_utils.sanitize_message "<b>bold</b>")
-
-(* ============================================================
    safe_filename Tests
    ============================================================ *)
 
@@ -782,23 +729,10 @@ let () =
       test_case "special chars" `Quick test_contains_substring_special_chars;
     ];
     "sanitize_html", [
-      test_case "no special" `Quick test_sanitize_html_no_special;
-      test_case "less than" `Quick test_sanitize_html_less_than;
-      test_case "greater than" `Quick test_sanitize_html_greater_than;
-      test_case "ampersand" `Quick test_sanitize_html_ampersand;
-      test_case "double quote" `Quick test_sanitize_html_double_quote;
-      test_case "single quote" `Quick test_sanitize_html_single_quote;
-      test_case "all special" `Quick test_sanitize_html_all_special;
-      test_case "empty" `Quick test_sanitize_html_empty;
-      test_case "unicode" `Quick test_sanitize_html_unicode;
     ];
     "sanitize_agent_name", [
-      test_case "normal" `Quick test_sanitize_agent_name_normal;
-      test_case "xss" `Quick test_sanitize_agent_name_xss;
     ];
     "sanitize_message", [
-      test_case "normal" `Quick test_sanitize_message_normal;
-      test_case "html" `Quick test_sanitize_message_html;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

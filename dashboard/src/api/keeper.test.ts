@@ -19,7 +19,6 @@ import {
   bulkKeeperDirective,
   clearKeeper,
   deleteKeeperHistorySnapshots,
-  fetchKeeperEventQueuePending,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperCheckpoints,
@@ -28,7 +27,7 @@ import {
   operateKeeperEventQueue,
   pauseKeeper,
   parseKeeperRuntimeTrace,
-  parseKeeperEventQueuePendingSnapshot,
+  parseKeeperEventQueueSourceAddress,
   resumeKeeper,
   resetKeeper,
   shutdownKeeper,
@@ -95,99 +94,36 @@ describe('keeper API module split compatibility', () => {
 })
 
 describe('Keeper Event Queue API', () => {
-  it('combines metadata-only event refs across one stable Admin inventory revision', async () => {
-    const item = (queueIndex: number, postId: string) => ({
-      queue_index: queueIndex,
-      post_id: postId,
-      source_ref: (queueIndex === 0 ? 'a' : 'b').repeat(64),
-      source_incarnation: String(queueIndex + 17),
+  it('reads the exact-entry address a waiting-inventory row carries', () => {
+    const address = parseKeeperEventQueueSourceAddress({
+      queue_index: 0,
+      post_id: 'workspace-message:wmsg-1',
+      source_ref: 'a'.repeat(64),
+      source_incarnation: '17',
       urgency: 'normal',
       arrived_at_unix: 42,
-      payload_kind: 'bootstrap',
+      payload_kind: 'workspace_message',
     })
-    const envelope = (
-      queueIndex: number,
-      postId: string,
-      nextAfter: string | null,
-    ) => ({
-      schema: 'keeper_event_queue.pending.v2',
-      ok: true,
-      keeper_name: 'sangsu',
-      revision: '31',
-      total_pending: 2,
-      next_after: nextAfter,
-      pending: [item(queueIndex, postId)],
-    })
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(0, 'post-1', '1')), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(1, 'post-2', null)), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperEventQueuePending('sangsu')
-
-    expect(result).toEqual(parseKeeperEventQueuePendingSnapshot({
-      schema: 'keeper_event_queue.pending.v2',
-      ok: true,
-      keeper_name: 'sangsu',
-      revision: '31',
-      total_pending: 2,
-      next_after: null,
-      pending: [
-        item(0, 'post-1'),
-        item(1, 'post-2'),
-      ],
-    }))
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      '/api/v1/keepers/sangsu/events/pending?limit=100',
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/v1/keepers/sangsu/events/pending?limit=100&after=1',
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
+    expect(address).toEqual({ sourceRef: 'a'.repeat(64), sourceIncarnation: '17' })
   })
 
-  it('rejects event pagination revision drift without a fixed retry loop', async () => {
-    const envelope = (revision: string, queueIndex: number, nextAfter: string | null) => ({
-      schema: 'keeper_event_queue.pending.v2',
-      ok: true,
-      keeper_name: 'sangsu',
-      revision,
-      total_pending: 2,
-      next_after: nextAfter,
-      pending: [{
-        queue_index: queueIndex,
-        post_id: `post-${revision}`,
-        source_ref: 'c'.repeat(64),
-        source_incarnation: revision,
-        urgency: 'normal',
-        arrived_at_unix: 42,
-        payload_kind: 'bootstrap',
-      }],
-    })
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('31', 0, '1')), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('32', 1, null)), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(fetchKeeperEventQueuePending('sangsu')).rejects.toThrow(
-      'fetchKeeperEventQueuePending: queue changed during pagination',
-    )
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+  // The address is the operator route's CAS key; a row that lacks either half,
+  // or carries it in another shape, must not produce a mutation request.
+  it('rejects a row detail without a usable address', () => {
+    expect(parseKeeperEventQueueSourceAddress(null)).toBeNull()
+    expect(parseKeeperEventQueueSourceAddress({ queue_index: 0 })).toBeNull()
+    expect(parseKeeperEventQueueSourceAddress({
+      source_ref: 'A'.repeat(64),
+      source_incarnation: '17',
+    })).toBeNull()
+    expect(parseKeeperEventQueueSourceAddress({
+      source_ref: 'a'.repeat(63),
+      source_incarnation: '17',
+    })).toBeNull()
+    expect(parseKeeperEventQueueSourceAddress({
+      source_ref: 'a'.repeat(64),
+      source_incarnation: '-1',
+    })).toBeNull()
   })
 
   it('sends a metadata-only event ref with its durable revision', async () => {
@@ -1196,7 +1132,7 @@ describe('keeper lifecycle', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('janitor', 7, {
+    const result = await resumeKeeper('janitor', {
       operatorOperationId: 'dashboard-resume-test-1',
     })
 
@@ -1205,7 +1141,6 @@ describe('keeper lifecycle', () => {
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({
       action: 'resume',
-      owner_nonce: 7,
       operator_operation_id: 'dashboard-resume-test-1',
     })
   })
@@ -1232,7 +1167,7 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('offline-janitor', 7, {
+    const result = await resumeKeeper('offline-janitor', {
       operatorOperationId: 'dashboard-resume-offline-1',
     })
 
@@ -1254,8 +1189,8 @@ describe('keeper lifecycle', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(false)
-    expect((await resumeKeeper('janitor', 7)).ok).toBe(true)
+    expect((await resumeKeeper('janitor')).ok).toBe(false)
+    expect((await resumeKeeper('janitor')).ok).toBe(true)
 
     const firstInit = fetchMock.mock.calls[0]![1] as RequestInit
     const secondInit = fetchMock.mock.calls[1]![1] as RequestInit
@@ -1263,17 +1198,6 @@ describe('keeper lifecycle', () => {
     const second = JSON.parse(String(secondInit.body))
     expect(first.operator_operation_id).toBe('dashboard-resume-stable-resume-uuid')
     expect(second.operator_operation_id).toBe(first.operator_operation_id)
-  })
-
-  it('refuses resume when the current owner generation is unavailable', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await resumeKeeper('janitor', undefined)
-
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('current owner generation is unavailable')
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends POST with action=wakeup via directive endpoint', async () => {
@@ -1322,98 +1246,6 @@ describe('keeper lifecycle', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Keeper not found')
-  })
-})
-
-describe('parseKeeperEventQueuePendingSnapshot cancellation fields', () => {
-  const snapshot = (extra: Record<string, unknown>) => ({
-    schema: 'keeper_event_queue.pending.v2',
-    ok: true,
-    keeper_name: 'sangsu',
-    revision: '7',
-    total_pending: 1,
-    next_after: null,
-    pending: [{
-      queue_index: 0,
-      post_id: 'task-cancelled:task-161',
-      source_ref: 'a'.repeat(64),
-      source_incarnation: '7',
-      urgency: 'normal',
-      arrived_at_unix: 1785863467,
-      payload_kind: 'task_cancelled',
-      ...extra,
-    }],
-  })
-
-  // The operator row rendered only "wake reason task_cancelled". The backend
-  // sends the task, the canceller and the reason; the parser dropped all three.
-  it('carries task id, canceller and reason through', () => {
-    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
-      cancelled_task_id: 'task-161',
-      cancelled_by: 'keeper-rondo-agent',
-      cancelled_reason: 'BLOCKED: service absent from sandbox',
-    }))
-    const row = parsed.pending[0]
-    expect(row).toBeDefined()
-    expect(row?.cancelledTaskId).toBe('task-161')
-    expect(row?.cancelledBy).toBe('keeper-rondo-agent')
-    expect(row?.cancelledReason).toBe('BLOCKED: service absent from sandbox')
-  })
-
-  // An unexplained cancellation still has to be triageable, and an absent
-  // reason must stay absent rather than becoming an empty string.
-  it('keeps the row identifiable when no reason was given', () => {
-    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
-      cancelled_task_id: 'task-162',
-      cancelled_by: 'keeper-rondo-agent',
-    }))
-    const row = parsed.pending[0]
-    expect(row).toBeDefined()
-    expect(row?.cancelledTaskId).toBe('task-162')
-    expect(row?.cancelledBy).toBe('keeper-rondo-agent')
-    expect(row?.cancelledReason).toBeUndefined()
-  })
-})
-
-describe('parseKeeperEventQueuePendingSnapshot workspace message fields', () => {
-  const snapshot = (extra: Record<string, unknown>) => ({
-    schema: 'keeper_event_queue.pending.v2',
-    ok: true,
-    keeper_name: 'sangsu',
-    revision: '9',
-    total_pending: 1,
-    next_after: null,
-    pending: [{
-      queue_index: 0,
-      post_id: 'workspace-message:wmsg-1234567890abcdef',
-      source_ref: 'b'.repeat(64),
-      source_incarnation: '9',
-      urgency: 'immediate',
-      arrived_at_unix: 1786822060,
-      payload_kind: 'workspace_message',
-      ...extra,
-    }],
-  })
-
-  // Without these the operator row reads "wake reason workspace_message" and
-  // nothing else: no sender, and no way back to the transcript line.
-  it('carries the sender and the request id through', () => {
-    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
-      message_request_id: 'wmsg-1234567890abcdef',
-      message_from: 'keeper-rondo-agent',
-    }))
-    const row = parsed.pending[0]
-    expect(row).toBeDefined()
-    expect(row?.messageRequestId).toBe('wmsg-1234567890abcdef')
-    expect(row?.messageFrom).toBe('keeper-rondo-agent')
-  })
-
-  it('leaves both absent on a backend that predates the fields', () => {
-    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({}))
-    const row = parsed.pending[0]
-    expect(row).toBeDefined()
-    expect(row?.messageRequestId).toBeUndefined()
-    expect(row?.messageFrom).toBeUndefined()
   })
 })
 

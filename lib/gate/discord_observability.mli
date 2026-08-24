@@ -34,9 +34,6 @@ type reconnect_outcome =
   | Reconnect_failed
 
 val gateway_event_label : gateway_event -> string
-val reconnect_method_label : reconnect_method -> string
-val reconnect_outcome_label : reconnect_outcome -> string
-
 val record_gateway_event : route:gateway_route -> gateway_event -> unit
 val record_gateway_close : code:int -> unit
 val record_gateway_reconnect_scheduled : unit -> unit

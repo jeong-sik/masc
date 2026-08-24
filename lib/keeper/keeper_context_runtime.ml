@@ -78,7 +78,6 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
@@ -247,7 +246,6 @@ let dispatch_post_turn_lifecycle_events
         ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
-             generation = lifecycle.updated_meta.runtime.nonce;
              new_trace_id =
                Keeper_id.Trace_id.to_string
                  lifecycle.updated_meta.runtime.trace_id;
@@ -270,31 +268,6 @@ let dispatch_post_turn_lifecycle_events
 (* ================================================================ *)
 
 let generate_trace_id = Keeper_identity.generate_trace_id
-
-let keeper_board_write_tool_names =
-  [ "masc_board_post"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_curation_submit"
-  ]
-
-let canonical_tool_name name =
-  Keeper_tool_descriptor_resolution.canonical_tool_name name
-;;
-
-let keeper_tool_name_matches tool name =
-  String.equal (canonical_tool_name name) tool
-
-let keeper_action_kind_of_tool_names tool_names =
-  [ "masc_board_post", "post"
-  ; "masc_board_comment", "comment"
-  ; "masc_board_vote", "vote"
-  ; "masc_board_curation_submit", "curation"
-  ]
-  |> List.find_map (fun (tool, action_kind) ->
-    if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind
-    else None)
-  |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* Provider selection is runtime.toml SSOT; the former ~provider_filter

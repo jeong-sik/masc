@@ -7,11 +7,10 @@
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
       [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  ["status"] is not an accepted field:
-      a row carrying it fails to decode, and {!read_state} then applies
-      the corrupt-store policy (recovery mirror if usable, otherwise an
-      empty state plus a warning).  A store written before the field was
-      dropped must be reset rather than loaded.
+      lifecycle representation.  The goal schema is closed: a row
+      carrying any other field fails to decode, and {!read_state} then
+      applies the corrupt-store policy (recovery mirror if usable,
+      otherwise an empty state plus a warning).
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -45,9 +44,6 @@ type goal = {
   phase : Goal_phase.t;
   last_review_note : string option;
   last_review_at : string option;
-  (** RFC-0362: the keeper responsible for turning this Goal into Tasks.
-      [None] is the default and is legitimate. *)
-  owner : string option;
   created_at : string;
   updated_at : string;
 }
@@ -71,7 +67,6 @@ type state = {
 
 type rollup = {
   active_count : int;
-  paused_count : int;
   verifying_count : int;
   done_count : int;
   dropped_count : int;

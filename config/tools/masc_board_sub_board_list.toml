@@ -1,0 +1,4 @@
+name = "masc_board_sub_board_list"
+description = """
+List all SubBoards with their slug, name, owner, member count, access policy, \
+and derived post count. Use to discover available board spaces before posting."""

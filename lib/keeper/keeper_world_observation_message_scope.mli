@@ -18,8 +18,6 @@ val is_self_author
     with {!Keeper_identity.Keeper_id.equal} — the single source of truth
     for "is this author one of us?". *)
 
-val is_keeper_authored_message : string -> bool
-
 type pending_kind =
   | Mention
   | Scope
@@ -115,7 +113,8 @@ val pending_scope_of_messages
 
 (** [fleet_messages_of_messages ~limit ~targets messages] returns the newest
     [limit] keeper broadcasts projected into this transcript, in arrival order.
-    A row qualifies when it is a user line on the [Surface_ref.Agent] surface
+    A row qualifies when it is a user line on the [Surface_ref.Broadcast]
+    (fleet fanout) or [Surface_ref.Agent] (direct keeper delivery) surface
     that the lane classifier places in no reactive lane — the lanes take its
     [Some], this layer takes its [None], so the same row cannot reach both.
     [limit <= 0] returns

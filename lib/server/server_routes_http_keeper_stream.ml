@@ -243,6 +243,76 @@ let turn_instructions_for_request payload =
 
 let direct_message_of_request payload = payload.direct_message
 
+(* How long a held tool call waits for an operator.
+
+   Long enough to read the question and decide -- an operator glancing away
+   should not come back to a denied call. Short enough that a turn does not
+   sit on a provider connection all afternoon when the reader has walked
+   away: the chat stream's own silence bound is the same order, and a wait
+   outliving it would hold a turn whose reader is already gone. *)
+let keeper_tool_approval_timeout_sec = 180.0
+
+(* Answer a held tool call.
+
+   The reply says whether a wait was actually released. A late answer -- one
+   whose call already timed out, or was never held -- reports [settled: false]
+   rather than reading as success, so an operator is not told a call was
+   approved when nothing was listening for it. *)
+let handle_keeper_tool_approval state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          let field name =
+            match List.assoc_opt name fields with
+            | Some (`String value) -> Ok (String.trim value)
+            | Some _ | None ->
+              Error (Printf.sprintf "%s (string) is required" name)
+          in
+          let ( let* ) = Result.bind in
+          let* keeper_name = field "name" in
+          let* tool_call_id = field "tool_call_id" in
+          let* decision_raw = field "decision" in
+          (match Keeper_tool_approval_registry.decision_of_string decision_raw with
+           | Some decision -> Ok (keeper_name, tool_call_id, decision)
+           | None ->
+             Error
+               (Printf.sprintf "decision must be approve or deny, got %S"
+                  decision_raw))
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match parsed with
+    | Error msg ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json msg)
+    | Ok (keeper_name, tool_call_id, decision) ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        let settled =
+          Keeper_tool_approval_registry.settle
+            (Keeper_tool_approval_registry.shared ())
+            ~keeper_name ~tool_call_id decision
+        in
+        Log.Keeper.info
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          keeper_name tool_call_id
+          (Keeper_tool_approval_registry.decision_to_string decision)
+          settled;
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+             [ ("settled", `Bool settled)
+             ; ( "decision"
+               , `String (Keeper_tool_approval_registry.decision_to_string decision) )
+             ])))
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -679,6 +749,7 @@ let execute_keeper_stream_tool_streaming
       ?auth_token:_
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ~admission_token
       state
       ~agent_name
@@ -709,6 +780,7 @@ let execute_keeper_stream_tool_streaming
           ~on_text_delta
           ?on_event
           ?on_tool_result_ready
+          ?approval_gate
           keeper_ctx
           ~continuation_channel
           ~message
@@ -881,8 +953,15 @@ let canonical_reply_payload_of_body ~redact_text body =
     | None -> Error Invalid_turn_ref
   in
   let* external_effect_target =
-    (* Absent on legacy payloads that predate the field; present means the
-       producer serialized a typed delivery target and it must decode. *)
+    (* The outcome and the surface-post receipt are decided from the same
+       [terminal_effect_state] (keeper_agent_run.ml), so the producer writes
+       the target exactly when the outcome is External_effect_completed. The
+       decoder holds both directions: [Some] iff that outcome, so a [Some]
+       here is the proof the External_effect_completed event needs. *)
+    let completed_external_effect =
+      Keeper_turn_outcome.equal turn_outcome
+        Keeper_turn_outcome.External_effect_completed
+    in
     match
       List.filter_map
         (fun (key, value) ->
@@ -891,11 +970,24 @@ let canonical_reply_payload_of_body ~redact_text body =
            else None)
         fields
     with
-    | [] -> Ok None
+    | [] ->
+      if completed_external_effect
+      then
+        Error
+          (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
+      else Ok None
     | [ value ] ->
-      (match Keeper_surface_post.delivery_target_of_yojson value with
-       | Ok target -> Ok (Some target)
-       | Error detail -> Error (Invalid_external_effect_target detail))
+      if not completed_external_effect
+      then
+        Error
+          (Invalid_external_effect_target
+             (Printf.sprintf
+                "present on turn_outcome %s"
+                (Keeper_turn_outcome.to_label turn_outcome)))
+      else (
+        match Keeper_surface_post.delivery_target_of_yojson value with
+        | Ok target -> Ok (Some target)
+        | Error detail -> Error (Invalid_external_effect_target detail))
     | _ ->
       Error
         (Duplicate_payload_field Keeper_surface_post.delivery_target_wire_key)
@@ -935,7 +1027,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
        ^ Keeper_turn_outcome.decode_error_to_string error)
   | Ok turn_outcome ->
     (match
-       turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks
+       turn_outcome, String_util.trim_nonempty visible_reply, has_visible_blocks
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
      | Keeper_turn_outcome.External_effect_completed, _, _ -> None
@@ -1095,7 +1187,7 @@ type translated_keeper_stream_event =
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.empty_state
+let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
 let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* [user_row_origin] and [submission] are required labelled arguments. Every
@@ -1347,6 +1439,18 @@ let process_single_turn ~user_row_origin ~submission
     push_worker_event
       (Stream_chat_event (Keeper_chat_events.Tool_result_ready { tool_call_id }))
   in
+  (* A gate only for turns an operator started here: this request is open,
+     someone is reading it, and the answer has somewhere to come back to. An
+     autonomous cycle gets none -- nobody is watching it, so every call it
+     made would wait out the timeout and then be denied. *)
+  let approval_gate =
+    Keeper_tool_approval_gate.create
+      ~registry:(Keeper_tool_approval_registry.shared ())
+      ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+      ~clock
+      ~keeper_name:payload.name
+      ~timeout_sec:keeper_tool_approval_timeout_sec
+  in
   let accumulated_media_blocks () =
     match
       Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
@@ -1435,6 +1539,7 @@ let process_single_turn ~user_row_origin ~submission
                 ?auth_token
                 state ~agent_name ~message:direct_message ~on_event
                 ~on_tool_result_ready
+                ~approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
                 ~admission_token
             in
@@ -1546,7 +1651,7 @@ let process_single_turn ~user_row_origin ~submission
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
-                   match turn_outcome, String_util.trim_to_option visible_reply with
+                   match turn_outcome, String_util.trim_nonempty visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (* [persisted_reply_blocks] always returns [Some _] for
                           [Continuation_checkpoint] (a typed status block), so
@@ -1665,7 +1770,7 @@ let process_single_turn ~user_row_origin ~submission
                 let kind =
                   match dispatch_failure_class with
                   | Tool_result.Operator_cancelled -> Turn_cancelled
-                  | Tool_result.Transient_error
+                  | Tool_result.Dependency_unavailable
                   | Tool_result.Policy_rejection
                   | Tool_result.Runtime_failure
                   | Tool_result.Workflow_rejection -> Turn_failed
@@ -1947,13 +2052,11 @@ let process_single_turn ~user_row_origin ~submission
                ; turn_outcome
                ; turn_ref = canonical_reply.turn_ref
                });
-          if
-            Keeper_turn_outcome.equal turn_outcome
-              Keeper_turn_outcome.External_effect_completed
-          then
-            Keeper_chat_events.publish events
-              (External_effect_completed
-                 { target = canonical_reply.external_effect_target });
+          (match canonical_reply.external_effect_target with
+           | Some target ->
+             Keeper_chat_events.publish events
+               (External_effect_completed { target })
+           | None -> ());
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_pending
@@ -1993,7 +2096,7 @@ let process_single_turn ~user_row_origin ~submission
               (Event_error { message });
             Some (Failed { kind = Stream_projection_failed; detail = message }))
   in
-  match consume_worker_events empty_keeper_stream_bridge_state with
+  match consume_worker_events (empty_keeper_stream_bridge_state ()) with
   | outcome ->
       signal_stream_projection_done ();
       outcome

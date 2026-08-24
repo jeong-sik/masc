@@ -91,10 +91,6 @@ let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_me
        else Some Digestif.SHA256.(digest_string text |> to_hex));
   }
 
-let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
-  prompt_segment_metrics_of_sanitized_text
-    (Inference_utils.sanitize_text_utf8 text)
-
 let build_prompt_metrics_with_sanitizer ~sanitize
     ~(system_prompt : string) ~(dynamic_context : string)
     ~(user_message : string) : prompt_metrics =

@@ -19,7 +19,6 @@ let publish_pending ~base_path name pending =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -27,11 +26,9 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -44,7 +41,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -195,8 +191,7 @@ let authorize_durable_intake_owner ~base_path ~keeper_name =
          (match current_meta with
           | None -> true
           | Some meta ->
-            Int.equal meta.runtime.nonce operation.generation
-            && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
+            Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
        | Keeper_shutdown_types.Retain_operator_pause -> false)
     | Keeper_shutdown_types.Finalized { meta_removed = false; _ }
     | Keeper_shutdown_types.Prepared
@@ -354,8 +349,6 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _ ->
@@ -461,10 +454,6 @@ type transfer_target_error =
       }
   | Transfer_target_metadata_read_failed of string
   | Transfer_target_metadata_absent
-  | Transfer_target_generation_changed of
-      { expected : int
-      ; actual : int
-      }
   | Transfer_target_trace_changed
 
 let transfer_target_error_to_string = function
@@ -476,11 +465,6 @@ let transfer_target_error_to_string = function
   | Transfer_target_metadata_read_failed detail ->
     "target Keeper metadata read failed: " ^ detail
   | Transfer_target_metadata_absent -> "target Keeper metadata is absent"
-  | Transfer_target_generation_changed { expected; actual } ->
-    Printf.sprintf
-      "target Keeper generation changed: expected=%d actual=%d"
-      expected
-      actual
   | Transfer_target_trace_changed -> "target Keeper trace identity changed"
 ;;
 
@@ -538,11 +522,6 @@ let project_accepted_transfer_durable_result
       match Keeper_meta_store.read_meta config name with
     | Error detail -> Error (Transfer_target_metadata_read_failed detail)
     | Ok None -> Error Transfer_target_metadata_absent
-    | Ok (Some meta)
-      when not (Int.equal meta.runtime.nonce transfer.target_generation) ->
-      Error
-        (Transfer_target_generation_changed
-           { expected = transfer.target_generation; actual = meta.runtime.nonce })
     | Ok (Some meta)
       when not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id) ->
       Error Transfer_target_trace_changed
@@ -715,14 +694,12 @@ let ack_pending_result ~base_path name ~selection =
 let cancel_pending_accepted_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
@@ -733,7 +710,6 @@ let transfer_pending_accepted_result
       ?intake_token
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
   =
@@ -741,7 +717,6 @@ let transfer_pending_accepted_result
     Keeper_event_queue_persistence.transfer_pending_accepted_result
       ~base_path
       ~keeper_name:name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       ~after_commit:(publish_pending ~base_path name)
@@ -775,14 +750,12 @@ let transfer_pending_accepted_result
 let ack_pending_source_terminal_result
       ~base_path
       name
-      ~current_owner_nonce
       ~acked_at
       ~source_terminal
   =
   Keeper_event_queue_persistence.ack_pending_source_terminal_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~acked_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
@@ -793,7 +766,6 @@ let ack_pending_source_terminal_result
 let terminalize_pending_turn_attempt_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
@@ -801,7 +773,6 @@ let terminalize_pending_turn_attempt_result
   Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~detail
@@ -813,14 +784,12 @@ let terminalize_pending_turn_attempt_result
 let terminalize_pending_turn_completed_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~selection
   =
   Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~after_commit:(publish_pending ~base_path name)

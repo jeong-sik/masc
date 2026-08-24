@@ -111,7 +111,7 @@ let reconcile_agent_current_task_with_assignments
   if path_exists config agent_file
   then
     with_file_lock config agent_file (fun () ->
-      match read_agent_with_repair config agent_file with
+      match read_agent config agent_file with
       | Ok agent ->
         reconcile_agent_current_task_record
           config
@@ -134,38 +134,6 @@ let reconcile_agent_current_task_with_backlog
     ~touch_last_seen
     ~agent_name
     active_task_assignees
-;;
-
-let reconcile_all_agent_current_tasks_with_backlog
-      config
-      ?(touch_last_seen = true)
-      backlog
-  =
-  let agents_path = agents_dir config in
-  try
-    (* Backend-aware sweep: the bare [Sys.file_exists] + [Sys.readdir] pair
-       saw only the local mirror, so a Memory-backend workspace skipped
-       reconciliation for every agent (RFC-0371 B9). [list_dir] is total. *)
-    if path_exists config agents_path
-    then (
-      let active_task_assignees = active_task_assignees_by_task_id backlog in
-      list_dir config agents_path
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.iter (fun name ->
-        Workspace_query.safe_yield ();
-        let path = Filename.concat agents_path name in
-        with_file_lock config path (fun () ->
-          match read_agent_with_repair config path with
-          | Ok (agent : Masc_domain.agent) ->
-            reconcile_agent_current_task_record
-              config
-              ~touch_last_seen
-              ~agent_file:path
-              ~agent
-              active_task_assignees
-          | Error msg -> Log.Misc.error "agent state reconcile failed for %s: %s" name msg)))
-  with
-  | Sys_error msg -> Log.Misc.error "agent state reconcile scan failed: %s" msg
 ;;
 
 (** Claim next highest priority unclaimed task.

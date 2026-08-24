@@ -22,9 +22,9 @@ function getSurfaceContext(surface, keepers, selId) {
   const sel = keepers.find(k => k.id === selId);
   const MAP = {
     overview: { label: '운영 개요', route: '/overview', scene: '함대 전체 상태를 함께 보는 중',
-      fields: [{ k: '실행', v: `${run}/${keepers.length}` }, { k: '주의', v: String(att), tone: 'bad' }, { k: 'ctx', v: avg + '%', tone: 'volt' }, { k: 'trace', v: traces.toLocaleString() }] },
+      fields: [{ k: '실행', v: `${run}/${keepers.length}` }, { k: '주의', v: String(att), tone: 'bad' }, { k: '마지막 턴', v: avg + '%', tone: 'volt' }, { k: 'trace', v: traces.toLocaleString() }] },
     keepers: { label: 'Keeper 대화', route: '/keepers', scene: `${sel ? sel.kr : '선택한 keeper'}와 1:1 스레드`,
-      fields: sel ? [{ k: 'state', v: sel.phase }, { k: 'ctx', v: Math.round(sel.ctx * 100) + '%', tone: sel.ctx >= 0.85 ? 'warn' : 'volt' }, { k: 'ns', v: sel.ns }] : [] },
+      fields: sel ? [{ k: 'state', v: sel.phase }, { k: '마지막 턴', v: Math.round(sel.ctx * 100) + '%', tone: 'volt' }, { k: 'ns', v: sel.ns }] : [] },
     board: { label: '보드 · 전체 피드', route: '/board', scene: '네임스페이스 보드를 함께 보는 중',
       fields: [{ k: '포스트', v: '5' }, { k: '멘션', v: '3', tone: 'volt' }, { k: '모더', v: '1', tone: 'warn' }] },
     ide: { label: 'IDE · round.ml', route: '/ide', scene: 'fix/round-lock-reentry 브랜치를 함께 보는 중',
@@ -47,8 +47,8 @@ const DOCK_STARTERS = {
 /* ── contextual streamed reply ── */
 function buildReply(keeper, ctx) {
   if (ctx.route === '/overview') {
-    return { body: `지금 **운영 개요**를 같이 보고 있네요. 실행 중 keeper와 주의 큐를 훑었어요.\n\n가장 급한 건 \`drifter\` — 컨텍스트가 **오버플로우**라 재시작이 필요합니다. \`nick0cave\`도 91%라 곧 compact가 걸릴 거예요.\n\n제가 ${keeper.kr}로서 주의 4건을 우선순위대로 정리해볼까요?`,
-      sug: ['drifter 재시작 절차 보기', '주의 4건 한 번에 트리아지', 'nick0cave compact 미리 돌리기'] };
+    return { body: `지금 **운영 개요**를 같이 보고 있네요. 실행 중 keeper와 주의 큐를 훑었어요.\n\n가장 급한 건 \`drifter\` — 컨텍스트가 **오버플로우**라 재시작이 필요합니다. \`nick0cave\`는 마지막 턴에 window의 91%를 썼어요. 지금 얼마나 차 있는지는 관측되지 않아요.\n\n제가 ${keeper.kr}로서 주의 4건을 우선순위대로 정리해볼까요?`,
+      sug: ['drifter 재시작 절차 보기', '주의 4건 한 번에 트리아지', 'nick0cave 최근 턴 사용량 보기'] };
   }
   if (ctx.route === '/ide') {
     return { body: `\`round.ml\`의 lock 재진입 경로를 같이 보고 있어요. \`compact()\`가 라운드 락을 잡은 채 호출되는 **L93**이 의심됩니다.\n\nPR **#7741**은 테스트 84/84 통과지만 아직 리뷰 대기예요.`,
@@ -148,7 +148,7 @@ function DockMsg({ m, keeper, onPick }) {
         <div className={`dbubble ${isUser ? 'user' : ''}`}><Para text={m.text} /></div>
         {!isUser && m.sug && (
           <div className="dsug">
-            {m.sug.map((s, i) => <button key={i} onClick={() => onPick(s)}><span className="pre">{'›'}</span>{s}</button>)}
+            {m.sug.map((s, i) => <button key={i} onClick={() => onPick(s)}><span className="pre">{'\u203A'}</span>{s}</button>)}
           </div>
         )}
       </div>
@@ -209,8 +209,8 @@ function CopilotDock({ dock, ctx, docked }) {
       <div className={`dock-head ${docked ? '' : 'drag'}`} onMouseDown={docked ? undefined : drag}>
         <div className="dock-title"><span className="dock-spark">{SPARK}</span>Chat</div>
         <div className="spacer"></div>
-        <button className="dock-iconbtn" title={docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'} onMouseDown={e => e.stopPropagation()} onClick={() => dock.setMode(docked ? 'float' : 'dock')}>{docked ? '⧉' : '❐'}</button>
-        <button className="dock-iconbtn" title="닫기 (Esc)" onMouseDown={e => e.stopPropagation()} onClick={dock.close}>{'✕'}</button>
+        <button className="dock-iconbtn" title={docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'} onMouseDown={e => e.stopPropagation()} onClick={() => dock.setMode(docked ? 'float' : 'dock')}>{docked ? '\u29C9' : '\u2750'}</button>
+        <button className="dock-iconbtn" title="닫기 (Esc)" onMouseDown={e => e.stopPropagation()} onClick={dock.close}>{'\u2715'}</button>
       </div>
 
       <div className="dock-idrow">
@@ -218,7 +218,7 @@ function CopilotDock({ dock, ctx, docked }) {
           <button className="dock-picker-btn" onMouseDown={e => e.stopPropagation()} onClick={() => setPickOpen(o => !o)}>
             <SigilBadge k={keeper} size={20} beat={keeper.status === 'run'} />
             <span className="nm">{keeper.kr}</span>
-            <span className="cv">{'▾'}</span>
+            <span className="cv">{'\u25BE'}</span>
           </button>
           {pickOpen && (
             <div className="dock-menu" onMouseDown={e => e.stopPropagation()}>
@@ -251,12 +251,12 @@ function CopilotDock({ dock, ctx, docked }) {
       <div className="dock-thread" ref={threadRef}>
         {msgs.length === 0 && !streaming ? (
           <div className="dock-empty">
-            <div className="ico">{'◈'}</div>
+            <div className="ico">{'\u25C8'}</div>
             <div className="t">{ctx.label}</div>
             <div className="s">이 화면에 대해 {keeper.kr}에게 바로 물어보세요. 같은 맥락을 보고 답합니다.</div>
             <div className="dsug" style={{ width: '100%' }}>
               {(DOCK_STARTERS[ctx.route] || ['이 화면 요약해줘', '다음 액션 추천']).map((s, i) => (
-                <button key={i} onClick={() => doSend(s)}><span className="pre">{'›'}</span>{s}</button>
+                <button key={i} onClick={() => doSend(s)}><span className="pre">{'\u203A'}</span>{s}</button>
               ))}
             </div>
           </div>
@@ -280,11 +280,11 @@ function CopilotDock({ dock, ctx, docked }) {
         <div className={`dock-comp-box ${focus ? 'focus' : ''}`}>
           <textarea ref={taRef} rows={1} value={val} placeholder={`${keeper.kr}에게… (이 화면 기준)`}
             onChange={grow} onKeyDown={onKey} onFocus={() => setFocus(true)} onBlur={() => setFocus(false)} onMouseDown={e => e.stopPropagation()} />
-          <button className="dock-send" disabled={!val.trim() || !!dock.streaming} onClick={() => doSend()}>{'↑'}</button>
+          <button className="dock-send" disabled={!val.trim() || !!dock.streaming} onClick={() => doSend()}>{'\u2191'}</button>
         </div>
         <div className="dock-foot">
           <span>발신 <b>@operator</b></span>
-          <span style={{ marginLeft: 'auto' }}><kbd>{'↵'}</kbd> 전송 · <kbd>Esc</kbd> 닫기</span>
+          <span style={{ marginLeft: 'auto' }}><kbd>{'\u21B5'}</kbd> 전송 · <kbd>Esc</kbd> 닫기</span>
         </div>
       </div>
     </aside>

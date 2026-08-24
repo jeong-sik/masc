@@ -149,7 +149,6 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; retryable : bool
   ; cwd_scope : string option
   ; polling_read : bool
   }
@@ -314,8 +313,7 @@ let discovery_example ~label ?cwd ~argv () =
   `Assoc [ "label", `String label; "input", input ]
 ;;
 
-let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
-      ?(polling_read = false) ()
+let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -324,7 +322,6 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(retryable = false)
   in
   { readonly_of_input
   ; readonly_hint = readonly
-  ; retryable
   ; cwd_scope
   ; polling_read
   }
@@ -765,7 +762,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:false
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -805,7 +801,6 @@ let public_descriptors =
            ~readonly:true
            ~readonly_of_input:search_files_readonly_of_input
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:true
            ())
       ~executor:Shell_ir
       ~backend:Sandbox_process
@@ -838,7 +833,6 @@ let public_descriptors =
         (policy
            ~readonly:true
            ~cwd_scope:"keeper_sandbox_or_allowed_path"
-           ~retryable:true
            ())
       ~executor:Filesystem
       ~backend:Sandbox_process
@@ -922,7 +916,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -948,7 +941,6 @@ let public_descriptors =
       ~policy:
         (policy
            ~readonly:true
-           ~retryable:true
            ())
       ~executor:In_process
       ~backend:Ocaml_runtime
@@ -1036,8 +1028,10 @@ let find_masc_schema_opt name =
 let find_cluster_schema_opt name =
   (* Keeper taskboard tools are checked before voice, misc, and public
      aggregates. Board descriptors use their typed registry directly.
-     The namespaces are expected to be disjoint; this order is not a conflict
-     resolver. Control descriptors use their dedicated typed schema projection
+     The namespaces are disjoint because every registry reached here is also
+     concatenated into [Config.raw_all_tool_schemas], whose module initialiser
+     runs [Config.validate_schemas] and raises on a repeated name. This order
+     is therefore not a conflict resolver. Control descriptors use their dedicated typed schema projection
      and do not enter this name-based lookup. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
@@ -1205,11 +1199,11 @@ let ide_annotate_schema_source, ide_annotate_schema =
 ;;
 
 let read_only_in_process_policy ?(polling_read = false) () =
-  policy ~readonly:true ~retryable:true ~polling_read ()
+  policy ~readonly:true ~polling_read ()
 ;;
 
-let write_in_process_policy ?(retryable = false) () =
-  policy ~readonly:false ~retryable ()
+let write_in_process_policy () =
+  policy ~readonly:false ()
 ;;
 
 let in_process_descriptor_with_schema_source
@@ -1373,9 +1367,12 @@ let board_list_output_schema =
     ~required:[ "kind"; "revision" ]
 ;;
 
-(* Producer: Masc_domain.task_to_yojson (lib/types/types_core.ml). Only the
-   unconditionally emitted fields are declared; status-variant and
-   presence-conditional fields pass through [additionalProperties]. *)
+(* Producer: Masc_domain.task_compact_to_yojson by default and
+   Masc_domain.task_to_yojson under projection "full" (lib/types/types_core.ml).
+   Required are the fields both shapes emit unconditionally; [description] and
+   [files] are declared because the full shape always carries them; the
+   status-variant and presence-conditional fields pass through
+   [additionalProperties]. *)
 let tasks_list_task_item_schema =
   `Assoc
     [ "type", `String "object"
@@ -1397,33 +1394,27 @@ let tasks_list_task_item_schema =
       , `List
           (List.map
              (fun name -> `String name)
-             [ "id"
-             ; "title"
-             ; "description"
-             ; "priority"
-             ; "files"
-             ; "created_at"
-             ; "status"
-             ]) )
+             [ "id"; "title"; "priority"; "created_at"; "status" ]) )
     ; "additionalProperties", `Bool true
     ]
 ;;
 
 (* Producer: Tasks_list Ok branch (keeper_tool_task_runtime.ml) — the
-   Snapshot_protocol envelope prefixed with backlog provenance. [snapshot]
-   is absent on the [unchanged] variant. *)
+   Snapshot_protocol envelope prefixed with backlog provenance and the row
+   shape that was served. [snapshot] is absent on the [unchanged] variant. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
       [ "backlog_authority", `Assoc [ "type", `String "string" ]
       ; "degraded", `Assoc [ "type", `String "boolean" ]
+      ; "projection", `Assoc [ "type", `String "string" ]
       ; "kind", `Assoc [ "type", `String "string" ]
       ; "revision", `Assoc [ "type", `String "string" ]
       ; ( "snapshot"
         , `Assoc
             [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
       ]
-    ~required:[ "backlog_authority"; "degraded"; "kind"; "revision" ]
+    ~required:[ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
 ;;
 
 (* Producer: Keeper_artifact_read.page_to_json — the single success path. *)
@@ -1448,81 +1439,6 @@ let artifact_read_output_schema =
       ; "eof"
       ; "encoding"
       ; "content"
-      ]
-;;
-
-(* Producer: Tool_agent_timeline.build_timeline. [detail] on an event and
-   the [retention] body are heterogeneous and stay undeclared. *)
-let agent_timeline_output_schema =
-  object_output_schema
-    ~properties:
-      [ "dashboard_surface", `Assoc [ "type", `String "string" ]
-      ; "source", `Assoc [ "type", `String "string" ]
-      ; "retention", `Assoc [ "type", `String "object" ]
-      ; "generated_at_iso", `Assoc [ "type", `String "string" ]
-      ; "agent", `Assoc [ "type", `String "string" ]
-      ; ( "period"
-        , object_output_schema
-            ~properties:
-              [ "from", `Assoc [ "type", `String "string" ]
-              ; "to", `Assoc [ "type", `String "string" ]
-              ]
-            ~required:[ "from"; "to" ] )
-      ; ( "events"
-        , `Assoc
-            [ "type", `String "array"
-            ; ( "items"
-              , `Assoc
-                  [ "type", `String "object"
-                  ; ( "properties"
-                    , `Assoc
-                        [ "ts", `Assoc [ "type", `String "string" ]
-                        ; "type", `Assoc [ "type", `String "string" ]
-                        ] )
-                  ; ( "required"
-                    , `List [ `String "ts"; `String "type" ] )
-                  ; "additionalProperties", `Bool true
-                  ] )
-            ] )
-      ; ( "summary"
-        , object_output_schema
-            ~properties:
-              [ "tasks_completed", `Assoc [ "type", `String "integer" ]
-              ; "tasks_claimed", `Assoc [ "type", `String "integer" ]
-              ; "messages_sent", `Assoc [ "type", `String "integer" ]
-              ; "tool_calls", `Assoc [ "type", `String "integer" ]
-              ; "chat_messages", `Assoc [ "type", `String "integer" ]
-              ; "turns_completed", `Assoc [ "type", `String "integer" ]
-              ; "total_input_tokens", `Assoc [ "type", `String "integer" ]
-              ; "total_output_tokens", `Assoc [ "type", `String "integer" ]
-              ; "total_cost_usd", `Assoc [ "type", `String "number" ]
-              ; ( "active_duration_minutes"
-                , `Assoc [ "type", `String "number" ] )
-              ; "total_events", `Assoc [ "type", `String "integer" ]
-              ]
-            ~required:
-              [ "tasks_completed"
-              ; "tasks_claimed"
-              ; "messages_sent"
-              ; "tool_calls"
-              ; "chat_messages"
-              ; "turns_completed"
-              ; "total_input_tokens"
-              ; "total_output_tokens"
-              ; "total_cost_usd"
-              ; "active_duration_minutes"
-              ; "total_events"
-              ] )
-      ]
-    ~required:
-      [ "dashboard_surface"
-      ; "source"
-      ; "retention"
-      ; "generated_at_iso"
-      ; "agent"
-      ; "period"
-      ; "events"
-      ; "summary"
       ]
 ;;
 
@@ -1696,39 +1612,6 @@ let agent_fitness_output_schema =
     ~required:[ "count"; "agents" ]
 ;;
 
-(* Producer: Tool_agent.handle_agent_card. [agent] is object-or-null and
-   stays undeclared, so the object keeps [additionalProperties] open. *)
-let agent_card_output_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ "schema", `Assoc [ "type", `String "string" ]
-          ; "name", `Assoc [ "type", `String "string" ]
-          ; "description", `Assoc [ "type", `String "string" ]
-          ; "action", `Assoc [ "type", `String "string" ]
-          ; "requested_by", `Assoc [ "type", `String "string" ]
-          ; "base_path", `Assoc [ "type", `String "string" ]
-          ; "workspace_path", `Assoc [ "type", `String "string" ]
-          ; "agent_count", `Assoc [ "type", `String "integer" ]
-          ] )
-    ; ( "required"
-      , `List
-          (List.map
-             (fun name -> `String name)
-             [ "schema"
-             ; "name"
-             ; "description"
-             ; "action"
-             ; "requested_by"
-             ; "base_path"
-             ; "workspace_path"
-             ; "agent_count"
-             ]) )
-    ; "additionalProperties", `Bool true
-    ]
-;;
-
 let masc_board_descriptor board_name =
   let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
@@ -1765,7 +1648,7 @@ let masc_board_descriptor board_name =
       | Board_sub_board_update
       | Board_vote ) -> Serial
   in
-  let policy = policy ~readonly ~retryable:readonly () in
+  let policy = policy ~readonly () in
   let canonical_keeper_input_schema =
     remove_schema_fields
       (Board_tool_registry.identity_fields_for_board_name board_name)
@@ -1855,11 +1738,17 @@ let task_descriptor ?ordinary_execution_mode ~capability_identity id name ~reado
    (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
-let masc_task_descriptor ?ordinary_execution_mode id name ~readonly =
+let masc_task_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
   cluster_descriptor
     ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.task." ^ id)
     ~name
     ~handler:Tool_masc_task_dispatch
@@ -1880,11 +1769,17 @@ let masc_task_transport_descriptor ?ordinary_execution_mode id name ~readonly =
     ()
 ;;
 
-let masc_plan_descriptor ?ordinary_execution_mode id name ~readonly =
+let masc_plan_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
   cluster_descriptor
     ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.plan." ^ id)
     ~name
     ~handler:Tool_masc_plan_dispatch
@@ -1905,11 +1800,17 @@ let masc_run_descriptor ?ordinary_execution_mode name ~readonly =
     ()
 ;;
 
-let masc_agent_descriptor ?ordinary_execution_mode id name ~readonly =
+let masc_agent_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
   cluster_descriptor
     ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.agent." ^ id)
     ~name
     ~handler:Tool_masc_agent_dispatch
@@ -1937,11 +1838,17 @@ let masc_workspace_descriptor
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
    misc / control / agent_timeline / local_runtime). *)
-let masc_misc_descriptor ?ordinary_execution_mode id name ~readonly =
+let masc_misc_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
   cluster_descriptor
     ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:("masc.misc." ^ id)
     ~name
     ~handler:Tool_masc_misc_dispatch
@@ -1964,11 +1871,17 @@ let masc_control_descriptor operation =
     ()
 ;;
 
-let masc_agent_timeline_descriptor ?ordinary_execution_mode name description ~readonly =
+let masc_agent_timeline_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    name
+    description
+    ~readonly
+  =
   cluster_descriptor
     ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
+    ~keeper_model_projection
     ~id:"masc.agent_timeline"
     ~name
     ~handler:Tool_masc_agent_timeline_dispatch
@@ -2064,10 +1977,7 @@ let masc_local_runtime_descriptor
     Tool_schemas_local_runtime.execution_policy definition.operation
   in
   let policy =
-    policy
-      ~readonly:execution_policy.read_only
-      ~retryable:execution_policy.retryable
-      ()
+    policy ~readonly:execution_policy.read_only ()
   in
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
@@ -2350,9 +2260,17 @@ let internal_descriptors : t list =
          lives once, on the canonical schema this descriptor reads. *)
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
-  ; masc_task_descriptor "add" "masc_add_task"
+  (* Zero keeper dispatches in the live window (tool_usage 2026-07..08):
+     keepers create and move tasks through the keeper_task_* surface, so the
+     masc_* twins stay on the transport surface only. Transport_alias names
+     the keeper tool that already covers the capability. *)
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_create" })
+       "add" "masc_add_task"
        ~readonly:false
-  ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_create" })
+       "batch_add" "masc_batch_add_tasks"
        ~readonly:false
   ; masc_task_descriptor ~ordinary_execution_mode:Concurrent
        "task_history" "masc_task_history"
@@ -2360,20 +2278,28 @@ let internal_descriptors : t list =
   ; masc_task_transport_descriptor ~ordinary_execution_mode:Concurrent
        "tasks" "masc_tasks"
        ~readonly:true
-  ; masc_task_descriptor "transition" "masc_transition"
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_claim" })
+       "transition" "masc_transition"
        ~readonly:false
-  ; masc_task_descriptor "update_priority" "masc_update_priority"
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_claim" })
+       "update_priority" "masc_update_priority"
        ~readonly:false
   ; masc_task_descriptor "set_goal" "masc_task_set_goal"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
-  ; masc_plan_descriptor "init" "masc_plan_init"
+  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
+       "init" "masc_plan_init"
        ~readonly:false
-  ; masc_plan_descriptor "update" "masc_plan_update"
+  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
+       "update" "masc_plan_update"
        ~readonly:false
-  ; masc_plan_descriptor "get" "masc_plan_get"
+  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
+      "get" "masc_plan_get"
       ~readonly:false
-  ; masc_plan_descriptor "set_task" "masc_plan_set_task"
+  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
+       "set_task" "masc_plan_set_task"
        ~readonly:false
   ; masc_plan_descriptor ~ordinary_execution_mode:Concurrent
        "get_task" "masc_plan_get_task"
@@ -2398,11 +2324,16 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
-  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+  ; (masc_agent_descriptor ~keeper_model_projection:Operator_only
+        ~ordinary_execution_mode:Concurrent
         "card" "masc_agent_card"
         ~readonly:true
-     |> with_eval_tags [ "agent_profile_lookup" ]
-     |> with_composable_output (Json_output { schema = agent_card_output_schema }))
+     (* No composable output: #29681 took this off the model surface, and a
+        composable schema only means "a Keeper plan may reference this node's
+        output" -- every reader of the field is in keeper_tool_plan*. A tool
+        the model cannot name is never a plan node, so the schema described a
+        reference nobody can write. *)
+     |> with_eval_tags [ "agent_profile_lookup" ])
   ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
        "fitness" "masc_agent_fitness"
        ~readonly:true
@@ -2436,19 +2367,18 @@ let internal_descriptors : t list =
       "status"
       "masc_status"
        ~readonly:true
-  ; masc_workspace_descriptor
+  ; masc_workspace_descriptor ~keeper_model_projection:Operator_only
       "heartbeat"
       "masc_heartbeat"
        ~readonly:false
-  ; masc_workspace_descriptor "check" "masc_check"
+  ; masc_workspace_descriptor ~keeper_model_projection:Operator_only
+      "check" "masc_check"
        ~readonly:true
   ; (masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
        "goal_list" "masc_goal_list"
        ~readonly:true
      |> with_composable_output (Json_output { schema = goal_list_output_schema }))
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
-       ~readonly:false
-  ; masc_workspace_descriptor "goal_assign" "masc_goal_assign"
        ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
@@ -2466,7 +2396,8 @@ let internal_descriptors : t list =
       ~handler:Tool_masc_misc_dispatch
       ~readonly:true
       ()
-  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only
+       ~ordinary_execution_mode:Concurrent
        "tool_help" "masc_tool_help"
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
@@ -2479,11 +2410,12 @@ let internal_descriptors : t list =
   ; masc_control_descriptor Tool_schemas_misc.Pause
   ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
-  ; (masc_agent_timeline_descriptor ~ordinary_execution_mode:Concurrent
+  ; (masc_agent_timeline_descriptor ~keeper_model_projection:Operator_only
+       ~ordinary_execution_mode:Concurrent
        "masc_agent_timeline"
-       "Read agent timeline events." ~readonly:true
-     |> with_composable_output
-          (Json_output { schema = agent_timeline_output_schema }))
+       (* No composable output, for the same reason as masc_agent_card above:
+          off the model surface since #29681, so no plan can name it. *)
+       "Read agent timeline events." ~readonly:true)
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
@@ -2647,7 +2579,6 @@ let eval_tags_json d =
 
 let common_policy_json_fields ~readonly_key policy =
   [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
-  ; "retryable", `Bool policy.retryable
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
   ; "polling_read", `Bool policy.polling_read
   ]

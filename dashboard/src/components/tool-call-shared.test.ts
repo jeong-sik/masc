@@ -6,6 +6,7 @@ import {
   formatArgs,
   prettyArgs,
   prettyJson,
+  toolSubject,
 } from './tool-call-shared'
 
 // ================================================================
@@ -212,5 +213,59 @@ describe('prettyJson', () => {
   it('preserves legitimate JSON-text string values (no over-coercion)', () => {
     const out = prettyJson(JSON.stringify({ note: '{"x":1}' }))
     expect(out).toBe('{\n  "note": "{\\"x\\":1}"\n}')
+  })
+})
+
+// ================================================================
+// toolSubject
+// ================================================================
+// Argument shapes below are the ones live keepers actually emit, read off
+// ~/.masc/trajectories: Execute carries argv/cwd, Read carries file_path, Grep
+// carries pattern/path/glob.
+
+describe('toolSubject', () => {
+  it('renders argv as the command that ran', () => {
+    expect(toolSubject({ argv: ['git', 'fetch', 'origin'], cwd: 'repos/masc', timeout_sec: 120 }))
+      .toBe('git fetch origin')
+  })
+
+  it('prefers the path for a file call', () => {
+    expect(toolSubject({ file_path: 'repos/masc/lib/tool_agent.ml', limit: 40, offset: 270 }))
+      .toBe('repos/masc/lib/tool_agent.ml')
+  })
+
+  it('prefers the pattern over the path for a search', () => {
+    expect(toolSubject({ glob: '*.ml', path: 'repos/masc/lib', pattern: 'agent block' }))
+      .toBe('agent block')
+  })
+
+  it('accepts a JSON string, which is how the trace step carries args', () => {
+    expect(toolSubject('{"file_path":"lib/keeper/keeper_chat_blocks.ml"}'))
+      .toBe('lib/keeper/keeper_chat_blocks.ml')
+  })
+
+  it('keeps the tail of an over-long path', () => {
+    const long = `repos/masc/${'nested/'.repeat(20)}target.ml`
+    const out = toolSubject({ file_path: long })
+    expect(out).not.toBeNull()
+    expect(out!.startsWith('…')).toBe(true)
+    expect(out!.endsWith('target.ml')).toBe(true)
+    expect(out!.length).toBeLessThanOrEqual(72)
+  })
+
+  it('returns null when no known key is present, so the caller can fall back', () => {
+    expect(toolSubject({ include_done: true, if_revision: 12 })).toBeNull()
+    expect(toolSubject({})).toBeNull()
+    expect(toolSubject(undefined)).toBeNull()
+    expect(toolSubject('')).toBeNull()
+  })
+
+  it('does not invent a subject from an empty value', () => {
+    expect(toolSubject({ file_path: '   ' })).toBeNull()
+    expect(toolSubject({ argv: [] })).toBeNull()
+  })
+
+  it('falls back to the raw text when args is not JSON', () => {
+    expect(toolSubject('git status')).toBe('git status')
   })
 })

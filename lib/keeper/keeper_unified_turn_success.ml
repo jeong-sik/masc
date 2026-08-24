@@ -147,7 +147,6 @@ let append_metrics_snapshot
          ~result
          ~latency_ms
          ~turn_cost
-         ~turn_generation:lifecycle.KEC.turn_generation
          ~channel
          ~checkpoint_bytes:lifecycle.checkpoint_bytes
          ~message_count:lifecycle.message_count
@@ -368,6 +367,7 @@ let emit_usage_metrics_and_log
     else 0
   in
   Log.Keeper.info
+    ~category:Log.Turn
     "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
     updated_meta.name
     (terminal_outcome_to_log_label terminal_outcome)
@@ -619,7 +619,6 @@ let handle
   run_projection KTP.Lifecycle_broadcast (fun () ->
     KUM.broadcast_lifecycle_events
       ~name:updated_meta.name
-      ~turn_generation:lifecycle.turn_generation
       ~handoff_json:lifecycle.handoff_json);
   run_projection KTP.Decision_record (fun () ->
     KUM.append_decision_record

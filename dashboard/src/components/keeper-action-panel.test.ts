@@ -195,12 +195,12 @@ describe('runKeeperAction', () => {
     expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
   })
 
-  it('forwards the observed owner generation for typed resume', async () => {
+  it('routes a resume action to resumeKeeper by name alone', async () => {
     vi.mocked(resumeKeeper).mockResolvedValueOnce({ ok: true })
 
-    await runKeeperAction('rondo', 'resume', 7)
+    await runKeeperAction('rondo', 'resume')
 
-    expect(resumeKeeper).toHaveBeenCalledWith('rondo', 7)
+    expect(resumeKeeper).toHaveBeenCalledWith('rondo')
   })
 })
 

@@ -3,10 +3,6 @@
     Cancellation is the one terminal Task outcome with no reader. Completion
     posts a verdict to Board and submission posts a request, but a cancellation
     wrote a backlog field and an activity row and stopped there.
-    {!Keeper_goal_reconciliation_wake} does not cover it: that path targets the
-    owner of the Task's Goal, so a Task with no Goal link reaches no one. On the
-    reference workspace no Task carried a Goal link at all, which made the
-    existing terminal wake unreachable for every one of them.
 
     The author is resolved from [created_by]. A self-cancellation enqueues
     nothing: the author already knows. *)

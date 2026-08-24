@@ -70,8 +70,8 @@ val load_credential : string -> string -> agent_credential option
     dispatcher-validated [ctx_agent_name]".  The second case is the
     {b dual identity} mode where {!load_credential} silently returned a
     credential whose [agent_name] differs from the caller's claimed
-    identity (e.g. requested [sangsu] resolves to bare-nickname cred
-    while [ctx_agent_name] is [keeper-sangsu-agent]).
+    identity (e.g. requested [example-keeper] resolves to bare-nickname cred
+    while [ctx_agent_name] is [keeper-example-keeper-agent]).
     [load_credential_of] surfaces the mismatch instead of
     perpetuating it. *)
 type load_credential_error =
@@ -113,8 +113,8 @@ val load_credential_of :
     simple exact-match lookup with explicit error variants.
 
     This replaces the removed silent alias fallback
-    where a stem of [sangsu] against a [ctx_agent_name] of
-    [keeper-sangsu-agent] would return the bare-nickname credential and
+    where a stem of [example-keeper] against a [ctx_agent_name] of
+    [keeper-example-keeper-agent] would return the bare-nickname credential and
     perpetuate dual identity. *)
 
 val save_credential : string -> agent_credential -> unit
@@ -274,16 +274,6 @@ val ensure_keeper_credential :
 type credential_status =
   | Credential_present of agent_credential
   | Credential_missing
-
-val audit_keeper_credentials :
-  string -> keeper_names:string list ->
-  (string * credential_status) list
-(** Read-only audit: for each [keeper_name] in [keeper_names], report
-    whether a credential file exists at [.masc/auth/agents/<n>.json].
-    Used at boot to emit one structured summary instead of
-    enumerating individual fail logs.  Does NOT mutate any state;
-    [ensure_keeper_credential] / [ensure_credential_alias] remain
-    the write paths. *)
 
 (** {1 Token Lifecycle} *)
 

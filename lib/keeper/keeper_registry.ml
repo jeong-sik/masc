@@ -7,6 +7,10 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* The failure-reason / turn-phase clusters live in Keeper_registry_types;
+   keeper_registry.mli re-exports them with [include module type of], so the
+   values and types must come through this structure. *)
+include Keeper_registry_types
 include Keeper_registry_setup
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
@@ -322,12 +326,6 @@ let exact_update_succeeded entry ~site = function
       site
       (registry_entry_validation_error_to_string validation_error);
     false
-;;
-
-let set_grpc_close ~base_path name close_fn =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> Atomic.set entry.grpc_close close_fn
-  | None -> ()
 ;;
 
 let started_at ~base_path name =

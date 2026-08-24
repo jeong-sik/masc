@@ -14,7 +14,7 @@ let in_turn_liveness_pulse_interval_sec () =
   max 5.0 (min 30.0 (float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())))
 ;;
 
-let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
+let with_pulse_fiber ~sw:_sw ~clock ~interval_sec ~tick f =
   let interval_sec = max 0.001 interval_sec in
   Eio.Switch.run (fun pulse_sw ->
     let pulse_stop = Atomic.make false in
@@ -144,7 +144,6 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
          `Assoc
            [ "type", `String "keeper_heartbeat"
            ; "name", `String meta.name
-           ; "generation", `Int meta.runtime.nonce
            ; "ts_unix", `Float now_ts
            ; "phase", `String "turn_running"
            ; "in_turn", `Bool true
@@ -175,7 +174,7 @@ let with_in_turn_liveness_pulse
       ~(stop : bool Atomic.t)
       f
   =
-  with_in_turn_liveness_pulse_for_test
+  with_pulse_fiber
     ~sw:ctx.sw
     ~clock:ctx.clock
     ~interval_sec:(in_turn_liveness_pulse_interval_sec ())

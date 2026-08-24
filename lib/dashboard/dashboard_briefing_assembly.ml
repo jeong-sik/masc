@@ -12,7 +12,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
-        (match String_util.trim_to_option n with Some v -> v | None -> agent_name)
+        (match String_util.trim_nonempty n with Some v -> v | None -> agent_name)
     | _ -> agent_name
   in
   let fallback_latest =
@@ -20,19 +20,19 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
   in
   let fallback_count = Json_util.assoc_int_opt "latest_tool_call_count" keeper in
   let fallback_source =
-    match String_util.trim_to_option (string_field "tool_audit_source" keeper) with
+    match String_util.trim_nonempty (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value
     | None -> None
   in
   let fallback_action_source =
-    String_util.trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
   let fallback_at =
-    String_util.trim_to_option (string_field "tool_audit_at" keeper)
+    String_util.trim_nonempty (string_field "tool_audit_at" keeper)
   in
   let file_snapshot =
     let keeper_updated_at =
-      String_util.trim_to_option (string_field "updated_at" keeper)
+      String_util.trim_nonempty (string_field "updated_at" keeper)
     in
     match
       Keeper_status_metrics.latest_tool_audit_snapshot_from_files config
@@ -90,7 +90,7 @@ let action_identity action =
     [
       string_field "action_type" action;
       string_field "target_type" action;
-      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" action));
+      Option.value ~default:"none" (String_util.trim_nonempty (string_field "target_id" action));
       normalized_text_key (string_field "reason" action);
     ]
 
@@ -99,7 +99,7 @@ let incident_identity incident =
     [
       string_field "kind" incident;
       string_field "target_type" incident;
-      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" incident));
+      Option.value ~default:"none" (String_util.trim_nonempty (string_field "target_id" incident));
       normalized_text_key (string_field "summary" incident);
     ]
 
@@ -136,24 +136,35 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            let context_metrics_unavailable =
              member_assoc "context_metrics_unavailable" keeper
            in
+           (* Parsed once into the closed surface vocabulary rather than
+              compared as text twice. keeper_status_runtime's comment on that
+              type names this ranker as one of the two sites that re-classified
+              the string; the producer builds it exhaustively, so a status this
+              parser does not know is a producer/consumer mismatch, not a rank
+              to guess at (#29350). *)
+           let surface = Keeper_status_runtime.surface_status_of_string_opt status in
            let pressure_rank =
-             if Dashboard_utils.is_keeper_offline status then 3
-             else if
-               Option.exists
-                 (fun ratio -> ratio >= lane_pressure_ctx_ratio)
-                 context_ratio
-             then
-               2
-             else if status = "idle" then 1
-             else 0
+             match surface with
+             | Some (Keeper_status_runtime.Surface_offline | Surface_inactive) -> 3
+             | Some (Surface_active | Surface_busy | Surface_listening | Surface_idle)
+             | None ->
+               if
+                 Option.exists
+                   (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                   context_ratio
+               then 2
+               else (
+                 match surface with
+                 | Some Keeper_status_runtime.Surface_idle -> 1
+                 | Some _ | None -> 0)
            in
            Some
              {
                pressure_rank;
                last_seen_ts =
                  Dashboard_utils.parse_iso_opt
-                   (String_util.trim_to_option
-                      (match String_util.trim_to_option (string_field "last_autonomous_action_at" keeper) with
+                   (String_util.trim_nonempty
+                      (match String_util.trim_nonempty (string_field "last_autonomous_action_at" keeper) with
                       | Some value -> value
                       | None -> string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
@@ -163,17 +174,10 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("name", `String name);
                       ("agent_name", member_assoc "agent_name" keeper);
                       ("status", `String status);
-                      ("generation", member_assoc "generation" keeper);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
-                      ( "current_work",
-                        Json_util.string_opt_to_json
-                          (Dashboard_utils.string_list_of_json
-                             (member_assoc "active_goal_ids" keeper)
-                           |> function
-                           | current :: _ -> Some current
-                           | [] -> None) );
+                      ("current_work", member_assoc "current_task_id" keeper);
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
@@ -182,7 +186,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                          (Keeper_runtime.autoboot_exclusion_reason config name));
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper
-                        (match String_util.trim_to_option (string_field "agent_name" keeper) with
+                        (match String_util.trim_nonempty (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));
              })

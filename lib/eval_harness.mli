@@ -45,7 +45,6 @@ type grader =
 (** {1 Scenario types} *)
 
 type tool_expectation = {
-  tool_name : string;
   selector : Eval_tool_selector.t;
   required : bool;
   max_calls : int option;
@@ -58,8 +57,6 @@ type tool_expectation = {
 type ownership =
   | Self_owned
   | Foreign
-
-val ownership_to_string : ownership -> string
 
 type scenario = {
   id : string;

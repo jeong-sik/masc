@@ -146,6 +146,7 @@ let to_json operation =
      ; "operation_id", `String (Operation_id.to_string operation.operation_id)
      ; "sequence", `String (Int64.to_string operation.sequence)
      ; "created_at", `Float operation.created_at
+     ; "execution_digest", `String operation.execution_digest
      ; "source", operation.source
      ; ( "input"
        , match operation.input with

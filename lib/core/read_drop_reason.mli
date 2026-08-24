@@ -61,7 +61,7 @@ type t =
 
 (** Stable wire format. The strings produced here are byte-for-byte
     compatible with the existing string constants in
-    [Core.Safe_ops] ([persistence_read_drop_reason_list_dir_error],
+    [Core.Safe_ops] ([Read_drop_reason.List_dir_error],
     [_entry_load_error], [_invalid_payload]) so swapping callers in
     PR-2 does not change the Otel_metric_store label cardinality.
 

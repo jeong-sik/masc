@@ -45,7 +45,7 @@ let agent_record_keeper_name config ~agent_name =
   in
   if path_exists config agent_file
   then (
-    match read_agent_with_repair config agent_file with
+    match read_agent config agent_file with
     | Ok { meta = Some { keeper_name = Some name; _ }; _ } ->
       let name = String.trim name in
       if name = "" then None else Some name

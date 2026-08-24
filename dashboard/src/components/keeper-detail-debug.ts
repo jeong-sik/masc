@@ -16,7 +16,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     { title: '이모지', key: 'emoji', value: keeper.emoji ?? '-' },
     { title: '한글명', key: 'koreanName', value: keeper.koreanName ?? '-' },
     { title: '상태', key: 'status', value: keeper.status },
-    { title: '세대', key: 'generation', value: String(keeper.generation ?? '-') },
     { title: '턴', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
     { title: '컨텍스트', key: 'context_ratio', value: formatPct(keeper.context_ratio) },
     { title: '하트비트', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },

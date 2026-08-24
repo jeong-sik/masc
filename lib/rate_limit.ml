@@ -2,9 +2,13 @@
 
     Provides token bucket rate limiting per client/agent.
 
-    Configuration via environment:
-    - MASC_RATE_LIMIT: requests per second (default: 20)
-    - MASC_RATE_BURST: burst capacity (default: 50)
+    The numbers live in [Env_config.Rate_bucket] and nowhere else. This
+    module used to restate them, and the three copies drifted: the doc here
+    said 20 while the module constant said 60 and the environment default
+    said 100. Whichever one a reader trusted, two of them were wrong.
+
+    - MASC_RATE_LIMIT / MASC_RATE_BURST — process-wide bucket
+    - MASC_AGENT_RATE_LIMIT / MASC_AGENT_RATE_BURST — per-agent bucket
 
     @since 0.4.0
 *)
@@ -27,12 +31,6 @@ type t = {
 
 (** {1 Configuration} *)
 
-let default_rate = 60.0  (* 12+ concurrent keepers need higher throughput *)
-let default_burst = 150
-
-let default_agent_rate = 20.0
-let default_agent_burst = 50
-
 let rate_of_config () = Env_config.Rate_bucket.rate
 
 let burst_of_config () = Env_config.Rate_bucket.burst
@@ -43,7 +41,9 @@ let agent_burst_of_config () = Env_config.Rate_bucket.agent_burst
 
 (** {1 Limiter Creation} *)
 
-let create ?(rate=default_rate) ?(burst=default_burst) () =
+(* [rate] and [burst] are required: a default here would be a second place
+   declaring the numbers, which is how the three copies drifted apart. *)
+let create ~rate ~burst () =
   {
     rate;
     burst;
@@ -175,19 +175,6 @@ let too_many_requests_body () =
 
 let too_many_agent_requests_body () =
   {|{"error":"Too Many Requests","message":"Per-agent rate limit exceeded"}|}
-
-(** Headers to include in a 429 Too Many Requests response.
-    Includes [Retry-After] (seconds until the bucket refills by one token)
-    in addition to the standard rate-limit informational headers. *)
-let too_many_requests_headers limiter ~key =
-  let base = headers limiter ~key in
-  (* Estimate refill time: one token arrives after 1/rate seconds. *)
-  let retry_after_s = if limiter.rate > 0.0 then
-    max 1 (int_of_float (Float.ceil (1.0 /. limiter.rate)))
-  else
-    1
-  in
-  ("Retry-After", string_of_int retry_after_s) :: base
 
 let headers_global ~key =
   headers (Eio.Lazy.force global) ~key

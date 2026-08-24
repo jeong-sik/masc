@@ -309,8 +309,13 @@ let assert_ollama_cloud_seed_runtime runtimes case =
   | Some runtime ->
     check string (case.runtime_id ^ " api name") case.api_name
       runtime.model.api_name;
+    (* The effective window, not the declaration. These cases pinned
+       runtime.model.max_context, the runtime.toml override, which holds only
+       while it stays under the model's catalog window; above it the resolver
+       clamps and the pinned number never reaches anything (#28738). What the
+       seed must keep stable is the window the runtime resolves. *)
     check (option int) (case.runtime_id ^ " context") (Some case.context)
-      runtime.model.max_context;
+      (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
@@ -840,7 +845,7 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
    entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
    A max-effort binding could therefore not be given more wall clock than a
    low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
-   analyst on claude_code.claude-opus-5-max failed every turn with "timed out
+   delta on claude_code.claude-opus-5-max failed every turn with "timed out
    after 300.000s" at 5,884 bytes of system+user input.
 
    The rejection case is the load-bearing one, but only for values that state
@@ -974,6 +979,65 @@ let test_retired_native_streaming_capability_is_rejected () =
               "models.sample.capabilities.supports-native-streaming"
             && String_util.contains_substring error.message "was removed")
          errors)
+
+(* A [models.X].max-context above the model's catalog window resolves to the
+   catalog number with source Override_clamped_by_capability: the declaration
+   is clamped away and reaches nothing. Two shipped runtimes carried one, and
+   one of them — glm-coding.glm-5-turbo, declaring 203000 against a catalog
+   window of 200000 — was cited in #28737 as this model's context window while
+   the number in effect was the catalog's (#28738).
+
+   The clamp itself stays — it is the safe direction if the catalog ever
+   shrinks under a deployment's override. What must not ship is a declaration
+   that reads as authoritative and is not. This drives the real resolver over
+   the real config rather than reading the file as text. *)
+let test_repo_runtime_toml_declares_no_clamped_max_context () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let clamped =
+      List.filter_map
+        (fun (rt : Runtime.t) ->
+           match Runtime.resolve_max_context_of_runtime rt with
+           | Some (effective, Runtime.Override_clamped_by_capability) ->
+             Some
+               (Printf.sprintf
+                  "%s declares %s and the catalog gives %d"
+                  rt.Runtime.id
+                  (match rt.Runtime.model.Runtime_schema.max_context with
+                   | Some declared -> string_of_int declared
+                   | None -> "<none>")
+                  effective)
+           | Some (_, (Runtime.Override | Runtime.Capability)) | None -> None)
+        runtimes
+    in
+    check (list string)
+      "no shipped runtime declares a max-context its model cannot take"
+      []
+      (List.sort String.compare clamped)
+
+(* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
+   models and all 36 came back carrying thinking while nothing declared it, so
+   every one logged Thinking_returned_but_declared_unsupported (#28457). Two of
+   those three models have since left the catalog entirely; this is the one
+   that remains, and the declaration is what stops the drift from returning
+   the moment a runtime binds it again. *)
+let test_kimi_for_coding_declares_the_reasoning_it_returns () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"kimi_code"
+      ~model_id:"kimi-for-coding"
+  with
+  | None -> fail "kimi-for-coding missing from the deployment catalog"
+  | Some caps ->
+    check bool "declares reasoning" true
+      caps.Llm_provider.Capabilities.supports_reasoning;
+    check bool "declares extended thinking" true
+      caps.Llm_provider.Capabilities.supports_extended_thinking
 
 let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -1192,7 +1256,11 @@ List.iter
      | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
-       check (option int) "Kimi K2.7 Code context" (Some 262144) runtime.model.max_context;
+       (* Effective window, not the declaration: what matters is what the
+          runtime resolves, and an override only holds while it stays under
+          the model's catalog window (#28738). *)
+       check (option int) "Kimi K2.7 Code context" (Some 262144)
+         (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
@@ -3304,9 +3372,6 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
      | Error detail -> failf "baseline exact save failed: %s" detail
      | Ok () -> ());
     let stable_registry = registry_exn () in
-    let stable_generation =
-      Runtime_exact_output_registry.generation stable_registry
-    in
     let degraded = content ~default:"local.libr" "missing-slot" in
     (match Runtime.save_config_text ~runtime_config_path:path degraded with
      | Error detail ->
@@ -3316,11 +3381,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check string "degraded save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
     let after_degraded = registry_exn () in
-    let degraded_generation =
-      Runtime_exact_output_registry.generation after_degraded
-    in
-    check bool "degraded save advances registry generation" true
-      (Int64.compare degraded_generation stable_generation > 0);
+    check bool "degraded save republishes the registry" true
+      (not (after_degraded == stable_registry));
     check bool "degraded save leaves optional lane without admitted slots" true
       (lane_has_no_admitted_slots
          ~lane_id:"compaction_exact"
@@ -3341,8 +3403,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
          check string "write failure preserves runtime cache" "local.libr"
            (Runtime.get_default_runtime_id ());
          let after_write_failure = registry_exn () in
-         check int64 "write failure preserves registry generation" degraded_generation
-           (Runtime_exact_output_registry.generation after_write_failure);
+         check bool "write failure preserves the published registry" true
+           (after_write_failure == after_degraded);
          check bool "write failure preserves no-admitted lane" true
            (lane_has_no_admitted_slots
               ~lane_id:"compaction_exact"
@@ -3358,57 +3420,44 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check string "valid save commits runtime cache" "local.chat"
       (Runtime.get_default_runtime_id ());
     let replaced = registry_exn () in
-    check bool "valid save advances registry generation" true
-      (Int64.compare
-         (Runtime_exact_output_registry.generation replaced)
-         degraded_generation
-       > 0);
+    check bool "valid save republishes the registry" true
+      (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
     check bool "valid save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
-let test_deprecated_capability_notice_warns_once_per_process () =
-  (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
-     warning flooded the WARN log (~315/day, 25% of live WARN volume). The
-     notice must fire once per process per capability key, not once per parse.
-     [dedupcheck] is a unique provider id so the process-level dedup table is
-     not pre-populated by another test. The deprecated key sits under
-     [providers.<id>.capabilities] because that is where parse_capabilities (the
-     emitter) runs. *)
+let test_unknown_capability_key_rejected_at_load () =
   let content =
-    "[providers.dedupcheck]\n\
+    "[providers.capcheck]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
      \n\
-     [providers.dedupcheck.capabilities]\n\
-     supports-runtime-mcp-tools = true\n\
+     [providers.capcheck.capabilities]\n\
+     supports-teleport = true\n\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
      max-context = 1024\n\
      \n\
-     [dedupcheck.sample]\n\
+     [capcheck.sample]\n\
      \n\
      [runtime]\n\
-     default = \"dedupcheck.sample\"\n"
+     default = \"capcheck.sample\"\n"
   in
-  let warns = ref [] in
-  Console_sink.For_testing.reset ();
-  Console_sink.For_testing.set_writer (Some (fun l -> warns := l :: !warns));
-  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
-    (* Parse twice; the deprecated key is present both times. *)
-    ignore (Runtime_toml.parse_string content);
-    ignore (Runtime_toml.parse_string content));
-  let dep_warns =
-    List.filter
-      (fun l ->
-        String_util.contains_substring l "dedupcheck"
-        && String_util.contains_substring l "is deprecated")
-      !warns
-  in
-  check int "deprecation notice fires once per process across two parses" 1
-    (List.length dep_warns)
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "an unknown capabilities key must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending key path"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            String.equal
+              e.path
+              "providers.capcheck.capabilities.supports-teleport")
+         errors)
 
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
@@ -3961,6 +4010,10 @@ let () =
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "kimi-for-coding declares the reasoning it returns" `Quick
+            test_kimi_for_coding_declares_the_reasoning_it_returns;
+          test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
+            test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick
@@ -4065,8 +4118,8 @@ let () =
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
-            "deprecated capability notice warns once per process, not per parse"
-            `Quick test_deprecated_capability_notice_warns_once_per_process;
+            "unknown capabilities key is rejected at load"
+            `Quick test_unknown_capability_key_rejected_at_load;
           test_case
             "max-context: capability-only source uses the catalog cap"
             `Quick test_runtime_max_context_capability_only_uses_catalog_cap;

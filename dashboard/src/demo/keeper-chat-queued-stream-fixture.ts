@@ -135,6 +135,7 @@ function waitingInventory(): Record<string, unknown> {
           keeper_name: KEEPER,
           source: 'chat_operation_running',
           waiting_on: 'keeper_turn',
+          what: '운영자와 진행 중인 대화',
           wake_producer: 'keeper_owner_actor',
           next_action: 'keeper_owner_settle_operation',
           detail: { operation_id: running.operationId },
@@ -144,6 +145,7 @@ function waitingInventory(): Record<string, unknown> {
       keeper_name: KEEPER,
       source: 'chat_operation_queued',
       waiting_on: 'owner_fifo',
+      what: `운영자 채팅 ${queued.length}건 대기`,
       wake_producer: 'keeper_owner_actor',
       next_action: 'keeper_owner_start_fifo_head',
       detail: { operation_id: operation.operationId },
@@ -256,17 +258,6 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   if (path === `/api/v1/keepers/${KEEPER}/chat/history` && method === 'GET') return json([])
   if (path === `/api/v1/keepers/${KEEPER}/waiting-inventory` && method === 'GET') {
     return json(waitingInventory())
-  }
-  if (path.startsWith(`/api/v1/keepers/${KEEPER}/events/pending?`) && method === 'GET') {
-    return json({
-      schema: 'keeper_event_queue.pending.v2',
-      ok: true,
-      keeper_name: KEEPER,
-      revision: '0',
-      total_pending: 0,
-      next_after: null,
-      pending: [],
-    })
   }
   if (path.startsWith(`/api/v1/keepers/${KEEPER}/chat/operations?`) && method === 'GET') {
     const operations = fixtureState.operations

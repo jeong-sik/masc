@@ -11,37 +11,33 @@
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)
 
+
 type t
-type forest
 
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
 
-val root_layout : t -> string list
+val create_goal_proof : config:Workspace.config -> (t, string) result
+(** The Goal proof surface: read and web-fetch rooted at the shared playground
+    prefix. A Goal names no producer, so there is no owned tree to bind to and
+    no producer set to derive; this root is the same fixed workspace location
+    for every Goal. [tool_search_files] is absent — its containment runs
+    through a Keeper's sandbox meta, which this surface has none of. *)
+
+val root_layout : t -> (string list, string) result
 (** The paths the lookup tools resolve against, listed from disk at review
-    time and relative to the ownership root: every immediate entry, plus one
-    further level so a checkout under [repos/] names itself. A directory with
-    no children is marked, because an empty tree and an unreachable one are
-    different findings. [[]] when the root itself cannot be listed. Bounded;
-    a truncated listing says so in its last line. *)
+    time and relative to the ownership root: bounded immediate entries plus
+    every checkout returned by the shared checkout-discovery authority.
+    Unavailable or partial discovery is [Error], so a caller must defer the
+    review instead of turning an incomplete list into absence evidence. *)
+
+val goal_proof_root_layout : t -> (string list, string) result
+(** {!root_layout} for a {!create_goal_proof} surface: the producer entries
+    under the shared root, without the per-producer checkout scan. That scan
+    stops on its reported-checkout budget when walked across every producer at
+    once, and the stop is an [Error] — running it here deferred every Goal
+    review instead of listing anything. *)
 
 val schemas : t -> Types_core.tool_schema list
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
-
-val create_forest :
-  config:Workspace.config -> producers:string list -> (forest, string) result
-(** Bind a read-only verifier surface to a closed set of producer trees. The
-    filesystem schemas require an exact [producer] chosen from this set; the
-    dispatcher refuses every other identity before reaching a tree. *)
-
-val forest_root_layout : forest -> string list
-(** {!root_layout} for every producer in the forest, each entry prefixed with
-    the producer it belongs to, because the forest dispatcher requires an
-    exact producer argument and a bare path would not name one. Bounded
-    across the whole forest. *)
-
-val forest_schemas : forest -> Types_core.tool_schema list
-
-val dispatch_forest :
-  forest -> name:string -> args:Yojson.Safe.t -> (string, string) result

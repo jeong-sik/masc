@@ -206,6 +206,80 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries observation
   in
   user
 
+(* --- Own Recent Actions: arguments ride on refusals --- *)
+
+let action_turn turn_id calls : Masc.Keeper_own_recent_actions.turn =
+  { turn_id; calls }
+;;
+
+let call ~tool ~input ~outcome : Masc.Keeper_own_recent_actions.call =
+  { Masc.Keeper_own_recent_actions.tool; input; outcome }
+;;
+
+let own_recent_actions_section body =
+  let marker = "### Your Recent Actions" in
+  match Astring.String.find_sub ~sub:marker body with
+  | None -> ""
+  | Some start ->
+    let rest = String.sub body start (String.length body - start) in
+    (match Astring.String.find_sub ~sub:"\n###" rest with
+     | None -> rest
+     | Some stop -> String.sub rest 0 stop)
+;;
+
+(* The live shape that starved keeper [analyst] on 2026-08-23: turns whose
+   successful calls carry large argument objects. 1,312 successes carried
+   538,743 bytes against 20 refusals carrying 6,417. *)
+let test_successful_call_arguments_are_not_replayed () =
+  let big = String.make 4000 'x' in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            360
+            (List.init 20 (fun i ->
+               call
+                 ~tool:"keeper_tool_execute"
+                 ~input:(Printf.sprintf "{\"i\":%d,\"payload\":\"%s\"}" i big)
+                 ~outcome:Masc.Keeper_own_recent_actions.Ok_call))
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "the calls are still listed" true
+    (Option.is_some
+       (Astring.String.find_sub ~sub:"[turn 360] keeper_tool_execute -> ok" section));
+  check bool
+    (Printf.sprintf "no argument body is replayed (section is %d bytes)"
+       (String.length section))
+    true
+    (Option.is_none (Astring.String.find_sub ~sub:big section))
+;;
+
+let test_refused_call_keeps_its_arguments () =
+  let payload = "{\"task_id\":\"task-471\",\"note\":\"needs-approval\"}" in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        [ action_turn
+            361
+            [ call
+                ~tool:"keeper_task_done"
+                ~input:payload
+                ~outcome:(Masc.Keeper_own_recent_actions.Failed_call (Some "not verified"))
+            ]
+        ]
+    }
+  in
+  let body = with_repo_prompt_config (fun () -> user_message observation) in
+  let section = own_recent_actions_section body in
+  check bool "the refused call keeps what was sent" true
+    (Option.is_some (Astring.String.find_sub ~sub:payload section));
+  check bool "and says why it was refused" true
+    (Option.is_some (Astring.String.find_sub ~sub:"REJECTED: not verified" section))
+;;
+
 (* --- 1. Current Task layer --- *)
 
 let test_current_task_section_renders () =
@@ -398,7 +472,7 @@ let test_direct_and_autonomous_share_system_prompt () =
   check bool "shared contract leads with the result" true
     (contains_prose ~needle:"lead with the result" base_system_prompt)
 
-let test_unresolved_goal_keeps_one_stable_safety_contract () =
+let test_open_goal_store_keeps_one_stable_safety_contract () =
   with_repo_prompt_config @@ fun () ->
   let meta_with_goal =
     meta_of_json
@@ -406,12 +480,11 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
         [
           ("name", `String "wake-context-keeper");
           ("trace_id", `String "test-trace-wake-context");
-          ("active_goal_ids", `List [ `String "missing-goal" ]);
         ])
   in
   let config = Masc.Workspace.default_config "/tmp/unused" in
   let active_goal_summaries =
-    Prompt.active_goal_summaries ~config ~meta:meta_with_goal
+    Prompt.active_goal_summaries_of_store ~config
   in
   let decision = WO.keeper_cycle_decision ~meta:meta_with_goal base_observation in
   let { Prompt.system_prompt = autonomous_system_prompt; _ } =
@@ -435,7 +508,7 @@ let test_unresolved_goal_keeps_one_stable_safety_contract () =
     "unresolved goal does not split direct and autonomous prompts"
     base_system_prompt
     autonomous_system_prompt;
-  check bool "unresolved goal remains as a bare id" true
+  check bool "removed per-Keeper goal id is absent" false
     (contains ~needle:"- missing-goal\n" base_system_prompt);
   check bool "identity block is preserved" true
     (contains ~needle:"<identity>" base_system_prompt);
@@ -589,7 +662,9 @@ let test_goal_summaries_render_titles () =
   check bool "bare id has no title" false
     (contains ~needle:"Improve wake context" bare)
 
-let test_partial_goal_summaries_preserve_missing_ids () =
+(* The heading and the list are read off one list, so the keeper is never told
+   it holds goals the block does not name. *)
+let test_goal_heading_counts_what_the_block_lists () =
   let observation =
     { base_observation with active_goals = [ "goal-a"; "goal-b" ] }
   in
@@ -603,12 +678,12 @@ let test_partial_goal_summaries_preserve_missing_ids () =
         ]
       observation
   in
-  check bool "header keeps full active-goal count" true
-    (contains ~needle:"### Active Goals (2)" user);
-  check bool "resolved goal title renders" true
+  check bool "heading counts the rendered goals" true
+    (contains ~needle:"### Active Goals (1)" user);
+  check bool "the rendered goal carries its title" true
     (contains ~needle:"- goal-a — Improve wake context" user);
-  check bool "missing title falls back to bare id" true
-    (contains ~needle:"- goal-b" user)
+  check bool "no goal is counted without being named" false
+    (contains ~needle:"goal-b" user)
 
 let () =
   init_prompt_config_for_tests ();
@@ -635,7 +710,7 @@ let () =
             `Quick
             test_direct_and_autonomous_share_system_prompt;
           test_case "unresolved goal keeps one stable safety contract" `Quick
-            test_unresolved_goal_keeps_one_stable_safety_contract;
+            test_open_goal_store_keeps_one_stable_safety_contract;
         ] );
       ( "threaded turn decision",
         [
@@ -653,11 +728,18 @@ let () =
           test_case "an in-progress task is still called held" `Quick
             test_in_progress_task_heading_still_says_held;
         ] );
+      ( "own recent actions carry arguments on refusals",
+        [
+          test_case "a successful call replays no argument body" `Quick
+            test_successful_call_arguments_are_not_replayed;
+          test_case "a refused call keeps what was sent" `Quick
+            test_refused_call_keeps_its_arguments;
+        ] );
       ( "goal titles",
         [
           test_case "summaries render titles, unresolved ids stay bare" `Quick
             test_goal_summaries_render_titles;
-          test_case "partial summaries preserve missing goal ids" `Quick
-            test_partial_goal_summaries_preserve_missing_ids;
+          test_case "the heading counts what the block lists" `Quick
+            test_goal_heading_counts_what_the_block_lists;
         ] );
     ]

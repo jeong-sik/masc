@@ -440,7 +440,7 @@ let project_workspace_message_to_fleet
             ~keeper_name
             ~delivery_key
             ~content:delivery.content
-            ~surface:Surface_ref.Agent
+            ~surface:Surface_ref.Broadcast
             ~external_message_id:delivery.request_id
             ~speaker
             ()
@@ -934,8 +934,6 @@ let prepare_keeper_persistence ?requested_base_path ~config () =
        else Error Preparation_ownership_lost)
 ;;
 
-let keeper_persistence_report prepared = prepared.report
-
 type base_path_validation_error =
   | Base_path_mismatch of { observed_canonical : string }
   | Base_path_identity_unavailable of keeper_persistence_failure
@@ -1417,6 +1415,7 @@ let start_keeper_loops_owned
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
+    Server_dashboard_http_core_cache.invalidate_board_projections ();
     Sse.broadcast
       (`Assoc
           [ "jsonrpc", `String "2.0"
@@ -1692,7 +1691,7 @@ let start_keeper_loops_owned
       (* A keeper filtered out here is config-bootable but its admission is
          still owned by a durable shutdown operation from the boot scan.
          Stamp it into the excluded list instead of dropping it silently —
-         the 2026-07-21 wedge left rondo absent from both the boot set and
+         the 2026-07-21 wedge left one Keeper absent from both the boot set and
          the excluded list, so the outage was invisible in the autoboot
          report. Boot recovery settles recoverable operations in this same
          bootstrap, after which the supervisor's periodic pass registers the
@@ -1802,7 +1801,7 @@ let start_keeper_loops_owned
                  fiber flips the registry to running asynchronously on the
                  next Eio tick, so querying is_running here is a race that
                  keepers with a larger proactive-warmup idx lose
-                 deterministically (verdict=165s / sojin=150s / sangsu=135s
+                 deterministically (keeper-a=165s / keeper-b=150s / keeper-c=135s
                  produced the bulk of the false-positive "not in registry"
                  WARNs).  Check the synchronous is_registered predicate
                  instead — the running transition is observed later by the

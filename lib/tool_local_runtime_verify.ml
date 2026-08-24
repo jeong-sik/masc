@@ -12,7 +12,7 @@ let safe_discovery_endpoints () =
   | _ -> None
 
 let select_endpoint_urls_for_pool ?runtime_pool endpoint_urls =
-  match Option.bind runtime_pool String_util.trim_to_option with
+  match Option.bind runtime_pool String_util.trim_nonempty with
   | None -> if endpoint_urls = [] then None else Some endpoint_urls
   | Some pool
     when String.equal pool Local_runtime_pool.default_pool_label
@@ -50,10 +50,10 @@ let discovery_endpoints_for_pool runtime_pool =
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with
-  | model :: _ -> String_util.trim_to_option model.id
+  | model :: _ -> String_util.trim_nonempty model.id
   | [] -> (
       match endpoint.props with
-      | Some props -> String_util.trim_to_option props.model
+      | Some props -> String_util.trim_nonempty props.model
       | None -> None)
 
 let endpoint_total_slots (endpoint : Discovery_cache.endpoint_info) =
@@ -71,11 +71,6 @@ let endpoint_ctx_size (endpoint : Discovery_cache.endpoint_info) =
 
 let endpoint_busy_slots (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.slots with Some slots -> slots.busy | None -> 0
-
-let first_endpoint_url endpoints =
-  match endpoints with
-  | (endpoint : Discovery_cache.endpoint_info) :: _ -> Some endpoint.url
-  | [] -> None
 
 let error_message_of_http_error = Provider_http_error.to_message
 
@@ -214,8 +209,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
                 `String
                   (Local_runtime_pool.runtime_id_of_base_url endpoint.url) );
               ("base_url", `String endpoint.url);
-              ("provider_base_url", `String endpoint.url);
-              ("slot_url", `String endpoint.url);
               ("provider_reachable", `Bool provider_ok_row);
               ( "provider_status_code",
                 Json_util.int_opt_to_json
@@ -283,8 +276,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("blocks_keeper_turns", `Bool false);
       ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_base_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
-      ("slot_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
       ("provider_reachable", `Bool provider_reachable);
       ("slot_reachable", `Bool slot_reachable);
       ("chat_completion_compatible", `Bool chat_completion_compatible);
@@ -295,7 +286,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
       ("active_slots_now", `Int active_slots_now);
-      ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
       ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
@@ -315,8 +305,6 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("blocks_keeper_turns", `Bool false);
       ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_base_url", `Null);
-      ("slot_url", `Null);
       ("provider_reachable", `Bool false);
       ("slot_reachable", `Bool false);
       ("chat_completion_compatible", `Null);
@@ -327,7 +315,6 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", `Null);
       ("active_slots_now", `Int 0);
-      ("peak_hot_slots", `Int 0);
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
       ("runtime_blocker", `String "agent_core_discovery_unavailable");

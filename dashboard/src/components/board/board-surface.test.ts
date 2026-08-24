@@ -14,7 +14,7 @@ import { route } from '../../router'
 import { createPost } from '../../api'
 import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -251,7 +251,6 @@ describe('BoardSurface Component', () => {
     boardFlairsError.value = false
     resetBoardLatencyMetrics()
     selectedBoardPostId.value = null
-    boardFilterMode.value = 'all'
     boardComposerMode.value = 'post'
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'sangsu', status: 'active' },
@@ -532,42 +531,6 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
   })
 
-  it('renders moderation status badge on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-flagged',
-        title: 'Needs moderation',
-        body: 'content',
-        author: 'ani1999',
-        report_count: 2,
-        moderation_status: 'flagged',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByText('모더레이션 대기')).toBeInTheDocument()
-  })
-
-  it('renders vote-blind post scores as hidden until voting', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-blind',
-        title: 'Blind score',
-        body: 'content',
-        author: 'ani1999',
-        votes: null,
-        vote_balance: null,
-        vote_blind: true,
-        vote_blind_reason: 'vote_before_score',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent(/투표 후 공개/)
-  })
-
   it('renders sub-board rail and filters posts by sub-board', () => {
     boardHearths.value = [
       { name: 'ops', count: 1 },
@@ -601,7 +564,6 @@ describe('BoardSurface Component', () => {
     expect(hearthScroll?.querySelectorAll('[data-testid^="bd-sub-hearth-"]')).toHaveLength(9)
     expect(hearthScroll?.querySelector('[data-testid="bd-sub-hearth-9"]')).not.toBeNull()
     expect(container.querySelector('.bd-sub-more')).toBeNull()
-    expect(queueSection?.querySelector('[data-testid="bd-queue-mod"]')).not.toBeNull()
     expect(queueSection?.querySelector('[data-testid="bd-queue-mentions"]')).not.toBeNull()
   })
 
@@ -621,20 +583,6 @@ describe('BoardSurface Component', () => {
     expect(queue).toHaveTextContent('멘션 인박스')
     expect(within(queue).getByText('1')).toBeInTheDocument()
     expect(within(queue).queryByText('2')).not.toBeInTheDocument()
-  })
-
-  it('renders filter chips for all posts and moderation', () => {
-    boardPosts.value = [
-      makePost({ id: 'post-mod', title: 'Mod', body: 'mod', author: 'keeper', moderation_status: 'flagged' }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByTestId('bd-filter-all')).toBeInTheDocument()
-    expect(screen.getByTestId('bd-filter-mod')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId('bd-filter-mod'))
-    expect(boardFilterMode.value).toBe('mod')
   })
 
   it('changes the server-backed board sort mode from the feed head', () => {

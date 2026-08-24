@@ -1,0 +1,28 @@
+{
+  "managed_by": "MASC",
+  "schema": "masc.tool-managed-assets.v1",
+  "paths": [
+    "masc_board_comment.toml",
+    "masc_board_comment_vote.toml",
+    "masc_board_curation_read.toml",
+    "masc_board_curation_submit.toml",
+    "masc_board_hearths.toml",
+    "masc_board_list.toml",
+    "masc_board_post.toml",
+    "masc_board_post_get.toml",
+    "masc_board_post_update.toml",
+    "masc_board_profile.toml",
+    "masc_board_reaction.toml",
+    "masc_board_search.toml",
+    "masc_board_stats.toml",
+    "masc_board_sub_board_create.toml",
+    "masc_board_sub_board_delete.toml",
+    "masc_board_sub_board_get.toml",
+    "masc_board_sub_board_list.toml",
+    "masc_board_sub_board_update.toml",
+    "masc_board_vote.toml",
+    "masc_goal_list.toml",
+    "masc_goal_transition.toml",
+    "masc_goal_upsert.toml"
+  ]
+}

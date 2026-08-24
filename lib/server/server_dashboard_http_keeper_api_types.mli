@@ -24,19 +24,13 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
-val keeper_suffix_catchup_judge : string
 val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
-val keeper_suffix_turn_records : string
-
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string
 (** Length-prefixed cache key segment so delimiter characters in the value
     cannot create key collisions. *)
-
-val cache_key_string_opt_segment : string option -> string
-(** [None] and [Some ""] produce distinct segments. *)
 
 val keeper_config_cache_key : Workspace.config -> string -> string
 (** Cache key for [/api/v1/keepers/<name>/config]. Used by both read and
@@ -72,7 +66,6 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
   | Keeper_post_fusion
   | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of
@@ -83,22 +76,23 @@ type keeper_post_route_kind =
 val classify_keeper_post_route : string -> keeper_post_route_kind
 (** Map a request path to its [keeper_post_route_kind]. *)
 
-val keeper_path_ends_with : string -> string -> bool
-(** [keeper_path_ends_with path suffix]: helper used by the classifier. *)
-
 val extract_keeper_name_for_suffix : string -> string -> string
 (** [extract_keeper_name_for_suffix path suffix] returns the keeper name
     from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
-
-val is_keeper_checkpoints_get_path : string -> bool
-(** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
 
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 val is_keeper_paused_work_get_path : string -> bool
 (** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
-val keeper_get_permission : string -> Masc_domain.permission option
+val keeper_get_permission
+  :  ?include_thinking:bool
+  -> string
+  -> Masc_domain.permission option
+(** The permission a GET on this keeper subroute requires. [include_thinking]
+    comes from the query string, which the path alone does not carry: a
+    trajectory asked for with hidden reasoning needs the same [CanAdmin] that
+    [/raw-trace] needs, because it returns the same thing. *)
 (** Mandatory token-bound permission for sensitive keeper GET sub-routes.
     Exact turn evidence requires [CanReadState]. Raw retained traces, Memory OS
     change journals, checkpoint state, and paused-work operator state require
@@ -146,13 +140,6 @@ val provider_attempt_row_json :
 
 val string_contains_substring : string -> string -> bool
 (** Pure: naive substring presence test. *)
-
-val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
-(** Pure: allowlist for provider/model-related decision keys in
-    runtime-trace responses. *)
-
-val runtime_trace_redacts_provider_model_key : string -> bool
-(** Pure: redact-by-substring policy for the runtime-trace public surface. *)
 
 val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
 (** Pure: recursively redact provider/model identity fields from runtime

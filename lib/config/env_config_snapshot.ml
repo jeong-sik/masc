@@ -144,8 +144,6 @@ let keeper_execution_entries =
 
 let autonomy_entries =
   [
-    entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
-    entry ~default:"7" "MASC_AUTONOMY_QUIET_END" "Quiet hours end (0-23)";
   ]
 
 let dashboard_entries =
@@ -218,8 +216,6 @@ let channel_gate_entries =
       "Dedup TTL (seconds, floored at 1)";
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (floored at 1)";
-    entry ~default:"30" "MASC_DISCORD_STATUS_STALE_SEC"
-      "Discord status stale threshold (seconds)";
     entry ~default:"30" "MASC_IMESSAGE_STATUS_STALE_SEC"
       "iMessage status stale threshold (seconds)";
   ]

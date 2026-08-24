@@ -17,7 +17,6 @@ type config = {
 let domain_local_pg_backend_diagnostics_json () =
   `Assoc
     [
-      ("creations", `Int 0);
       ("failures", `Int 0);
       ("last_error", `Null);
     ]

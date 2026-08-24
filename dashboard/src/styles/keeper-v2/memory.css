@@ -7,7 +7,7 @@
    main.ts:89). The component (memory-inspector.ts) is actually styled by
    ../memory-inspector-v2.css, a superset that additionally owns the
    real-data extension classes (.mem-trust / .mem-policy / .mem-prompt-* /
-   .mem-store-why / .mem-more / .mem-dot / .mem-disclosure).
+   .mem-delta / .mem-more / .mem-dot / .mem-disclosure).
    The shared .mem-* selectors are intentionally duplicated across both
    files; any change to a shared selector here MUST be mirrored in
    ../memory-inspector-v2.css (and vice versa). Consolidating the two into
@@ -72,6 +72,7 @@
 .mem-kind.goal { color: var(--volt-strong); border-color: var(--volt-dim); }
 .mem-kind.constraint { color: var(--info); border-color: color-mix(in oklab, var(--info) 32%, transparent); }
 .mem-kind.blocker { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
+.mem-kind.ephemeral { color: var(--text-dim); border-style: dashed; }
 .mem-kind.unknown { color: var(--text-dim); }
 .mem-kind.entity { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 35%, transparent); }
 .mem-store-main { min-width: 0; flex: 1; }

@@ -5,9 +5,7 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_id
-
-(** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
-include Keeper_registry_types
+open Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -27,9 +25,8 @@ let registry_entry_validation_error_to_string = function
   | Healthy -> "registry entry is healthy"
   | Lifecycle_transaction_reserved owner ->
     Printf.sprintf
-      "registry mutation reserved by lifecycle transaction owner=%s expected_generation=%d"
+      "registry mutation reserved by lifecycle transaction owner=%s"
       owner.owner_id
-      owner.expected_generation
   | Meta_validation_failed { reason } ->
       Printf.sprintf "registry entry meta validation failed: %s" reason
   | Required_field_missing { field } ->
@@ -45,9 +42,6 @@ let registry_entry_validation_error_to_string = function
         expected
         actual
 ;;
-
-let registry_key_parts = Keeper_registry_types.registry_key_parts
-let canonical_base_path_exn = Keeper_registry_types.canonical_base_path_exn
 
 let has_blank_string names =
   List.exists (fun name -> String.equal (String.trim name) "") names
@@ -78,8 +72,6 @@ let validate_string_list field names =
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
-  else if runtime.nonce < 0
-  then Error (Required_field_missing { field = "generation" })
   else if runtime.usage.total_turns < 0
   then Error (Required_field_missing { field = "usage.total_turns" })
   else if runtime.usage.total_tokens < 0
@@ -557,7 +549,20 @@ let register_with_state_result
             commit_key_locked
         with
         | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
-          Error (Registration_shutdown_reserved operation_id)
+          (* Observed, not obeyed. The reservation records that a shutdown
+             began; one that never finalises never clears it, and refusing on
+             it stopped every registration for as long as the process lived —
+             15h32m on 2026-08-20 (#29566). Register and name what stood. *)
+          Log.Keeper.warn
+            "keeper registered while a shutdown reservation stood: keeper=%s \
+             operation=%s"
+            name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id);
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error validation_error -> Error (Registration_invalid validation_error))
         | Keeper_shutdown_intake_fence.Registration_committed
             (Error (Lifecycle_transaction_reserved owner)) ->
           Error (Registration_lifecycle_reserved owner)
@@ -1039,7 +1044,7 @@ let set_last_error_entry ~base_path ~name err =
   Error_tracking.set_last_error_entry ~base_path ~name err ~update_entry:update_entry_unit
 ;;
 
-(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
+(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so callers use that module directly. *)
 
 let clear_error ~base_path name =
   Error_tracking.clear_error ~base_path name ~update_entry:update_entry_unit
@@ -1047,24 +1052,6 @@ let clear_error ~base_path name =
 
 let set_failure_reason ~base_path name reason =
   Error_tracking.set_failure_reason ~base_path name reason ~update_entry:update_entry_unit
-;;
-
-let set_compaction_decision ~base_path name decision =
-  (* Reactive provider-overflow recovery has no other path to
-     [compaction_rt]: the [update_entry] helpers mutate only the turn
-     observation, and [meta.compaction_rt] is otherwise persisted wholesale by
-     the turn lifecycle (post_turn returns [updated_meta]; its caller persists).
-     Stamping the specific recovery decision onto the already-serialized
-     [last_decision] lets the dashboard surface why an overflow compaction
-     failed instead of only a generic [Turn_overflow_failure]. *)
-  update_entry_unit ~base_path name (fun e ->
-    { e with
-      meta =
-        map_compaction_rt
-          (fun rt ->
-            { rt with last_decision = compaction_runtime_decision_of_string decision })
-          e.meta
-    })
 ;;
 
 let set_last_correlation_id ~base_path name cid =

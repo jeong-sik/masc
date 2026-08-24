@@ -300,6 +300,48 @@ let test_exact_agent_core_occurrence_persisted () =
         (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+(* The ordinary path knows the disposition but not the payload, so it cannot
+   supply [typed_result]. Before this it supplied nothing and the row carried
+   only [success], which cannot tell a policy rejection from a runtime failure
+   and cannot represent [Deferred] at all. *)
+let test_ordinary_path_disposition_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"refused"
+      ~success:false
+      ~duration_ms:3.0
+      ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "the row says which kind of failure"
+        (Some "failed")
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* A row with neither says so by omission rather than by guessing. *)
+let test_row_without_a_typed_outcome_omits_the_field () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "no disposition is written when none was known"
+        None
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let test_composition_action_context_persisted () =
   with_tmp_log (fun () ->
     let typed_result =
@@ -311,7 +353,7 @@ let test_composition_action_context_persisted () =
         }
     in
     Keeper_tool_call_log.log_call
-      ~keeper_name:"analyst"
+      ~keeper_name:"delta"
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
       ~output_text:"typed output"
@@ -508,11 +550,9 @@ let test_turn_context_fields_stored () =
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
-      ~generation:3
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
-      ~goal_ids:["goal-short"; "goal-long"]
       ~sandbox_profile:"docker"
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
@@ -533,9 +573,8 @@ let test_turn_context_fields_stored () =
       ?thinking_budget:tctx.thinking_budget
       ?prompt_fingerprint:tctx.prompt_fingerprint
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-      ?generation:tctx.generation
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
-      ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+      ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile
       ?sandbox_root:tctx.sandbox_root
       ?allowed_paths:tctx.allowed_paths
@@ -566,8 +605,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "session_id field"
       (Some "trace-k")
       (Safe_ops.json_string_opt "session_id" entry);
-    Alcotest.(check int) "generation field" 3
-      (Safe_ops.json_int ~default:0 "generation" entry);
     Alcotest.(check int) "turn field" 7
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
@@ -578,9 +615,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
-    Alcotest.(check (list string)) "goal_ids field"
-      ["goal-short"; "goal-long"]
-      Yojson.Safe.Util.(entry |> member "goal_ids" |> to_list |> List.map to_string);
     Alcotest.(check (option string)) "sandbox_profile field"
       (Some "docker")
       (Safe_ops.json_string_opt "sandbox_profile" entry);
@@ -596,8 +630,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "runtime_contract agent"
       (Some "keeper-k-agent")
       (Safe_ops.json_string_opt "agent_name" runtime_contract);
-    Alcotest.(check int) "runtime_contract generation" 3
-      (Safe_ops.json_int ~default:0 "generation" runtime_contract);
     Alcotest.(check (list string)) "runtime_contract allowed_paths"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
@@ -716,7 +748,7 @@ let test_turn_context_fields_absent_without_context () =
 let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -788,7 +820,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
               ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
     in
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -831,7 +863,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
 let test_route_evidence_redacts_wrapped_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -868,7 +900,7 @@ let test_route_evidence_command_redaction_fails_closed () =
     (fun command ->
        with_tmp_log (fun () ->
          Keeper_tool_call_log.log_call
-           ~keeper_name:"executor"
+           ~keeper_name:"omega"
            ~tool_name:"tool_execute"
            ~input:(`Assoc [ ("cmd", `String command) ])
            ~output_text:
@@ -904,7 +936,7 @@ let test_route_evidence_command_redaction_fails_closed () =
 let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
@@ -942,7 +974,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
 let test_route_evidence_records_internal_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"keeper_time_now"
       ~input:(`Assoc [])
       ~output_text:
@@ -984,7 +1016,7 @@ let test_route_evidence_records_internal_descriptor () =
 let test_route_evidence_records_masc_board_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"mcp__masc__masc_board_post"
       ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
       ~output_text:{|{"ok":true,"post_id":"post-1"}|}
@@ -1045,7 +1077,7 @@ let test_route_evidence_records_descriptor_eval_tags () =
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
       ~output_text:"gate_waiting_for_operator"
@@ -1079,15 +1111,17 @@ let test_dashboard_aggregate_groups_runtime_fields () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k1" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
       ~runtime_profile:"primary" ();
+    let failure_output = "error: {\"ok\":false,\"error\":\"boom\"}" in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
+      ~input:(`Assoc []) ~output_text:failure_output
+      ~result_bytes:(String.length failure_output)
       ~success:false ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
@@ -1150,6 +1184,7 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ~tool_name:"masc_status"
       ~input:(`Assoc [])
       ~output_text:"ok"
+      ~result_bytes:2
       ~success:true
       ~duration_ms:1.0
       ();
@@ -1214,6 +1249,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -1257,6 +1293,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -1267,6 +1304,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
+         ; ("result_bytes", `Int 35)
          ; ("success", `Bool false)
          ; ("duration_ms", `Float 5.0)
          ]);
@@ -1282,6 +1320,74 @@ let test_dashboard_aggregate_window_hours () =
     Alcotest.(check (option (float 0.0001))) "window echoed"
       (Some 24.0)
       (Safe_ops.json_float_opt "window_hours" summary))
+
+let test_dashboard_aggregate_drops_rows_without_result_bytes () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let now = Unix.gettimeofday () in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    (* No [result_bytes]: an inline output string must not stand in for it. *)
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"boom\"}")
+         ; ("success", `Bool false)
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "malformed row excluded from total" 1
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "malformed row excluded from failures" 0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    let masc_status =
+      find_bucket "masc_status" (Yojson.Safe.Util.member "by_tool" summary)
+    in
+    Alcotest.(check int) "malformed row excluded from per-tool calls" 1
+      (Safe_ops.json_int ~default:(-1) "calls" masc_status);
+    Alcotest.(check bool) "malformed row excluded from failure categories" true
+      Yojson.Safe.Util.(member "failure_categories" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "nothing aggregated" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
 
 let test_append_failure_records_coverage_gap () =
   with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
@@ -1346,7 +1452,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~trace_id:"trace-recovered" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
@@ -1509,6 +1615,49 @@ let test_output_preview_derives_truncation_metadata () =
         (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
     | _ -> Alcotest.fail "expected exactly one object entry")
 
+(* A file target and a working directory are both strings. Reported as the
+   same target_kind, a consumer reading "path" as "a file" opened a directory:
+   1,094 of 2026-08-18's 1,323 Execute rows carried a cwd that way (#29013). *)
+let test_action_radius_tells_a_file_from_a_directory () =
+  with_tmp_log (fun () ->
+    let radius_of_input input =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
+        ~success:true ~duration_ms:1.0 ();
+      match Keeper_tool_call_log.read_recent ~n:1 () with
+      | [ json ] ->
+        let radius =
+          match json with
+          | `Assoc fields ->
+            Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+          | _ -> `Null
+        in
+        ( Safe_ops.json_string ~default:"" "target_kind" radius
+        , Safe_ops.json_string ~default:"" "target_path" radius )
+      | _ -> Alcotest.fail "expected exactly one entry"
+    in
+    Alcotest.(check (pair string string))
+      "file_path is a file target"
+      ("path", "lib/keeper/keeper_tool_call_log.ml")
+      (radius_of_input
+         (`Assoc [ "file_path", `String "lib/keeper/keeper_tool_call_log.ml" ]));
+    Alcotest.(check (pair string string))
+      "cwd is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "cwd", `String "repos/masc" ]));
+    Alcotest.(check (pair string string))
+      "repo_path is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "repo_path", `String "repos/masc" ]));
+    (* An explicit declaration still wins over the key it was found under. *)
+    Alcotest.(check (pair string string))
+      "declared target_kind is not overridden"
+      ("workspace", "repos/masc")
+      (radius_of_input
+         (`Assoc
+            [ "cwd", `String "repos/masc"; "target_kind", `String "workspace" ])))
+;;
+
 let test_string_input_keeps_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1640,6 +1789,10 @@ let () =
         ; eio_test "unfiltered read is exactly n; filtered still finds n"
             test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
+        ; eio_test "ordinary path disposition"
+            test_ordinary_path_disposition_persisted
+        ; eio_test "no typed outcome omits the field"
+            test_row_without_a_typed_outcome_omits_the_field
         ; eio_test "composition action context"
             test_composition_action_context_persisted
         ; eio_test "composition rows separate submitted from autonomous turn"
@@ -1685,6 +1838,10 @@ let () =
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"
             test_dashboard_aggregate_window_hours
+        ; eio_test "dashboard aggregate drops rows without result_bytes"
+            test_dashboard_aggregate_drops_rows_without_result_bytes
+        ; eio_test "dashboard aggregate with only malformed rows is empty"
+            test_dashboard_aggregate_only_malformed_rows_is_empty_summary
         ; eio_test "append failure records coverage gap"
             test_append_failure_records_coverage_gap
         ; eio_test "dashboard aggregate surfaces coverage gap"
@@ -1709,6 +1866,8 @@ let () =
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"
             test_string_input_keeps_action_radius
+        ; Alcotest.test_case "action radius tells a file from a directory" `Quick
+            test_action_radius_tells_a_file_from_a_directory
         ] )
     ; ( "async_append",
         [ eio_env_test "append queues until flush when async fiber is active"

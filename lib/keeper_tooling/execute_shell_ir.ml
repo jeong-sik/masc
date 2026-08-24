@@ -42,6 +42,11 @@ let with_cwd ~raw ~cwd ir =
       Masc_exec.Shell_ir.Simple { simple with cwd = scope }
     | Masc_exec.Shell_ir.Pipeline stages ->
       Masc_exec.Shell_ir.Pipeline (List.map map stages)
+    | Masc_exec.Shell_ir.Sequence { head; tail } ->
+      Masc_exec.Shell_ir.Sequence
+        { head = map head
+        ; tail = List.map (fun (connector, part) -> connector, map part) tail
+        }
   in
   map ir
 ;;

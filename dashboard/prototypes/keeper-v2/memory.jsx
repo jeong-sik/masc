@@ -134,9 +134,9 @@ function OneKeeperMemory({ keeper }) {
           <React.Fragment>
             <div className="cmp-trigger"><span className="sub-k">최근 컴팩션</span>{lastCmp.at} · {lastCmp.trigger}</div>
             <div className="cmp-diff">
-              <div className="cmp-col kept"><div className="cmp-col-h">{'◈'} 유지</div>{lastCmp.kept.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
-              <div className="cmp-col summ"><div className="cmp-col-h">{'◉'} 요약</div>{lastCmp.summarized.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
-              <div className="cmp-col drop"><div className="cmp-col-h">{'◌'} 폐기</div>{lastCmp.dropped.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col kept"><div className="cmp-col-h">{'\u25C8'} 유지</div>{lastCmp.kept.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col summ"><div className="cmp-col-h">{'\u25C9'} 요약</div>{lastCmp.summarized.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
+              <div className="cmp-col drop"><div className="cmp-col-h">{'\u25CC'} 폐기</div>{lastCmp.dropped.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}</div>
             </div>
           </React.Fragment>
         ) : <div className="mem-empty">컴팩션 이력 없음 — 메모리가 압축된 적 없음.</div>}
@@ -178,11 +178,11 @@ function AllKeepersMemory({ keepers, onPick }) {
       <div className="turn-sec">
         <h4>keeper별 메모리 <span className="mem-hint">행을 누르면 개별 보기</span></h4>
         <div className="mem-table">
-          <div className="mem-tr mem-th"><span>keeper</span><span>ctx</span><span>스토어</span><span>mem bytes</span></div>
+          <div className="mem-tr mem-th"><span>keeper</span><span title="마지막 턴 입력 비율 — 지금 쓰는 양은 알 수 없음 (not_observed)">마지막 턴</span><span>스토어</span><span>mem bytes</span></div>
           {agg.rows.map(r => (
             <button key={r.id} className="mem-tr" onClick={() => onPick && onPick(r.id)}>
               <span className="mem-td-id"><StatusDot status={r.status === 'run' ? 'run' : r.status === 'pause' ? 'idle' : 'bad'} /><span className="mono">{r.id}</span></span>
-              <span className="mono">{Math.round(r.ctx * 100)}%</span>
+              <span className="mono" title="마지막 턴 입력 비율 — 현재 점유율 아님 (not_observed)">{Math.round(r.ctx * 100)}%</span>
               <span className="mono">{r.store}</span>
               <span className="mem-td-bar"><i style={{ width: (r.memBytes / maxMem * 100) + '%' }}></i><b className="mono">{memFmtBytes(r.memBytes)}</b></span>
             </button>
@@ -220,7 +220,7 @@ function MemoryInspector({ keeper, onClose }) {
             <button className={scope === 'one' ? 'on' : ''} onClick={() => setScope('one')}>이 keeper</button>
             <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>전체</button>
           </div>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           {scope === 'one'

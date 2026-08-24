@@ -208,6 +208,25 @@ let test_masc_broadcast_schema () =
       | Some props ->
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
           Alcotest.(check bool) "has content" true (List.mem_assoc "content" props);
+          Alcotest.(check bool)
+            "has typed cache subject"
+            true
+            (List.mem_assoc "task_cache_subject_agent" props);
+          Alcotest.(check bool)
+            "has typed cache task"
+            true
+            (List.mem_assoc "task_cache_task_id" props);
+          (match get_json_list "required" schema.input_schema with
+           | Some required ->
+             Alcotest.(check bool)
+               "typed cache subject is optional"
+               false
+               (List.mem (`String "task_cache_subject_agent") required);
+             Alcotest.(check bool)
+               "typed cache task is optional"
+               false
+               (List.mem (`String "task_cache_task_id") required)
+           | None -> Alcotest.fail "masc_broadcast missing required field");
           (* The body is named "content" on every surface that carries it —
              board post, surface post, file write, and this tool's own result
              payload. A stray "message" here is the fork that cost a keeper
@@ -215,6 +234,64 @@ let test_masc_broadcast_schema () =
           Alcotest.(check bool) "no stray message field" false
             (List.mem_assoc "message" props)
       | None -> Alcotest.fail "masc_broadcast missing properties"
+
+let test_broadcast_cache_signal_reaches_keeper_and_agent_core_surfaces () =
+  let assert_optional_pair label schema =
+    match get_json_assoc "properties" schema with
+    | None -> Alcotest.fail (label ^ " missing properties")
+    | Some props ->
+      Alcotest.(check bool)
+        (label ^ " has typed cache subject")
+        true
+        (List.mem_assoc "task_cache_subject_agent" props);
+      Alcotest.(check bool)
+        (label ^ " has typed cache task")
+        true
+        (List.mem_assoc "task_cache_task_id" props)
+  in
+  let keeper_schema =
+    Tool_shard_types.taskboard_tools
+    |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
+      String.equal schema.name "keeper_broadcast")
+  in
+  (match keeper_schema with
+   | None -> Alcotest.fail "keeper_broadcast schema missing"
+   | Some schema -> assert_optional_pair "keeper_broadcast" schema.input_schema);
+  let binding =
+    Masc.Agent_core_tool_contract.agent_core_binding_by_name "masc_broadcast"
+  in
+  (match binding with
+   | None -> Alcotest.fail "agent-core masc_broadcast binding missing"
+   | Some binding -> assert_optional_pair "agent-core masc_broadcast" binding.input_schema);
+  let arguments =
+    `Assoc
+      [ "content", `String "typed cache observation"
+      ; "task_cache_subject_agent", `String "subject"
+      ; "task_cache_task_id", `String "task-123"
+      ]
+  in
+  match
+    Masc.Agent_core_tool_contract.resolve_requested_tool_call
+      ~agent_name:"observer"
+      ~requested_name:"masc_broadcast"
+      ~arguments
+  with
+  | Error detail -> Alcotest.fail ("agent-core broadcast projection failed: " ^ detail)
+  | Ok (operation, `Assoc projected) ->
+    Alcotest.(check string) "canonical broadcast operation" "masc_broadcast" operation;
+    Alcotest.(check (option string))
+      "agent-core preserves typed cache subject"
+      (Some "subject")
+      (Option.bind
+         (List.assoc_opt "task_cache_subject_agent" projected)
+         (function `String value -> Some value | _ -> None));
+    Alcotest.(check (option string))
+      "agent-core preserves typed cache task"
+      (Some "task-123")
+      (Option.bind
+         (List.assoc_opt "task_cache_task_id" projected)
+         (function `String value -> Some value | _ -> None))
+  | Ok (_, _) -> Alcotest.fail "agent-core broadcast projection is not an object"
 
 let test_masc_transition_schema () =
   match find_registered_tool "masc_transition" with
@@ -439,7 +516,7 @@ let test_masc_goal_transition_schema () =
            | Some action_schema ->
              Alcotest.(check (list string))
                "only lifecycle actions are public"
-               [ "request_complete"; "pause"; "resume"; "block"; "unblock"; "drop"; "reopen" ]
+               [ "request_complete"; "drop"; "reopen" ]
                (match get_json_list "enum" action_schema with
                 | Some values ->
                   List.map
@@ -553,6 +630,46 @@ let test_masc_dashboard_schema () =
   match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
+
+(* The enum the model reads and the vocabulary Dashboard accepts sit on
+   opposite sides of the cut that keeps the descriptor generator out of its own
+   consumer, and they used to be spelled separately (#27069). A scope in one
+   and not the other either hides it from the model or advertises one the
+   runtime refuses. *)
+let test_masc_dashboard_scope_enum_matches_the_runtime () =
+  match find_registered_tool "masc_dashboard" with
+  | None -> Alcotest.fail "masc_dashboard not found"
+  | Some schema ->
+    let enum =
+      match get_json_assoc "properties" schema.input_schema with
+      | None -> Alcotest.fail "masc_dashboard missing properties"
+      | Some props ->
+        (match List.assoc_opt "scope" props with
+         | None -> Alcotest.fail "masc_dashboard has no scope parameter"
+         | Some scope_schema ->
+           (match Yojson.Safe.Util.member "enum" scope_schema with
+            | `List values ->
+              List.map
+                (function
+                  | `String value -> value
+                  | other ->
+                    Alcotest.failf
+                      "scope enum holds a non-string: %s"
+                      (Yojson.Safe.to_string other))
+                values
+            | _ -> Alcotest.fail "masc_dashboard scope has no enum"))
+    in
+    Alcotest.(check (list string))
+      "the schema enum is what Dashboard accepts"
+      Dashboard.valid_scope_strings
+      enum;
+    List.iter
+      (fun value ->
+        Alcotest.(check bool)
+          (Printf.sprintf "the runtime parses the advertised scope %S" value)
+          true
+          (Option.is_some (Dashboard.scope_of_string_opt value)))
+      enum
 
 let test_masc_keeper_waiting_inventory_schema () =
   match find_registered_tool "masc_keeper_waiting_inventory" with
@@ -684,6 +801,8 @@ let () =
       Alcotest.test_case "masc_start" `Quick test_masc_start_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
+      Alcotest.test_case "broadcast cache signal surfaces" `Quick
+        test_broadcast_cache_signal_reaches_keeper_and_agent_core_surfaces;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_run schemas share SSOT" `Quick
         test_masc_run_schemas_share_ssot;
@@ -714,6 +833,8 @@ let () =
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;
+      Alcotest.test_case "dashboard scope enum matches the runtime" `Quick
+        test_masc_dashboard_scope_enum_matches_the_runtime;
       Alcotest.test_case "keeper_waiting_inventory" `Quick
         test_masc_keeper_waiting_inventory_schema;
       Alcotest.test_case "agent_fitness" `Quick test_masc_agent_fitness_schema;

@@ -115,9 +115,6 @@ let turn_state_label : type a. a turn_state -> string = function
       to_tla_symbol (Cancelled reason) ^ ":" ^ cancel_reason_label reason
   | state -> to_tla_symbol state
 
-let pp_cancel_reason fmt r =
-  Format.pp_print_string fmt (cancel_reason_label r)
-
 let pp_failure_reason fmt = function
   | Failure_runtime_unavailable { base; resolved } ->
       let resolved = match resolved with Some value -> value | None -> "-" in
@@ -144,9 +141,6 @@ let pp_failure_reason fmt = function
       Format.pp_print_string fmt (Printf.sprintf "runtime_error(%s)" msg)
   | Failure_unexpected_exception { exn; _ } ->
       Format.pp_print_string fmt (Printf.sprintf "unexpected_exception(%s)" exn)
-
-let pp_turn_state fmt (s : _ turn_state) =
-  Format.pp_print_string fmt (turn_state_label s)
 
 type transition_action =
   | StartTurn
@@ -236,8 +230,6 @@ let same_observable_state a b =
 type any_state = Any : _ turn_state -> any_state
 
 let any_state_label (Any s) = turn_state_label s
-let pp_any_state fmt (Any s) = pp_turn_state fmt s
-
 let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   let stop_signaled_before =
     match ctx with

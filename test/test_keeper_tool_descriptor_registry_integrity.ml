@@ -323,7 +323,6 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"
     ];
@@ -349,6 +348,20 @@ let test_registered_cluster_model_projections_are_explicit () =
          authority. *)
     ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
+      (* #29681 took these off the model surface after two months of zero
+         Keeper calls. Pinned here so the surface cannot quietly regrow: the
+         plan tools are an operator's editing surface, and heartbeat, check,
+         tool_help, and the agent screens answer questions the world-state
+         frame already carries. All stay registered for MCP/HTTP. *)
+    ; "masc_heartbeat"
+    ; "masc_check"
+    ; "masc_tool_help"
+    ; "masc_agent_card"
+    ; "masc_agent_timeline"
+    ; "masc_plan_init"
+    ; "masc_plan_update"
+    ; "masc_plan_get"
+    ; "masc_plan_set_task"
     ];
   List.iter
     (fun (name, projected_by) ->
@@ -356,22 +369,25 @@ let test_registered_cluster_model_projections_are_explicit () =
     [ "masc_library_read", "keeper_library_read"
     ; "masc_library_search", "keeper_library_search"
     ; "masc_tasks", "keeper_tasks_list"
+      (* #29681: the keeper_* twin is what the model sees. *)
+    ; "masc_add_task", "keeper_task_create"
+    ; "masc_batch_add_tasks", "keeper_task_create"
+    ; "masc_transition", "keeper_task_claim"
+    ; "masc_update_priority", "keeper_task_claim"
     ]
 ;;
 
-let test_local_runtime_effect_policy_is_explicit () =
+let test_local_runtime_effect_metadata_is_explicit () =
   let verify = required_internal_descriptor "masc_runtime_verify" in
   Alcotest.(check (option bool))
     "verify is not read-only"
     (Some false)
     verify.policy.readonly_hint;
-  Alcotest.(check bool) "verify is not retryable" false verify.policy.retryable;
   let probe = required_internal_descriptor "masc_runtime_ollama_probe" in
   Alcotest.(check (option bool))
     "native probe is not read-only"
     (Some false)
-    probe.policy.readonly_hint;
-  Alcotest.(check bool) "native probe is not retryable" false probe.policy.retryable
+    probe.policy.readonly_hint
 ;;
 
 let test_keeper_management_projection_is_explicit () =
@@ -549,6 +565,38 @@ let test_internal_name_snake_case () =
 let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Keeper_tool_descriptor.all_descriptors () returned []"
+
+let object_schema = `Assoc [ "type", `String "object" ]
+
+let schema_named name : Masc_domain.tool_schema =
+  { name; description = "one line"; input_schema = object_schema }
+;;
+
+let rejects_with what schemas =
+  match Masc.Config.validate_schemas schemas with
+  | () -> Alcotest.failf "validate_schemas accepted %s" what
+  | exception Invalid_argument _ -> ()
+;;
+
+(* The disjointness that [Keeper_tool_descriptor.find_cluster_schema_opt] relies
+   on is enforced here and nowhere else: the six registries it falls through are
+   all concatenated into [Config.raw_all_tool_schemas]. *)
+let test_duplicate_schema_name_is_rejected () =
+  rejects_with
+    "a repeated tool name"
+    [ schema_named "masc_status"; schema_named "masc_status" ]
+;;
+
+let test_distinct_schema_names_are_accepted () =
+  Masc.Config.validate_schemas
+    [ schema_named "masc_status"; schema_named "masc_tasks" ]
+;;
+
+let test_blank_schema_description_is_rejected () =
+  rejects_with
+    "a blank description"
+    [ { name = "masc_status"; description = ""; input_schema = object_schema } ]
+;;
 
 let schema_property_description schema name =
   let open Yojson.Safe.Util in
@@ -1704,6 +1752,18 @@ let () =
         ] )
     ; ( "uniqueness"
       , [ test_case "registry not empty" `Quick test_registry_not_empty
+        ; test_case
+            "a repeated schema name is rejected"
+            `Quick
+            test_duplicate_schema_name_is_rejected
+        ; test_case
+            "distinct schema names are accepted"
+            `Quick
+            test_distinct_schema_names_are_accepted
+        ; test_case
+            "a blank schema description is rejected"
+            `Quick
+            test_blank_schema_description_is_rejected
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness
         ; test_case
@@ -1747,9 +1807,9 @@ let () =
             `Quick
             test_registered_cluster_model_projections_are_explicit
         ; test_case
-            "local runtime effect policy is explicit"
+            "local runtime effect metadata is explicit"
             `Quick
-            test_local_runtime_effect_policy_is_explicit
+            test_local_runtime_effect_metadata_is_explicit
         ; test_case
             "Keeper management projection is explicit"
             `Quick

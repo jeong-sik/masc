@@ -735,6 +735,8 @@
 /* keeper config drawer */
 .kc-text { width: 100%; font-family: var(--font-body); font-size: var(--fs-13); line-height: 1.55; padding: 10px 12px; background: var(--bg-sunken); color: var(--text-primary); border: 1px solid var(--border-main); border-radius: var(--radius-sm); outline: none; resize: vertical; }
 .kc-text:focus { border-color: var(--volt-dim); box-shadow: 0 0 0 2px var(--volt-wash); }
+.kc-traits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.kc-trait { font-family: var(--font-ui); font-size: 10.5px; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); padding: 2px 9px; border-radius: var(--radius-pill); }
 .kc-save { width: 100%; margin-top: 4px; padding: 11px; background: var(--volt); color: var(--volt-ink); border: 0; border-radius: var(--radius-sm); font-family: var(--font-ui); font-weight: 600; font-size: var(--fs-13); cursor: pointer; transition: 0.14s; }
 .kc-save:hover { filter: brightness(1.06); }
 .turn-sec .set-row { padding: 8px 0; }
@@ -845,8 +847,6 @@
 .wk-blk-n { color: var(--status-bad); }
 .wk-foot { margin: 16px 2px 4px; font-size: var(--fs-11); color: var(--text-dim); }
 
-/* ── work v2: goal list (priority-sorted), task lifecycle, gate contract, backlog ── */
-
 /* ── work v2: horizon groups, real task lifecycle, gate contract, backlog ── */
 /* ── operator status aside (지금 상황 / 해야 할 일 / 최근 한 일) — shared by work·schedule·approvals ── */
 .ov.ov-2col { flex-direction: row; align-items: stretch; }
@@ -857,6 +857,12 @@
 .wka-h .n { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); letter-spacing: 0; }
 .wka-list { display: flex; flex-direction: column; gap: 6px; }
 .wka-calm { font-size: var(--fs-11); color: var(--text-dim); padding: 5px 2px; }
+
+.wka-pulse { display: flex; gap: 8px; margin-bottom: 12px; }
+.wka-pulse-i { flex: 1; display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); font-size: 9.5px; letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase; }
+.wka-pulse-i b { font-size: 19px; font-weight: 400; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.wka-pulse-i b.volt { color: var(--volt-strong); }
+.wka-pulse-i b.warn { color: var(--status-warn); }
 
 /* flagged goals (지금 상황) */
 .wka-flag { text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; padding: 9px 11px; border: 1px solid var(--border-soft); border-left-width: 2px; border-radius: var(--radius-sm); background: var(--bg-card); cursor: pointer; transition: border-color 0.16s ease, background 0.16s ease; }
@@ -886,7 +892,13 @@
 .wka-done { text-align: left; display: flex; align-items: baseline; gap: 9px; padding: 6px 10px; border-radius: var(--radius-xs); background: none; border: 0; cursor: pointer; transition: background 0.16s ease; }
 .wka-done:hover { background: var(--bg-sunken); }
 .wka-done-mark { flex: none; color: var(--status-ok); font-size: var(--fs-11); }
+.wka-done-mark.ok { color: var(--status-ok); }
+.wka-done-mark.bad { color: var(--status-bad); }
+.wka-done-mark.warn { color: var(--status-warn); }
+.wka-done-mark.dim { color: var(--text-dim); }
+.wka-done-mark.info { color: var(--info); }
 .wka-done-t { font-size: 12.5px; color: var(--text-mid); line-height: 1.3; }
+.wka-done-ns { margin-left: auto; flex: none; font-size: var(--fs-10); color: var(--text-dim); }
 
 /* auto-approve policy control (approvals aside) */
 .wka-auto { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); padding: 12px 13px; display: flex; flex-direction: column; gap: 11px; }
@@ -998,6 +1010,42 @@
 .wk-task-detail { padding: 4px 8px 10px 25px; }
 
 /* ── 활동 흐름 (lineage): 누가 → 누구에게 ── */
+.wk-lineage { border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-sunken); padding: 10px 12px; margin-bottom: 8px; }
+.wk-lin-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+.wk-lin-h-lbl { font-family: var(--font-display); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mid); }
+.wk-lin-chain { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wk-lin-chain-arr { color: var(--volt-strong); font-size: var(--fs-12); }
+.wk-lin-actor { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); background: none; border: 0; border-bottom: 1px dashed var(--border-highlight); padding: 0 1px 1px; cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease; }
+.wk-lin-actor:hover { color: var(--volt-strong); border-color: var(--volt-strong); }
+.wk-lin-actor.none { color: var(--text-dim); border-bottom-style: dotted; cursor: default; }
+.wk-lin-actor.cur { color: var(--text-bright); border-bottom-color: var(--volt-strong); }
+.wk-lin-actor.to { color: var(--volt-strong); }
+
+.wk-lin-track { display: flex; flex-direction: column; }
+.wk-lin-row { display: grid; grid-template-columns: 38px 16px 1fr; align-items: start; gap: 0 9px; }
+.wk-lin-at { text-align: right; font-size: var(--fs-10); color: var(--text-dim); padding-top: 1px; font-variant-numeric: tabular-nums; }
+.wk-lin-rail { position: relative; align-self: stretch; display: flex; justify-content: center; }
+.wk-lin-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-main); }
+.wk-lin-row:first-child .wk-lin-rail::before { top: 6px; }
+.wk-lin-row:last-child .wk-lin-rail::before { bottom: calc(100% - 10px); }
+.wk-lin-dot { position: relative; z-index: 1; width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; background: var(--text-dim); box-shadow: 0 0 0 3px var(--bg-sunken); }
+.wk-lin-dot.dim { background: var(--text-dim); }
+.wk-lin-dot.claimed { background: var(--text-mid); }
+.wk-lin-dot.wip { background: var(--volt-strong); }
+.wk-lin-dot.volt { background: var(--volt-strong); box-shadow: 0 0 0 3px var(--bg-sunken), 0 0 7px var(--volt-dim); }
+.wk-lin-dot.verify { background: var(--info); }
+.wk-lin-dot.done { background: var(--status-ok); }
+.wk-lin-dot.bad { background: var(--status-bad); }
+.wk-lin-body { padding: 0 0 11px; min-width: 0; }
+.wk-lin-row:last-child .wk-lin-body { padding-bottom: 0; }
+.wk-lin-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wk-lin-ev { font-size: 11.5px; color: var(--text-mid); white-space: nowrap; }
+.wk-lin-ev.wip, .wk-lin-ev.volt { color: var(--volt-strong); }
+.wk-lin-ev.verify { color: var(--info); }
+.wk-lin-ev.done { color: var(--status-ok); }
+.wk-lin-ev.bad { color: var(--status-bad); }
+.wk-lin-arr { color: var(--volt-strong); font-size: var(--fs-12); }
+.wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
 
 /* ── work 뷰 토글 (호라이즌 / 칸반) ── */
 .wk-head-r { display: flex; align-items: center; gap: 12px; }
@@ -1035,6 +1083,8 @@
 .wk-kcard.done .wk-kcard-title { color: var(--text-mid); }
 .wk-kcard-block { font-size: 10.5px; color: var(--status-bad); }
 .wk-kcard-foot { display: flex; align-items: center; gap: 7px; }
+.wk-kcard-goal { display: block; width: 100%; box-sizing: border-box; text-align: left; font-size: 10.5px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.14s ease; }
+.wk-kcard-goal:hover { color: var(--volt-strong); }
 .wk-kcard-ho { color: var(--volt-strong); font-size: var(--fs-12); }
 .wk-kcard-kp { display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; padding: 0; cursor: pointer; border-radius: 50%; }
 .wk-kcard-kp.none { color: var(--text-faint); cursor: default; }
@@ -1156,6 +1206,7 @@
 .wk-kcard-title { font-size: var(--fs-13); color: var(--text-bright); line-height: 1.35; text-wrap: pretty; }
 .wk-kcard-block { margin-top: 6px; font-size: 10.5px; color: var(--status-warn); line-height: 1.45; }
 .wk-kcard-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.wk-kcard-goal { font-size: var(--fs-10); color: var(--text-dim); }
 .wk-kcard-kp { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--text-mid); font-size: var(--fs-11); cursor: pointer; transition: color 0.14s ease; }
 .wk-kcard-kp:hover { color: var(--volt-strong); }
 .wk-kcard-kp.none { color: var(--text-dim); cursor: default; }
@@ -1357,6 +1408,10 @@
 .meter.hot > span { background: linear-gradient(90deg, var(--status-warn), var(--status-bad)); }
 .meter-wrap { position: relative; margin-top: 7px; }
 .meter-wrap .meter { margin-top: 0; }
+.meter-mark { position: absolute; top: -2px; width: 1px; height: 11px; background: color-mix(in oklab, var(--status-warn) 75%, transparent); transform: translateX(-50%); pointer-events: none; }
+.meter-mark.hot { background: var(--status-bad); }
+.meter-mark-lbl { position: absolute; bottom: 100%; right: 1px; margin-bottom: 3px; font-size: 8.5px; font-style: normal; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; color: color-mix(in oklab, var(--status-warn) 80%, var(--text-dim)); }
+.meter-mark.hot .meter-mark-lbl { color: var(--status-bad); }
 
 /* fsm list */
 .fsm { display: flex; flex-direction: column; gap: 0; }
@@ -1602,14 +1657,13 @@
 
 /* roster row command menu */
 .kp-row { position: relative; }
-/* on hover the command menu button takes the right slot — fade the time/att stack so they
+/* on hover the ⋯ takes the right slot — fade the time/att stack so they
    don't collide with the absolutely-positioned button */
 .kp-row:hover .kp-right { opacity: 0; pointer-events: none; }
 .kp-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid var(--border-main);
-  background: var(--bg-panel); color: var(--text-mid); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; padding: 0;
+  background: var(--bg-panel); color: var(--text-mid); cursor: pointer; font-size: var(--fs-14); line-height: 1;
   opacity: 0; transition: 0.14s; z-index: 2;
 }
 .kp-row:hover .kp-more { opacity: 1; }
@@ -1651,41 +1705,6 @@
 
 /* compaction inspector body */
 .cmp-empty { font-size: 12.5px; line-height: 1.7; color: var(--text-dim); text-align: center; padding: 30px 12px; }
-.cmp-coverage {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 9px 11px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-.cmp-coverage.warn {
-  border-color: color-mix(in oklab, var(--status-warn) 38%, var(--border-soft));
-  background: color-mix(in oklab, var(--status-warn) 8%, var(--bg-card));
-}
-.cmp-coverage-main,
-.cmp-coverage-meta {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.cmp-coverage-main strong {
-  color: var(--text-mid);
-  font-family: var(--font-ui);
-  font-size: var(--fs-10);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.cmp-coverage-note {
-  color: var(--status-warn);
-}
 .cmp-trigger { font-size: var(--fs-12); color: var(--text-mid); margin-bottom: 4px; }
 .cmp-trigger .sub-k { margin-right: 6px; }
 .cmp-headline { display: flex; align-items: center; gap: 10px; font-size: var(--fs-20); margin-bottom: 12px; }
@@ -1939,71 +1958,6 @@ input:focus-visible,
 textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; border-radius: var(--radius-xs); }
 .v2-app :focus:not(:focus-visible) { outline: none; }
 
-/* ══════════════════════════════════════════════════════════════
-   Work/Schedule deltas — vendored verbatim from the keeper-v2
-   prototype v2.css (design tokens are native here). Backs:
-   · schedule aside pulse + terminal marks (schedule-surface.ts SchAside)
-   · task activity lineage rail (goals/task-detail-overlay.ts)
-   · kanban card → owning goal jump (work.ts KanbanCard)
-   ══════════════════════════════════════════════════════════════ */
-
-/* schedule aside — pulse summary */
-.wka-pulse { display: flex; gap: 8px; margin-bottom: 12px; }
-.wka-pulse-i { flex: 1; display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); font-size: 9.5px; letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase; }
-.wka-pulse-i b { font-size: 19px; font-weight: 400; color: var(--text-bright); font-variant-numeric: tabular-nums; }
-.wka-pulse-i b.volt { color: var(--volt-strong); }
-.wka-pulse-i b.warn { color: var(--status-warn); }
-
-/* schedule aside — terminal recency marks + status suffix */
-.wka-done-mark.ok { color: var(--status-ok); }
-.wka-done-mark.bad { color: var(--status-bad); }
-.wka-done-mark.warn { color: var(--status-warn); }
-.wka-done-mark.dim { color: var(--text-dim); }
-.wka-done-mark.info { color: var(--info); }
-.wka-done-ns { margin-left: auto; flex: none; font-size: var(--fs-10); color: var(--text-dim); }
-
-/* task activity lineage rail */
-.wk-lineage { border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-sunken); padding: 10px 12px; margin-bottom: 8px; }
-.wk-lin-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
-.wk-lin-h-lbl { font-family: var(--font-display); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mid); }
-.wk-lin-chain { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.wk-lin-chain-arr { color: var(--volt-strong); font-size: var(--fs-12); }
-.wk-lin-actor { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); background: none; border: 0; border-bottom: 1px dashed var(--border-highlight); padding: 0 1px 1px; cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease; }
-.wk-lin-actor:hover { color: var(--volt-strong); border-color: var(--volt-strong); }
-.wk-lin-actor.none { color: var(--text-dim); border-bottom-style: dotted; cursor: default; }
-.wk-lin-actor.cur { color: var(--text-bright); border-bottom-color: var(--volt-strong); }
-.wk-lin-actor.to { color: var(--volt-strong); }
-
-.wk-lin-track { display: flex; flex-direction: column; }
-.wk-lin-row { display: grid; grid-template-columns: 38px 16px 1fr; align-items: start; gap: 0 9px; }
-.wk-lin-at { text-align: right; font-size: var(--fs-10); color: var(--text-dim); padding-top: 1px; font-variant-numeric: tabular-nums; }
-.wk-lin-rail { position: relative; align-self: stretch; display: flex; justify-content: center; }
-.wk-lin-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-main); }
-.wk-lin-row:first-child .wk-lin-rail::before { top: 6px; }
-.wk-lin-row:last-child .wk-lin-rail::before { bottom: calc(100% - 10px); }
-.wk-lin-dot { position: relative; z-index: 1; width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; background: var(--text-dim); box-shadow: 0 0 0 3px var(--bg-sunken); }
-.wk-lin-dot.dim { background: var(--text-dim); }
-.wk-lin-dot.claimed { background: var(--text-mid); }
-.wk-lin-dot.wip { background: var(--volt-strong); }
-.wk-lin-dot.volt { background: var(--volt-strong); box-shadow: 0 0 0 3px var(--bg-sunken), 0 0 7px var(--volt-dim); }
-.wk-lin-dot.verify { background: var(--info); }
-.wk-lin-dot.done { background: var(--status-ok); }
-.wk-lin-dot.bad { background: var(--status-bad); }
-.wk-lin-body { padding: 0 0 11px; min-width: 0; }
-.wk-lin-row:last-child .wk-lin-body { padding-bottom: 0; }
-.wk-lin-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.wk-lin-ev { font-size: 11.5px; color: var(--text-mid); white-space: nowrap; }
-.wk-lin-ev.wip, .wk-lin-ev.volt { color: var(--volt-strong); }
-.wk-lin-ev.verify { color: var(--info); }
-.wk-lin-ev.done { color: var(--status-ok); }
-.wk-lin-ev.bad { color: var(--status-bad); }
-.wk-lin-arr { color: var(--volt-strong); font-size: var(--fs-12); }
-.wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
-
-/* kanban card — owning goal jump */
-.wk-kcard-goal { display: block; width: 100%; box-sizing: border-box; text-align: left; font-size: 10.5px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.14s ease; }
-.wk-kcard-goal:hover { color: var(--volt-strong); }
-
 /* ════ MOBILE: operator-status / policy aside is hidden ≤1180; on phones it
    carries the auto-approve policy + "지금 상황 / 해야 할 일", so bring it back
    stacked below the content (the surface itself becomes the scroller). ════ */
@@ -2028,3 +1982,6 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
   /* KPI strips: 2 across on phones (work surface forces 5 inline → override) */
   .ov-kpis { grid-template-columns: repeat(2, 1fr) !important; }
 }
+
+.rp-name-row{display:flex;align-items:baseline;gap:8px;min-width:0}
+.rp-path{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

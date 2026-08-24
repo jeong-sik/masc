@@ -38,7 +38,7 @@ let test_create_accumulator () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-001" ~generation:0 () in
+      ~trace_id:"trace-001" () in
     Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
     Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
 
@@ -50,7 +50,7 @@ let test_record_entry () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-002" ~generation:0 () in
+      ~trace_id:"trace-002" () in
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0;
       ts_iso = "2026-01-01T00:00:00Z";
@@ -76,7 +76,7 @@ let test_increment_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005" ~generation:0 () in
+      ~trace_id:"trace-005" () in
     Alcotest.(check int) "turn 0" 0 acc.Trajectory.turn;
     Trajectory.increment_turn acc;
     Alcotest.(check int) "turn 1" 1 acc.Trajectory.turn;
@@ -87,7 +87,7 @@ let test_set_turn_adopts_runtime_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005b" ~generation:0 () in
+      ~trace_id:"trace-005b" () in
     Alcotest.(check int) "turn starts at 0" 0 acc.Trajectory.turn;
     (* The runtime numbers turns itself; the accumulator adopts that number
        so tool-call entries land on the same turn as the reasoning entries
@@ -110,7 +110,7 @@ let test_finalize () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-006" ~generation:0 () in
+      ~trace_id:"trace-006" () in
     Trajectory.increment_turn acc;
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
@@ -149,7 +149,7 @@ let test_calls_in_current_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-007" ~generation:0 () in
+      ~trace_id:"trace-007" () in
     Trajectory.increment_turn acc;
     let mk tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
@@ -172,14 +172,14 @@ let test_task_id_default_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-001" ~generation:0 () in
+      ~trace_id:"trace-tid-001" () in
     Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
 
 let test_set_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-002" ~generation:0 () in
+      ~trace_id:"trace-tid-002" () in
     Trajectory.set_task_id acc "task-042";
     Alcotest.(check (option string)) "task_id set"
       (Some "task-042") acc.Trajectory.task_id)
@@ -188,7 +188,7 @@ let test_clear_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-003" ~generation:0 () in
+      ~trace_id:"trace-tid-003" () in
     Trajectory.set_task_id acc "task-042";
     Trajectory.clear_task_id acc;
     Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
@@ -197,7 +197,7 @@ let test_finalize_propagates_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-004" ~generation:0 () in
+      ~trace_id:"trace-tid-004" () in
     Trajectory.set_task_id acc "task-099";
     Trajectory.increment_turn acc;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -208,7 +208,7 @@ let test_task_id_in_trajectory_json () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-005" ~generation:0 () in
+      ~trace_id:"trace-tid-005" () in
     Trajectory.set_task_id acc "task-json-test";
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
@@ -223,7 +223,7 @@ let test_task_id_null_when_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-006" ~generation:0 () in
+      ~trace_id:"trace-tid-006" () in
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in
@@ -374,7 +374,6 @@ let test_entry_to_json_includes_contract_and_radius () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ()
   in
@@ -411,16 +410,16 @@ let test_execution_id_roundtrip () =
     execution_id = Some "exec-1718150400000-0001";
   } in
   (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
-   | Some (decoded, _) ->
+   | Some decoded ->
        Alcotest.(check (option string)) "round-trip"
          (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
    | None -> Alcotest.fail "entry did not decode");
-  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
-  match Trajectory.tool_call_entry_of_json legacy with
-  | Some (decoded, _) ->
-      Alcotest.(check (option string)) "legacy row decodes as None" None
+  let without_execution_id = Trajectory.entry_to_json { entry with execution_id = None } in
+  match Trajectory.tool_call_entry_of_json without_execution_id with
+  | Some decoded ->
+      Alcotest.(check (option string)) "absent execution_id decodes as None" None
         decoded.Trajectory.execution_id
-  | None -> Alcotest.fail "legacy entry did not decode"
+  | None -> Alcotest.fail "entry without execution_id did not decode"
 
 let has_assoc_key key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -432,7 +431,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"
       ~network_mode:"none"
@@ -443,7 +441,6 @@ let test_runtime_contract_projection_redacts_backend_details () =
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
-      ~generation:2
       ~sandbox_profile:"docker"
       ~sandbox_root:"/workspace"
       ~network_mode:"none"
@@ -476,8 +473,10 @@ let test_read_entries_since () =
     let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
+    (* [gate] is written unconditionally by [entry_to_json]; a row without it is
+       not a shape the writer produces, and the reader no longer invents one. *)
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|}
       ts
     in
     let oc = open_out path in
@@ -492,7 +491,7 @@ let test_read_entries_since () =
     let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
     Alcotest.(check int) "all entries" 3 (List.length all))
 
-let test_read_entries_since_result_parses_gate_summary () =
+let test_rows_without_a_gate_object_are_not_read () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
@@ -509,16 +508,11 @@ let test_read_entries_since_result_parses_gate_summary () =
     let oc = open_out path in
     List.iter (Printf.fprintf oc "%s\n") rows;
     close_out oc;
-    let result =
-      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
-        ~since:0.0
-    in
-    Alcotest.(check int) "three entries" 3 (List.length result.Trajectory.entries);
-    Alcotest.(check int) "parsed gate count" 2
-      result.Trajectory.gate_decode.parsed_gate_count;
-    Alcotest.(check int) "legacy default count" 1
-      result.Trajectory.gate_decode.legacy_default_count;
-    match List.nth result.Trajectory.entries 1 with
+    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
+    (* The third row carries no gate object. It used to arrive as [Pass], a
+       verdict it never recorded; it is now not an entry at all. *)
+    Alcotest.(check int) "only the two rows with a gate object" 2 (List.length entries);
+    match List.nth entries 1 with
     | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
       Alcotest.(check string) "reject reason parsed" "blocked" reason
     | _ -> Alcotest.fail "expected persisted reject gate")
@@ -548,8 +542,7 @@ let test_read_recent_lines_skips_malformed_rows () =
   with_tmpdir (fun dir ->
     let acc =
       Trajectory.create_accumulator
-        ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed"
-        ~generation:0 ()
+        ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed" ()
     in
     Trajectory.record_entry acc
       (mk_entry "tool_execute" 10 "2026-07-01T00:00:00Z");
@@ -579,7 +572,7 @@ let test_read_recent_lines_skips_malformed_rows () =
 let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
-      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null}|}
+      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":10,"error":null}|}
     ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
@@ -617,7 +610,6 @@ let next_round_summary_row : Yojson.Safe.t =
       ("type", `String "trajectory_summary");
       ("keeper_name", `String "k");
       ("trace_id", `String "t");
-      ("generation", `Int 0);
     ]
 
 (* Append rows to the trajectory JSONL for a keeper/trace. Uses a single append
@@ -870,7 +862,7 @@ let test_content_bearing_thinking_row_is_rejected () =
 let test_persist_response_content_per_turn_withheld () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
+      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" () in
     (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
     let big = String.make 5000 'a' in
     let content = [
@@ -961,8 +953,8 @@ let () =
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
-      Alcotest.test_case "parses persisted gate summary" `Quick
-        test_read_entries_since_result_parses_gate_summary;
+      Alcotest.test_case "rows without a gate object are not read" `Quick
+        test_rows_without_a_gate_object_are_not_read;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;

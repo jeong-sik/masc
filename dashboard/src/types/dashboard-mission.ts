@@ -234,7 +234,6 @@ export interface OperatorKeeperSnapshot {
   status?: string
   context_ratio?: number | null
   generation?: number
-  active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string

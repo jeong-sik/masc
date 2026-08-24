@@ -849,7 +849,7 @@ case \"$1\" in\n\
         exit 1\n\
         ;;\n\
       rm-gone)\n\
-        printf '\\t100.000\\tfalse\\t600\\n'\n\
+        printf '4242\\t100.000\\tfalse\\t600\\n'\n\
         exit 0\n\
         ;;\n\
     esac\n\
@@ -934,7 +934,7 @@ let test_sandbox_container_label_args_include_managed_ttl () =
     Keeper_sandbox_runtime.docker_label_args
       ~ttl_sec:90.0
       ~base_path:"/tmp/masc"
-      ~keeper_name:"issue-king"
+      ~keeper_name:"kappa-keeper"
       ~container_kind:"managed"
       ~network_label:"inherit" ()
   in
@@ -1064,6 +1064,41 @@ let test_docker_failure_class_is_typed_and_serializes_stable_string () =
      with
      | Docker_daemon_timeout -> true
      | _ -> false)
+
+(* Under a non-default cluster the board, task and goal stores live in
+   .masc/clusters/<name>/, which is where Board_paths reads them. A mount
+   rooted at .masc/ handed the container a different set of files — usually
+   none, since the default-cluster copies do not exist (#28953). *)
+let test_docker_workspace_state_mounts_follow_the_cluster () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_CLUSTER_NAME" "cluster-alpha" @@ fun () ->
+  let default_root = Filename.concat base ".masc" in
+  let cluster_root =
+    Filename.concat (Filename.concat default_root "clusters") "cluster-alpha"
+  in
+  ensure_dir cluster_root;
+  write_file (Filename.concat cluster_root "board_posts.jsonl") "";
+  (* A same-named file in the default root, so a mount that ignores the cluster
+     still finds something and the assertion below is about which one. *)
+  ensure_dir default_root;
+  write_file (Filename.concat default_root "board_posts.jsonl") "";
+  let specs =
+    Keeper_sandbox_runtime.docker_workspace_state_mount_specs
+      ~base_path:base
+      ~container_root:"/home/keeper/playground/minjae"
+  in
+  Alcotest.(check bool) "mounts the cluster's board posts" true
+    (List.mem
+       (Filename.concat cluster_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs);
+  Alcotest.(check bool) "does not mount the default-cluster copy" false
+    (List.mem
+       (Filename.concat default_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs)
+;;
 
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
@@ -1656,19 +1691,19 @@ let test_streaming_exec_validates_cached_container_before_retry () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1676,7 +1711,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected retried exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "retried exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected retried exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
@@ -1834,19 +1869,19 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1854,7 +1889,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected restarted exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "restarted exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected restarted exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
@@ -2131,6 +2166,8 @@ let run_tests ~clock () =
             test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
+          Alcotest.test_case "docker-workspace-state-mounts-follow-the-cluster" `Quick
+            test_docker_workspace_state_mounts_follow_the_cluster;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

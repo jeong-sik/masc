@@ -50,6 +50,8 @@ val run_named_with_masc_tools :
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?on_runtime_attempt_error:
+    (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?provider_config_transform:
@@ -62,7 +64,9 @@ val run_named_with_masc_tools :
 (** [run_named] variant that bridges MASC tool schemas into AGENT_CORE tools
     via {!Tool_bridge.agent_core_tool_of_masc}. [keeper_name] preserves per-Keeper
     lane ownership in runtime manifests and metrics; the default retains
-    compatibility for non-Keeper callers. *)
+    compatibility for non-Keeper callers. [on_runtime_attempt_error] forwards
+    the typed per-candidate observation from {!Keeper_turn_driver.run_named}
+    without changing its terminal result. *)
 
 val run_model_with_masc_tools :
   model_label:string ->

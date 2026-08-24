@@ -16,10 +16,6 @@
     RFC-0029 candidate, tracked in #10710.  *)
 
 
-let normalize_model_name s =
-  let s = String.trim s in
-  Runtime_provider_binding.normalize_runtime_name_for_bucket s
-
 type keeper_gen_window_stats = {
   turns: int;
   usage_points: int;
@@ -84,10 +80,7 @@ let keeper_history_summary_json
           Keeper_context_core.text_of_history_jsonl_json j |> String.trim
         in
         let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
-        let ts_unix =
-          let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-          if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
-        in
+        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         if role = "" || content = ""
            || Keeper_types_support.is_internal_history_source source
         then

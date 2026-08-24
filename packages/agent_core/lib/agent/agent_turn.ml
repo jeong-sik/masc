@@ -57,7 +57,7 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
       (try project prepared with
        | exn ->
          Llm_provider.Reserved_exn.reraise_if_reserved exn;
-         Error (Printexc.to_string exn))
+         Error (Error.Internal (Printexc.to_string exn)))
   in
   Result.map
     (fun effective_messages -> { tools_json; effective_messages; visible_tool_names })

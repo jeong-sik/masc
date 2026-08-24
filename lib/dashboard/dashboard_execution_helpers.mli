@@ -23,7 +23,7 @@
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
     [extract_keeper_name] / [lookup_neo4j_profile] /
-    [is_keeper_offline] / [is_health_at_risk] / [option_or_else] /
+    [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
@@ -94,7 +94,6 @@ val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
-val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Health predicates} *)

@@ -376,7 +376,11 @@ let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
-      [ Masc.Keeper_chat_events.External_effect_completed { target = None }
+      [ Masc.Keeper_chat_events.External_effect_completed
+          { target =
+              Masc.Keeper_surface_post.Delivered_to_slack
+                { channel_id = "C-effect"; thread_ts = None }
+          }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
       ]
       ~send_plain:(fun ~content:_ ->
@@ -402,7 +406,11 @@ let test_completed_external_effect_deletes_streamed_draft () =
         deleted := message_id :: !deleted;
         Ok ())
       [ Masc.Keeper_chat_events.Text_delta "partial "
-      ; Masc.Keeper_chat_events.External_effect_completed { target = None }
+      ; Masc.Keeper_chat_events.External_effect_completed
+          { target =
+              Masc.Keeper_surface_post.Delivered_to_slack
+                { channel_id = "C-effect"; thread_ts = None }
+          }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect-draft" }
       ]
       ~send_plain:(fun ~content:_ -> fail "external effect needs no side message")
@@ -539,8 +547,17 @@ let test_native_activity_failure_does_not_affect_delivery () =
   check (list string) "typed activity lifecycle"
     [ "답변을 준비하고 있어요…"; "🔧 keeper_surface_post 사용 중…"; "" ]
     (List.rev !statuses);
-  check (list string) "tool context is not exposed" [ "final" ]
+  (* The trail names the call the turn made. Tool_context_block's summaries are
+     a different thing and stay off the channel -- that is the property this
+     case exists to hold, so it is now checked for itself rather than implied
+     by the reply being bare. *)
+  check (list string) "the reply carries the call's name"
+    [ "final\n```\n\xe2\x94\x94 keeper_surface_post\n```" ]
     (List.rev !sends);
+  check bool "private tool context never reaches the channel" false
+    (List.exists
+       (fun sent -> contains sent "private args" || contains sent "private result")
+       !sends);
   check bool "delivery still succeeds" true (outcomes = [ Ok () ])
 
 let disposition_testable =

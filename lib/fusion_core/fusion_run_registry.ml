@@ -101,9 +101,11 @@ module Store = Run_registry_core.Make (Payload)
 
 type t = Store.t
 
+let storage_filename = "fusion-runs.jsonl"
 let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 
 let register_running t ~run_id ~keeper ~preset ~topology ~started_at =
   Store.register t ~id:run_id ~started_at

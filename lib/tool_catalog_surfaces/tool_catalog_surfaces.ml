@@ -45,7 +45,6 @@ let public_mcp_surface_tools =
   ; (* Planning *)
     "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_plan_init"
   ; "masc_plan_get"
@@ -130,7 +129,6 @@ let spawned_agent_surface_tools =
   ; "masc_messages"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_board_list"
   ; "masc_board_post"
@@ -166,7 +164,6 @@ let session_min_surface_tools =
   ; "masc_add_task"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_broadcast"
   ; "masc_heartbeat"

@@ -195,7 +195,11 @@ let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
-      [ Masc.Keeper_chat_events.External_effect_completed { target = None }
+      [ Masc.Keeper_chat_events.External_effect_completed
+          { target =
+              Masc.Keeper_surface_post.Delivered_to_discord
+                { channel_id = "channel-effect" }
+          }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
       ]
       ~post_message:(fun ~content:_ ->
@@ -339,8 +343,14 @@ let test_tool_activity_uses_native_surface_without_messages () =
   in
   check int "run start and tool start refresh native activity" 2
     !activity_refreshes;
-  check (list string) "only the final reply is sent" [ "done" ]
+  (* The tool trail rides on that one reply. Tool activity still creates no
+     message of its own -- post_message and edit_message fail the test above if
+     it does -- which is the property this case exists to hold. *)
+  check (list string) "only the final reply is sent, carrying the turn's trail"
+    [ "done\n```\n\xe2\x94\x94 keeper_surface_read\n```" ]
     (List.rev !final_sends);
+  check bool "private tool context never reaches the channel" false
+    (List.exists (fun sent -> contains sent "private tool result") !final_sends);
   check_single_ok "activity failure does not affect delivery" outcomes
 
 let () =

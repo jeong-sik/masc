@@ -47,7 +47,6 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
     ; "input", entry.input
     ]
   in
@@ -1210,7 +1209,6 @@ let spawn_with
       registry
       ~run_id
       ~lane:Exact_lane_run_registry.Hitl_auto_judge
-      ~subject_id:entry.id
       ~actor:entry.keeper_name
       ~started_at
       ~input:
@@ -1225,8 +1223,7 @@ let spawn_with
            ; "turn_id", Json_util.int_opt_to_json entry.turn_id
            ; "task_id", Json_util.string_opt_to_json entry.task_id
            ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-           ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
-           ; "partial_context", `Bool (Option.is_none entry.request_context)
+                  ; "partial_context", `Bool (Option.is_none entry.request_context)
            ]));
     let complete outcome output =
       match

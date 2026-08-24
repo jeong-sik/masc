@@ -4,9 +4,10 @@
     Before this fix, the handler called [Workspace_task.add_task], which
     folds [add_task_with_result]'s [Error] into a display string and drops
     it. This branch then unconditionally returned [ok:true,
-    typed_outcome:Progress] -- a failed goal-link write (or backlog write)
-    was invisible to the keeper. See [Workspace_task.add_task_with_result]
-    for the typed error this now surfaces instead. *)
+    typed_outcome:Progress] -- a failed explicit goal-link write (or backlog
+    write) was invisible to the keeper. See
+    [Workspace_task.add_task_with_result] for the typed error this now
+    surfaces instead. *)
 
 open Alcotest
 open Masc
@@ -41,7 +42,7 @@ let make_path_unwritable path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
-let meta_with_active_goals goal_ids =
+let keeper_meta () =
   let name = "task-create-typed-failure-test" in
   match
     Masc_test_deps.meta_of_json_fixture
@@ -49,8 +50,6 @@ let meta_with_active_goals goal_ids =
         [ "name", `String name
         ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
         ; "trace_id", `String "trace-task-create-typed-failure"
-        ; ( "active_goal_ids"
-          , `List (List.map (fun goal_id -> `String goal_id) goal_ids) )
         ])
   with
   | Ok meta -> meta
@@ -64,7 +63,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
      | Ok _ -> ()
      | Error msg -> fail ("upsert_goal failed: " ^ msg));
     make_path_unwritable (Workspace_goal_index.goal_task_links_path config);
-    let meta = meta_with_active_goals [ "goal-a" ] in
+    let meta = keeper_meta () in
     let execution =
       Task.handle_keeper_task_tool_with_outcome
         ~config
@@ -75,6 +74,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
             [ "title", `String "Blocked by goal-link write failure"
             ; "description", `String "must not silently report success"
             ; "priority", `Int 3
+            ; "goal_id", `String "goal-a"
             ])
     in
     (* An IO/write failure is [Runtime_failure], not [Workflow_rejection]:

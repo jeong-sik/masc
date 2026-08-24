@@ -450,8 +450,6 @@ let cached_surface_cache_json
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
     ; "request_cache_key", Json_util.string_opt_to_json cache_key
-    ; "request_cache_ttl_s", `Float ttl_s
-    ; "request_timeout_s", `Float timeout_s
     ; "background_refresh_interval_s", `Float background_refresh_interval_s
     ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
     ]
@@ -494,9 +492,7 @@ let with_cached_dashboard_surface_metadata
             ; "producer", `String producer
             ; "store_kind", `String store_kind
             ; "cache_surface", `String "Server_dashboard_http_execution_surfaces.cached_surface"
-            ; "http_swr_ttl_s", `Float ttl_s
             ; "background_refresh_interval_s", `Float background_refresh_interval_s
-            ; "request_timeout_s", `Float timeout_s
             ; ( "cache_policy"
               , `String
                   "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
@@ -1013,7 +1009,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           (fun ~config ~sw ->
              Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
              |> patch_surface_json_for_running_keepers config
-             |> with_projection_diagnostics
+             |> Server_dashboard_http_core_cache.with_projection_diagnostics
                   ~surface:"execution"
                   ~started_at
                   ~extra:
@@ -1121,7 +1117,7 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ~config:(Mcp_server.workspace_config state)
     (fun ~config ~sw:_ ->
        Dashboard_http_keeper.execution_trust_dashboard_json config
-       |> with_projection_diagnostics
+       |> Server_dashboard_http_core_cache.with_projection_diagnostics
             ~surface:"execution_trust"
             ~started_at
             ~extra:[])
@@ -1200,7 +1196,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
          |> patch_surface_json_for_running_keepers config
-         |> with_projection_diagnostics
+         |> Server_dashboard_http_core_cache.with_projection_diagnostics
               ~surface:"execution"
               ~started_at
               ~extra:

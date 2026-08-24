@@ -197,7 +197,7 @@ let string_opt_nonempty name json =
    A keeper that guesses the host layout ("workspace/<org>/<repo>") gets the
    same "directory does not exist" as one that asked for a repo nobody
    materialized, and the two need opposite responses: retry with the right
-   path, or stop asking. Live taskmaster hit the first and kept retrying
+   path, or stop asking. A live Keeper hit the first and kept retrying
    (#23442). The set is measured, not prescribed: whatever git checkouts sit
    under the keeper's workspace root, wherever the keeper put them. An empty
    set is reported as empty rather than omitted, because "no repository is
@@ -317,7 +317,6 @@ let handle_read_file_with_outcome
              ~fields:
                [ "path", `String target
                ; "offset", `Int window.start_line
-               ; "scanned_bytes", `Int (String.length body)
                ]
              (Printf.sprintf
                 "offset %d is beyond the scanned window (%d bytes; the file \
@@ -490,7 +489,6 @@ let handle_owned_read_file_with_outcome
                ~fields:
                  [ "path", `String target
                  ; "offset", `Int window.start_line
-                 ; "scanned_bytes", `Int (String.length prefix.content)
                  ]
                (Printf.sprintf
                   "offset %d is beyond the scanned window (%d bytes)"
@@ -1406,7 +1404,6 @@ let decide_file_write
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; continuation_channel
     }
 ;;
@@ -1869,8 +1866,6 @@ let append_write_outcome_payload ~target outcome =
       ; ( "filesystem_append_target_effect"
         , `String
             (append_target_effect_to_string (append_target_effect outcome)) )
-      ; "filesystem_append_requested_bytes", `Int outcome.requested_bytes
-      ; "filesystem_append_bytes_written", `Int outcome.bytes_written
       ; ( "filesystem_append_target_binding"
         , append_target_binding_json outcome.target_binding )
       ; ( "filesystem_append_failure"

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reconcileBoardPosts, reconcileKeepers } from './store'
+import { isInitializingExecutionPayload, reconcileBoardPosts, reconcileKeepers } from './store'
 import type { BoardPost, Keeper } from './types'
 
 function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
@@ -133,7 +133,6 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
     recent_tool_names: ['keeper_task_claim'],
     latest_tool_names: ['keeper_task_claim'],
     latest_tool_call_count: 1,
-    active_goal_ids: ['goal-1'],
     ...overrides,
   }
 }
@@ -192,5 +191,16 @@ describe('reconcileKeepers', () => {
     expect(result).not.toBe(prev)
     expect(result[0]).toBe(unchanged)
     expect(result[1]).toBe(updatedChanged)
+  })
+})
+
+describe('isInitializingExecutionPayload', () => {
+  it('recognises the warm-up envelope by status.project', () => {
+    expect(isInitializingExecutionPayload({ status: { project: 'initializing' }, keepers: [] })).toBe(true)
+  })
+
+  it('treats a real snapshot, even an empty one, as hydratable', () => {
+    expect(isInitializingExecutionPayload({ status: { project: 'me' }, keepers: [] })).toBe(false)
+    expect(isInitializingExecutionPayload({ keepers: [] })).toBe(false)
   })
 })

@@ -37,32 +37,12 @@ type proactive_cycle_outcome =
 
 (** {1 Runtime state types} *)
 
-type compaction_runtime_decision = Compaction_runtime_decision of string
-(** Last compaction gate result as persisted in keeper meta.  JSON and
-    dashboard boundaries still use the historical string value via
-    {!compaction_runtime_decision_to_string}. *)
-
-val compaction_runtime_decision_to_string :
-  compaction_runtime_decision -> string
-
-val compaction_runtime_decision_of_string :
-  string -> compaction_runtime_decision
-
-val compaction_decision_json_or_null :
-  compaction_runtime_decision -> Yojson.Safe.t
-(** API/dashboard projection of [last_compaction_decision]: the decision
-    string, or [`Null] when empty. Shared by keeper_status.ml and
-    dashboard_http_keeper.ml so the null-guard policy has one definition
-    (issue #25323). Not used by keeper_meta_json.ml, whose on-disk
-    representation serializes the raw string. *)
 
 type compaction_runtime = {
   count : int;
   last_ts : float;
   last_before_tokens : int;
   last_after_tokens : int;
-  last_check_ts : float;
-  last_decision : compaction_runtime_decision;
 }
 
 type proactive_runtime = {
@@ -206,15 +186,6 @@ val blocker_info_of_class :
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
 
-val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
-    a structured object so the inner [runtime_exhaustion_reason] is
-    preserved across read/write cycles. *)
-
-val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
-(** Parses the JSON shape emitted by {!blocker_info_to_json}.
-    Returns [None] for [`Null] or any value whose [klass] field is
-    absent / not recognisable. *)
 
 (** {1 Runtime attempt provenance} *)
 
@@ -231,16 +202,12 @@ type runtime_attempt_record = {
 val runtime_attempt_record_to_json :
   runtime_attempt_record -> Yojson.Safe.t
 
-val runtime_attempt_record_of_json :
-  Yojson.Safe.t -> runtime_attempt_record option
-
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
   usage : usage_metrics;
   compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
-  nonce : int;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
   last_handoff_ts : float;
@@ -252,7 +219,6 @@ type agent_runtime_state = {
   board_reactive_turn_count : int;
   mention_reactive_turn_count : int;
   noop_turn_count : int;
-  last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
@@ -286,7 +252,6 @@ type keeper_meta = {
   (* Performance & limits *)
   max_context_override : int option;
   (* Operational control *)
-  active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
       (** Typed companion to [paused]. Explicit operator pause and
@@ -309,13 +274,10 @@ type keeper_meta = {
 }
 
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit and [runtime.last_blocker]. A
+    latches with the pause bit. A
     [Transcript_corruption_reset_required] latch is returned unchanged, so
     generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
-
-(** Reject [paused = false] paired with a terminal or reset-required latch. *)
-val terminal_latch_pause_violation : keeper_meta -> string option
 
 (** Overlay Keeper configuration defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
@@ -397,8 +359,3 @@ val map_compaction_rt :
   keeper_meta
 (** Nested update of [m.runtime.compaction_rt]. *)
 
-val map_proactive_rt :
-  (proactive_runtime -> proactive_runtime) ->
-  keeper_meta ->
-  keeper_meta
-(** Nested update of [m.runtime.proactive_rt]. *)

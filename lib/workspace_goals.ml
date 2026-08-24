@@ -190,11 +190,12 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
 ;;
 
 (* RFC-0387 stage 2: wake the goal verifier lane after a durable
-   [Criterion_pending] / [Proof_pending] request committed. The wake is
+   [Proof_pending] request committed. The wake is
    scheduling only — the same discipline as the task-side
    [verification_submitted_fn] call: a raised hook must not fail (or roll
-   back) a commit that already landed; the maintenance-pulse rescan is the
-   backstop. *)
+   back) a commit that already landed. A repeated [request_complete] on a
+   standing [Proof_pending] request sends the explicit event-driven wake
+   again. *)
 let notify_goal_verification_pending (ctx : context) ~goal_id =
   try
     (Atomic.get Workspace_hooks.goal_verification_pending_fn) ctx.config ~goal_id
@@ -301,30 +302,12 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
-          (* RFC-0387 §3.2 (B2): creation records the durable criterion-check
-             request BEFORE any verifier model call consumes it. The goal is
-             already committed, so a failed write does not fail the creation
-             (the cross-file best-effort precedent of [delete_goal]) — it is
-             reported in [criterion_check] instead. Updates carry no hook:
-             the declaration obligation is creation-time only. *)
-          let criterion_check =
-            match action with
-            | `updated -> `String "not_applicable_update"
-            | `created ->
-              (match Goal_verification.mark_criterion_pending ctx.config ~goal_id:goal.id with
-               | Ok _ ->
-                 notify_goal_verification_pending ctx ~goal_id:goal.id;
-                 `String "criterion_pending"
-               | Error msg -> `Assoc [ "state", `String "criterion_check_failed"
-                                     ; "detail", `String msg ])
-          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
-            ; "criterion_check", criterion_check
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -338,115 +321,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ])
 ;;
 
-(* RFC-0362 §4.2 — explicit Goal -> keeper assignment.
-
-   Both arguments are required: omitting [owner] is a schema error, never an
-   auto-pick. That mirrors RFC-0267 §Phase 2, which records that the earlier
-   masc_add_task schema falsely claimed to auto-link a single active goal and
-   that #21653 removed the claim rather than implementing the guess.
-
-   Owner validation lives here, in the adapter, not in Goal_store: lib/goal/dune
-   states the direction is one-way (consumers depend on masc_goal, never the
-   reverse), so the goal domain must not reach for the keeper registry. A keeper
-   is registered iff its metadata file exists under the keepers runtime dir --
-   the same path helper the rest of the workspace uses. *)
-let registered_keeper_names (ctx : context) =
-  let dir = Workspace_utils.keepers_runtime_dir ctx.config in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ -> []
-  | Ok entries ->
-    List.filter_map
-      (fun name ->
-         if Filename.check_suffix name ".json"
-         then Some (Filename.chop_suffix name ".json")
-         else None)
-      entries
-;;
-
-(* The observable record for this transition is goal_events.jsonl, not a counter
-   or a log line. emit_goal_event below writes both the previous and the new
-   owner, so a reassignment reads back as who lost the Goal and who gained it; a
-   metric would say only that one happened, and a log line would duplicate a
-   record that is already typed, durable and queryable.
-   TEL-OK: goal_events.jsonl carries this transition. *)
-let handle_goal_assign ~tool_name ~start_time (ctx : context) args
-    : Tool_result.result =
-  match get_string_opt args "goal_id", get_string_opt args "owner" with
-  | None, _ ->
-    validation_error_result
-      ~tool_name
-      ~start_time
-      [ { Tool_args.field = "goal_id"
-        ; constraint_violated = Tool_args.Required
-        ; message = "goal_id is required"
-        ; expected = Some "an existing goal id"
-        ; received = None
-        }
-      ]
-  | _, None ->
-    validation_error_result
-      ~tool_name
-      ~start_time
-      [ { Tool_args.field = "owner"
-        ; constraint_violated = Tool_args.Required
-        ; message =
-            "owner is required; masc_goal_assign never picks an owner for you"
-        ; expected = Some "a registered keeper name"
-        ; received = None
-        }
-      ]
-  | Some goal_id, Some owner ->
-    (match Goal_store.get_goal ctx.config ~goal_id with
-     | None ->
-       error_result_typed
-         ~tool_name
-         ~start_time
-         ~code:Validation_error
-         (Printf.sprintf "unknown goal '%s'" goal_id)
-     | Some existing ->
-       let known = registered_keeper_names ctx in
-       if not (List.mem owner known)
-       then
-         error_result_typed
-           ~tool_name
-           ~start_time
-           ~code:Validation_error
-           (Printf.sprintf
-              "unknown owner '%s'; registered keepers: %s"
-              owner
-              (String.concat ", " (List.sort compare known)))
-       else (
-         match
-           Goal_store.update_goal ctx.config ~goal_id (fun current ->
-             { current with owner = Some owner })
-         with
-         | Error msg ->
-           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
-         | Ok goal ->
-           (* RFC-0362 §4.2: the transition is recorded in goal_events. Both
-              sides are written, so a reassignment can be read back as who lost
-              the Goal and who gained it -- a counter would say only that one
-              happened. *)
-           emit_goal_event
-             ctx
-             ~goal_id
-             ~event_type:"goal_owner"
-             ~payload:
-               (`Assoc
-                  [ "previous_owner", Json_util.string_opt_to_json existing.owner
-                  ; "owner", Json_util.string_opt_to_json goal.owner
-                  ; "actor", `String ctx.agent_name
-                  ]);
-           ok_result
-             ~tool_name
-             ~start_time
-             [ "goal_id", `String goal.id
-             ; "previous_owner", Json_util.string_opt_to_json existing.owner
-             ; "owner", Json_util.string_opt_to_json goal.owner
-             ; "goal", Goal_store.goal_to_yojson goal
-             ]))
-;;
-
 (* RFC-0387 stage 2 — the completion gate.
 
    Ordering for every gated action: [Goal_phase.decide_transition] first (the
@@ -456,18 +330,12 @@ let handle_goal_assign ~tool_name ~start_time (ctx : context) args
    vetoes the phase write (persist-before-model-call), which is what keeps a
    crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
 
-(* The four gate actions carry a verdict; a verdict without evidence is not a
+(* The gate actions carry a verdict; a verdict without evidence is not a
    judgment, so [evidence] is required non-blank (RFC-0387 §3.3/§4). *)
 let gate_action_requires_evidence = function
   | Goal_phase.Record_proof_proven
-  | Goal_phase.Record_proof_refuted
-  | Goal_phase.Record_criterion_viable
-  | Goal_phase.Record_criterion_unreachable -> true
+  | Goal_phase.Record_proof_refuted -> true
   | Goal_phase.Request_complete
-  | Goal_phase.Pause
-  | Goal_phase.Resume
-  | Goal_phase.Block
-  | Goal_phase.Unblock
   | Goal_phase.Drop
   | Goal_phase.Reopen -> false
 ;;
@@ -494,8 +362,6 @@ let validate_gate_evidence args action =
 ;;
 
 type verifier_decision =
-  | Criterion_viable
-  | Criterion_unreachable of { reason : string }
   | Proof_proven
   | Proof_refuted of { reason : string }
 
@@ -538,6 +404,47 @@ let gate_verdict
   }
 ;;
 
+(* A Keeper requests completion and the verifier answers out of band. Without
+   this the answer lands in the ledger and nowhere else: no module under
+   lib/keeper reads [Goal_verification], so a Keeper learns its own proof was
+   judged only by calling masc_goal_list and looking. The record stays the
+   authority; this is the projection that reaches the conversation.
+
+   A failed announcement does not undo the verdict — the ledger row is already
+   committed and readable — so it warns rather than failing the commit. *)
+let announce_proof_verdict
+      (ctx : context)
+      ~(goal : Goal_store.goal)
+      (verdict : Goal_verification.verdict)
+  =
+  let outcome_line =
+    match verdict.outcome with
+    | Goal_verification.Proven -> "proven"
+    | Goal_verification.Refuted { reason } -> "refuted: " ^ reason
+  in
+  let content =
+    Printf.sprintf
+      "[goal_verdict] %s — %s\noutcome: %s\nevidence: %s"
+      goal.Goal_store.id
+      goal.Goal_store.title
+      outcome_line
+      verdict.evidence
+  in
+  match
+    Workspace_broadcast.broadcast
+      ~audience:Workspace_broadcast.Fleet_conversation
+      ctx.config
+      ~from_agent:ctx.agent_name
+      ~content
+  with
+  | Ok _ -> ()
+  | Error error ->
+    Log.Misc.warn
+      "goal verdict announcement failed goal_id=%s: %s"
+      goal.Goal_store.id
+      (Workspace_broadcast.broadcast_error_to_string error)
+;;
+
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
   let outcome_fields =
     match verdict.outcome with
@@ -571,26 +478,7 @@ let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal ve
      | None -> [])
 ;;
 
-(* Phase-neutral criterion commit (RFC-0387 §3.3): the FSM answered [Already]
-   for a non-terminal phase, so there is no phase write and no phase event —
-   the ledger is the whole effect. *)
-let commit_criterion_verdict_response
-      ~tool_name ~start_time (ctx : context) ~goal_id ~action ~phase goal verdict
-  =
-  match Goal_verification.record_criterion_verdict ctx.config ~goal_id verdict with
-  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
-  | Ok record ->
-    already_goal_response
-      ~tool_name ~start_time ~goal_id ~action ~phase goal (Some record)
-;;
-
 let verifier_decision_parts = function
-  | Criterion_viable ->
-    Goal_phase.Record_criterion_viable, Goal_verification.Proven, None
-  | Criterion_unreachable { reason } ->
-    ( Goal_phase.Record_criterion_unreachable
-    , Goal_verification.Refuted { reason }
-    , Some reason )
   | Proof_proven ->
     Goal_phase.Record_proof_proven, Goal_verification.Proven, None
   | Proof_refuted { reason } ->
@@ -626,32 +514,14 @@ let commit_verifier_decision
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        | Ok (Goal_phase.Already phase) ->
-          (match decision with
-           | Criterion_viable | Criterion_unreachable _ ->
-             commit_criterion_verdict_response
-               ~tool_name
-               ~start_time
-               ctx
-               ~goal_id
-               ~action
-               ~phase
-               goal
-               (gate_verdict verdict_outcome ~verification_run_id ~evidence)
-           | Proof_proven | Proof_refuted _ ->
-             error_result_typed
-               ~tool_name
-               ~start_time
-               ~code:Conflict
-               "proof verdict did not name a phase transition")
+        | Ok (Goal_phase.Already _) ->
+          error_result_typed
+            ~tool_name
+            ~start_time
+            ~code:Conflict
+            "proof verdict did not name a phase transition"
         | Ok (Goal_phase.Move_to phase) ->
           (match decision with
-           | Criterion_viable | Criterion_unreachable _ ->
-             error_result_typed
-               ~tool_name
-               ~start_time
-               ~code:Internal_error
-               "criterion verdicts are phase-neutral; decide_transition never moves"
            | Proof_proven | Proof_refuted _ ->
              let verdict =
                gate_verdict verdict_outcome ~verification_run_id ~evidence
@@ -673,6 +543,7 @@ let commit_verifier_decision
                      ~goal_id
                      ~event_type:"goal_phase"
                      ~payload:(gate_event_payload ctx ~phase verdict);
+                   announce_proof_verdict ctx ~goal:updated_goal verdict;
                    ok_result
                      ~tool_name
                      ~start_time
@@ -764,18 +635,21 @@ let reconcile_committed_proof config ~goal_id =
 
 (* A repeated [request_complete] on [Verifying] is the explicit retry that
    replaces wall-clock expiry (RFC-0387 §5). A missing durable request is
-   re-armed; a committed verdict whose phase/event write was interrupted is
-   reconciled from that exact ledger row without another model call. *)
+   re-armed, a standing pending request is woken again, and a committed
+   verdict whose phase/event write was interrupted is reconciled from that
+   exact ledger row without another model call. *)
 let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~action goal =
   match Goal_verification.get_record ctx.config ~goal_id with
   | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Ok record ->
     (match record with
      | Some
-         { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
+         ({ Goal_verification.completion = Goal_verification.Proof_pending _; _ }
+          as pending_record) ->
+       notify_goal_verification_pending ctx ~goal_id;
        already_goal_response
          ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
-         record
+         (Some pending_record)
      | Some
          ({ Goal_verification.completion =
               (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)
@@ -863,16 +737,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                 answer_verifying_repeat
                   ~tool_name ~start_time ctx ~goal_id ~action goal
               | Goal_phase.Executing
-              | Goal_phase.Blocked
-              | Goal_phase.Paused
               | Goal_phase.Completed
               | Goal_phase.Dropped ->
                 already_goal_response
                   ~tool_name ~start_time ~goal_id ~action ~phase goal None)
-           | Goal_phase.Public_action.Pause
-           | Goal_phase.Public_action.Resume
-           | Goal_phase.Public_action.Block
-           | Goal_phase.Public_action.Unblock
            | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
              already_goal_response
@@ -880,29 +748,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         | Ok (Goal_phase.Move_to phase) ->
           (match public_action with
            | Goal_phase.Public_action.Request_complete ->
-                (* Executing -> Verifying (RFC-0387 §4): gate on the criterion
-                   verdict, then persist the proof request BEFORE the phase
-                   write — if the ledger write fails the phase does not move.
-                   A ledger that does not decode is a typed error, never read
-                   as "not unreachable" (P1-1). *)
-                (match Goal_verification.get_record ctx.config ~goal_id with
-                 | Error msg ->
-                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-                 | Ok
-                     (Some
-                       { Goal_verification.criterion =
-                           Goal_verification.Criterion_unreachable _
-                       ; _
-                       }) ->
-                   error_result_typed
-                     ~tool_name
-                     ~start_time
-                     ~code:Conflict
-                     (Printf.sprintf
-                        "goal %s criterion was judged unreachable; \
-                         request_complete is refused (RFC-0387 B2)"
-                        goal_id)
-                 | Ok _ ->
+                (* Executing -> Verifying (RFC-0387 §4): persist the proof
+                   request BEFORE the phase write — if the ledger write fails
+                   the phase does not move, so a crash between the two leaves a
+                   request the verifier can still pick up.
+
+                   Nothing is consulted here to decide whether the request is
+                   allowed. Asking to be judged is not a claim; the judgement is
+                   the verdict, and refusing the request only hides the goal
+                   from the thing that would judge it. *)
                    (match
                       Goal_verification.mark_proof_pending ctx.config ~goal_id
                     with
@@ -937,11 +791,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                            ; "goal", Goal_store.goal_to_yojson updated_goal
                            ; ( "verification"
                              , Goal_verification.record_to_yojson record )
-                           ])))
-           | Goal_phase.Public_action.Pause
-           | Goal_phase.Public_action.Resume
-           | Goal_phase.Public_action.Block
-           | Goal_phase.Public_action.Unblock
+                           ]))
            | Goal_phase.Public_action.Drop
            | Goal_phase.Public_action.Reopen ->
                 (match update_goal_phase ctx goal ~phase ?note () with

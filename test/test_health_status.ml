@@ -54,6 +54,72 @@ let test_serialized_agent_status_ranks_through_the_wire () =
     Masc_domain.all_agent_statuses;
   check int "a non-status string ranks 0" 0 (Dashboard_utils.status_rank "idle")
 
+(* Every status word the producers in #27560 emit. `of_string_opt` answering
+   [None] means that module speaks a vocabulary this type never declared, so
+   the value lands on [Unknown] and its severity is whatever [Unknown] ranks —
+   not what the producer meant. Adding a producer word without deciding where
+   it belongs breaks this list. *)
+let producer_vocabulary =
+  [ (* channel_gate_metrics.health_of_counts *)
+    "idle", None
+  ; "healthy", Some Health_status.Ok
+  ; "failing", Some Health_status.Error
+  ; "degraded", Some Health_status.Degraded
+    (* keeper_reaction_ledger *)
+  ; "empty", None
+    (* keeper_manual_compaction *)
+  ; "compacted", None
+    (* server_dashboard_http_runtime_info *)
+  ; "reachable", None
+  ; "no_http_runtimes", None
+    (* schedule_runner_status *)
+  ; "stale", Some Health_status.Stale
+  ]
+;;
+
+let test_producer_vocabulary_membership () =
+  List.iter
+    (fun (raw, expected) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s recognized" raw)
+        (Option.is_some expected)
+        (Option.is_some (Health_status.of_string_opt raw)))
+    producer_vocabulary
+;;
+
+let test_failing_outranks_degraded () =
+  (* The producer ladder puts `failing` (no successes, or >=50%% errors) above
+     `degraded`. Before `failing` was declared here both ranked 2. *)
+  Alcotest.(check bool)
+    "failing is more severe than degraded"
+    true
+    (Health_status.rank (Health_status.of_string "failing")
+     > Health_status.rank (Health_status.of_string "degraded"))
+;;
+
+let test_initializing_is_not_at_risk () =
+  (* server_dashboard_http_core and operator_digest both emit "initializing"
+     as workspace_health. Undeclared, it fell to Unknown, which ranks 2 — the
+     same rung as Degraded — so is_health_at_risk (rank >= 2) reported a
+     booting workspace as at risk in the briefing (#27560). *)
+  Alcotest.(check bool)
+    "a booting workspace is not at risk"
+    false
+    (Health_status.rank (Health_status.of_string "initializing") >= 2);
+  Alcotest.(check bool)
+    "initializing and warming are the same rung"
+    true
+    (Health_status.of_string "initializing" = Health_status.of_string "warming")
+;;
+
+let test_unknown_word_is_distinguishable () =
+  Alcotest.(check bool)
+    "an undeclared word is not an explicit unknown"
+    true
+    (Health_status.of_string_opt "no_http_runtimes" = None
+     && Health_status.of_string_opt "unknown" = Some Health_status.Unknown)
+;;
+
 let () =
   run "Health_status"
     [
@@ -66,6 +132,15 @@ let () =
         [
           test_case "dashboard wrappers use SSOT" `Quick test_dashboard_compat_uses_health_status_ssot;
           test_case "legacy synonyms" `Quick test_legacy_dashboard_synonyms_map_to_shared_statuses;
+        ] );
+      ( "producer vocabulary",
+        [
+          test_case "membership is declared" `Quick test_producer_vocabulary_membership;
+          test_case "failing outranks degraded" `Quick test_failing_outranks_degraded;
+          test_case "initializing is not at risk" `Quick
+            test_initializing_is_not_at_risk;
+          test_case "undeclared word is distinguishable" `Quick
+            test_unknown_word_is_distinguishable;
         ] );
       ( "agent_status rank",
         [

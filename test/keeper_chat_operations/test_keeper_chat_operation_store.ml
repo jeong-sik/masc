@@ -103,6 +103,11 @@ let test_exact_idempotency_and_terminal_dedupe () =
     |> store_ok
     |> accepted
   in
+  check
+    string
+    "wire projection keeps execution identity"
+    first.execution_digest
+    Yojson.Safe.Util.(Operation.to_json first |> member "execution_digest" |> to_string);
   (match
      store_ok
        (Store.submit
@@ -127,6 +132,18 @@ let test_exact_idempotency_and_terminal_dedupe () =
      check string "conflicting id" (Id.to_string operation_id) (Id.to_string observed)
    | Error error -> fail ("wrong conflict: " ^ Store.error_to_string error)
    | Ok _ -> fail "different request reused an operation id");
+  (match
+     Store.submit
+       store
+       ~now:3.5
+       ~operation_id
+       ~source:(source "different-actor")
+       ~input:original_input
+   with
+   | Error (Store.Idempotency_conflict observed) ->
+     check string "changed-source conflict" (Id.to_string operation_id) (Id.to_string observed)
+   | Error error -> fail ("wrong source conflict: " ^ Store.error_to_string error)
+   | Ok _ -> fail "different authorized actor reused an operation id");
   ignore (store_ok (Store.claim_next store ~now:4.0));
   let terminal =
     store_ok

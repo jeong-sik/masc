@@ -13,6 +13,7 @@
 #   3  binary did not reach `MASC MCP Server listening` within timeout
 #   4  README references a subcommand that --help does not list
 #   5  argument / setup error
+#   6  argv parsing depends on MASC_BASE_PATH
 
 set -euo pipefail
 
@@ -20,6 +21,7 @@ readonly EXIT_FATAL=2
 readonly EXIT_TIMEOUT=3
 readonly EXIT_DRIFT=4
 readonly EXIT_SETUP=5
+readonly EXIT_ARGV=6
 
 BINARY="${1:-_build/default/bin/main_eio.exe}"
 PORT="${SMOKE_PORT:-18935}"
@@ -36,6 +38,30 @@ trap 'rm -rf "$tmp"; [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null || true' EXIT
 
 mkdir -p "$tmp/.masc/config"
 cp config/runtime.toml "$tmp/.masc/config/runtime.toml"
+
+# --- --base-path must stand on its own ---------------------------------------
+# Cmdliner builds every term before it reads argv, so a term default that
+# resolves the workspace root runs on every invocation — --help included — and
+# answers from the environment no matter what --base-path carries. masc#27347:
+# the binary logged the environment's base path for a command that had chosen
+# the flag's, and with MASC_BASE_PATH unset it exited 1 before the flag was
+# ever parsed. Both entry points now accept --base-path as an option and reach
+# for the environment only when it is absent.
+argv_help="$tmp/argv-help.txt"
+argv_status=0
+env -u MASC_BASE_PATH -u MASC_BASE_PATH_INPUT MASC_OTEL_ENABLED=0 TERM=dumb \
+  "$BINARY" --help=plain >"$argv_help" 2>&1 || argv_status=$?
+if [ "$argv_status" -ne 0 ]; then
+  echo "smoke: --help exited $argv_status with MASC_BASE_PATH unset" >&2
+  tail -5 "$argv_help" >&2
+  exit "$EXIT_ARGV"
+fi
+if grep -q 'MASC base:' "$argv_help"; then
+  echo "smoke: --help resolved a workspace root before parsing argv" >&2
+  grep 'MASC base:' "$argv_help" >&2
+  exit "$EXIT_ARGV"
+fi
+echo "smoke: --base-path independent of MASC_BASE_PATH OK"
 
 log="$tmp/boot.log"
 echo "smoke: booting $BINARY on :$PORT under $tmp"

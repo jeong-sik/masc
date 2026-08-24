@@ -18,7 +18,6 @@ let broadcast_compaction
       (`Assoc
         [ "type", `String "keeper_compaction"
         ; "name", `String name
-        ; "generation", `Int recovery.turn_generation
         ; "outcome", `String "applied_checkpoint"
         ; "trigger", `String (Compaction_trigger.to_label recovery.trigger)
         ; "trigger_detail", Compaction_trigger.to_detail_json recovery.trigger
@@ -38,17 +37,10 @@ let broadcast_compaction
 ;;
 
 let broadcast_lifecycle_events ~(name : string)
-    ~(turn_generation : int)
     ~(handoff_json : Yojson.Safe.t option) : unit =
   let now_ts = Time_compat.now () in
   match handoff_json with
   | Some ((`Assoc _ as handoff)) ->
-      let from_generation =
-        Safe_ops.json_int ~default:turn_generation "from_generation" handoff
-      in
-      let to_generation =
-        Safe_ops.json_int ~default:(from_generation + 1) "to_generation" handoff
-      in
       let to_model = Safe_ops.json_string ~default:"" "to_model" handoff in
       (try
          Sse.broadcast
@@ -56,8 +48,6 @@ let broadcast_lifecycle_events ~(name : string)
              [
                ("type", `String "keeper_handoff");
                ("name", `String name);
-               ("from_generation", `Int from_generation);
-               ("to_generation", `Int to_generation);
                ("from_model", `Null);
                ("to_model",
                 if String.trim to_model = "" then `Null else `String to_model);

@@ -215,28 +215,54 @@ let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =
     ]
 ;;
 
+let queue_vote_to_yojson (vote : Board_dispatch.board_vote_change) =
+  let target_kind, target_id =
+    match vote.target with
+    | Board_dispatch.Vote_on_post post_id -> "post", post_id
+    | Board_dispatch.Vote_on_comment comment_id -> "comment", comment_id
+  in
+  `Assoc
+    [ "target_kind", `String target_kind
+    ; "target_id", `String target_id
+    ; "target_author", `String vote.target_author
+    ; "voter", `String vote.voter
+    ; "direction", `String (Board.vote_direction_to_string vote.direction)
+    ]
+;;
+
 let signal_kind_to_string = function
   | Board_dispatch.Board_post_created -> "post_created"
   | Board_dispatch.Board_comment_added -> "comment_added"
   | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+  | Board_dispatch.Board_vote_cast _ -> "vote_cast"
 ;;
 
+(* Candidate rows written before votes became a signal carry exactly the
+   eight keys below, so [vote] is added only on a vote row rather than as a
+   ninth always-present key; [signal_of_yojson] expects it by kind. *)
 let signal_to_yojson (signal : Board_dispatch.board_signal) =
   `Assoc
-    [ "kind", `String (signal_kind_to_string signal.kind)
-    ; "post_id", `String signal.post_id
-    ; "author", `String signal.author
-    ; "title", `String signal.title
-    ; "content", `String signal.content
-    ; "hearth", Json_util.option_to_yojson (fun value -> `String value) signal.hearth
-    ; "updated_at", Json_util.option_to_yojson (fun value -> `Float value) signal.updated_at
-    ; ( "reaction"
-      , match signal.kind with
-        | Board_dispatch.Board_reaction_changed reaction ->
-          queue_reaction_to_yojson reaction
-        | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
-          `Null )
-    ]
+    ([ "kind", `String (signal_kind_to_string signal.kind)
+     ; "post_id", `String signal.post_id
+     ; "author", `String signal.author
+     ; "title", `String signal.title
+     ; "content", `String signal.content
+     ; "hearth", Json_util.option_to_yojson (fun value -> `String value) signal.hearth
+     ; "updated_at", Json_util.option_to_yojson (fun value -> `Float value) signal.updated_at
+     ; ( "reaction"
+       , match signal.kind with
+         | Board_dispatch.Board_reaction_changed reaction ->
+           queue_reaction_to_yojson reaction
+         | Board_dispatch.Board_post_created
+         | Board_dispatch.Board_comment_added
+         | Board_dispatch.Board_vote_cast _ -> `Null )
+     ]
+     @
+     match signal.kind with
+     | Board_dispatch.Board_vote_cast vote -> [ "vote", queue_vote_to_yojson vote ]
+     | Board_dispatch.Board_post_created
+     | Board_dispatch.Board_comment_added
+     | Board_dispatch.Board_reaction_changed _ -> [])
 ;;
 
 let json_string_list values =
@@ -269,7 +295,6 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
          ; "instructions", `String meta.instructions
-         ; "active_goal_ids", json_string_list meta.active_goal_ids
          ; ( "current_task_id"
            , Json_util.option_to_yojson
                (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
@@ -293,7 +318,8 @@ let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
         ; "post_id", `String signal.post_id
         ]
     | Board_dispatch.Board_comment_added
-    | Board_dispatch.Board_reaction_changed _ ->
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ ->
       `Assoc
         [ "keeper_name", `String keeper_name
         ; "signal", signal_to_yojson signal
@@ -317,12 +343,23 @@ let signal_identity_equal
     left = right
   | Board_dispatch.Board_reaction_changed _, Board_dispatch.Board_reaction_changed _ ->
     left = right
+  | Board_dispatch.Board_vote_cast _, Board_dispatch.Board_vote_cast _ -> left = right
   | Board_dispatch.Board_post_created,
-    (Board_dispatch.Board_comment_added | Board_dispatch.Board_reaction_changed _)
+    ( Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_comment_added,
-    (Board_dispatch.Board_post_created | Board_dispatch.Board_reaction_changed _)
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_reaction_changed _,
-    (Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added) ->
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_vote_cast _,
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _ ) ->
     false
 ;;
 
@@ -782,25 +819,60 @@ let parse_reaction json =
     }
 ;;
 
-let signal_of_yojson json =
-  let context = "candidate.signal" in
+let parse_vote json =
+  let context = "candidate.signal.vote" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "kind"
-      ; "post_id"
-      ; "author"
-      ; "title"
-      ; "content"
-      ; "hearth"
-      ; "updated_at"
-      ; "reaction"
-      ]
+      [ "target_kind"; "target_id"; "target_author"; "voter"; "direction" ]
       fields
   in
+  let* target_kind_json = field ~context "target_kind" fields in
+  let* target_kind = string_json ~context:(context ^ ".target_kind") target_kind_json in
+  let* target_id_json = field ~context "target_id" fields in
+  let* target_id = string_json ~context:(context ^ ".target_id") target_id_json in
+  let* target =
+    match target_kind with
+    | "post" -> Ok (Board_dispatch.Vote_on_post target_id)
+    | "comment" -> Ok (Board_dispatch.Vote_on_comment target_id)
+    | other -> Error (Printf.sprintf "unknown vote target kind %S" other)
+  in
+  let* target_author_json = field ~context "target_author" fields in
+  let* target_author =
+    string_json ~context:(context ^ ".target_author") target_author_json
+  in
+  let* voter_json = field ~context "voter" fields in
+  let* voter = string_json ~context:(context ^ ".voter") voter_json in
+  let* direction_json = field ~context "direction" fields in
+  let* direction_raw = string_json ~context:(context ^ ".direction") direction_json in
+  let* direction =
+    match Board.vote_direction_of_string_opt direction_raw with
+    | Some direction -> Ok direction
+    | None -> Error (Printf.sprintf "unknown vote direction %S" direction_raw)
+  in
+  Ok { Board_dispatch.target = target; target_author; voter; direction }
+;;
+
+let signal_base_fields =
+  [ "kind"; "post_id"; "author"; "title"; "content"; "hearth"; "updated_at"; "reaction" ]
+;;
+
+let signal_of_yojson json =
+  let context = "candidate.signal" in
+  let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
+  (* A vote row carries the extra [vote] key; every other kind carries exactly
+     the base keys, which is also the shape of rows written before votes became
+     a signal. *)
+  let* expected_fields =
+    match kind_raw with
+    | "vote_cast" -> Ok (signal_base_fields @ [ "vote" ])
+    | "post_created" | "comment_added" | "reaction_changed" -> Ok signal_base_fields
+    | value -> Error (Printf.sprintf "unknown Board signal kind %S" value)
+  in
+  let* () = exact_fields ~context expected_fields fields in
   let* reaction_json = field ~context "reaction" fields in
   let* kind =
     match kind_raw, reaction_json with
@@ -809,7 +881,11 @@ let signal_of_yojson json =
     | "reaction_changed", (`Assoc _ as json) ->
       let* reaction = parse_reaction json in
       Ok (Board_dispatch.Board_reaction_changed reaction)
-    | "post_created", _ | "comment_added", _ ->
+    | "vote_cast", `Null ->
+      let* vote_json = field ~context "vote" fields in
+      let* vote = parse_vote vote_json in
+      Ok (Board_dispatch.Board_vote_cast vote)
+    | "post_created", _ | "comment_added", _ | "vote_cast", _ ->
       Error "non-reaction Board signal must carry reaction=null"
     | "reaction_changed", _ -> Error "reaction_changed signal requires reaction object"
     | value, _ -> Error (Printf.sprintf "unknown Board signal kind %S" value)
@@ -1107,21 +1183,24 @@ let optional_string_of_yojson ~context = function
     Ok ()
 ;;
 
+let keeper_context_current_fields =
+  [ "lane_keeper_name"
+  ; "agent_name"
+  ; "keeper_record_id"
+  ; "keeper_runtime_uid"
+  ; "instructions"
+  ; "current_task_id"
+  ; "mention_keeper_ids"
+  ]
+;;
+
 let validate_keeper_context ~keeper_name json =
   let context = "candidate.judgment_request.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "lane_keeper_name"
-      ; "agent_name"
-      ; "keeper_record_id"
-      ; "keeper_runtime_uid"
-      ; "instructions"
-      ; "active_goal_ids"
-      ; "current_task_id"
-      ; "mention_keeper_ids"
-      ]
+      keeper_context_current_fields
       fields
   in
   let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
@@ -1154,12 +1233,6 @@ let validate_keeper_context ~keeper_name json =
     optional_string_of_yojson
       ~context:(context ^ ".keeper_runtime_uid")
       keeper_runtime_uid
-  in
-  let* active_goal_ids = field ~context "active_goal_ids" fields in
-  let* () =
-    string_list_of_yojson
-      ~context:(context ^ ".active_goal_ids")
-      active_goal_ids
   in
   let* current_task_id = field ~context "current_task_id" fields in
   let* () =
@@ -1433,6 +1506,15 @@ type ledger_stat_key =
   ; stat_size : int
   }
 
+(* Compared field by field rather than with [=], so each field has a named
+   reader the compiler can see. *)
+let ledger_stat_key_equal left right =
+  Int.equal left.stat_dev right.stat_dev
+  && Int.equal left.stat_ino right.stat_ino
+  && Float.equal left.stat_mtime right.stat_mtime
+  && Int.equal left.stat_size right.stat_size
+;;
+
 let ledger_stat_key_opt path =
   match Unix.stat path with
   | stats ->
@@ -1473,7 +1555,8 @@ let load_candidates ~base_path ~keeper_name =
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
     (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after when key_before = key_after ->
+     | Some key_before, Some key_after
+       when ledger_stat_key_equal key_before key_after ->
        Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
          Hashtbl.replace candidate_read_memo path (key_before, candidates))
      | Some _, (Some _ | None) | None, (Some _ | None) -> ());

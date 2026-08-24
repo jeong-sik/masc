@@ -24,28 +24,11 @@ type proactive_cycle_outcome =
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
-type compaction_runtime_decision = Compaction_runtime_decision of string
-
-let compaction_runtime_decision_to_string (Compaction_runtime_decision value) = value
-let compaction_runtime_decision_of_string value = Compaction_runtime_decision value
-
-(* SSOT for the API/dashboard projection of [last_compaction_decision]: the
-   decision string, or [`Null] when empty. keeper_status.ml and
-   dashboard_http_keeper.ml share this null-guard so the policy is defined once
-   (previously copied verbatim across both — issue #25323). keeper_meta_json.ml
-   serializes the raw string for its own on-disk representation and does not use
-   this guard. *)
-let compaction_decision_json_or_null decision : Yojson.Safe.t =
-  let s = compaction_runtime_decision_to_string decision in
-  if String.trim s = "" then `Null else `String s
-
 type compaction_runtime =
   { count : int
   ; last_ts : float
   ; last_before_tokens : int
   ; last_after_tokens : int
-  ; last_check_ts : float
-  ; last_decision : compaction_runtime_decision
   }
 
 type proactive_runtime =
@@ -221,56 +204,6 @@ type blocker_info = {
 
 let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
-let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
-  let klass_payload = match info.klass with
-    | Runtime_exhausted reason ->
-      `Assoc [ "name", `String "runtime_exhausted"
-             ; "reason", runtime_exhaustion_reason_to_json reason
-             ]
-    | _ -> `String (blocker_class_to_string info.klass)
-  in
-  let fields =
-    [ "klass", klass_payload
-    ; "detail", `String info.detail
-    ]
-  in
-  `Assoc fields
-;;
-
-let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let klass =
-      match List.assoc_opt "klass" fields with
-      | Some (`String s) -> blocker_class_of_serialized_string s
-      | Some (`Assoc kfields) ->
-        (match List.assoc_opt "name" kfields with
-         | Some (`String "runtime_exhausted") ->
-           let reason =
-             match List.assoc_opt "reason" kfields with
-             | Some r ->
-               (match runtime_exhaustion_reason_of_json r with
-                | Some r -> r
-                | None -> Other_detail "runtime_exhausted")
-             | None -> Other_detail "runtime_exhausted"
-           in
-           Some (Runtime_exhausted reason)
-         | Some (`String s) -> blocker_class_of_serialized_string s
-         | _ -> None)
-      | _ -> None
-    in
-    (match klass with
-     | None -> None
-     | Some klass ->
-       let detail = match List.assoc_opt "detail" fields with
-         | Some (`String s) -> s
-         | _ -> ""
-       in
-       Some { klass; detail })
-  | _ -> None
-;;
-
 type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option
@@ -284,22 +217,6 @@ let runtime_attempt_outcome_to_json = function
     `Assoc [ "kind", `String "failure"; "message", `String message ]
 ;;
 
-let runtime_attempt_outcome_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "success") -> Some `Success
-     | Some (`String "failure") ->
-       (match List.assoc_opt "message" fields with
-        | Some (`String message) -> Some (`Failure message)
-        (* DET-OK: retired attempt rows encoded failure without a message;
-           keep the lossy historical record instead of dropping it. *)
-        | _ -> Some (`Failure ""))
-     | _ -> None)
-  | `String "success" -> Some `Success
-  | `String "failure" -> Some (`Failure "")
-  | _ -> None
-;;
-
 let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
   `Assoc
     [ "provider_id", `String record.provider_id
@@ -310,41 +227,6 @@ let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Sa
     ; "outcome", runtime_attempt_outcome_to_json record.outcome
     ; "timestamp", `Float record.timestamp
     ]
-;;
-
-let runtime_attempt_record_of_json (json : Yojson.Safe.t)
-  : runtime_attempt_record option
-  =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let provider_id =
-      match List.assoc_opt "provider_id" fields with
-      | Some (`String value) -> Some value
-      | _ -> None
-    in
-    let http_status =
-      match List.assoc_opt "http_status" fields with
-      | Some (`Int status) -> Some status
-      | Some `Null | None -> None
-      | _ -> None
-    in
-    let outcome =
-      match List.assoc_opt "outcome" fields with
-      | Some value -> runtime_attempt_outcome_of_json value
-      | None -> None
-    in
-    let timestamp =
-      match List.assoc_opt "timestamp" fields with
-      | Some (`Float value) -> Some value
-      | Some (`Int value) -> Some (float_of_int value)
-      | _ -> None
-    in
-    (match provider_id, outcome, timestamp with
-     | Some provider_id, Some outcome, Some timestamp ->
-       Some { provider_id; http_status; outcome; timestamp }
-     | _ -> None)
-  | _ -> None
 ;;
 
 type usage_metrics =
@@ -384,7 +266,6 @@ type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
-  ; nonce : int
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
@@ -396,7 +277,6 @@ type agent_runtime_state =
   ; board_reactive_turn_count : int
   ; mention_reactive_turn_count : int
   ; noop_turn_count : int
-  ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
@@ -428,8 +308,7 @@ type keeper_meta =
   ; (* -- Performance & Limits -- *)
     max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
-    active_goal_ids : string list
-  ; paused : bool
+    paused : bool
   ; latched_reason : Keeper_latched_reason.t option
     (** Typed companion to [paused]. Explicit operator pause and
         transcript-corruption reset-required paths may write it. [None] while
@@ -450,41 +329,13 @@ type keeper_meta =
   ; agent_core_env : (string * string) list
   }
 
-(* Sanctioned generic unpause transform. A reset-required transcript latch is
-   deliberately immutable here and must cross the explicit reset boundary. *)
+(* Sanctioned generic unpause transform. Every latch this type can carry is an
+   explicit operator pause, so resume clears it. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
-  match m.latched_reason with
-  | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
-    m
-  | Some (Keeper_latched_reason.Operator_paused _)
-  | None ->
-    { m with
-      paused = false
-    ; latched_reason = None
-    ; runtime = { m.runtime with last_blocker = None }
-    }
-;;
-
-(* Write-boundary invariant: reset-required latches must co-occur
-   with [paused = true]. Admission denies them by latch identity even if a
-   stale writer cleared [paused], so reject that split instead of repairing it
-   silently. *)
-let terminal_latch_pause_violation (m : keeper_meta) : string option =
-  (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
-     catch-all): a future terminal latch variant must force a decision here
-     rather than silently escaping the write-boundary guard. A non-terminal
-     latch with [paused = false] is admission-[Active] (recoverable), so it is
-     not a violation. [paused = true] is always consistent with any latch. *)
-  match m.paused, m.latched_reason with
-  | false,
-    Some (Keeper_latched_reason.Transcript_corruption_reset_required as reason) ->
-    Some
-      (Printf.sprintf
-         "keeper %s: paused=false with terminal/reset-required latch %s"
-         m.name
-         (Keeper_latched_reason.to_wire reason))
-  | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
-  | true, _ -> None
+  { m with
+    paused = false
+  ; latched_reason = None
+  }
 ;;
 
 let apply_profile_default opt current =
@@ -558,8 +409,6 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
-          active_goal_ids =
-            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;
@@ -708,8 +557,3 @@ let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper
   { m with runtime = { m.runtime with compaction_rt = f m.runtime.compaction_rt } }
 ;;
 
-let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_meta)
-  : keeper_meta
-  =
-  { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
-;;

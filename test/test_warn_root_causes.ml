@@ -224,7 +224,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                  check bool
                    (name ^ " executes serially")
                    true
-                   (Agent_core.Tool.execution_mode tool
+                   (Agent_core.Tool.execution_mode tool ~input:`Null
                     = Agent_core.Tool_contract.Serial);
                  check bool
                    (name ^ " continues after success")
@@ -254,7 +254,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                   check bool
                     (name ^ " execution mode matches its descriptor")
                     true
-                    (Agent_core.Tool.execution_mode tool = expected_mode);
+                    (Agent_core.Tool.execution_mode tool ~input:`Null = expected_mode);
                   check bool
                     (name ^ " continues after success")
                     true
@@ -264,7 +264,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
                   check bool
                     (name ^ " terminal tools are serial")
                     true
-                    (Agent_core.Tool.execution_mode tool
+                    (Agent_core.Tool.execution_mode tool ~input:`Null
                      = Agent_core.Tool_contract.Serial);
                   check bool
                     (name ^ " terminal completion preserves unknown effect outcome")
@@ -467,12 +467,12 @@ let test_missing_current_task_reconciled_before_transition_hint () =
           let description =
             bundle.tools
             |> List.find_map (fun (tool : Agent_core.Tool.t) ->
-                 if String.equal tool.schema.name "masc_transition"
+                 if String.equal tool.schema.name "keeper_task_claim"
                  then Some tool.schema.description
                  else None)
           in
           match description with
-          | None -> fail "masc_transition not found in bundle"
+          | None -> fail "keeper_task_claim not found in bundle"
           | Some description ->
             (* masc#26123 stopped the runtime injecting task state into tool
                descriptions: the reconciled "No task currently assigned" hint
@@ -486,7 +486,14 @@ let test_missing_current_task_reconciled_before_transition_hint () =
               (string_contains description "not found in backlog");
             check bool "no reconciled task hint either" false
               (string_contains description "No task currently assigned");
-            (* Was pinned to the literal "Transition a task to a new status." —
+            (* Subject was masc_transition until #29681 made it a transport
+               alias projected by keeper_task_claim: the model sees the
+               keeper_* name, so the masc_* twin is no longer in the bundle
+               and the case had nothing to read. The contract under test is
+               unchanged -- a bundled tool's description is a static
+               capability statement.
+
+               Was pinned to the literal "Transition a task to a new status." —
                the inline string [cluster_descriptor] used to be handed. That
                string is gone: the descriptor now takes its description from
                the canonical registry, so pinning the registry's own text keeps
@@ -498,13 +505,13 @@ let test_missing_current_task_reconciled_before_transition_hint () =
             let canonical =
               List.find_map
                 (fun (schema : Masc_domain.tool_schema) ->
-                   if String.equal schema.name "masc_transition"
+                   if String.equal schema.name "keeper_task_claim"
                    then Some schema.description
                    else None)
                 Config.raw_all_tool_schemas
             in
             (match canonical with
-             | None -> fail "masc_transition missing from the canonical registry"
+             | None -> fail "keeper_task_claim missing from the canonical registry"
              | Some canonical ->
                check string "description is the registry's capability statement"
                  canonical description)))

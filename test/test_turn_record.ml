@@ -49,9 +49,8 @@ let sample_record () : Turn_record.t =
       [ Ids.Execution_id.of_string "exec-1781200000000-0001"
       ; Ids.Execution_id.of_string "exec-1781200000001-0002"
       ]
-  ; keeper = "sangsu"
-  ; agent_name = "sangsu-agent"
-  ; generation = 12
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
   ; turn_kind = Turn_record.Direct
   ; trace_id = "trace-1780648779957-00000"
   ; absolute_turn = 4071
@@ -153,7 +152,6 @@ let test_codec_roundtrip () =
          decoded.execution_ids);
     check string "keeper" record.keeper decoded.keeper;
     check string "agent_name" record.agent_name decoded.agent_name;
-    check int "generation" record.generation decoded.generation;
     check string "turn_kind" (Turn_record.turn_kind_to_string record.turn_kind)
       (Turn_record.turn_kind_to_string decoded.turn_kind);
     check string "trace_id" record.trace_id decoded.trace_id;
@@ -366,7 +364,6 @@ let test_codec_requires_current_observation_fields () =
           (Astring.String.is_infix ~affix:field message))
     [ "turn_ref"
     ; "agent_name"
-    ; "generation"
     ; "turn_kind"
     ; "raw_trace_run_ref"
     ; "input_components"

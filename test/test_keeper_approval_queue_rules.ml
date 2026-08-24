@@ -152,7 +152,6 @@ let test_gate_allows_only_the_exact_persisted_rule () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -341,7 +340,6 @@ let gate_request ~base_path : Gate.request =
   ; base_path
   ; causal_context = None
   ; task_id = None
-  ; goal_ids = []
   ; continuation_channel = None
   }
 ;;

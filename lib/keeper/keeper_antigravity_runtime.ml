@@ -151,7 +151,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
     with
     | Ok projected -> Ok projected
     | Error error ->
-      Error (Runtime_model_input_tail_window.budget_error_to_string error))
+      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
@@ -194,15 +194,15 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     let* context =
       prepared.messages |> extra_system_context_messages |> render_messages
     in
-    match String_util.trim_to_option context with
+    match String_util.trim_nonempty context with
     | None -> Ok goal
     | Some context -> Ok (context ^ prompt_section_separator ^ goal))
   else
     let* history = render_messages prepared.messages in
     Ok
-      ([ String_util.trim_to_option prepared.system_prompt
+      ([ String_util.trim_nonempty prepared.system_prompt
          |> Option.map (fun value -> system_instructions_label ^ value)
-      ; String_util.trim_to_option history
+      ; String_util.trim_nonempty history
       ; Some (current_goal_label ^ goal)
       ]
       |> List.filter_map Fun.id
@@ -438,6 +438,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -506,6 +510,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -754,6 +762,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            | None -> settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
+          (match turn.trajectory_error with
+           | None -> ()
+           | Some detail ->
+             Log.Keeper.warn
+               ~keeper_name
+               "antigravity turn completed with %d tool error step(s); last step error: %s"
+               turn.tool_errors
+               detail);
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id

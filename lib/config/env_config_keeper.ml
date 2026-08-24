@@ -307,48 +307,6 @@ module KeeperMemoryOs = struct
 
 end
 
-(** {1 Keeper dashboard compaction snapshots}
-
-    Read-side bounds for the dashboard compaction snapshot inspector. These
-    limits only cap filesystem hydration work and response size; they do not
-    alter keeper compaction policy or reducer semantics.
-
-    @category Runtime @ops_class operator *)
-module KeeperCompactionSnapshots = struct
-  (** Default item limit for [GET /keepers/:name/compaction-snapshots].
-      Default: 25. @category Runtime @ops_class operator *)
-  let default_limit =
-    max 1 (get_int_nonneg ~default:25 "MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT")
-  ;;
-
-  (** Maximum accepted item limit for the compaction snapshot endpoint.
-      Default: 100. @category Runtime @ops_class operator *)
-  let max_limit =
-    max 1 (get_int_nonneg ~default:100 "MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT")
-  ;;
-
-  (** Minimum manifest files scanned before applying [limit * multiplier].
-      Default: 8. @category Runtime @ops_class operator *)
-  let manifest_scan_min_files =
-    max
-      1
-      (get_int_nonneg
-         ~default:8
-         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES")
-  ;;
-
-  (** Multiplier from requested item limit to manifest files scanned.
-      Default: 4. @category Runtime @ops_class operator *)
-  let manifest_scan_limit_multiplier =
-    max
-      1
-      (get_int_nonneg
-         ~default:4
-         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER")
-  ;;
-
-end
-
 (** {1 Keeper Vision Tool Configuration} *)
 
 module KeeperVision = struct
@@ -601,7 +559,7 @@ module KeeperKeepalive = struct
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)
-  let body_timeout_sec_override =
+  let body_timeout_sec_override_live () =
     match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
     | Some raw ->
       (match Float.of_string_opt (String.trim raw) with
@@ -609,6 +567,8 @@ module KeeperKeepalive = struct
        | None -> None)
     | None -> None
   ;;
+
+  let body_timeout_sec_override = body_timeout_sec_override_live ()
 
   (** Total wall-clock deadline for a single provider call attempt (whole
       operation, independent of streaming progress) — distinct from
@@ -639,7 +599,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
-  let provider_call_deadline_sec_override =
+  let provider_call_deadline_sec_override_live () =
     match
       Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
     with
@@ -648,6 +608,10 @@ module KeeperKeepalive = struct
        | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
        | None -> None)
     | None -> None
+  ;;
+
+  let provider_call_deadline_sec_override =
+    provider_call_deadline_sec_override_live ()
   ;;
 
 end

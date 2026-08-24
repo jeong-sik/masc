@@ -9,8 +9,7 @@
 
    Tool lines are dropped — tool activity is already surfaced by the timeline's
    [tool.called] source, so re-emitting the chat store's tool rows would
-   double-count. Rows without a timestamp (legacy pre-ts lines) are dropped
-   because they cannot be placed chronologically. *)
+   double-count. *)
 let chat_store_keeper_name raw =
   match Keeper_identity.canonical_keeper_name raw with
   | Some keeper_name -> keeper_name
@@ -20,14 +19,14 @@ let lines_for ~base_dir ~keeper_name : Tool_agent_timeline.chat_line list =
   let keeper_name = chat_store_keeper_name keeper_name in
   Keeper_chat_store.load ~base_dir ~keeper_name
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-         match (m.role, m.ts) with
-         | Keeper_chat_store.Role.Tool, _ | _, None -> None
-         | role, Some ts ->
+         match m.role with
+         | Keeper_chat_store.Role.Tool -> None
+         | Keeper_chat_store.Role.User | Keeper_chat_store.Role.Assistant ->
              Some
                {
-                 Tool_agent_timeline.cl_role = Keeper_chat_store.Role.to_label role;
+                 Tool_agent_timeline.cl_role = Keeper_chat_store.Role.to_label m.role;
                  cl_content = m.content;
-                 cl_ts = ts;
+                 cl_ts = m.ts;
                  cl_connector =
                    Option.map Surface_ref.lane_label m.surface;
                  cl_conversation_id = m.conversation_id;

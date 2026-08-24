@@ -33,6 +33,22 @@ val raw_value_opt : string -> string option
 (** {1 Typed getters with defaults} *)
 
 val get_string : default:string -> string -> string
+type retention =
+  | Retain_forever
+  | Prune_after_days of int
+
+val get_retention_days : default:retention -> string -> retention
+(** Read a [MASC_*_RETENTION_DAYS] knob.
+
+    Unset or empty gives [default], which each store declares for itself. A
+    positive value prunes after that many days. Zero or negative keeps
+    everything — the one way to say so, and it says it in every store.
+
+    A malformed value gives [default] and warns, rather than meaning opposite
+    things per store: two kept files forever and one began pruning at its own
+    default, and each of the two cited the third as the model it followed
+    (#27110). *)
+
 val get_int : default:int -> string -> int
 val get_float : default:float -> string -> float
 val get_bool : default:bool -> string -> bool
@@ -56,16 +72,10 @@ val get_int_nonneg : default:int -> string -> int
     [int] does not exist, so the only extra rejection vs {!get_int}
     is [v < 0]. *)
 
-val default_jsonl_retention_days : int
-(** The value {!jsonl_retention_days} falls back to.  Exposed because a
-    caller that treats a non-positive override as "pruning disabled" needs
-    a positive bound of its own, and re-reading the getter would hand back
-    the same non-positive value. *)
-
 val jsonl_retention_days : unit -> int
 (** [MASC_JSONL_RETENTION_DAYS], default 30.  Day-file retention for the
-    JSONL stores under [.masc], shared by the startup prune, the periodic
-    maintenance prune, and the catch-up digest look-back clamp. *)
+    JSONL stores under [.masc], shared by the startup prune and the periodic
+    maintenance prune. *)
 
 val get_float_nonneg : default:float -> string -> float
 (** Like {!get_float} but floors all non-finite (NaN, +∞, -∞) and
@@ -99,7 +109,6 @@ val trim_opt : string option -> string option
 
 val strip_trailing_slashes : string -> string
 val strip_path_trailing_slashes : string -> string
-val expand_home_prefix : string -> string
 val normalize_path_lexically : string -> string
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
@@ -116,7 +125,6 @@ val host_env_key : string
 val http_port_env_key : string
 val masc_http_port : unit -> string
 val masc_http_port_int : unit -> int
-val masc_host_opt : unit -> string option
 val default_host : string
 val masc_host : unit -> string
 
@@ -153,8 +161,6 @@ val get_port : default:int -> string -> int
 (** {1 Host pressure integration} *)
 
 val host_fd_pressure_state_file_env_key : string
-val host_fd_pressure_poller_disabled_env_key : string
-val host_fd_pressure_poll_interval_sec_env_key : string
 val host_fd_pressure_state_file_path_opt : unit -> string option
 val host_fd_pressure_poller_disabled : unit -> bool
 val host_fd_pressure_poll_interval_sec : unit -> float
@@ -174,7 +180,6 @@ val base_path_source_opt : unit -> (string * string) option
    internally; a follow-up RFC migrates those too. *)
 
 val running_under_test_executable : unit -> bool
-val test_allow_home_base_path_env : string
 val base_path_prod_guard : string -> string
 val base_path : unit -> string
 
@@ -184,8 +189,6 @@ val resolve_against_base_path : string -> string
     relative.  Raises [Config_error] through [base_path] when
     [MASC_BASE_PATH] is unset. *)
 
-val sb_path_opt : unit -> string option
-val sb_path_result : unit -> (string, string) result
 val sb_path : unit -> string
 val orchestrator_enabled_env_key : string
 

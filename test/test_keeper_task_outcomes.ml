@@ -27,28 +27,26 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let meta_with_active_goals goal_ids =
+let keeper_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String "task-create-test"
         ; "agent_name", `String "keeper-task-create-test-agent"
         ; "trace_id", `String "trace-task-create-test"
-        ; ( "active_goal_ids"
-          , `List (List.map (fun goal_id -> `String goal_id) goal_ids) )
         ])
   with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
-let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
+let test_task_create_without_goal_id_is_unscoped () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [ "goal-a"; "goal-b" ] in
+       let meta = keeper_meta () in
        let payload =
          Task.handle_keeper_task_tool
            ~config
@@ -70,6 +68,132 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_keeper_broadcast_forwards_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name:meta.agent_name
+            ~capabilities:[ "test" ]
+            ());
+       let subject = Masc.Workspace.resolve_agent_name config meta.agent_name in
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Terminal cache fixture"
+            ~priority:1
+            ~description:"");
+       ignore (Masc.Workspace.claim_task config ~agent_name:subject ~task_id:"task-001");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let terminal_backlog =
+         { backlog with
+           tasks =
+             List.map
+               (fun (task : Masc_domain.task) ->
+                  if String.equal task.id "task-001"
+                  then
+                    { task with
+                      task_status =
+                        Masc_domain.Done
+                          { assignee = subject
+                          ; completed_at = "2026-08-22T00:00:00Z"
+                          ; notes = Some "keeper broadcast cache fixture"
+                          }
+                    }
+                  else task)
+               backlog.tasks
+         }
+       in
+       Workspace_backlog.write_backlog config terminal_backlog;
+       let agent_file =
+         Filename.concat
+           (Masc.Workspace.agents_dir config)
+           (Masc.Workspace.safe_filename subject ^ ".json")
+       in
+       let stale_agent =
+         match
+           Masc.Workspace.read_json config agent_file
+           |> Masc_domain.agent_of_yojson
+         with
+         | Ok agent ->
+           { agent with
+             status = Masc_domain.Busy
+           ; current_task = Some "task-001"
+           }
+         | Error detail -> fail ("fixture agent decode failed: " ^ detail)
+       in
+       Masc.Workspace.write_json
+         config
+         agent_file
+         (Masc_domain.agent_to_yojson stale_agent);
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "typed stale cache observation"
+               ; "task_cache_subject_agent", `String subject
+               ; "task_cache_task_id", `String "task-001"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () -> fail "keeper broadcast was deferred"
+        | Tool_result.Failed _ ->
+          fail ("keeper broadcast failed: " ^ execution.raw_output));
+       check bool
+         "keeper surface persists canonical cache invalidation"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "[cache_invalidated]");
+       let current_task =
+         Option.bind
+           (Masc.Workspace.get_agents_raw config
+            |> List.find_opt (fun (agent : Masc_domain.agent) ->
+              String.equal agent.name subject))
+           (fun agent -> agent.current_task)
+       in
+       check (option string) "keeper surface clears exact stale cache" None current_task)
+
+let test_keeper_broadcast_rejects_partial_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta:(keeper_meta ())
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "partial typed signal"
+               ; "task_cache_subject_agent", `String "subject"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Failed Tool_result.Policy_rejection -> ()
+        | Tool_result.Failed _ -> fail "partial pair used the wrong failure class"
+        | Tool_result.Completed () | Tool_result.Deferred () ->
+          fail "partial typed cache pair was accepted");
+       check bool
+         "partial pair error names both fields"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "task_cache_subject_agent and task_cache_task_id"))
+
 (* A page is not the backlog. The sort keys on priority alone and is stable, so
    within one priority the newest task sits last and falls off [limit] first.
    Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
@@ -81,7 +205,7 @@ let test_tasks_list_reports_truncation () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        for index = 1 to 4 do
          ignore
            (Task.handle_keeper_task_tool
@@ -124,7 +248,7 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execution =
          Task.handle_keeper_task_tool_with_outcome
            ~config
@@ -172,6 +296,88 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
          (Yojson.Safe.to_string unchanged_data)
        unchanged.raw_output)
 
+let test_tasks_list_projection_compact_by_default_full_on_request () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_create"
+            ~args:
+              (`Assoc
+                [ "title", `String "Projection fixture"
+                ; "description", `String "a body the compact row must not carry"
+                ; "priority", `Int 2
+                ]));
+       let list args =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args)
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let only_row data =
+         match U.(data |> member "snapshot" |> to_list) with
+         | [ row ] -> row
+         | rows -> failf "expected one row, got %d" (List.length rows)
+       in
+       let compact = list (`Assoc []) in
+       check string "default projection is compact" "compact"
+         U.(compact |> member "projection" |> to_string);
+       let compact_row = only_row compact in
+       check string "compact row keeps the title" "Projection fixture"
+         U.(compact_row |> member "title" |> to_string);
+       check string "compact row keeps the status" "todo"
+         U.(compact_row |> member "status" |> to_string);
+       check int "compact row keeps the priority" 2
+         U.(compact_row |> member "priority" |> to_int);
+       List.iter
+         (fun field ->
+            check bool (field ^ " is absent from the compact row") true
+              (U.member field compact_row = `Null))
+         [ "description"; "files"; "contract"; "handoff_context"; "execution_links" ];
+       let full = list (`Assoc [ "projection", `String "full" ]) in
+       check string "requested projection is echoed" "full"
+         U.(full |> member "projection" |> to_string);
+       let full_row = only_row full in
+       check string "full row carries the description"
+         "a body the compact row must not carry"
+         U.(full_row |> member "description" |> to_string);
+       check bool "full row carries files" true
+         (U.member "files" full_row <> `Null);
+       check bool "the two projections have distinct revisions" true
+         (U.(compact |> member "revision" |> to_string)
+          <> U.(full |> member "revision" |> to_string));
+       let rejected =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [ "projection", `String "summary" ])
+       in
+       check bool "unknown projection is rejected, not defaulted" true
+         (rejected.data = None);
+       check bool "rejection names the accepted values" true
+         (let message = rejected.raw_output in
+          let contains needle =
+            let n = String.length needle and h = String.length message in
+            let rec go i = i + n <= h && (String.sub message i n = needle || go (i + 1)) in
+            go 0
+          in
+          contains "compact" && contains "full" && contains "summary"))
+;;
+
 let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
   let base_path = temp_dir () in
   Fun.protect
@@ -187,7 +393,7 @@ let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
             ~description:"");
        Out_channel.with_open_text (Masc.Workspace.backlog_path config) (fun oc ->
          output_string oc "{not valid json");
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execute args =
          Task.handle_keeper_task_tool_with_outcome
            ~config
@@ -226,7 +432,7 @@ let test_tasks_list_revision_covers_projected_contents () =
             ~title:"First workspace task"
             ~priority:1
             ~description:"");
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let snapshot () =
          match
            (Task.handle_keeper_task_tool_with_outcome
@@ -320,7 +526,7 @@ let test_done_missing_task_id_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        (* task_id omitted -> early workflow_rejection path. *)
        match
          rejected_done_typed_outcome ~base_path config meta
@@ -342,7 +548,7 @@ let test_done_missing_evidence_refs_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        match
          rejected_done_typed_outcome ~base_path config meta
            (`Assoc
@@ -366,7 +572,7 @@ let test_done_failed_transition_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        (* A done on a task that does not exist fails the transition -> the
           [else] branch must emit a typed [Error], not [None]. *)
        match
@@ -443,7 +649,7 @@ let test_strict_done_submits_for_verification () =
         | Error error ->
           fail
             ("claim failed: " ^ Masc_domain.masc_error_to_string error));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        ignore
          (Task.handle_keeper_task_tool
             ~config
@@ -498,7 +704,7 @@ let test_default_done_is_terminal () =
         | Error error ->
           fail
             ("claim failed: " ^ Masc_domain.masc_error_to_string error));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execution =
          Task.handle_keeper_task_tool_with_outcome
            ~config
@@ -576,13 +782,17 @@ let () =
   run "keeper task outcomes"
     [ ( "outcomes"
       , [ test_case
-            "keeper_task_create treats ambiguous active_goal_ids as advisory"
+            "keeper_task_create without goal_id remains unscoped"
             `Quick
-            test_task_create_multi_active_goals_without_goal_id_is_unscoped
+            test_task_create_without_goal_id_is_unscoped
         ; test_case
             "keeper_tasks_list reports a truncated page"
             `Quick
             test_tasks_list_reports_truncation
+        ; test_case "keeper_broadcast forwards typed cache signal" `Quick
+            test_keeper_broadcast_forwards_typed_cache_signal
+        ; test_case "keeper_broadcast rejects partial typed cache signal" `Quick
+            test_keeper_broadcast_rejects_partial_typed_cache_signal
         ; test_case
             "keeper_tasks_list returns snapshot and unchanged"
             `Quick
@@ -595,6 +805,10 @@ let () =
             "keeper_tasks_list recovery is degraded and never unchanged"
             `Quick
             test_tasks_list_recovery_is_degraded_and_never_unchanged
+        ; test_case
+            "keeper_tasks_list is compact by default and full on request"
+            `Quick
+            test_tasks_list_projection_compact_by_default_full_on_request
         ; test_case "response finalization keeps visible reply only" `Quick
             test_response_finalization_keeps_visible_reply_only
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"

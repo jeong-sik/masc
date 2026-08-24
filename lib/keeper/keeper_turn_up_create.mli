@@ -8,13 +8,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-(** Commit a freshly-built Keeper metadata snapshot through its Owner. *)
-val write_initial_meta :
-  intake_token:Keeper_shutdown_intake_fence.intake_token ->
-  Workspace.config ->
-  keeper_meta ->
-  (unit, string) result
-
 (** Create a new keeper from parsed args: build initial meta,
     write checkpoint, start keepalive, return the [keeper_up]
     response envelope. *)

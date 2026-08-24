@@ -55,7 +55,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
@@ -64,25 +63,14 @@ describe('keeperDisplayStatus', () => {
     it('classifies inactive keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'inactive',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
     })
 
-    it('classifies offline keeper with generation > 0 as stopped', () => {
-      const keeper = makeKeeper({
-        status: 'offline',
-        generation: 3,
-        turn_count: 0,
-      })
-      expect(keeperDisplayStatus(keeper)).toBe('stopped')
-    })
-
     it('classifies offline keeper with turn_count > 0 as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 5,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
@@ -91,7 +79,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with all activity signals as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 2,
         turn_count: 10,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
@@ -216,6 +203,9 @@ describe('keeperRuntimeBlockerLabel', () => {
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
     for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
       expect(keeperRuntimeBlockerLabel(cls), `missing label for ${cls}`).not.toBeNull()
+      // A label that repeats the wire string satisfies the check above while
+      // telling the operator nothing they did not already see.
+      expect(keeperRuntimeBlockerLabel(cls), `${cls} is labelled with its own wire string`).not.toBe(cls)
     }
   })
 })

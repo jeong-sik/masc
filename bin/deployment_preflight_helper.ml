@@ -83,6 +83,42 @@ let validate_current_wal ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+(* The two rejection classes call for different operator action, so each
+   verdict carries a single-token [class=] label: cmdliner re-wraps the error
+   text at the terminal margin and can split a phrase across lines, a token
+   survives intact. *)
+let validate_current_meta path =
+  Masc.Keeper_meta_store.validate_current_meta_file_result path
+  |> Result.map_error (function
+    | Masc.Keeper_meta_store.Unreadable detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is unreadable class=unreadable_json path=%s \
+            (on boot the runtime refuses this keeper instead of \
+            re-materialising it; restore the file from backup): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Not_current detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta production validation rejected \
+            class=not_current_schema path=%s (on boot the runtime reads this \
+            meta as absent and re-materialises the keeper from its \
+            declaration, losing the accumulated counters and the task \
+            binding; strip retired fields or fill missing ones): %s"
+           path
+           detail))
+;;
+
+(* The gate prints this next to its verdict so the operator can tell a
+   freshly built helper from an older installed one. [binary_commit] is the
+   SHA the Dune build rule embeds; a helper built outside a checkout has none. *)
+let print_build_commit () =
+  match (Masc.Build_identity.current ()).Masc.Build_identity.binary_commit with
+  | Some commit -> Printf.printf "%s\n%!" commit
+  | None -> Printf.printf "unstamped\n%!"
+;;
+
 let validate_schedule_ledger path =
   try
     let json = Yojson.Safe.from_file path in
@@ -489,6 +525,22 @@ let current_queue_keeper_name =
   Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
 ;;
 
+let durable_filenames_cmd =
+  let doc = "print the durable event-queue filenames this binary reads and writes" in
+  Cmd.v
+    (Cmd.info "durable-filenames" ~doc)
+    Term.(
+      const (fun () ->
+        (* The preflight script builds fixtures at these exact names. It used
+           to spell them out, so bumping the snapshot filename in OCaml left
+           the fixtures one version behind and the self-test failed. *)
+        Printf.printf
+          "snapshot=%s\nwal=%s\n"
+          Keeper_event_queue_persistence.snapshot_filename
+          Keeper_event_queue_persistence.transition_wal_filename)
+      $ const ())
+;;
+
 let validate_current_queue_cmd =
   let doc = "validate a current event-queue through production decode and replay" in
   Cmd.v
@@ -513,6 +565,26 @@ let validate_current_wal_cmd =
               cmdliner_result (validate_current_wal ~base_path ~keeper_name))
          $ current_queue_base_path
          $ current_queue_keeper_name))
+;;
+
+let current_meta_file =
+  let doc = "Validate one persisted Keeper meta against the current closed schema." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"KEEPER_META" ~doc)
+;;
+
+let validate_current_meta_cmd =
+  let doc = "validate one keeper meta with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-current-meta" ~doc)
+    Term.(
+      ret
+        (const (fun path -> cmdliner_result (validate_current_meta path))
+           $ current_meta_file))
+;;
+
+let build_commit_cmd =
+  let doc = "print the git commit stamped into this helper at build time" in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const print_build_commit $ const ())
 ;;
 
 let schedule_ledger_file =
@@ -579,6 +651,384 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
+(* Every durable store this gate can read, in one list.
+
+   The shell gate reads a store by knowing its layout: it runs [find] for a
+   glob and calls a per-file subcommand. That works while one command covers
+   one store, and it is why five stores are covered and the rest are not --
+   each new one is a new subcommand and a new [find]. The path conventions
+   already live in OCaml (a keeper's memory snapshot is a suffix on a
+   configured id, a disposition receipt sits under a sha256 of the keeper
+   name), so the enumeration belongs where the convention is.
+
+   Adding a store here is adding a row.
+
+   [on_refusal] says what the runtime does with a row it cannot read. That is
+   the part an operator needs at 3am and it differs per store: some refuse the
+   whole file and stop the keeper, some drop the row and never say so. It is
+   stated per row rather than inferred, because it is a property of the
+   consumer and not of the decoder.
+
+   Every scan runs the production decoder. A fixture cannot go stale here
+   because there is no fixture -- these are the rows on disk, read by the
+   binary about to serve them. *)
+type store_report =
+  { rows : int
+  ; refused : int
+  ; first_refusal : string option
+  }
+
+type store_scan =
+  { store : string
+  ; on_refusal : string
+  ; scan : base_path:string -> (store_report, string) result
+  }
+
+let empty_report = { rows = 0; refused = 0; first_refusal = None }
+
+let count_row report = function
+  | Ok () -> { report with rows = report.rows + 1 }
+  | Error detail ->
+    { rows = report.rows + 1
+    ; refused = report.refused + 1
+    ; first_refusal =
+        (match report.first_refusal with
+         | Some _ as kept -> kept
+         | None -> Some detail)
+    }
+;;
+
+let scan_files ~paths ~decode =
+  List.fold_left
+    (fun report path ->
+       match Fs_compat.load_file path with
+       | exception exn ->
+         count_row report (Error (path ^ ": " ^ Printexc.to_string exn))
+       | contents ->
+         count_row
+           report
+           (decode ~path contents |> Result.map_error (fun d -> path ^ ": " ^ d)))
+    empty_report
+    paths
+;;
+
+let scan_jsonl ~path ~decode =
+  if not (Fs_compat.file_exists path)
+  then empty_report
+  else
+    Fs_compat.load_jsonl path
+    |> List.fold_left (fun report json -> count_row report (decode json)) empty_report
+;;
+
+let files_under dir ~keep =
+  match Sys.readdir dir with
+  | exception Sys_error _ -> []
+  | entries ->
+    Array.to_list entries
+    |> List.filter keep
+    |> List.sort String.compare
+    |> List.map (Filename.concat dir)
+;;
+
+let keeper_meta_store =
+  { store = "keeper meta"
+  ; on_refusal =
+      "the runtime reads the meta as absent and re-materialises the keeper \
+       from its declaration, losing accumulated counters and the task binding"
+  ; scan =
+      (fun ~base_path ->
+         let dir =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+         in
+         Ok
+           (scan_files
+              ~paths:
+                (files_under dir ~keep:(fun name ->
+                   Filename.check_suffix name ".json"))
+              ~decode:(fun ~path _ ->
+                Masc.Keeper_meta_store.validate_current_meta_file_result path
+                |> Result.map (fun _ -> ())
+                |> Result.map_error (function
+                  | Masc.Keeper_meta_store.Unreadable detail
+                  | Masc.Keeper_meta_store.Not_current detail -> detail))))
+  }
+;;
+
+let memory_os_current_store =
+  { store = "memory OS current snapshot"
+  ; on_refusal =
+      "recall injection, the librarian and keeper_memory_write all fail for \
+       that keeper, and neither writer repairs it because both read first"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_os_current.list_keeper_ids_for_keepers_dir
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    match
+                      Masc.Keeper_memory_os_current.read_for_keepers_dir
+                        ~keepers_dir
+                        ~keeper_id
+                    with
+                    | Ok None -> report
+                    | Ok (Some _) -> count_row report (Ok ())
+                    | Error detail ->
+                      count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
+let disposition_receipt_store =
+  { store = "paused-work disposition receipts"
+  ; on_refusal =
+      "the operation id neither replays its receipt nor records a new one, \
+       because save_if_absent reads before it writes"
+  ; scan =
+      (fun ~base_path ->
+         let root =
+           Filename.concat
+             (Common.masc_dir_from_base_path ~base_path)
+             ("paused-work-dispositions-"
+              ^ Masc.Keeper_paused_work_disposition_receipt.store_version)
+         in
+         let receipts =
+           files_under root ~keep:(fun name ->
+             String.starts_with ~prefix:"keeper-" name)
+           |> List.concat_map (fun keeper_dir ->
+             files_under keeper_dir ~keep:(fun name ->
+               String.starts_with ~prefix:"operation-" name
+               && Filename.check_suffix name ".json"))
+         in
+         Ok
+           (scan_files ~paths:receipts ~decode:(fun ~path:_ contents ->
+              match Yojson.Safe.from_string contents with
+              | exception Yojson.Json_error detail -> Error detail
+              | json ->
+                Masc.Keeper_paused_work_disposition_receipt.of_yojson json
+                |> Result.map (fun _ -> ()))))
+  }
+;;
+
+let board_posts_store =
+  { store = "board posts"
+  ; on_refusal =
+      "the loader drops the row without a log or a counter, and the next \
+       full-snapshot write removes it from disk"
+  ; scan =
+      (fun ~base_path ->
+         let path =
+           Filename.concat
+             (Common.masc_dir_from_base_path ~base_path)
+             "board_posts.jsonl"
+         in
+         Ok
+           (scan_jsonl ~path ~decode:(fun json ->
+              match Masc_board_handlers.Board_votes_json.post_of_yojson json with
+              | Some _ -> Ok ()
+              | None -> Error "post rejected by the current field set")))
+  }
+;;
+
+let durable_stores =
+  [ keeper_meta_store
+  ; memory_os_current_store
+  ; disposition_receipt_store
+  ; board_posts_store
+  ]
+;;
+
+let validate_stores base_path =
+  let reports =
+    List.map
+      (fun store -> store, store.scan ~base_path)
+      durable_stores
+  in
+  List.iter
+    (fun (store, result) ->
+       match result with
+       | Error detail -> Printf.printf "%s scan_failed=%s\n%!" store.store detail
+       | Ok report ->
+         Printf.printf
+           "%s rows=%d refused=%d\n%!"
+           store.store
+           report.rows
+           report.refused;
+         (match report.first_refusal with
+          | None -> ()
+          | Some detail ->
+            Printf.printf "  first refusal: %s\n%!" detail;
+            Printf.printf "  on refusal: %s\n%!" store.on_refusal))
+    reports;
+  let refused =
+    List.fold_left
+      (fun total (_, result) ->
+         match result with
+         | Ok report -> total + report.refused
+         | Error _ -> total)
+      0
+      reports
+  in
+  let failed_scans =
+    List.filter_map
+      (fun (store, result) ->
+         match result with
+         | Error _ -> Some store.store
+         | Ok _ -> None)
+      reports
+  in
+  if failed_scans <> []
+  then errorf "store scan failed: %s" (String.concat ", " failed_scans)
+  else if refused = 0
+  then Ok ()
+  else
+    errorf
+      "%d stored row(s) the runtime about to serve them cannot read"
+      refused
+;;
+
+let validate_stores_cmd =
+  let doc =
+    "read every durable store this gate knows with the production decoders \
+     and report the rows the runtime could not read"
+  in
+  Cmd.v
+    (Cmd.info "validate-stores" ~doc)
+    Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
+;;
+
+(* A hard-cut field leaves rows no current decoder can read. [replay] refuses
+   to compact while such a row is on disk and the row only leaves through
+   compaction, so the store keeps it and its retention bound stops applying —
+   #29277. Cutting the store is a deployment step because it drops rows, and
+   the operator has to see how many before authorising it. *)
+let run_registry_cuts =
+  [ ( Masc.Exact_lane_run_registry.storage_filename
+    , Masc.Exact_lane_run_registry.cut_replay_log )
+  ; Fusion_run_registry.storage_filename, Fusion_run_registry.cut_replay_log
+  ; ( Masc.Verification_run_registry.storage_filename
+    , Masc.Verification_run_registry.cut_replay_log )
+  ; ( Masc.Goal_verification_run_registry.storage_filename
+    , Masc.Goal_verification_run_registry.cut_replay_log )
+  ]
+;;
+
+let scan_run_registries base_path ~execute =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  List.map
+    (fun (filename, cut) ->
+       let report = cut ~execute (Filename.concat masc_dir filename) in
+       Printf.printf
+         "%s lines=%d unreadable=%d retained=%d whole_file=%b rewritten=%b\n%!"
+         filename
+         report.Run_registry_core.lines_read
+         report.malformed_lines
+         report.retained_entries
+         report.reached_end
+         report.rewritten;
+       filename, report)
+    run_registry_cuts
+;;
+
+let cut_run_registries_report ~execute reports =
+  let dropped =
+    List.fold_left
+      (fun total (_, r) -> total + r.Run_registry_core.malformed_lines)
+      0
+      reports
+  in
+  (* A store whose last line is unterminated is left alone, which is what a
+     crashed server leaves behind — exactly the state a deployment runs into.
+     Reporting that as success would tell the deploy script the store was
+     cleaned when it was not. *)
+  let unfinished =
+    List.filter (fun (_, r) -> not r.Run_registry_core.reached_end) reports
+    |> List.map fst
+  in
+  if unfinished <> []
+  then
+    errorf
+      "store(s) end in an unterminated line and were left alone: %s"
+      (String.concat ", " unfinished)
+  else if not execute
+  then
+    if dropped = 0
+    then Ok ()
+    else
+      errorf
+        "%d unreadable row(s) across the run registries; re-run with --execute \
+         to cut them"
+        dropped
+  else (
+    let uncut =
+      List.filter
+        (fun (_, r) ->
+           r.Run_registry_core.malformed_lines > 0 && not r.rewritten)
+        reports
+      |> List.map fst
+    in
+    if uncut = []
+    then Ok ()
+    else
+      errorf
+        "store(s) still hold unreadable rows after the cut: %s"
+        (String.concat ", " uncut))
+;;
+
+(* The rewrite replaces the inode and drops rows that are Running on disk, so
+   it must not run under a live server. The lease is the same one
+   [tool-blob-maintenance] takes for its own destructive pass. *)
+let cut_run_registries base_path ~execute =
+  if not execute
+  then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
+  else (
+    let run_dir = (Host_config.host ()).run_dir in
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned { pid } ->
+      errorf
+        "workspace writer lease is already owned base_path=%s pid=%s"
+        base_path
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+           cut_run_registries_report
+             ~execute
+             (scan_run_registries base_path ~execute)))
+;;
+
+let execute_cut =
+  let doc = "Rewrite each store, dropping the rows no current decoder reads." in
+  Arg.(value & flag & info [ "execute" ] ~doc)
+;;
+
+let cut_run_registries_cmd =
+  let doc =
+    "report run-registry rows the current decoders refuse; --execute rewrites \
+     the stores without them (run with the server stopped)"
+  in
+  Cmd.v
+    (Cmd.info "cut-run-registries" ~doc)
+    Term.(
+      ret
+        (const (fun base_path execute ->
+           cmdliner_result (cut_run_registries base_path ~execute))
+         $ base_path
+         $ execute_cut))
+;;
+
 let owner_pid =
   let doc = "Expected process ID of the current BasePath lease owner." in
   Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
@@ -640,13 +1090,18 @@ let () =
     (Cmd.eval
        (Cmd.group
           (Cmd.info "masc-deployment-preflight-helper" ~doc)
-          [ lease_run_cmd
+          [ durable_filenames_cmd
+          ; lease_run_cmd
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
+          ; validate_current_meta_cmd
+          ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
+          ; cut_run_registries_cmd
+          ; validate_stores_cmd
           ]))
 ;;

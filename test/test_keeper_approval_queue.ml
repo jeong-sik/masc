@@ -116,7 +116,6 @@ let submit_submission_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ~base_path
       ~keeper_name
@@ -133,7 +132,6 @@ let submit_submission_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ~goal_ids
       ?continuation_channel
       ()
   with
@@ -146,7 +144,6 @@ let submit_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ~base_path
       ~keeper_name
@@ -158,7 +155,6 @@ let submit_with_context
      ?request_context
      ?task_id
      ?goal_id
-     ~goal_ids
      ?continuation_channel
      ~base_path
      ~keeper_name
@@ -252,7 +248,6 @@ let test_dedup_never_merges_distinct_origins () =
        let first =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -262,7 +257,6 @@ let test_dedup_never_merges_distinct_origins () =
        let same =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -278,7 +272,6 @@ let test_dedup_never_merges_distinct_origins () =
        let retried_next_turn =
          submit_with_context
            ~turn_id:2
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -292,30 +285,15 @@ let test_dedup_never_merges_distinct_origins () =
        let another_channel =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_b
            ~base_path
            ~keeper_name
            ~input
            ()
        in
-       let another_goal_context =
-         submit_with_context
-           ~turn_id:1
-           ~goal_ids:[ "goal-b" ]
-           ~continuation_channel:dashboard_a
-           ~base_path
-           ~keeper_name
-           ~input
-           ()
-       in
-       List.iter
-         (fun id ->
-            Alcotest.(check bool) "distinct origin has its own request" true
-              (not (String.equal first id)))
-         [ another_channel; another_goal_context ];
-       List.iter (reject_and_cleanup ~base_path)
-         [ first; another_channel; another_goal_context ])
+       Alcotest.(check bool) "distinct origin has its own request" true
+         (not (String.equal first another_channel));
+       List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
 ;;
 
 (* The measured 2026-08-16 incident, end to end: the retry lands after the
@@ -622,7 +600,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -1446,7 +1424,7 @@ let test_resolution_is_durable_and_origin_scoped () =
               Agent_core.Types.text_of_content projected.content
             | Ok _ ->
               Alcotest.fail "replay projection did not append exact evidence"
-            | Error detail -> Alcotest.fail detail)
+            | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
        in
        let replay_evidence =
          projected_text
@@ -1548,7 +1526,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          submit_with_context
            ~turn_id:17
            ~task_id:"task-origin"
-           ~goal_ids:[ "goal-origin" ]
            ~continuation_channel
            ~base_path
            ~keeper_name
@@ -1594,7 +1571,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; causal_context =
              Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
          ; task_id
-         ; goal_ids
          ; continuation_channel = None
          }
        in
@@ -1702,7 +1678,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v8 snapshot" 8 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v9 snapshot" 9 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -3109,7 +3085,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 8
+            [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -3144,7 +3120,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 8
+               [ "version", `Int 9
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -3169,7 +3145,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 7
+            [ "version", `Int 8
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -3179,7 +3155,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 7 is unsupported (current 8); reset \
+                  "gate_pending.version 8 is unsupported (current 9); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3390,7 +3366,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -3599,7 +3575,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -3687,7 +3663,6 @@ let test_default_auto_judge_defers_without_blocking () =
          ; causal_context =
              Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
-         ; goal_ids = [ "goal-auto-judge" ]
          ; continuation_channel = None
          }
        in
@@ -3759,7 +3734,6 @@ let test_unavailable_cycle_grant_never_falls_through () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3848,7 +3822,6 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3987,7 +3960,6 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -4099,7 +4071,6 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in

@@ -5,15 +5,7 @@
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
-import {
-  Archive,
-  ChevronLeft,
-  Info,
-  MoreHorizontal,
-  Play,
-  Search,
-  Settings,
-} from 'lucide-preact'
+import { ChevronLeft, MoreHorizontal } from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
@@ -46,29 +38,38 @@ const LazyChatArtifactPanel = lazy(async () => ({
 
 type WorkspaceUtilityAction = 'search' | 'turn' | 'artifacts' | 'detail' | 'config'
 type WorkspaceCommandId = KeeperActionKey | WorkspaceUtilityAction
-type IconComponent = typeof Play
 
 interface WorkspaceCommand {
   id: WorkspaceCommandId
   label: string
   title: string
-  icon: IconComponent
   danger?: boolean
   active?: boolean
   onClick: () => void | Promise<void>
 }
 
+// Header/composer glyphs mirror the prototype's FSM_ACTIONS table
+// (prototypes/keeper-v2/data.jsx, ported at v2/keeper-fsm.ts): pause ⏸,
+// stop ⏹, resume/start ▶, restart ↻, config ⚙. Two deliberate local
+// deviations: boot keeps ⏻ (keeper-action-panel.ts documents why boot must
+// not share resume's ▶ in icon-only rows), and the utility commands are
+// wired operator capability the mock does not have, so they keep their
+// existing marks.
 const COMMAND_GLYPHS: Partial<Record<WorkspaceCommandId, string>> = {
-  pause: 'Ⅱ',
+  pause: '⏸',
   resume: '▶',
   wakeup: '↻',
   boot: '⏻',
-  shutdown: '■',
+  shutdown: '⏹',
   search: '⌕',
   turn: '↳',
   artifacts: '▣',
   detail: 'ⓘ',
   config: '⚙',
+}
+
+function commandGlyph(command: WorkspaceCommand): string {
+  return COMMAND_GLYPHS[command.id] ?? '·'
 }
 
 function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
@@ -86,10 +87,9 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
       id: key,
       label: copy.label,
       title: copy.title,
-      icon: copy.icon,
       danger: copy.danger,
       onClick: () => key === 'resume'
-        ? runKeeperAction(keeper.name, key, keeper.generation)
+        ? runKeeperAction(keeper.name, key)
         : runKeeperAction(keeper.name, key),
     }
   })
@@ -119,7 +119,6 @@ function workspaceUtilityCommands({
       id: 'search',
       label: searchOpen ? '검색·이력 닫기' : '대화 검색·이력',
       title: searchOpen ? '검색·이력 닫기' : '대화 검색·이력',
-      icon: Search,
       active: searchOpen,
       onClick: onToggleSearch,
     },
@@ -127,14 +126,12 @@ function workspaceUtilityCommands({
       id: 'turn',
       label: '턴 검사',
       title: '턴 검사',
-      icon: Search,
       onClick: onOpenTurnInspector,
     },
     {
       id: 'artifacts',
       label: artifactsOpen ? '아티팩트 숨김' : '아티팩트',
       title: '대화 아티팩트',
-      icon: Archive,
       active: artifactsOpen,
       onClick: onToggleArtifacts,
     },
@@ -142,7 +139,6 @@ function workspaceUtilityCommands({
       id: 'detail',
       label: detailOpen ? '대화로' : '상세',
       title: '상세 (상태 · 진단 · 정체성 · 설정 · 디버그)',
-      icon: Info,
       active: detailOpen,
       onClick: onToggleDetail,
     },
@@ -150,7 +146,6 @@ function workspaceUtilityCommands({
       id: 'config',
       label: 'keeper 설정',
       title: 'keeper 설정',
-      icon: Settings,
       onClick: onOpenConfig ?? onToggleDetail,
     },
   ]
@@ -224,32 +219,34 @@ function WorkspaceCommandButtons({
     }
   }
 
+  // Prototype menu rows (shell.jsx chat-ovf-menu) render `{glyph} {label}` as
+  // text; `kp-menu-i` is the vendored design class for these items.
   const renderMenuItem = (command: WorkspaceCommand): VNode => {
-    const Icon = command.icon
     return html`
       <button
         key=${command.id}
         type="button"
         role=${command.active === undefined ? 'menuitem' : 'menuitemcheckbox'}
         aria-checked=${command.active === undefined ? undefined : command.active ? 'true' : 'false'}
-        class=${`kw-chat-command-item${command.danger ? ' danger' : ''}${command.active ? ' active' : ''}`}
+        class=${`kw-chat-command-item kp-menu-i${command.danger ? ' danger' : ''}${command.active ? ' active' : ''}`}
         disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
         onClick=${() => { void run(command) }}
         data-testid=${`kw-chat-command-${command.id}`}
       >
-        <${Icon} size=${14} aria-hidden="true" />
-        <span>${command.label}</span>
+        <span>${commandGlyph(command)} ${command.label}</span>
       </button>
     `
   }
 
   if (mobile) {
+    // Design's mobile header command button is `.chat-ovf` with the ⋮ glyph
+    // (shell.jsx); the popover wears the vendored `.chat-ovf-menu`.
     return html`
       <div class="kw-chat-mobile-actions">
         <div class="kw-chat-command-menu">
           <button
             type="button"
-            class="kw-chat-command-menu-toggle v2-monitoring-action"
+            class="kw-chat-command-menu-toggle chat-ovf v2-monitoring-action"
             aria-label="keeper 명령"
             aria-haspopup="menu"
             aria-expanded=${menuOpen ? 'true' : 'false'}
@@ -260,11 +257,18 @@ function WorkspaceCommandButtons({
             }}
             data-testid="kw-chat-command-menu-toggle"
           >
-            <${MoreHorizontal} size=${17} aria-hidden="true" />
+            ⋮
           </button>
           ${menuOpen
             ? html`
-                <div class="kw-chat-command-popover v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
+                <div class="kw-chat-command-popover chat-ovf-menu v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
+                  ${commands.some(isLifecycleWorkspaceCommand)
+                    ? null
+                    // shell.jsx kp-menu-note: the ovf menu explains why the row
+                    // is action-less. The live KeeperPhase enum has no Dead
+                    // state, so only the transient wording applies (mirrors the
+                    // desktop act-quiet note below).
+                    : html`<div class="kp-menu-note">전이 중 — 잠시 후 가능</div>`}
                   ${commands.map(renderMenuItem)}
                 </div>
               `
@@ -274,13 +278,14 @@ function WorkspaceCommandButtons({
     `
   }
 
+  // Prototype header actions (shell.jsx ChatHeader) are `.act.icon` glyph
+  // buttons; dual-emit the design classes so the vendored skin owns the box.
   const renderIcon = (command: WorkspaceCommand): VNode => {
-    const Icon = command.icon
     return html`
       <button
         key=${command.id}
         type="button"
-        class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
+        class=${`kw-chat-command-icon act icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
         aria-label=${command.label}
         aria-pressed=${command.active ? 'true' : undefined}
         title=${command.title}
@@ -288,7 +293,7 @@ function WorkspaceCommandButtons({
         onClick=${() => { void run(command) }}
         data-testid=${`kw-chat-command-${command.id}`}
       >
-        <${Icon} size=${14} aria-hidden="true" />
+        <span aria-hidden="true">${commandGlyph(command)}</span>
       </button>
     `
   }
@@ -303,6 +308,13 @@ function WorkspaceCommandButtons({
   return html`
     <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
       ${lifecycle.map(renderIcon)}
+      ${lifecycle.length === 0
+        // Prototype shows a quiet note when the phase exposes no operator
+        // action (shell.jsx: transient phases → '전이 중…'). The live
+        // KeeperPhase enum has no Dead state, so only the transient wording
+        // applies.
+        ? html`<span class="act-quiet" title=${keeperDisplayStatus(keeper)}>전이 중…</span>`
+        : null}
       ${lifecycle.length > 0 && utility.length > 0
         ? html`<span class="kw-chat-command-sep" role="separator" aria-orientation="vertical"></span>`
         : null}
@@ -378,9 +390,9 @@ function ChatHeader({
       : null
 
   // Single-row header: identity + status + actions only. Runtime / model /
-  // throughput / scope live in the context rail (ThroughputSection) — the
-  // canonical home — so the header stays slim and the conversation gets the
-  // vertical space instead of a redundant metadata sub-row.
+  // context-window vitals live in the context rail — the canonical home — so
+  // the header stays slim and the conversation gets the vertical space
+  // instead of a redundant metadata sub-row.
   return html`
     <div class="kw-chat-head chat-head v2-monitoring-toolbar">
       <button
@@ -458,7 +470,7 @@ function ChatHeader({
                 onClick=${onOpenRail}
                 data-testid="kw-chat-mobile-context"
               >
-                <${Info} size=${14} aria-hidden="true" />
+                ⓘ
                 <span>컨텍스트</span>
               </button>
             `
@@ -539,6 +551,13 @@ export function KeeperWorkspaceChat({
   const [searchOpen, setSearchOpen] = useState(false)
   const [composerBusyAction, setComposerBusyAction] = useState<WorkspaceCommandId | null>(null)
   const entries = keeperThreads.value[keeper.name] ?? []
+  // Design's in-thread pending-approval cue (keepers.jsx chat-pendcue): a slim
+  // strip above the transcript linking to the approvals queue — the sole
+  // act-point. Reads the same Gate approval_queue SSOT as the header badge;
+  // the queue row's tool_name fills the design's `pend.tool` slot. Kept in
+  // addition to the header pill because the design draws both signals (the
+  // cue is the one visible while reading the thread).
+  const pendingCueItem = keeperPendingApprovals(keeper.name)?.[0] ?? null
   const detailOpen = false
   const onToggleDetail = onOpenDetail ?? (() => {})
   const openTurnInspector = (entry?: KeeperConversationEntry) => {
@@ -600,6 +619,21 @@ export function KeeperWorkspaceChat({
         searchOpen=${searchOpen}
         onToggleSearch=${() => setSearchOpen(open => !open)}
       />
+      ${pendingCueItem
+        ? html`
+            <button
+              type="button"
+              class="chat-pendcue"
+              title="결재 큐에서 처리"
+              data-testid="keeper-chat-pendcue"
+              onClick=${() => navigate('approvals')}
+            >
+              <span class="chat-pendcue-dot"></span>
+              <span class="chat-pendcue-tx">이 keeper는 <b>승인 대기</b> 중 · <span class="mono">${pendingCueItem.tool_name}</span></span>
+              <span class="chat-pendcue-arr">결재 큐에서 처리 →</span>
+            </button>
+          `
+        : null}
       <div class="kw-chat-body">
         <${KeeperConversationPanel}
           keeperName=${keeper.name}

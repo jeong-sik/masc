@@ -93,8 +93,6 @@ end
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
-val bootstrap_prompt_state : Mcp_server.server_state -> unit
-
 (** {1 Startup Tasks} *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit

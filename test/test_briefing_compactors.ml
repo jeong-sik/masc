@@ -55,12 +55,10 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("name", json_string name);
       ("status", json_string status);
       ("agent_name", json_string agent_name);
-      ("generation", `Int generation);
       ("context_ratio", `Float context_ratio);
       ("last_turn_ago_s", `Float 30.0);
       ("compaction_count", `Int 1);
       ("handoff_count_total", `Int 0);
-      ("active_goal_ids", `List [ json_string "g1"; json_string "g2" ]);
       ( "diagnostic",
         `Assoc
           [
@@ -103,7 +101,6 @@ let test_compact_keeper_strict_keys () =
         "name"; "status"; "agent_name"; "generation"; "context_ratio";
         "last_turn_ago_s"; "compaction_count"; "handoff_count_total";
         "current_task"; "last_reply_status"; "last_reply_preview";
-        "active_goal_ids";
       ]
   in
   assert (assoc_keys_sorted out = expected_keys)

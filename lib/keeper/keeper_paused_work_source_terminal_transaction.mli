@@ -3,7 +3,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
   }
@@ -20,10 +19,6 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Source_queue_validation_failed of string
   | Committed_ack_failed of string

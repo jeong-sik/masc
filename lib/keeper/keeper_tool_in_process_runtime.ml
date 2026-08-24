@@ -48,7 +48,6 @@ let external_gate_decision
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
       ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-      ; goal_ids = meta.active_goal_ids
       ; continuation_channel
       }
   with
@@ -305,10 +304,6 @@ let handle_web_fetch_with_outcome
 
 let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
   Keeper_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
-;;
-
-let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
-  Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
 ;;
 
 let handle_memory_write_with_outcome
@@ -987,7 +982,7 @@ let connector_post_replay_of_gate_input input =
     | _ ->
       Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
-  let optional_string_list key fields =
+  let required_string_list key fields =
     match
       List.filter_map
         (fun (name, value) -> if String.equal name key then Some value else None)
@@ -1009,7 +1004,7 @@ let connector_post_replay_of_gate_input input =
       decode [] values
     | [ _ ] ->
       Error (Printf.sprintf "approved connector_post %s must be an array" key)
-    | [] -> Ok []
+    | [] -> Error (Printf.sprintf "approved connector_post is missing %s" key)
     | _ -> Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
   let reject_unknown ~allowed fields =
@@ -1032,11 +1027,9 @@ let connector_post_replay_of_gate_input input =
     let* connector = required_string "connector" fields in
     let* channel_id = required_string "channel_id" fields in
     let* content = required_string "content" fields in
-    (* Approvals persisted before rich mentions have no field at all. New
-       producers always write the canonical empty list, while replay keeps the
-       exact old no-mention meaning instead of making an approved effect
-       undecodable across the upgrade. *)
-    let* mention_user_ids = optional_string_list "mention_user_ids" fields in
+    (* [connector_post_gate_input] always writes the list (empty when there
+       are no mentions), so an absent field is a malformed request. *)
+    let* mention_user_ids = required_string_list "mention_user_ids" fields in
     let* validated_mention_user_ids =
       Keeper_surface_post.user_mentions_of_args
         ~surface:connector
@@ -1504,10 +1497,6 @@ let handle_voice_with_outcome
     ()
 ;;
 
-let handle_task ~config ~(meta : keeper_meta) ~name ~args =
-  Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
-;;
-
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the producer-owned execution outcome.
    [None] means the dispatcher does not recognise the name (the descriptor →
@@ -1761,27 +1750,6 @@ let handle_masc_local_runtime_with_outcome
     ~name
     ~args
   |> dispatch_option_to_execution ~name
-;;
-
-let handle_masc_local_runtime
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~name
-      ~args
-      ()
-  =
-  (handle_masc_local_runtime_with_outcome
-     ~config
-     ~meta
-     ?continuation_channel
-     ?gate_context
-     ?gate_grant
-     ~name
-     ~args
-     ()).raw_output
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/

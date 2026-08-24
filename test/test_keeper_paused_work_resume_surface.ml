@@ -17,19 +17,18 @@ let test_single_resume_requires_exact_fences () =
     Surface.parse_resume_request
       (`Assoc
          [ "action", `String "resume"
-         ; "owner_nonce", `Int 7
          ; "operator_operation_id", `String "dashboard-resume-7"
          ])
     |> require_ok "parse exact Resume_owner"
   in
-  check (pair int string) "exact fences" (7, "dashboard-resume-7") parsed
+  check string "exact fences" "dashboard-resume-7" parsed
 ;;
 
 let test_bulk_resume_requires_per_owner_targets () =
   let names_only =
     `Assoc
       [ "action", `String "resume"
-      ; "names", `List [ `String "rondo"; `String "qa-king" ]
+      ; "names", `List [ `String "beta"; `String "mu-king" ]
       ]
   in
   (match Surface.parse_bulk_resume_requests names_only with
@@ -42,13 +41,11 @@ let test_bulk_resume_requires_per_owner_targets () =
          ; ( "targets"
            , `List
                [ `Assoc
-                   [ "name", `String "rondo"
-                   ; "owner_nonce", `Int 3
-                   ; "operator_operation_id", `String "resume-rondo-1"
+                   [ "name", `String "beta"
+                   ; "operator_operation_id", `String "resume-beta-1"
                    ]
                ; `Assoc
-                   [ "name", `String "qa-king"
-                   ; "owner_nonce", `Int 5
+                   [ "name", `String "mu-king"
                    ; "operator_operation_id", `String "resume-qa-1"
                    ]
                ] )
@@ -56,9 +53,9 @@ let test_bulk_resume_requires_per_owner_targets () =
     |> require_ok "parse bulk Resume_owner"
   in
   check
-    (list (triple string int string))
+    (list (pair string string))
     "per-owner fences"
-    [ "rondo", 3, "resume-rondo-1"; "qa-king", 5, "resume-qa-1" ]
+    [ "beta", "resume-beta-1"; "mu-king", "resume-qa-1" ]
     parsed
 ;;
 
@@ -67,7 +64,7 @@ let () =
     "keeper paused-work resume surface"
     [ ( "resume request contract"
       , [ test_case
-            "single requires generation and operation id"
+            "single requires the operation id"
             `Quick
             test_single_resume_requires_exact_fences
         ; test_case

@@ -74,7 +74,7 @@ let keeper_fleet_messages_max () : int =
 
 (* How many of the keeper's own past turns are replayed as actions. The default
    is the depth the product states a keeper must not lose ("10턴 전에 한 자신의
-   발화나 행동"), and it fits: measured on taskmaster 2026-08-16, a turn renders
+   발화나 행동"), and it fits the measured fleet distribution: a turn renders
    at a median 1.6 KB, so ten turns add ~16 KB to a prompt that was assembling
    5.8 KB against a 131 KB runtime cap. *)
 let keeper_own_recent_turns_max_rp =
@@ -84,6 +84,23 @@ let keeper_own_recent_turns_max_rp =
     ~description:"Past turns of the keeper's own tool calls replayed into the world observation (0 = disable)" ()
 let keeper_own_recent_turns_max () : int =
   Runtime_params.get keeper_own_recent_turns_max_rp
+
+(* The briefing is pinned: the conversation window cannot take back whatever
+   it occupies. A keeper whose briefing outgrew its runtime's whole request cap
+   could not assemble a turn at all, and no cut of the history helped, because
+   the bytes were never in the history (masc#29676: 141,937 pinned bytes
+   against a 131,072 cap, 86 turns refused across eight hours).
+
+   Half keeps the guarantee symmetric — the turn being briefed always has at
+   least as much room as the briefing about it. It is a ceiling, not a target:
+   a briefing that already fits takes what it needs and this never applies. *)
+let keeper_context_briefing_share_percent_rp =
+  _rp_int ~key:"keeper.context.briefing.share_percent"
+    ~default:(fun () -> 50)
+    ~min_v:1 ~max_v:100
+    ~description:"Share of the runtime's declared request-body cap the world-state briefing may occupy" ()
+let keeper_context_briefing_share_percent () : int =
+  Runtime_params.get keeper_context_briefing_share_percent_rp
 
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"

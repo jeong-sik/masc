@@ -14,6 +14,7 @@ type board_stimulus_kind =
   | Post_created
   | Comment_added
   | Reaction_changed of board_reaction_change
+  | Vote_cast of board_vote_change
 
 and board_reaction_target_type =
   | Reaction_post
@@ -25,6 +26,21 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_direction =
+  | Vote_up
+  | Vote_down
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+  voter : string;
+  direction : board_vote_direction;
 }
 
 type board_stimulus = {
@@ -63,19 +79,9 @@ type stimulus_payload =
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
   | Manual_compaction_requested
-  | Goal_assigned of goal_assignment
-      (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
-         (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
-         the assignment edge so the new standing objective arrives as
-         actionable turn input — before this, an assigned goal was
-         discovered only if some unrelated stimulus happened to fire.
-         Uses the same no-dedicated-reason pattern as async completions:
-         turn_reason; the injected pending observation drives the turn. *)
-  | Goal_reconciliation_ready of goal_reconciliation_ready
   | Completion_authority_rejected of completion_authority_rejection
-  (* Cancellation is the one terminal outcome with no Board projection, and
-     Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
-     link reaches no one. This carries the cancellation to the Task's author. *)
+  (* Cancellation is the one terminal outcome with no Board projection. This
+     carries the cancellation to the Task's author. *)
   | Task_cancelled of task_cancellation
   (* A committed workspace message named this Keeper. The transcript row is the
      content SSOT; this payload carries the workspace request identity so the
@@ -142,21 +148,6 @@ and scheduled_wake = {
   result_delivery : Keeper_continuation_channel.t option;
 }
 
-and goal_assignment = {
-  ga_goal_id : string;
-  ga_goal_title : string;
-  (* display-only title resolved from Goal_store at enqueue time. *)
-  ga_assigned_by : string;
-  (* actor label for the prompt line: tool caller name or
-     "toml_reconcile". Display-only; stripped from queue identity so
-     repeat assignments of the same goal dedup regardless of actor. *)
-}
-
-and goal_reconciliation_ready = {
-  gr_goal_id : string;
-  gr_triggering_task_id : string;
-}
-
 and completion_authority_rejection = {
   car_task_id : string;
   car_verification_id : string;
@@ -183,14 +174,6 @@ let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
-
-let goal_assignment_post_id (ga : goal_assignment) =
-  (* Stable per goal: re-assigning the same goal before the keeper consumes
-     the first wake collapses under queue identity dedup. *)
-  "goal-assigned:" ^ ga.ga_goal_id
-
-let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
-  "goal-reconciliation-ready:" ^ ready.gr_goal_id
 
 let completion_authority_rejection_post_id
       (rejection : completion_authority_rejection)
@@ -236,8 +219,6 @@ let enqueue (queue : t) (s : stimulus) : t =
    Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
-  | Goal_assigned ga ->
-    Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | Task_cancelled cancellation ->
     (* The reason is operator-facing prose whose wording can vary between
        retries of the same cancellation; identity is the task and who ended
@@ -245,7 +226,7 @@ let identity_payload = function
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Manual_compaction_requested | Goal_reconciliation_ready _
+    | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
     ) as payload ->
     payload
@@ -305,15 +286,6 @@ let dequeue (queue : t) : (stimulus * t) option =
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
 
-let prepend_list stimuli queue =
-  match stimuli with
-  | [] -> queue
-  | _ ->
-    { front = stimuli @ to_list queue
-    ; back_rev = []
-    ; length = queue.length + List.length stimuli
-    }
-
 let remove_by_post_id post_id queue =
   let removed, kept =
     queue
@@ -338,13 +310,6 @@ let uniq_stimuli stimuli =
     stimuli
   |> List.rev
 
-let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
-
-let remove_by_post_id_pair post_id left right =
-  let left_removed, left' = remove_by_post_id post_id left in
-  let right_removed, right' = remove_by_post_id post_id right in
-  uniq_stimuli (left_removed @ right_removed), left', right'
-
 let sort_by_urgency (queue : t) : t =
   queue
   |> to_list
@@ -361,8 +326,6 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Manual_compaction_requested -> "manual_compaction_requested"
-  | Goal_assigned _ -> "goal_assigned"
-  | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
   | Workspace_message _ -> "workspace_message"
@@ -371,8 +334,8 @@ let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Manual_compaction_requested | Goal_assigned _
-  | Goal_reconciliation_ready _ | Completion_authority_rejected _
+  | Manual_compaction_requested
+  | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ ->
     false
 
@@ -384,7 +347,6 @@ let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
-  | Goal_assigned _ | Goal_reconciliation_ready _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _ ->
     None
 
@@ -414,12 +376,14 @@ let board_stimulus_kind_to_string = function
   | Post_created -> "post_created"
   | Comment_added -> "comment_added"
   | Reaction_changed _ -> "reaction_changed"
+  | Vote_cast _ -> "vote_cast"
 
 let board_stimulus_kind_of_string = function
   | "post_created" -> Ok Post_created
   | "comment_added" -> Ok Comment_added
   | "reaction_changed" ->
     Error "reaction_changed board stimulus requires reaction payload fields"
+  | "vote_cast" -> Error "vote_cast board stimulus requires vote payload fields"
   | value -> Error (Printf.sprintf "unknown board stimulus kind: %s" value)
 
 let board_reaction_target_type_to_string = function
@@ -430,6 +394,27 @@ let board_reaction_target_type_of_string = function
   | "post" -> Ok Reaction_post
   | "comment" -> Ok Reaction_comment
   | value -> Error (Printf.sprintf "unknown board reaction target type: %s" value)
+
+let board_vote_target_fields = function
+  | Vote_on_post post_id ->
+    [ "vote_target_kind", `String "post"; "vote_target_id", `String post_id ]
+  | Vote_on_comment comment_id ->
+    [ "vote_target_kind", `String "comment"; "vote_target_id", `String comment_id ]
+
+let board_vote_target_of_strings ~kind ~target_id =
+  match kind with
+  | "post" -> Ok (Vote_on_post target_id)
+  | "comment" -> Ok (Vote_on_comment target_id)
+  | value -> Error (Printf.sprintf "unknown board vote target kind: %s" value)
+
+let board_vote_direction_to_string = function
+  | Vote_up -> "up"
+  | Vote_down -> "down"
+
+let board_vote_direction_of_string = function
+  | "up" -> Ok Vote_up
+  | "down" -> Ok Vote_down
+  | value -> Error (Printf.sprintf "unknown board vote direction: %s" value)
 
 let option_json f = function
   | Some value -> f value
@@ -445,6 +430,13 @@ let board_reaction_change_fields (reaction : board_reaction_change) =
   ; "reaction_active", `Bool reaction.reacted
   ]
 
+let board_vote_change_fields (vote : board_vote_change) =
+  board_vote_target_fields vote.target
+  @ [ "vote_target_author", `String vote.target_author
+    ; "vote_voter", `String vote.voter
+    ; "vote_direction", `String (board_vote_direction_to_string vote.direction)
+    ]
+
 let board_stimulus_fields board =
   [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
   ; "author", `String board.author
@@ -457,6 +449,7 @@ let board_stimulus_fields board =
   match board.kind with
   | Post_created | Comment_added -> []
   | Reaction_changed reaction -> board_reaction_change_fields reaction
+  | Vote_cast vote -> board_vote_change_fields vote
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -585,19 +578,6 @@ let payload_to_yojson = function
        | Hitl_rejected rationale -> [ "rationale", `String rationale ])
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
-  | Goal_assigned ga ->
-    `Assoc
-      [ "kind", `String "goal_assigned"
-      ; "goal_id", `String ga.ga_goal_id
-      ; "goal_title", `String ga.ga_goal_title
-      ; "assigned_by", `String ga.ga_assigned_by
-      ]
-  | Goal_reconciliation_ready ready ->
-    `Assoc
-      [ "kind", `String "goal_reconciliation_ready"
-      ; "goal_id", `String ready.gr_goal_id
-      ; "triggering_task_id", `String ready.gr_triggering_task_id
-      ]
   | Completion_authority_rejected rejection ->
     `Assoc
       [ "kind", `String "completion_authority_rejected"
@@ -659,6 +639,15 @@ let payload_of_yojson json =
         let* emoji = string_field ~context "reaction_emoji" fields in
         let* reacted = bool_field ~context "reaction_active" fields in
         Ok (Reaction_changed { target_type; target_id; user_id; emoji; reacted })
+      | "vote_cast" ->
+        let* kind = string_field ~context "vote_target_kind" fields in
+        let* target_id = string_field ~context "vote_target_id" fields in
+        let* target = board_vote_target_of_strings ~kind ~target_id in
+        let* target_author = string_field ~context "vote_target_author" fields in
+        let* voter = string_field ~context "vote_voter" fields in
+        let* direction_raw = string_field ~context "vote_direction" fields in
+        let* direction = board_vote_direction_of_string direction_raw in
+        Ok (Vote_cast { target; target_author; voter; direction })
       | _ -> board_stimulus_kind_of_string board_kind
     in
     let* author = string_field ~context "author" fields in
@@ -819,24 +808,6 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "manual_compaction_requested" -> Ok Manual_compaction_requested
-  | "goal_assigned" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* goal_title = string_field ~context "goal_title" fields in
-    let* assigned_by = string_field ~context "assigned_by" fields in
-    Ok
-      (Goal_assigned
-         { ga_goal_id = goal_id
-         ; ga_goal_title = goal_title
-         ; ga_assigned_by = assigned_by
-         })
-  | "goal_reconciliation_ready" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* triggering_task_id =
-      string_field ~context "triggering_task_id" fields
-    in
-    Ok
-      (Goal_reconciliation_ready
-         { gr_goal_id = goal_id; gr_triggering_task_id = triggering_task_id })
   | "completion_authority_rejected" ->
     let* () =
       exact_fields
@@ -976,8 +947,6 @@ let continuation_channel_of_payload = function
   | Board_attention _
   | Bootstrap
   | Manual_compaction_requested
-  | Goal_assigned _
-  | Goal_reconciliation_ready _
   | Completion_authority_rejected _
   | Task_cancelled _
   | Workspace_message _ -> None

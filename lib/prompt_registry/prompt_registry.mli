@@ -47,51 +47,17 @@
     [register_prompt], [register_prompt_unlocked],
     [validated_override], [prompt_snapshot] type).
 
-    The mutable entry API ([register], [init], [get], [render],
-    [register_default], [get_versions], [list_all], [list_ids], [exists],
-    [unregister], [deprecate], [update_metrics], [stats], [count],
-    [count_unique], [to_json], [of_json]) was deleted, not hidden: nothing
-    called it. Prompts are added by dropping a markdown file into the
+    Prompts are added by dropping a markdown file into the
     directory read by {!load_prompts_from_directory}. *)
 
 (** {1 Type re-exports} *)
-
-module Types = Prompt_registry_types
-(** Re-export of the type-only sub-module so callers reach
-    record / variant types via [Prompt_registry.Types.X]
-    after [open Masc].
-    [test/test_prompt_registry_pbt.ml] uses this alias. *)
-
-type prompt_metrics = Prompt_registry_types.prompt_metrics = {
-  usage_count : int;
-  avg_score : float;
-  last_used : float;
-}
-
-val prompt_metrics_to_yojson : prompt_metrics -> Yojson.Safe.t
-val prompt_metrics_of_yojson :
-  Yojson.Safe.t -> (prompt_metrics, string) result
 
 type prompt_entry = Prompt_registry_types.prompt_entry = {
   id : string;
   template : string;
   version : string;
   variables : string list;
-  metrics : prompt_metrics option;
   created_at : float;
-  deprecated : bool;
-}
-
-val prompt_entry_to_yojson : prompt_entry -> Yojson.Safe.t
-val prompt_entry_of_yojson :
-  Yojson.Safe.t -> (prompt_entry, string) result
-
-type registry_stats = Prompt_registry_types.registry_stats = {
-  total_prompts : int;
-  active_prompts : int;
-  deprecated_prompts : int;
-  most_used : string option;
-  avg_usage : float;
 }
 
 type prompt_meta = Prompt_registry_types.prompt_meta = {
@@ -117,11 +83,6 @@ type persisted_mutation_error =
   | Persistence_error of string
 
 (** {1 Markdown parsing} *)
-
-val markdown_body : string -> string
-(** Return the body of a markdown asset after removing one leading YAML-style
-    frontmatter block. Content without frontmatter is returned unchanged. *)
-
 
 (** {1 Markdown directory} *)
 

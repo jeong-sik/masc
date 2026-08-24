@@ -69,6 +69,11 @@ type turn_result =
   ; permission_mode : permission_mode
   ; tool_steps : int
   ; tool_errors : int
+  ; trajectory_error : string option
+      (** The CLI marks the whole result [ERROR] when any trajectory step
+          errored, even one the model corrected before replying. When a
+          reply was produced the turn is complete and the step error is
+          carried here; [None] for a clean [SUCCESS] result. *)
   ; resumed : bool
   ; wall_duration_s : float
   }

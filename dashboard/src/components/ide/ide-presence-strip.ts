@@ -178,7 +178,7 @@ export function IdePresenceStrip({ compact = false }: { readonly compact?: boole
         : 'Presence loading'
     return html`
       <div
-        class="ide-presence-strip ide-v2-presence-compact v2-ide-panel"
+        class="ide-presence-strip ide-presence v2-ide-panel"
         role="status"
         aria-label="Live workspace keeper presence"
         data-state=${current.kind}

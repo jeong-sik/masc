@@ -34,9 +34,7 @@ type 'a transfer_intake_result =
   | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 type slot =
-  { base_path : string
-  ; keeper_name : string
-  ; intake_mu : Eio.Mutex.t
+  { intake_mu : Eio.Mutex.t
   ; state_mu : Stdlib.Mutex.t
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
@@ -57,9 +55,7 @@ let slot_for ~base_path ~keeper_name =
     | Some slot -> slot
     | None ->
       let slot =
-        { base_path
-        ; keeper_name
-        ; intake_mu = Eio.Mutex.create ()
+        { intake_mu = Eio.Mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; shutdown_operation_id = None
         }
@@ -177,6 +173,30 @@ let run_durable_intake_if_open ~base_path ~keeper_name intake =
        token.intake_active <- false;
        release ();
        raise exn)
+;;
+
+(* Observation, not authority. A reserved slot says a shutdown began, not that
+   it is still running: a shutdown that never reaches [Finalized] never calls
+   [rollback_shutdown], so the reservation outlives it with no path to clear
+   it. On 2026-08-20 one such reservation stood for 15h32m and every 30s sweep
+   round was refused by it, which is what produced 38,910 abandoned session
+   directories (#29566, #29586). The caller runs regardless and is told who
+   holds the slot, so a stuck shutdown cannot stop the fleet. *)
+let run_durable_intake_observing ~base_path ~keeper_name intake =
+  let slot = slot_for ~base_path ~keeper_name in
+  Eio.Mutex.lock slot.intake_mu;
+  let release () = Eio.Mutex.unlock slot.intake_mu in
+  let reserved_by = peek_shutdown slot in
+  let token = { intake_slot = slot; intake_active = true } in
+  match intake token with
+  | value ->
+    token.intake_active <- false;
+    release ();
+    value, reserved_by
+  | exception exn ->
+    token.intake_active <- false;
+    release ();
+    raise exn
 ;;
 
 let run_transfer_intake_if_open

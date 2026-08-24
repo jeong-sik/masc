@@ -234,25 +234,11 @@ let iso8601_now () =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
-(* With_process.with_process_args_in gives exact argv control (no shell
-   string parsing, unlike Unix.open_process_in) and guarantees the
-   subprocess is reaped on every exit path. The exit status is consumed:
-   a captured line is only trusted when git actually reported success —
-   e.g. a detached-HEAD-less checkout can print nothing on stdout while
-   still exiting 0, and a failing invocation must not be read as "no
-   commit" the same way a genuinely commit-less checkout would be. *)
-let git_commit_opt () =
-  try
-    let lines, status =
-      With_process.with_process_args_in
-        "git"
-        [| "git"; "rev-parse"; "HEAD" |]
-        With_process.drain_lines
-    in
-    match status, lines with
-    | Unix.WEXITED 0, line :: _ -> Some (String.trim line)
-    | _ -> None
-  with _ -> None
+(* This must testify to the canary executable that is running, not to an
+   arbitrary checkout it happens to be launched from.  The trusted runtime
+   manifest binds the companion binary digest to the same build source SHA;
+   [binary_commit] is that SHA embedded by the Dune build rule. *)
+let build_commit_opt () = (Masc.Build_identity.current ()).binary_commit
 
 let sha256_hex text = Digestif.SHA256.(to_hex (digest_string text))
 
@@ -460,11 +446,7 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
     else Error (Printf.sprintf "shutdown returned HTTP %d: %s" status body)
   in
   let* () = wait_until_stopped ~host ~port ~keeper_name in
-  (* The nonce is re-read after shutdown: that is the durable owner state
-     the resume directive must name. *)
-  let* _trace_id_paused, owner_nonce =
-    trajectory_identity ~host ~port ~keeper_name
-  in
+  let* _trace_id_paused, _ = trajectory_identity ~host ~port ~keeper_name in
   let boot () = lifecycle_post ~host ~port ~keeper_name ~action:"boot" ~body:"{}" () in
   let* status, body = boot () in
   let* () =
@@ -479,7 +461,6 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
         Yojson.Safe.to_string
           (`Assoc
             [ ("action", `String "resume")
-            ; ("owner_nonce", `Int owner_nonce)
             ; ( "operator_operation_id"
               , `String (Printf.sprintf "canary-restart-%s" run_id) )
             ])
@@ -987,7 +968,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
     in
     Ok
       { Keeper_canary_evidence.captured_at = iso8601_now ()
-      ; harness_git_commit = git_commit_opt ()
+      ; harness_git_commit = build_commit_opt ()
       ; run_id = args.run_id
       ; keeper_name = args.keeper
       ; runtime = args.runtime

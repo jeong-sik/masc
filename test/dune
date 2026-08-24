@@ -27,13 +27,13 @@
 
 (tests
  (names
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_wakeup_policy
+  test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
@@ -73,6 +73,8 @@
   test_mcp_error_code
   test_error_body_wire_shape
   test_log_ring_bounds
+  test_log_seq_restart_continuity
+  test_runtime_log_sink_render
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
@@ -150,7 +152,6 @@
   test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
-  test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
   test_keeper_tool_use_failure_counter
   test_keeper_usage_trust_counter
@@ -186,6 +187,9 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
+  test_tool_definition_toml
+  test_board_tool_toml_parity
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -194,7 +198,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -240,6 +243,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -330,13 +334,13 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink)
  (modules
-  test_keeper_cooldown_cause_23438
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
+  test_broadcast_stores_raw_text
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -377,6 +381,8 @@
   test_mcp_error_code
   test_error_body_wire_shape
   test_log_ring_bounds
+  test_log_seq_restart_continuity
+  test_runtime_log_sink_render
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
@@ -456,7 +462,6 @@
   test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
-  test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
   test_keeper_tool_use_failure_counter
   test_keeper_usage_trust_counter
@@ -492,6 +497,10 @@
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
+  test_blocker_class_mirror
+  test_tool_definition_toml
+  test_board_tool_toml_parity
+  test_tool_definition_toml
   test_ide_bridge
   test_server_ide_lsp_proxy
   test_server_ide_http
@@ -500,7 +509,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
   test_keeper_lifecycle_registry_dispatch
@@ -546,6 +554,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -634,7 +643,8 @@
   test_runtime_model_input_tail_window
   test_keeper_model_input_demotion
   test_workspace_handoff_boundary
-  test_exec_command_gate_log_sink)
+  test_exec_command_gate_log_sink
+  test_board_tool_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
 
@@ -677,6 +687,16 @@
  (name test_keeper_yield_observability)
  (modules test_keeper_yield_observability)
  (libraries alcotest astring masc_test_deps))
+
+(test
+ (name test_exec_dispatch_file_redirect)
+ (modules test_exec_dispatch_file_redirect)
+ (libraries alcotest astring masc_test_deps eio_main))
+
+(test
+ (name test_process_file_redirects)
+ (modules test_process_file_redirects)
+ (libraries alcotest astring masc_test_deps eio_main))
 
 (test
  (name test_keeper_paused_work_cancellation_transaction)
@@ -922,6 +942,14 @@
  (modules test_dashboard_goal_id_projection)
  (libraries masc_test_deps))
 
+; #29299: the goal tree emitted raw goal_events.jsonl rows under
+; timeline_events while every consumer reads the normalized shape.
+
+(test
+ (name test_goal_timeline_projection)
+ (modules test_goal_timeline_projection)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 
@@ -940,7 +968,6 @@
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
-  test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt
@@ -952,7 +979,6 @@
   test_keeper_state_machine_pbt
   test_telemetry_eio_pbt
   test_metrics_store_eio_pbt
-  test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
   test_event_priority_monotone_pbt
@@ -1034,7 +1060,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_voice_bridge_retry
+  test_voice_bridge_error
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1119,14 +1145,11 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
-  test_keeper_goal_reconciliation_target
-  test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
   test_set_util
-  test_board_core_payload
-  test_board_moderation)
+  test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
   test_runtime_params
@@ -1176,7 +1199,7 @@
   test_with_process_coverage
   test_process_eio_detached
   test_voice_runtime_overlay
-  test_voice_bridge_retry
+  test_voice_bridge_error
   test_resilience
   test_common
   test_workspace_messages_raw
@@ -1261,19 +1284,18 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
-  test_keeper_goal_reconciliation_target
-  test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
   test_system_error_class
   test_set_util
-  test_board_core_payload
-  test_board_moderation)
+  test_board_core_payload)
  (libraries
   masc_test_deps
   masc_test_runtime
   masc.embedded_config
   bigstringaf
+  ; test_activity_graph checks its day file against the layout owner
+  masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz)
@@ -1701,6 +1723,7 @@
 (include stanzas/test_discord_wss_lifecycle.inc)
 
 (include stanzas/test_keeper_chat_discord.inc)
+(include stanzas/test_keeper_chat_tool_trail.inc)
 
 (test
  (name test_keeper_chat_slack)
@@ -1718,6 +1741,8 @@
  (libraries alcotest masc_test_deps))
 
 (include stanzas/test_ci_run_tests_script.inc)
+
+(include stanzas/test_telemetry_gate_handler_detection.inc)
 
 (include stanzas/test_contract_harness_auth_script.inc)
 
@@ -2065,6 +2090,7 @@
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
+(include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 
@@ -2558,7 +2584,197 @@
  (libraries alcotest ast_grep)
  (deps
   (source_tree ../lib)
+  (source_tree ../bin)
+  %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
+
+(test
+ (name test_tui_chat_queue_wiring)
+ (modules test_tui_chat_queue_wiring)
+ (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
+ (deps
   (source_tree ../bin)))
+
+(test
+ (name test_tui_operator_projection)
+ (modules test_tui_operator_projection)
+ (libraries alcotest masc_tui_operator_projection yojson))
+
+(test
+ (name test_tui_task_detail)
+ (modules test_tui_task_detail)
+ (libraries alcotest masc_tui_task_selection masc.masc_types))
+
+(test
+ (name test_tui_keeper_chat_transcript)
+ (modules test_tui_keeper_chat_transcript)
+ (libraries
+  alcotest
+  fmt
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_keeper_chat_history)
+ (modules test_tui_keeper_chat_history)
+ (libraries alcotest masc_tui_keeper_chat_history yojson))
+
+(test
+ (name test_tui_keeper_chat_queue)
+ (modules test_tui_keeper_chat_queue)
+ (libraries alcotest astring masc_tui_keeper_chat_queue))
+
+(test
+ (name test_tui_chat_surface_mirror)
+ (modules test_tui_chat_surface_mirror)
+ (libraries alcotest masc masc_tui_keeper_chat_history yojson))
+
+(test
+ (name test_keeper_tool_approval_gate)
+ (modules test_keeper_tool_approval_gate)
+ (libraries alcotest agent_core eio eio_main fmt masc yojson))
+
+(test
+ (name test_keeper_tool_approval_policy)
+ (modules test_keeper_tool_approval_policy)
+ (libraries alcotest masc yojson))
+
+(test
+ (name test_keeper_tool_approval_registry)
+ (modules test_keeper_tool_approval_registry)
+ (libraries alcotest eio eio_main fmt masc))
+
+(test
+ (name test_tui_keeper_chat_live)
+ (modules test_tui_keeper_chat_live)
+ (libraries alcotest fmt masc_tui_keeper_chat_live yojson))
+
+(test
+ (name test_tui_keeper_chat_projection)
+ (modules test_tui_keeper_chat_projection)
+ (libraries
+  alcotest
+  masc
+  masc.keeper_chat_operations
+  masc.string_util
+  masc_tui_keeper_chat_projection
+  masc.masc_random_id
+  yojson))
+
+(test
+ (name test_tui_keeper_chat_recovery)
+ (modules test_tui_keeper_chat_recovery)
+ (libraries
+  alcotest
+  eio
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_recovery
+  fs_compat
+  threads
+  unix))
+
+(test
+ (name test_tui_message_layout)
+ (modules test_tui_message_layout)
+ (libraries alcotest masc_tui_message_layout))
+
+(test
+ (name test_tui_observation_layout)
+ (modules test_tui_observation_layout)
+ (libraries alcotest masc_tui_observation_layout masc))
+
+(test
+ (name test_tui_context_state)
+ (modules test_tui_context_state)
+ (libraries alcotest masc_tui_context_state masc))
+
+(test
+ (name test_tui_frame_presenter)
+ (modules test_tui_frame_presenter)
+ (libraries alcotest masc_tui_frame_presenter))
+
+(test
+ (name test_tui_board_selection)
+ (modules test_tui_board_selection)
+ (libraries alcotest masc_tui_board_selection))
+
+(test
+ (name test_tui_planning_selection)
+ (modules test_tui_planning_selection)
+ (libraries alcotest masc_tui_planning_selection))
+
+(test
+ (name test_tui_markdown)
+ (modules test_tui_markdown)
+ (libraries alcotest masc_tui_markdown masc_tui_message_layout))
+
+(test
+ (name test_tui_composer)
+ (modules test_tui_composer)
+ (libraries alcotest masc_tui_composer masc_tui_render_schedule))
+
+(test
+ (name test_tui_keeper_control)
+ (modules test_tui_keeper_control)
+ (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
+
+(test
+ (name test_tui_keeper_selection)
+ (modules test_tui_keeper_selection)
+ (libraries alcotest masc_tui_keeper_selection))
+
+(test
+ (name test_tui_board_detail)
+ (modules test_tui_board_detail)
+ (libraries alcotest masc_tui_board_detail))
+
+(rule
+ (alias runtest-test_tui_keyboard_input)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe})))
+
+(test
+ (name test_tui_metrics_tail)
+ (modules test_tui_metrics_tail)
+ (libraries
+  alcotest
+  masc_tui_keeper_chat_projection
+  masc_tui_metrics_tail
+  masc
+  dated_jsonl
+  fs_compat
+  unix
+  yojson))
+
+(test
+ (name test_tui_keeper_activity)
+ (modules test_tui_keeper_activity)
+ (libraries alcotest masc masc_tui_keeper_activity))
+
+(test
+ (name test_tui_transport_health)
+ (modules test_tui_transport_health)
+ (libraries alcotest astring masc yojson))
+
+(test
+ (name test_tui_render_schedule)
+ (modules test_tui_render_schedule)
+ (libraries alcotest masc_tui_render_schedule))
+
+(test
+ (name test_tui_terminal_write_repair)
+ (modules test_tui_terminal_write_repair)
+ (libraries
+  alcotest
+  masc.masc_log
+  masc_tui_render_schedule
+  masc_tui_terminal_write_repair
+  unix))
 
 (test
  (name test_fs_compat_capability_exact_read)
@@ -2654,3 +2870,8 @@
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
  (libraries alcotest yojson masc masc_test_deps))
+
+(test
+ (name test_goal_tool_toml_parity)
+ (modules test_goal_tool_toml_parity)
+ (libraries alcotest yojson masc.tool_schemas masc_types))

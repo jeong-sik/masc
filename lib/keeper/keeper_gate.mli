@@ -18,7 +18,6 @@ type request =
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t option
   }
 
@@ -174,7 +173,6 @@ val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 
 val authorization_source_to_string : authorization_source -> string
-val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
 

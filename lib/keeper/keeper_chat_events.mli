@@ -55,11 +55,10 @@ type keeper_chat_event =
   | Text_delta of string
   | Text_message_end
   | External_effect_completed of
-      { target : Keeper_surface_post.delivery_target option }
+      { target : Keeper_surface_post.delivery_target }
       (** A terminal tool already delivered the reply outside this adapter.
           Connector adapters settle the receipt without emitting another
-          text message. [target] names where the post actually landed;
-          [None] only for legacy reply payloads that predate the field. *)
+          text message. [target] names where the post actually landed. *)
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Reply_details of reply_details
@@ -99,6 +98,23 @@ type keeper_chat_event =
   | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
       (** Provider argument streaming ended. This is not execution completion. *)
+  | Tool_approval_requested of
+      { tool_call_id : string
+      ; tool_call_name : string
+      ; args : string
+      ; question : string
+      }
+      (** The turn is held at this call until an operator answers or the wait
+          runs out. Carries the call's arguments as sent, because a reader
+          deciding whether to allow it needs to see what it would do -- the
+          name alone does not distinguish reading a file from rewriting it. *)
+  | Tool_approval_settled of
+      { tool_call_id : string
+      ; outcome : string
+      }
+      (** How the wait ended: the operator's answer, or that nobody gave one.
+          Sent so a pane showing the prompt stops showing it, including on the
+          paths where no answer arrived. *)
   | Tool_result_ready of { tool_call_id : string }
       (** The exact tool result is durably readable from the tool-call store. *)
   | Link_block of

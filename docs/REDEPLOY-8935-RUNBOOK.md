@@ -48,6 +48,14 @@ ancestry 확증은 2026-08-16 운영 루프 2회차 사고(병합 파이프라�
 
 새 binary가 `Keeper_meta_json.current_field_names`에 필드를 추가했다면, 파서가 그 키를 필수로 요구하므로 기존 `<base>/.masc/keepers/*.json`이 전부 파싱 실패한다 (enum 자동 복구는 missing key를 못 고친다 — `lib/keeper/keeper_meta_store.ml`). 다운타임(6단계와 7단계 사이)에 store를 정합시킨다: 원본을 `<base>/.masc/_archive/`로 통째 보존한 뒤, 각 meta JSON에 새 키를 기본값(`null` 등 writer의 부재 표현)으로 주입한다.
 
+반대 방향(필드 제거)도 같은 단계에서 걸린다. hard cut으로 스키마에서 지운 필드를 디스크 meta가 아직 들고 있으면 새 binary는 그 meta를 읽지 못한다. 2026-08-23 `generation`·`last_blocker` 제거 때 키퍼 10개가 21분간 부팅하지 못했다. 런타임은 이제 그 meta를 버리고 TOML 선언에서 키퍼를 다시 만든다(#29610) — 누적 카운터와 `current_task_id`가 사라진다. 손실 없이 넘기려면 6단계 preflight가 걸러준 시점에 유령 필드만 지운다(필드 목록은 preflight 실패 메시지에 나온다):
+
+```bash
+for f in <base>/.masc/keepers/*.json; do
+  jq 'del(.generation, .last_blocker)' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+done
+```
+
 ## 4.5 사전 조율 — 진행 중 작업 보호
 
 재기동은 **모든 keeper를 내린다**. autoboot이 꺼진 keeper(장기 canary 전부)는 재기동 후 자동 복귀하지 않는다 — durable demand recovery가 `retained ... reason=autoboot_disabled`로 보존만 한다. 2026-08-17 5회차 재기동이 진행 중이던 24h 사다리 run의 turn을 서버 다운에 노출시킨 사고가 근거다 (redeploy receipt의 incident 절).
@@ -79,7 +87,13 @@ MASC_DEPLOYMENT_PREFLIGHT_HELPER=<repo>/_build/default/bin/deployment_preflight_
   <repo>/scripts/check-runtime-deployment-preflight.sh --base-path <base>
 ```
 
-성공 신호는 `[runtime-deployment-preflight] OK`. keeper 이벤트 큐/WAL 파싱, schedule ledger 계약, board attention candidate ledger `schema_version` 검사를 포함한다.
+성공 신호는 `[runtime-deployment-preflight] OK`. keeper meta 현재 스키마 검사, keeper 이벤트 큐/WAL 파싱, schedule ledger 계약, board attention candidate ledger `schema_version` 검사를 포함한다. OK/FAIL 줄 끝의 `helper=<경로> helper_commit=<SHA>`가 방금 빌드한 helper(2단계에서 확증한 SHA)인지 본다 — 다른 SHA면 옛 helper가 판정한 것이다.
+
+meta 검사 범위는 keeper meta(`<base>/.masc/keepers/*.json`)뿐이다. `goals.json`(`lib/goal/goal_store.ml`의 닫힌 스키마)과 run registry 파일은 이 게이트가 검사하지 않는다.
+
+이 단계는 5단계(정지)와 7단계(기동) 사이에서 돈다. 거부되면 서버는 내려간 채로 멈추고, 지적된 파일을 고친 뒤 이 단계를 다시 돌려 OK를 본 다음 7단계로 간다. 그 다운타임이 카운터를 지키는 값이다 — 기동 시 fail-open(#29610)은 meta를 버린다. keeper meta 거부는 helper 판정의 `class=` 토큰이 둘로 나뉜다: `not_current_schema`는 필드 불일치라 유령 필드 삭제/빠진 필드 주입으로 고치고, `unreadable_json`은 JSON 자체가 깨진 것이라 백업에서 복원한다(이 경우 런타임은 meta를 버리지 않고 그 keeper 부팅을 거부한다).
+
+스토어 버전이 올라간 바이너리(이벤트 큐 v16 → v17, exact-lane run registry v4 → v5 등)를 올릴 때는 이전 버전 파일을 이 단계에서 지운다. 새 바이너리는 옛 파일을 열지 않으므로 남겨 두면 아무 도구도 다시 보지 않는 고아 파일이 된다. 지우기 전에 크기와 행 수를 기록한다 (`wc -lc <base>/.masc/exact-lane-runs-v4.jsonl`).
 
 ## 7. 기동
 
@@ -109,7 +123,7 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 - `binary_commit` == 배포 의도 SHA, `binary_commit_source` == `embedded`
 - `dashboard_surface.status` == `ok`
 - `keeper_fibers`/`bootable_keeper_count`가 1단계 기준선으로 회복
-- 기동 로그에 keeper meta parse 실패가 없다 (`rg "meta parse" <로그>`)
+- 기동 로그에 keeper meta fail-open WARN이 없다 (`rg "keeper meta unreadable at" <로그>` — `lib/keeper/keeper_meta_store.ml`의 `keeper meta unreadable at %s, treating as absent` 리터럴)
 
 대시보드 TopBar는 같은 `/health` 필드를 읽는다. 브라우저 스크린샷은 보조 증거로 남긴다.
 
@@ -123,5 +137,6 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 | 맨손 `dune build` (worktree 안) | 상위 repo를 빌드하는 거짓 검증 |
 | ancestry 미확증 pull | 수리 커밋 없는 checkout 배포 (08-16 2회차 사고) |
 | meta 스키마 확장 후 store 미정합 | 전 keeper meta 파싱 실패 |
+| hard cut 제거 필드를 디스크 meta가 아직 가짐 | 부팅 시 meta 폐기 — 카운터·과제 바인딩 손실 (08-23 사고, #29610 이후엔 자동 재생성) |
 | 포트 판정을 lsof exit code로 | 거짓 판정 — 출력 존재로 판정할 것 |
 | 사전 broadcast·장기 run 확인 생략 | 진행 중 사다리 run이 서버 다운에 노출, non-autoboot keeper 미복귀 (08-17 5회차 사고) |

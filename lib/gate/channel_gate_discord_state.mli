@@ -4,14 +4,12 @@
     can be registered at server startup via
     [Channel_gate_connector.register (module Channel_gate_discord_state)].
 
-    Internal helpers (the [U] / [Names] / [Store] aliases, the
-    [binding] record, the [default_*_path] / [legacy_*_path] /
-    path resolvers, the shared binding-store wrappers, the
-    [string_member] / [int_member] / [bool_member] /
-    [bool_option_member] yojson lookups, [stale_of_updated_at],
-    [list_assoc_field], and binding transaction helpers) are
-    hidden — only the {!Channel_gate_connector.S} surface is
-    public.  The status label comes from
+    Internal helpers (the [U] / [Store] aliases, the [binding] record,
+    the [default_*_path] resolvers, the shared binding-store wrappers,
+    the [string_member] / [int_member] / [bool_member] /
+    [bool_option_member] yojson lookups, and binding transaction
+    helpers) are hidden — only the {!Channel_gate_connector.S} surface
+    is public.  The status label comes from
     {!Channel_gate_connector.connector_state_label} and the observed
     channel row from {!Json_util.find_assoc_row_by_string_field}. *)
 
@@ -29,9 +27,9 @@ val channel : string
 (** {1 Connector status} *)
 
 val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
-(** Runtime status snapshot — bindings, recent audit events,
-    staleness flag, and connector liveness. [audit_limit] caps the
-    audit-history slice (default [10]). *)
+(** Runtime status snapshot — bindings, recent audit events, and
+    connector liveness from the gateway state machine. [audit_limit]
+    caps the audit-history slice (default [10]). *)
 
 val connector_json :
   ?audit_limit:int ->
@@ -59,8 +57,7 @@ val unbind :
 (** {1 In-process gateway support}
 
     Used by {!Server_discord_in_process_gateway}, the OCaml gateway
-    that replaces the deleted [sidecars/discord-bot/] Python
-    connector. *)
+    that is the only Discord transport. *)
 
 type keeper_binding_resolution = {
   keeper_name : string;

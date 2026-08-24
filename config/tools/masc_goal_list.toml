@@ -1,0 +1,13 @@
+name = "masc_goal_list"
+description = """
+List shared planning goals, optionally filtered by explicit lifecycle phase."""
+additional_properties = false
+
+# The enum mirrors Goal_phase.all (issue #8392: hand-rolled enums drop
+# constructors); test_enum_mirror_sync compares the published values against
+# the variant.
+[[params]]
+name = "phase"
+type = "string"
+enum = ["executing", "verifying", "completed", "dropped"]
+description = "Optional explicit Goal lifecycle phase filter"

@@ -117,34 +117,35 @@ let keeper_toml_path_opt name =
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
-let keeper_instructions_path ~toml_path name =
-  Filename.concat (Filename.concat (Filename.dirname toml_path) name) "AGENT.md"
-
-let load_keeper_instructions ~toml_path name defaults =
+let load_keeper_instructions ~toml_path _name defaults =
+  let reject detail =
+    Error
+      { keeper_path = toml_path
+      ; failing_path = toml_path
+      ; kind = Parse_error
+      ; detail
+      }
+  in
   match defaults.instructions with
-  | Some _ ->
-    (* keeper.instructions was set inline in the TOML [keeper] table --
-       every keeper TOML that predates the AGENT.md convention still does
-       this. AGENT.md is the fallback for keepers that leave it unset, not
-       an additional file required on top of an inline value. *)
-    Ok defaults
+  | Some value when String.trim value = "" ->
+    reject "keeper TOML must set a non-empty keeper.instructions"
+  | Some value when string_has_operator_todo_placeholder value ->
+    reject
+      (Printf.sprintf
+         "keeper.instructions contains %s placeholder text"
+         operator_todo_placeholder_marker)
+  | Some _ -> Ok defaults
   | None ->
-    let path = keeper_instructions_path ~toml_path name in
-    let error kind detail =
-      Error { keeper_path = toml_path; failing_path = path; kind; detail }
-    in
-    (match Safe_ops.read_file_safe path with
-     | Error detail -> error Read_error detail
-     | Ok content ->
-       let instructions = String.trim content in
-       if instructions = "" then
-         error Parse_error "keeper AGENT.md must not be empty"
-       else if string_has_operator_todo_placeholder instructions then
-         error Parse_error
-           (Printf.sprintf
-              "keeper AGENT.md contains %s placeholder text"
-              operator_todo_placeholder_marker)
-       else Ok { defaults with instructions = Some instructions })
+    (* The TOML is the whole setup. An external instructions file was the
+       Persona system's loader (#19978); Persona was hard cut in #27048 and
+       the file path outlived it. A keeper with no [keeper.instructions] is
+       not configured. *)
+    Error
+      { keeper_path = toml_path
+      ; failing_path = toml_path
+      ; kind = Parse_error
+      ; detail = "keeper TOML must set a non-empty keeper.instructions"
+      }
 
 let load_keeper_profile_defaults_result_uncached_with_paths
     ~keeper_toml_path_opt
@@ -247,7 +248,6 @@ let keeper_toml_unknown_keys_to_json
     [
       ("keeper", `String keeper_name);
       ("path", `String path);
-      ("unknown_key_count", `Int (List.length unknown_keys));
       ("unknown_keys", `List (List.map (fun key -> `String key) unknown_keys));
       ("terminal_reason", `String "config_unknown_keys");
       ("severity", `String "error");
@@ -341,7 +341,7 @@ let keeper_toml_unknown_keys () =
   keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
 
 (* Profile defaults cache — strict results are cached by source file
-   fingerprint, not by keeper name alone. TOML and AGENT.md edits happen outside the
+   fingerprint, not by keeper name alone. TOML edits happen outside the
    process, so both Ok and Error entries must invalidate when their dependency
    mtimes/sizes change. *)
 type profile_defaults_cache_key = string * string
@@ -389,12 +389,11 @@ let file_fingerprint path =
 let dependency_fingerprint paths =
   paths |> List.map file_fingerprint |> String.concat "|"
 
-let profile_dependency_paths ~name ~primary_toml_path
+let profile_dependency_paths ~name:_ ~primary_toml_path
     (result : (keeper_profile_defaults, keeper_toml_load_error) result) =
   let paths =
     match primary_toml_path, result with
-    | Some toml_path, Ok _ ->
-      [ toml_path; keeper_instructions_path ~toml_path name ]
+    | Some toml_path, Ok _ -> [ toml_path ]
     | Some _, Error error -> keeper_toml_load_error_paths error
     | None, _ -> []
   in

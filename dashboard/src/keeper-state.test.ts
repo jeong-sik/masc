@@ -616,6 +616,31 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.externalMessageId).toBe('message-1')
   })
 
+  it('drops an unknown surface kind but keeps the row (closed parse)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'row with an unknown surface',
+        ts: 1_780_000_000,
+        surface: { kind: 'telepathy', channel_id: 'c1' },
+        speaker_authority: 'external',
+      },
+      {
+        role: 'user',
+        content: 'fleet fanout row',
+        ts: 1_780_000_001,
+        surface: { kind: 'broadcast' },
+        speaker_name: 'keeper-taskmaster-agent',
+      },
+    ])
+    expect(entries).toHaveLength(2)
+    // Unknown kind never defaults: the surface is dropped, the row and its
+    // speaker fields survive — same policy as keeper_chat_store.load.
+    expect(entries[0]?.surface).toBeNull()
+    expect(entries[0]?.speakerAuthority).toBe('external')
+    expect(entries[1]?.surface).toEqual({ kind: 'broadcast' })
+  })
+
   it('prefers backend stream contracts from REST chat history', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

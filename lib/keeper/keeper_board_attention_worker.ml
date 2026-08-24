@@ -27,11 +27,26 @@ type retry_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
+(* What the drain loop actually did before it stopped. A wake that finds an
+   empty partition returns the same verdict as one that judged twenty
+   candidates, so without these counts the log line cannot tell an operator
+   whether the worker did any work: the two hours to 2026-08-22T02:03Z held
+   120 pairs of textually identical [outcome=drained] lines, each pair a real
+   drain followed by a wake that found nothing left. *)
+type drain_progress =
+  { judgments : int
+      (* Candidates that produced a judgment on this drain. *)
+  ; steps : int
+      (* Loop iterations, including visits that found the candidate already
+         consumed or its partition blocked. *)
+  }
+
 type drain_outcome =
-  | Drained
+  | Drained of drain_progress
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
       }
 
 type rearm_schedule =
@@ -353,7 +368,7 @@ let reset_contention_rearms scheduler ~keep =
    another flow holds the claim, Selected_generation_changed means the partition
    moved under this worker. *)
 let drain_outcome_label = function
-  | Drained -> "drained"
+  | Drained _ -> "drained"
   | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
   | Retry_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
@@ -364,12 +379,17 @@ let drain_outcome_label = function
    worker that keeps returning it makes no progress while its candidate ledger
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
-  | Drained -> Log.Info
+  | Drained _ -> Log.Info
   | Retry_later _ -> Log.Warn
 ;;
 
+let drain_outcome_progress = function
+  | Drained progress -> progress
+  | Retry_later { progress; _ } -> progress
+;;
+
 let apply_drain_rearm scheduler = function
-  | Drained ->
+  | Drained _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -1790,17 +1810,26 @@ let observe_error ~base_path ~keeper_name detail =
   Log.Keeper.error "Board attention worker failed keeper=%s: %s" keeper_name detail
 ;;
 
-let rec drain_available_with_process ~yield ~process =
-  match process () with
-  | Ok Idle -> Ok Drained
-  | Ok (Contended contention) ->
-    Ok (Retry_later { contention; reason = Exact_claim_contended })
-  | Ok (Rescan_later contention) ->
-    Ok (Retry_later { contention; reason = Selected_generation_changed })
-  | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
-    yield ();
-    drain_available_with_process ~yield ~process
-  | Error detail -> Error detail
+let drain_available_with_process ~yield ~process =
+  let rec loop progress =
+    match process () with
+    | Ok Idle -> Ok (Drained progress)
+    | Ok (Contended contention) ->
+      Ok (Retry_later { contention; reason = Exact_claim_contended; progress })
+    | Ok (Rescan_later contention) ->
+      Ok
+        (Retry_later
+           { contention; reason = Selected_generation_changed; progress })
+    | Ok (Judgment_completed _) ->
+      yield ();
+      loop
+        { judgments = progress.judgments + 1; steps = progress.steps + 1 }
+    | Ok (Candidate_already_consumed _ | Partition_blocked _) ->
+      yield ();
+      loop { progress with steps = progress.steps + 1 }
+    | Error detail -> Error detail
+  in
+  loop { judgments = 0; steps = 0 }
 ;;
 
 let drain_available_current
@@ -1928,12 +1957,16 @@ let run
                  ~execute
              with
              | Ok outcome ->
+               let progress = drain_outcome_progress outcome in
                Log.Keeper.emit
                  (drain_outcome_log_level outcome)
                  (Printf.sprintf
-                    "board_attention_worker_drain keeper=%s outcome=%s"
+                    "board_attention_worker_drain keeper=%s outcome=%s \
+                     judgments=%d steps=%d"
                     keeper_name
-                    (drain_outcome_label outcome));
+                    (drain_outcome_label outcome)
+                    progress.judgments
+                    progress.steps);
                ignore
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);
@@ -1962,6 +1995,7 @@ module For_testing = struct
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
   let drain_outcome_label = drain_outcome_label
+  let drain_outcome_progress = drain_outcome_progress
   let drain_outcome_log_level = drain_outcome_log_level
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake

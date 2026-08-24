@@ -370,7 +370,12 @@ let () =
     | Some result ->
       assert (Tool_result.is_failed result);
       assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
-      assert_contains (Tool_result.message result) "status snapshot unavailable"
+      assert_contains (Tool_result.message result) "status snapshot unavailable";
+      (match Tool_result.data result with
+       | `Assoc fields ->
+         assert (List.mem_assoc "error_code" fields);
+         assert (List.mem_assoc "message" fields)
+       | _ -> failwith "expected assoc data envelope")
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -884,8 +889,8 @@ let () =
     Eio_main.run
     @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let ctx = { (make_test_ctx ()) with agent_name = "keeper-sangsu-agent" } in
-    let _ = Workspace.init ctx.config ~agent_name:(Some "keeper-sangsu-agent") in
+    let ctx = { (make_test_ctx ()) with agent_name = "keeper-alpha-agent" } in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "keeper-alpha-agent") in
     ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
     ignore (Auth.ensure_internal_keeper_token ctx.config.base_path);
     ignore (Workspace.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
@@ -896,12 +901,12 @@ let () =
       assert (
         str_contains
           result
-          "Credential: required=yes | available=yes | candidates=keeper-sangsu-agent");
+          "Credential: required=yes | available=yes | candidates=keeper-alpha-agent");
       assert (
         not
           (str_contains
              result
-             "Lifecycle actions are credential-blocked for keeper-sangsu-agent"));
+             "Lifecycle actions are credential-blocked for keeper-alpha-agent"));
       assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;

@@ -16,7 +16,5 @@ let operator_server_profile_json =
     [ "name", `String "operator_remote_v1"
     ; "transport", `String "mcp_streamable_http"
     ; "auth", `String "bearer_token"
-    ; "confirm_ttl_seconds", `Float remote_confirm_ttl_seconds
-    ; "curated_tool_count", `Int 4
     ]
 ;;

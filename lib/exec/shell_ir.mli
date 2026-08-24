@@ -30,8 +30,21 @@ type simple = {
       [Keeper_turn_sandbox_runtime]. *)
 }
 
+(** How the next command depends on the one before it. *)
+type connector =
+  | And_if  (** run the next command only if the one before it exited zero *)
+  | Or_if  (** run the next command only if the one before it did not *)
+
 type t =
   | Simple of simple
   | Pipeline of t list            (** length >= 2 — head | middle* | tail *)
+  | Sequence of {
+      head : t;
+      tail : (connector * t) list;
+    }
+      (** [a && b || c] as [head = a], [tail = [And_if, b; Or_if, c]]. The
+          first command is a separate field, so an empty sequence cannot be
+          written down. Evaluation is left to right: each connector looks only
+          at the status of whatever ran last. *)
 
 val pp : Format.formatter -> t -> unit

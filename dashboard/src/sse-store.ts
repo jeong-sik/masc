@@ -128,18 +128,6 @@ export function registerKeeperWaitingInventoryRefresh(
   return () => _refreshKeeperWaitingInventoryFns.delete(fn)
 }
 
-type KeeperCompactionRefreshReason = 'source_changed' | 'ready' | 'failed'
-const _refreshKeeperCompactionFns = new Set<(
-  keeperName: string,
-  reason: KeeperCompactionRefreshReason,
-) => void>()
-export function registerKeeperCompactionRefresh(
-  fn: (keeperName: string, reason: KeeperCompactionRefreshReason) => void,
-): () => void {
-  _refreshKeeperCompactionFns.add(fn)
-  return () => _refreshKeeperCompactionFns.delete(fn)
-}
-
 const _refreshActivityFns = new Set<() => void>()
 export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
@@ -190,6 +178,18 @@ export function registerBoardHearthsRefresh(fn: () => void): () => void {
   _refreshBoardHearthsFn = fn
   return () => {
     if (_refreshBoardHearthsFn === fn) _refreshBoardHearthsFn = null
+  }
+}
+
+// The fusion detail browser reads the board-sink posts, not the run registry,
+// and post_created carries only a 200-char preview with no meta — so the run's
+// panels and judge cannot be built from the event. Refetch instead, which is
+// what the surface's manual Refresh does (#21822).
+let _refreshFusionBoardFn: (() => void) | null = null
+export function registerFusionBoardRefresh(fn: () => void): () => void {
+  _refreshFusionBoardFn = fn
+  return () => {
+    if (_refreshFusionBoardFn === fn) _refreshFusionBoardFn = null
   }
 }
 
@@ -301,6 +301,14 @@ function scheduleTargetRefresh(
 ): void {
   if (!routeWantsRefreshTarget(route.value, target)) return
   scheduleRefresh(target, fn, delayMs)
+}
+
+function scheduleFusionBoardRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
+  if (!_refreshFusionBoardFn) return
+  if (!routeWantsRefreshTarget(route.value, 'fusion')) return
+  scheduleRefresh('fusion-board', () => {
+    _refreshFusionBoardFn?.()
+  }, delayMs)
 }
 
 function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
@@ -637,14 +645,6 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
-  if (event.type === 'agent_core:context_compacted') {
-    const keeperName = event.agent_name?.trim() ?? ''
-    if (keeperName) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, 'source_changed')
-      }
-    }
-  }
   if (hydrateServerPushEvent(event)) {
     return
   }
@@ -747,7 +747,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
 }
 
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
-  if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot') && event.payload) {
+  if (event.type === 'project_snapshot' && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
     return true
   }
@@ -919,18 +919,11 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'keeper_compaction_snapshots_changed') {
-    const keeperName = event.keeper_name?.trim() ?? ''
-    if (keeperName && (event.status === 'ready' || event.status === 'failed')) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, event.status)
-      }
-    }
-    return true
-  }
-
-  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-    return true
+  if (event.type === 'post_created') {
+    // Before the board branch: the fusion surface needs the refetch whether or
+    // not the board could prepend, and the prepend path returns early.
+    scheduleFusionBoardRefresh()
+    if (handleBoardPostCreated(event)) return true
   }
 
   return false
@@ -943,7 +936,6 @@ function eventPayloadRecord(payload: unknown): Record<string, unknown> {
 export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
   switch (eventType) {
     case 'project_snapshot':
-    case 'namespace_truth_snapshot':
     case 'execution_snapshot':
     case 'operator_snapshot':
     case 'operator_digest':

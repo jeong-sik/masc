@@ -45,7 +45,6 @@ type run_input = Exact_input of Yojson.Safe.t
 type run =
   { run_id : string
   ; lane : lane
-  ; subject_id : string
   ; actor : string
   ; started_at : float
   ; input : run_input
@@ -72,6 +71,10 @@ val max_completed_retained : int
     copied from the sibling registries, which retain 64 and have no paging UI.
     A test pins that relation. *)
 
+val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
+(** Deployment-time store cut for {!storage_filename}. See
+    {!Run_registry_core.Make.cut_replay_log}. *)
+
 val create : ?path:string -> unit -> t
 val replay : string -> t
 
@@ -79,7 +82,6 @@ val register_running
   :  t
   -> run_id:string
   -> lane:lane
-  -> subject_id:string
   -> actor:string
   -> started_at:float
   -> input:run_input

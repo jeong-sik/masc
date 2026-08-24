@@ -370,6 +370,48 @@ let test_result_error_is_not_success () =
        | Ok _ -> fail "ERROR result was admitted as success")
 ;;
 
+(* The CLI marks the whole result ERROR when any trajectory step errored,
+   even a tool call the model corrected and went on from (analyst,
+   2026-08-22T01:39Z: rejection, retry 3s later, post created, reply
+   written, status=ERROR). A reply means the turn completed. *)
+let test_error_result_with_reply_completes_the_turn () =
+  with_fixture
+    ~exit_code:1
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
+    ; step ~index:1 ~state:"ERROR" ~step_type:"tool" ()
+    ; step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ()
+    ; step ~index:2 ~state:"DONE" ~step_type:"tool" ()
+    ; result
+        ~status:"ERROR"
+        ~response:"Posted the summary to the board.\n"
+        ~error:"Tool 'masc_board_post' received unsupported field(s): agent"
+        ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "reply kept" "Posted the summary to the board.\n" turn.text;
+         check int "tool errors counted" 1 turn.tool_errors;
+         check
+           (option string)
+           "step error carried"
+           (Some "Tool 'masc_board_post' received unsupported field(s): agent")
+           turn.trajectory_error)
+;;
+
+let test_error_result_without_reply_fails_the_turn () =
+  with_fixture
+    ~exit_code:1
+    [ init (); result ~status:"ERROR" ~response:" \n" ~error:"cortex unavailable" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed "cortex unavailable") -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "ERROR result without a reply was admitted as a completed turn")
+;;
+
 let test_success_with_blank_response_is_not_success () =
   with_fixture
     [ init (); result ~response:" \n\t" () ]
@@ -398,7 +440,7 @@ let test_duplicate_keys_fail_closed () =
 
 (* A live init event announced request-review. It was not modelled, the parse
    failed, and the resulting protocol error put the official-client session in
-   Recovery_required -- taskmaster, 110 turns in one hour (#28008).
+   Recovery_required -- fixture-keeper, 110 turns in one hour (#28008).
 
    Nothing branches on [permission_mode]: the only read of the field is its own
    parse site. Naming the one member that stalled a keeper leaves the next one
@@ -422,7 +464,7 @@ let test_observed_permission_modes_are_admitted () =
 ;;
 
 (* #28029 opened step_type with [Unrecognized] after Antigravity began emitting
-   "system_message" and taskmaster stopped. #28037 closed it again and named
+   "system_message" and fixture-keeper stopped. #28037 closed it again and named
    [System_message] instead -- which admits the value that already stalled a
    keeper and leaves the next one to stall it again. Nothing branches on
    [System_message]: it appears at its declaration and at the parse site only.
@@ -657,6 +699,14 @@ let () =
             test_callback_timeout_origin_is_preserved_without_deadline
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
+        ; test_case
+            "error result with a reply completes"
+            `Quick
+            test_error_result_with_reply_completes_the_turn
+        ; test_case
+            "error result without a reply fails"
+            `Quick
+            test_error_result_without_reply_fails_the_turn
         ; test_case
             "blank success"
             `Quick

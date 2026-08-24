@@ -77,8 +77,8 @@ type try_provider_ctx =
        #27349 measured this against total elapsed wall-clock. Elapsed cannot
        separate "a turn that stopped" from "a turn that is taking a while",
        and on 2026-08-12 the same 900s value did both at once: it correctly
-       rotated 4 wedged sangsu attempts (65 minutes with zero trajectory
-       events) and killed a healthy rondo attempt 6 seconds after a
+       rotated 4 wedged attempts (65 minutes with zero trajectory
+       events) and killed a healthy Keeper attempt 6 seconds after a
        successful tool call (30+ tool calls inside the window, longest
        progress gap 120s). #28417 moves the measurement onto the progress
        signal, which is the distinction #27355's own observation side always
@@ -102,6 +102,10 @@ type try_provider_ctx =
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
+  (* Installed on the config below when present: its pre_tool_use composes
+     over [hooks] as the outer set, and its callback is what AGENT_CORE calls
+     to settle an ElicitToolApproval. Absent means no call is held. *)
+  ; approval_gate : Keeper_tool_approval_gate.t option
   ; raw_trace : Agent_core.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
@@ -205,7 +209,6 @@ let emit_context_overflow_shrink_manifest
     ~decision:
       (`Assoc
         [ "shrink_attempt", `Int shrink_attempt
-        ; "previous_model_input_capacity_bytes", `Int previous_capacity_bytes
         ; "model_input_capacity_bytes", `Int capacity_bytes
         ; "max_request_body_bytes", `Int ctx.max_request_body_bytes
         ])
@@ -296,7 +299,7 @@ let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
   | Some { last_progress_at; active_tool_count } ->
     (* A tool call that runs for minutes refreshes no progress signal while
        it runs, so tools in flight are work, not a stall. The 2026-08-12
-       rondo attempt spent 120s inside one [Execute] and was healthy. *)
+       live attempt spent 120s inside one [Execute] and was healthy. *)
     active_tool_count = 0 && now -. last_progress_at > threshold_sec
   | None ->
     (* Probe absent, or the keeper has no live turn observation to read.
@@ -694,7 +697,7 @@ let budgeted_model_input_projection
             messages
         with
         | Error error ->
-          Error (Runtime_model_input_tail_window.budget_error_to_string error)
+          Error (Runtime_model_input_tail_window.budget_error_to_core_error error)
         | Ok (planned, windowed, history_atom_count) ->
           Ok (planned, windowed, history_atom_count))
     in
@@ -738,7 +741,7 @@ let budgeted_model_input_projection
               | Ok recut -> keep recut
               | Error error ->
                 Error
-                  (Runtime_model_input_tail_window.budget_error_to_string error)))
+                  (Runtime_model_input_tail_window.budget_error_to_core_error error)))
     in
     match windowed with
     | Error error -> Error error
@@ -789,6 +792,22 @@ let run_try_provider
         ~tools:ctx.tools
         candidate
     in
+    (* The gate's pre_tool_use runs before whatever hooks the turn brought:
+       composed as [outer], so a call it holds never reaches them, and a call
+       it lets through is still theirs to decide on. *)
+    let hooks_with_gate =
+      match ctx.approval_gate with
+      | None -> ctx.hooks
+      | Some (gate : Keeper_tool_approval_gate.t) ->
+        let gate_hooks =
+          { Agent_core.Hooks.empty with pre_tool_use = Some gate.pre_tool_use }
+        in
+        Some
+          (match ctx.hooks with
+           | None -> gate_hooks
+           | Some hooks ->
+             Agent_core.Hooks.compose ~outer:gate_hooks ~inner:hooks)
+    in
     (* Runtime/model configuration is authoritative; the run-level value only
        fills an omitted provider temperature. *)
     let temperature =
@@ -802,7 +821,11 @@ let run_try_provider
           ; first_event_timeout_s = ctx.first_event_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
-          ; hooks = ctx.hooks
+          ; hooks = hooks_with_gate
+          ; tool_approval =
+              Option.map
+                (fun (gate : Keeper_tool_approval_gate.t) -> gate.tool_approval)
+                ctx.approval_gate
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; runtime_id = Some ctx.runtime_id

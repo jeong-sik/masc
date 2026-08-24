@@ -295,14 +295,6 @@ val succeed_running_operation
   -> outcome_ref:string
   -> (Chat_operation.t, error) result
 
-val fail_running_operation
-  :  t
-  -> operation_id:Chat_operation.Operation_id.t
-  -> kind:Chat_operation.failure_kind
-  -> detail:string
-  -> outcome_ref:string option
-  -> (Chat_operation.t, error) result
-
 val begin_stopping : t -> (unit, error) result
 (** Reject new mutation and submit commands, cancel an active child turn, and
     return only after its terminal operation transition has been attempted. *)

@@ -79,14 +79,12 @@ let keepers_dir_of ~base_dir =
 let write_keeper_toml ~base_dir name lines =
   write_lines (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml")) lines
 
-(* Instructions come from [keepers/<name>/AGENT.md]; [keeper.instructions] is
+(* Instructions come from [keeper.instructions] in the TOML; it is
    an unknown TOML key and rejecting it leaves the profile unloaded. *)
 let write_keeper_instructions ~base_dir name body =
   write_lines
-    (Filename.concat
-       (Filename.concat (keepers_dir_of ~base_dir) name)
-       "AGENT.md")
-    [ body ]
+    (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml"))
+    [ "[keeper]"; Printf.sprintf "instructions = %S" body ]
 
 let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
   write_json
@@ -593,7 +591,10 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         { entry with
           meta =
             { entry.meta with
-              runtime = { entry.meta.runtime with nonce = -1 }
+              runtime =
+                { entry.meta.runtime with
+                  usage = { entry.meta.runtime.usage with total_turns = -1 }
+                }
             }
         }
       in
@@ -606,7 +607,7 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
         (function
           | Publication_scope.Registry_entry_unhealthy
               (KR.Required_field_missing { field }) ->
-            String.equal field "generation"
+            String.equal field "usage.total_turns"
           | _ -> false)
         (Publication_scope.resolve_turn_resources
            ~provider

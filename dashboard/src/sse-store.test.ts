@@ -791,27 +791,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshQueue).toHaveBeenCalledWith('echo')
   })
 
-  it('forces compaction hydration from the typed source event, then re-reads on cache completion', async () => {
-    const { sseStore } = await loadSseStore()
-    const refreshCompaction = vi.fn()
-    sseStore.registerKeeperCompactionRefresh(refreshCompaction)
-
-    sseStore.routeServerPushEvent({
-      type: 'agent_core:context_compacted',
-      agent_name: 'echo',
-      before_tokens: 100,
-      after_tokens: 40,
-    })
-    sseStore.routeServerPushEvent({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'echo',
-      status: 'ready',
-    })
-
-    expect(refreshCompaction).toHaveBeenNthCalledWith(1, 'echo', 'source_changed')
-    expect(refreshCompaction).toHaveBeenNthCalledWith(2, 'echo', 'ready')
-  })
-
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
     const { sseStore } = await loadSseStore()
     const audio = {
@@ -901,6 +880,46 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches the fusion board-sink track when a post is created', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'fusion', params: {}, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-1',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    // The event carries a preview and no meta, so the detail browser cannot be
+    // built from it — the surface has to refetch (#21822).
+    expect(refreshFusion).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the fusion track alone when the operator is elsewhere', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-2',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusion).not.toHaveBeenCalled()
   })
 
   it('keeps optimistic post_created hydration inside the active hearth filter', async () => {

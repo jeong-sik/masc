@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -35,7 +34,6 @@ type extra_system_context_assembly =
   ; blocks : (Prompt_block_id.t * string) list
   }
 
-let normalize_memory_fragment = Inference_utils.sanitize_text_utf8
 let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let append_extra_system_context ctx text =
@@ -89,7 +87,6 @@ let build_turn_context
       ~base_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
-  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""
@@ -144,7 +141,6 @@ let build_turn_context
    | Record_user_turn, true | Skip_already_checkpointed_user_turn, _ -> ());
   { turn_system_prompt
   ; dynamic_context
-  ; memory_context
   ; temporal_context
   ; prompt_metrics
   ; history_messages

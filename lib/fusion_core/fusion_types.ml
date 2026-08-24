@@ -72,8 +72,6 @@ type panel_failure =
 [@@deriving to_yojson, show, eq]
 
 let panel_failure_of_yojson = function
-  | `String "Timeout" -> Ok Timeout
-  | `String "Empty_response" -> Ok (Empty_response "empty response")
   | `List [ `String "Timeout" ] -> Ok Timeout
   | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
   | `List [ `String "Invalid_structured_response"; `String detail ] ->
@@ -82,11 +80,6 @@ let panel_failure_of_yojson = function
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
     Ok (Invalid_max_output_tokens value)
   | `List [ `String "Invalid_timeout_s"; `Float value ] -> Ok (Invalid_timeout_s value)
-  (* durable 레코드가 정수로 직렬화된 데드라인을 담을 수 있다(Yojson은 3.0을 [`Int 3]
-     으로 쓰지 않지만, 손으로 쓴 레코드/이전 wire는 그럴 수 있다). 같은 값의 두 표현을
-     한쪽만 받아 replay를 깨뜨리지 않는다. *)
-  | `List [ `String "Invalid_timeout_s"; `Int value ] ->
-    Ok (Invalid_timeout_s (float_of_int value))
   | json ->
     Error
       (Printf.sprintf
@@ -317,14 +310,6 @@ type fusion_trigger =
   | Operator_requested
   | Harness_eval
 [@@deriving yojson, show, eq]
-
-let trigger_label = function
-  | Explicit_tool_call -> "explicit_tool_call"
-  | Low_confidence -> "low_confidence"
-  | High_stakes _ -> "high_stakes"
-  | Contested_board _ -> "contested_board"
-  | Operator_requested -> "operator_requested"
-  | Harness_eval -> "harness_eval"
 
 type fusion_request =
   { run_id : string

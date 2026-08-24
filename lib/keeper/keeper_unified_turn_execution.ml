@@ -17,7 +17,6 @@ include Keeper_unified_turn_types
 type retry_loop_input =
   { run_meta : keeper_meta
   ; execution : runtime_execution
-  ; run_generation : int
   ; attempt : int
   ; is_retry : bool
   ; attempted_runtimes : string list
@@ -79,7 +78,6 @@ type ctx =
   ; event_bus : Agent_core.Event_bus.t option
   ; event_bus_integrity_error_snapshot : unit -> Agent_core.Error.t option
   ; tool_completed_count_snapshot : unit -> int
-  ; generation : int
   ; keeper_turn_id : int
   ; meta : keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
@@ -103,7 +101,7 @@ let run (ctx : ctx)
       ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(user_message : string)
       ~(registry_base_path : string)
-      ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_core.Error.t) result * turn_state
@@ -112,7 +110,6 @@ let run (ctx : ctx)
       ; meta
       ; turn_ctx_cell
       ; observation
-      ; generation
       ; keeper_turn_id
       ; turn_id
       ; channel
@@ -153,7 +150,6 @@ let run (ctx : ctx)
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
-        ~run_generation
         ~is_retry
         ~(turn_state : turn_state)
     =
@@ -167,7 +163,6 @@ let run (ctx : ctx)
         ~runtime_id:execution.runtime_id
         ~trace_id:
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
-        ~generation:run_generation
         ~max_context:execution.max_context
         ~channel:(Keeper_world_observation.channel_to_string channel)
         ~is_retry
@@ -207,7 +202,6 @@ let run (ctx : ctx)
                  ~turn_kind:Turn_record.Autonomous
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
-                 ~generation:run_generation
                  ~history_user_source:"world_state_prompt"
                  (* This is an ordinary durable conversation turn. The current
                     observation remains ephemeral dynamic context, while the
@@ -258,7 +252,6 @@ let run (ctx : ctx)
               record_streaming_cancelled_observation
                 ~config
                 ~run_meta
-                ~run_generation
                 ~runtime_id:execution.runtime_id
                 ~keeper_turn_id
                 ();
@@ -269,7 +262,6 @@ let run (ctx : ctx)
   let retry_loop (input : retry_loop_input) (turn_state : turn_state) =
     let { run_meta
         ; execution
-        ; run_generation
         ; attempt
         ; is_retry
         ; attempted_runtimes
@@ -310,7 +302,6 @@ let run (ctx : ctx)
       do_run
         ~execution
         ~run_meta
-        ~run_generation
         ~is_retry
         ~turn_state
     in
@@ -460,7 +451,6 @@ let run (ctx : ctx)
     retry_loop
       { run_meta = meta
       ; execution = initial_execution
-      ; run_generation = generation
       ; attempt = 1
       ; is_retry = false
       ; attempted_runtimes =

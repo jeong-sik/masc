@@ -37,19 +37,16 @@ type 'a observed_change =
 
 type turn_runtime_delta =
   { expected_trace_id : Keeper_id.Trace_id.t
-  ; expected_generation : int
   ; usage : usage_delta
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
   ; next_agent_name : string
   ; next_trace_id : Keeper_id.Trace_id.t
   ; next_trace_history : string list
-  ; next_generation : int
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; last_autonomous_action_at : string observed_change
-  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -59,7 +56,6 @@ type identity_handoff =
   ; agent_name : string
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
-  ; generation : int
   ; updated_at : string
   }
 
@@ -75,7 +71,6 @@ type profile_update =
   ; mention_targets : string list
   ; proactive_enabled : bool
   ; max_context_override : int option
-  ; active_goal_ids : string list
   ; autoboot_enabled : bool
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
@@ -96,21 +91,15 @@ type meta_command =
       { latch : shutdown_latch
       ; updated_at : string
       }
-  | Latch_transcript_corruption of
-      { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
-      ; updated_at : string
-      }
   | Set_autoboot of
       { enabled : bool
       ; updated_at : string
       }
   | Update_profile of profile_update
   | Handoff_identity of identity_handoff
-  | Repair_trace_generation of
+  | Repair_trace_identity of
       { trace_id : Keeper_id.Trace_id.t
       ; trace_history : string list
-      ; generation : int
       ; updated_at : string
       }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
@@ -120,8 +109,7 @@ type meta_command =
       ; updated_at : string
       }
   | Turn_failed of
-      { blocker : Keeper_meta_contract.blocker_info
-      ; usage : usage_delta option
+      { usage : usage_delta option
       ; updated_at : string
       }
   | Commit_turn_runtime of turn_runtime_delta
@@ -130,13 +118,8 @@ type meta_command =
       { task_id : Keeper_id.Task_id.t option
       ; updated_at : string
       }
-  | Set_blocker of
-      { blocker : Keeper_meta_contract.blocker_info option
-      ; updated_at : string
-      }
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
-      ; generation : int
       ; commit_count : int
       ; at : float
       ; before_bytes : int
@@ -175,7 +158,7 @@ type error =
       { expected : string
       ; actual : string
       }
-  | Identity_generation_mismatch
+  | Identity_mismatch
   | Snapshot_changed
 
 val turn_runtime_delta_of_snapshots

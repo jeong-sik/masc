@@ -128,12 +128,7 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
   match Safe_ops.json_string_opt "goal_id" args with
   | Some s when String.trim s <> "" ->
       validate_goal_id config (String.trim s) |> Result.map Option.some
-  | _ ->
-      (match meta.active_goal_ids with
-       | [] -> Ok None
-       | [ goal_id ] ->
-           validate_goal_id config goal_id |> Result.map Option.some
-       | _ :: _ :: _ -> Ok None)
+  | _ -> Ok None
 ;;
 
 let no_eligible_exclusion_summary =
@@ -190,6 +185,31 @@ let sync_keeper_meta_current_task
          "failed to persist claimed current_task_id=%s: %s"
          task_id
          (Keeper_owner_registry.command_error_to_string error))
+;;
+
+(* Row shape of a [Tasks_list] page. [Compact] is the default: identity,
+   ordering and claim state only ([Masc_domain.task_compact_to_yojson]).
+   [Full] is the whole record, for the task(s) a keeper is about to work on.
+   The argument is decoded once here; an unknown value is a validation error,
+   not a silent fallback to either shape. *)
+type task_projection =
+  | Compact
+  | Full
+
+let task_projection_of_args args : (task_projection, string) result =
+  match Safe_ops.json_string_opt "projection" args with
+  | None | Some "compact" -> Ok Compact
+  | Some "full" -> Ok Full
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "projection must be \"compact\" or \"full\", got %S"
+         other)
+;;
+
+let task_projection_to_string = function
+  | Compact -> "compact"
+  | Full -> "full"
 ;;
 
 (* Cluster sub-dispatch via closed sum type — string [name] is converted
@@ -276,12 +296,17 @@ let handle_keeper_task_tool_with_outcome
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    (match Snapshot_protocol.if_revision args with
+    let projection_and_revision =
+      match task_projection_of_args args, Snapshot_protocol.if_revision args with
+      | Error message, _ | _, Error message -> Error message
+      | Ok projection, Ok if_revision -> Ok (projection, if_revision)
+    in
+    (match projection_and_revision with
      | Error message ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
-     | Ok if_revision ->
+     | Ok (projection, if_revision) ->
        match Workspace.read_backlog_observation_with_source_r config with
      | Error message ->
        let data =
@@ -330,7 +355,12 @@ let handle_keeper_task_tool_with_outcome
           across nineteen todo listings while the caller read the page as the
           whole backlog (#29101). *)
        let tasks = matching |> List.filteri (fun index _ -> index < limit) in
-       let tasks_json = `List (List.map Masc_domain.task_to_yojson tasks) in
+       let row_to_yojson =
+         match projection with
+         | Compact -> Masc_domain.task_compact_to_yojson
+         | Full -> Masc_domain.task_to_yojson
+       in
+       let tasks_json = `List (List.map row_to_yojson tasks) in
        let revision =
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
@@ -343,6 +373,7 @@ let handle_keeper_task_tool_with_outcome
              ; "status", Option.fold ~none:`Null ~some:(fun value -> `String value) status_filter
              ; "include_done", `Bool include_done
              ; "limit", `Int limit
+             ; "projection", `String (task_projection_to_string projection)
              ; "snapshot", tasks_json
              ])
        in
@@ -361,6 +392,7 @@ let handle_keeper_task_tool_with_outcome
                    then "primary"
                    else "recovery_non_authoritative") )
               :: ("degraded", `Bool (Option.is_some recovered_from))
+              :: ("projection", `String (task_projection_to_string projection))
               :: ("matching_count", `Int matching_count)
               :: ("returned_count", `Int (List.length tasks))
               :: ("truncated", `Bool (matching_count > limit))
@@ -400,21 +432,33 @@ let handle_keeper_task_tool_with_outcome
             ]))
     | Broadcast ->
     let message = Safe_ops.json_string ~default:"" "content" args |> String.trim in
+    let task_cache_signal_result = Workspace_broadcast.task_cache_signal_of_args args in
     if message = ""
     then
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
         (error_json "content is required. Good: content='Build complete, all tests pass.'.")
     else (
+      match task_cache_signal_result with
+      | Error detail ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          (error_json detail)
+      | Ok task_cache_signal ->
       match
         (* A Keeper calling keeper_broadcast is speaking to the workspace,
            so this reaches every Keeper's conversation window. *)
         Workspace.broadcast
+          ?task_cache_signal
           ~audience:Workspace_broadcast.Fleet_conversation
           config
           ~from_agent:(keeper_agent_sender ~meta)
           ~content:message
       with
+      | Error (Workspace_broadcast.Broadcast_policy_rejected detail) ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          (error_json ("broadcast rejected: " ^ detail))
       | Error error ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Runtime_failure
@@ -595,16 +639,7 @@ let handle_keeper_task_tool_with_outcome
     (match result with
      | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       (* Make the scope override visible: this is a claim outside the keeper's
-          active_goal_ids, taken because no in-scope task was eligible
-          (schedule-level fallback). Silent widening would let operators misread
-          the keeper's scope. *)
-       if scope_widened then
-         Log.Keeper.info ~keeper_name:meta.name
-           "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
-            eligible (active_goal_ids=[%s])"
-           task_id
-           (String.concat ", " meta.active_goal_ids);
+       ignore scope_widened;
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
           (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every
@@ -721,7 +756,6 @@ let handle_keeper_task_tool_with_outcome
         (`Assoc
            ([
               ("result", `String message);
-              ("auto_started", `Bool !auto_started_ok);
             ]
              @ (match typed_outcome_field with
                 | Some field -> [ field ]

@@ -11,6 +11,11 @@ type t =
   | Error
   | Timeout
 
+val of_string_opt : string -> t option
+(** [None] when the word is not in this vocabulary. Use this wherever the
+    difference between an explicit ["unknown"] and a word nobody declared
+    changes what happens. *)
+
 val of_string : string -> t
 val to_string : t -> string
 val equal : t -> t -> bool
@@ -20,4 +25,3 @@ val rank_string : string -> int
 val max : t -> t -> t
 val max_string : string -> string -> string
 val requires_operator_action : t -> bool
-val requires_operator_action_string : string -> bool

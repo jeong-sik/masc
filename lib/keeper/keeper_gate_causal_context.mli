@@ -1,7 +1,7 @@
 (** Explicit turn-local causal evidence for contextual Gate judgment.
 
     The cell is created once by the outer Keeper turn and threaded through the
-    AGENT_CORE tool bundle. Each completed Tool appends its exact typed input/result.
+    AGENT_CORE tool bundle. Each completed Tool appends its exact typed input.
     [snapshot] renders the newest of those calls that fit a declared evidence
     budget, as immutable JSON for one later Gate request. No global,
     string-keyed, or fiber-local carrier is used. *)

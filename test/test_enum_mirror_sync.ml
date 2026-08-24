@@ -154,6 +154,25 @@ let test_schedule_contract_mirrors () =
     ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
     ]
 ;;
+(* The three Goal tool schemas moved into config/tools/masc_goal_*.toml, where
+   the enum arrays are literals: nothing in TOML can read an OCaml variant. The
+   variants stay the owners, so check each property directly rather than
+   accepting any matching enum elsewhere — a constructor added to either one
+   without editing its file would otherwise ship a schema that never offers the
+   value, and the tool would reject what its own documentation advertised. *)
+let test_goal_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Goal property %s matches its variant" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Tool_schemas_workspace_extra.schemas ~property))
+    [ "phase", List.map Goal_phase.to_string Goal_phase.all
+    ; ( "action"
+      , List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all )
+    ]
+;;
+
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -202,6 +221,43 @@ let test_vote_direction_mirror () =
     ()
 ;;
 
+(* The [pattern] declared for one property name across every schema that
+   declares it, mirroring [advertised_values_for_schemas] for enums. *)
+let declared_patterns_for_schemas schemas ~property =
+  let rec walk (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match value with
+          | `Assoc inner when String.equal key property ->
+            (match List.assoc_opt "pattern" inner with
+             | Some (`String pattern) -> [ pattern ]
+             | _ -> walk value)
+          | _ -> walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  schemas
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
+  |> List.sort_uniq String.compare
+;;
+
+(* Board comment id. [Masc.Board.Comment_id] owns the shape; the canonical
+   comment_vote / comment schemas read it directly and the Keeper projection of
+   masc_board_comment hand-copies it as [comment_id_pattern]. Both property
+   names carry a comment id, so each is compared on its own. *)
+let test_comment_id_pattern_mirror () =
+  List.iter
+    (fun property ->
+      check (list string)
+        (Printf.sprintf "%s pattern matches Board.Comment_id" property)
+        [ Masc.Board.Comment_id.json_schema_pattern ]
+        (declared_patterns_for_schemas (all_schemas ()) ~property))
+    [ "comment_id"; "parent_id" ]
+;;
+
 (* A guard that passes when the thing it guards is empty is not a guard. *)
 let test_owners_are_non_empty () =
   List.iter
@@ -226,7 +282,9 @@ let () =
         ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
+        ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
+        ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

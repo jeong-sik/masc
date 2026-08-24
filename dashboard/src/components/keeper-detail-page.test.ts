@@ -15,7 +15,6 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
     lifecycle_phase: 'Running',
     active_model_label: 'claude-sonnet-4',
     runtime_canonical: 'agent-core-seoul-1',
-    active_goal_ids: ['goal-runtime-lane-cleanup'],
     context_ratio: 0.62,
     context_tokens: 124_000,
     context_max: 200_000,
@@ -86,6 +85,9 @@ describe('KeeperWorkspaceRail', () => {
     const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
     expect(sectionHeaders).toContain('런타임')
     expect(container.textContent).not.toContain('claude-sonnet-4')
+    // The runtime card follows the design's collapsed-by-default disclosure
+    // (rails.jsx RailRuntime) — open `.rtc-detail` before asserting its rows.
+    fireEvent.click(container.querySelector('.rtc-head') as HTMLButtonElement)
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
     expect(container.textContent).toContain('agent-core-seoul-1')
     expect(container.textContent).toContain('62%')

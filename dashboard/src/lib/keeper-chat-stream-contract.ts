@@ -14,7 +14,17 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONTINUATION_CHECKPOINT',
   'KEEPER_EXTERNAL_EFFECT_COMPLETED',
   'KEEPER_REPLY_DETAILS',
+  // #29650 put the pre-tool-use decision in one place and gave it these two
+  // events. The OCaml side had them and this list did not, which the
+  // cross-language parity test reads as a broken binding: an event the server
+  // sends and the vocabulary does not name is dropped by the SSE decoder.
+  'KEEPER_TOOL_APPROVAL_REQUESTED',
+  'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
+  // #29742 and #29744 both registered the two approval events for the same
+  // main-red and both merged, leaving them listed twice. A duplicate entry
+  // makes the contract array longer than the OCaml codec's vocabulary and
+  // fails the cross-language parity test the other way.
 ] as const
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]
@@ -146,15 +156,15 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED'
-      // null is the legacy wire value; a typed target names the real
-      // destination of the completed surface post (#28374).
+      // The typed target names the real destination of the completed
+      // surface post (#28374).
       value: {
-        target?: {
+        target: {
           kind?: 'dashboard' | 'discord' | 'slack'
           channel_id?: string
           thread_ts?: string
         }
-      } | null
+      }
     }
   | {
       type: 'CUSTOM'

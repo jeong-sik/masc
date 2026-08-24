@@ -146,56 +146,9 @@ function InternalAgentsPanel() {
   );
 }
 
-/* ── 감사 무결성 — Shared_audit.Store.verify 결과 (hash-chain) ── */
-const AI_ROWS = [
-  { keeper: 'masc-improver', entries: 18422, ok: true, broken: null, detail: null },
-  { keeper: 'nick0cave', entries: 12907, ok: true, broken: null, detail: null },
-  { keeper: 'sangsu', entries: 9613, ok: false, broken: 7741, detail: 'prev_hash 불일치 — 7741 번째 엔트리에서 체인 단절' },
-  { keeper: 'qa-king', entries: 5120, ok: true, broken: null, detail: null },
-  { keeper: 'analyst', entries: 3388, ok: true, broken: null, detail: null },
-  { keeper: 'reviewer', entries: 2044, ok: true, broken: null, detail: null },
-];
-function AuditIntegrityPanel() {
-  const totals = {
-    keepers: AI_ROWS.length,
-    entries: AI_ROWS.reduce((a, r) => a + r.entries, 0),
-    ok: AI_ROWS.filter(r => r.ok).length,
-    failed: AI_ROWS.filter(r => !r.ok).length,
-  };
-  return (
-    <div className="ia-wrap">
-      <div className="ia-head">
-        <h3>감사 무결성</h3>
-        <span className="ia-count mono">hash-chain verify</span>
-        <span className="ia-route mono">lab?section=audit-integrity</span>
-      </div>
-      <p className="ia-lede">keeper 별 resilience 감사 로그의 해시 체인을 서버에서 검증한 결과 — 검증 엔트리 수, 정상/실패, 첫 단절 지점.</p>
-      <div className="ai-strip">
-        <div className="ai-stat"><span className="k">검증 키퍼</span><span className="v mono">{totals.keepers}</span></div>
-        <div className="ai-stat"><span className="k">검증 엔트리</span><span className="v mono">{totals.entries.toLocaleString()}</span></div>
-        <div className="ai-stat"><span className="k">정상</span><span className="v mono ok">{totals.ok}</span></div>
-        <div className="ai-stat"><span className="k">실패</span><span className={`v mono ${totals.failed ? 'bad' : ''}`}>{totals.failed}</span></div>
-        <div className="ai-stat"><span className="k">Resilience 감사</span><span className="v mono">활성</span></div>
-      </div>
-      <div className="ai-tablewrap">
-        <table className="ai-table">
-          <thead><tr><th>키퍼</th><th>검증 엔트리</th><th>체인 상태</th><th>실패 지점</th><th>상세</th></tr></thead>
-          <tbody>
-            {AI_ROWS.map(r => (
-              <tr key={r.keeper} className={r.ok ? '' : 'fail'}>
-                <td className="mono">{r.keeper}</td>
-                <td className="mono">{r.entries.toLocaleString()}</td>
-                <td>{r.ok ? <span className="ai-b ok">정상</span> : <span className="ai-b bad">실패</span>}</td>
-                <td className="mono">{r.broken != null ? r.broken : '—'}</td>
-                <td className="ai-d">{r.detail || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+/* 감사 무결성(resilience hash-chain) 패널 제거(2026-08-23) — 대상 서브시스템이
+   #28170로 사라졌다. 죽은 기능의 화면을 프로토타입이 계속 그리면 다음 re-sync
+   때 대시보드에 없는 것이 component gap으로 다시 등장한다. */
 
 /* ── 비용 원장 — masc-cost / inference metrics 공용 행 코덱 (2026-08 재설계) ── */
 const CL_DAYS = [
@@ -249,4 +202,4 @@ function CostLedgerPanel() {
   );
 }
 
-Object.assign(window, { InternalAgentsPanel, AuditIntegrityPanel, CostLedgerPanel });
+Object.assign(window, { InternalAgentsPanel, CostLedgerPanel });

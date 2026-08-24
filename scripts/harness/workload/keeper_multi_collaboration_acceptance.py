@@ -60,8 +60,9 @@ TOOL_ALIASES = {
 KNOWN_ASSERTIONS = {
     "all_keepers_live",
     "role_identity_preserved",
+    "runtime_assignment_serving_observed",
     "goal_visible",
-    "goal_assignment_visible",
+    "goal_shared_open_set_visible",
     "tasks_linked_to_goal",
     "parallel_wave_completed",
     "parallel_keeper_overlap_observed",
@@ -107,6 +108,27 @@ KNOWN_ASSERTIONS = {
     "goal_verifier_dashboard_browser_observed",
 }
 
+# Goal verification is an autonomous durable drain, not one synchronous model
+# request. A retryable provider failure is re-armed by the runtime's default
+# 60-second maintenance pulse. The acceptance budget must therefore cover a
+# full first request, that re-arm interval, and a full second request. Keep one
+# additional pulse as scheduling/polling margin so a retry observed near the
+# request boundary is not turned into a false-negative campaign result.
+GOAL_VERIFIER_RETRY_INTERVAL_SEC = 60.0
+BROWSER_PROOF_TIMEOUT_FLOOR_SEC = 600.0
+
+
+def goal_verifier_convergence_timeout(request_timeout: float) -> float:
+    return (2.0 * request_timeout) + (2.0 * GOAL_VERIFIER_RETRY_INTERVAL_SEC)
+
+
+def browser_proof_subprocess_timeout(request_timeout: float) -> float:
+    # The Node proof's declared Keeper-ready window is 240 seconds. It then
+    # verifies three independent dashboard surfaces and owns the failure-state
+    # screenshot/console capture. The parent must never terminate it before
+    # that inner contract can settle and emit its diagnostic artifacts.
+    return max(BROWSER_PROOF_TIMEOUT_FLOOR_SEC, 2.0 * request_timeout)
+
 
 class AcceptanceError(RuntimeError):
     pass
@@ -150,6 +172,15 @@ def safe_slug(value: str, limit: int = 24) -> str:
     if not slug:
         raise AcceptanceError("run id does not contain a usable slug")
     return slug[:limit].rstrip("-")
+
+
+def campaign_identity_slug(value: str, limit: int = 16) -> str:
+    """Keep a readable prefix without discarding the full run identity."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    prefix_limit = limit - len(digest) - 1
+    if prefix_limit < 1:
+        raise AcceptanceError("campaign slug limit is too small for identity hash")
+    return f"{safe_slug(value, prefix_limit)}-{digest}"
 
 
 def json_bytes(value: Any) -> bytes:
@@ -669,6 +700,175 @@ def runtime_strategy_receipt(
     }
 
 
+def collect_runtime_serving_evidence(
+    *,
+    base_path: pathlib.Path,
+    keepers_by_role: dict[str, str],
+    expected_runtime_by_role: dict[str, str],
+    manifest_line_cursors_by_keeper: dict[str, dict[str, int]],
+) -> dict[str, Any]:
+    """Read durable runtime receipts and prove each configured role actually served.
+
+    A configured runtime ID is not execution evidence.  Only a terminal
+    ``receipt_appended`` row for the requested runtime, with a completed
+    no-fallback outcome, proves that role reached the provider and returned.
+    """
+    role_evidence: dict[str, Any] = {}
+    parse_errors: list[str] = []
+    observed_runtime_ids: set[str] = set()
+
+    for role in sorted(keepers_by_role):
+        keeper = keepers_by_role[role]
+        expected_runtime = expected_runtime_by_role[role]
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        exact_receipts: list[dict[str, Any]] = []
+        fallback_receipts: list[dict[str, Any]] = []
+        current_run_row_count = 0
+        manifest_files = sorted(manifest_root.glob("*.jsonl"))
+        if keeper not in manifest_line_cursors_by_keeper:
+            parse_errors.append(f"{keeper}:missing campaign manifest cursor")
+        keeper_cursors = manifest_line_cursors_by_keeper.get(keeper, {})
+        for manifest_path in manifest_files:
+            relative_path = str(manifest_path.relative_to(base_path))
+            baseline_line_count = keeper_cursors.get(relative_path, 0)
+            observed_line_count = 0
+            with manifest_path.open(encoding="utf-8") as handle:
+                for line_number, raw_line in enumerate(handle, 1):
+                    observed_line_count = line_number
+                    if line_number <= baseline_line_count:
+                        continue
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        row = json.loads(stripped)
+                    except json.JSONDecodeError as error:
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:{error.msg}"
+                        )
+                        continue
+                    if not isinstance(row, dict) or row.get("event") != "receipt_appended":
+                        continue
+                    current_run_row_count += 1
+                    decision = row.get("decision")
+                    if not isinstance(decision, dict):
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:missing decision object"
+                        )
+                        continue
+                    schema_errors: list[str] = []
+                    if row.get("schema_version") != 1:
+                        schema_errors.append("schema_version must be 1")
+                    if row.get("keeper_name") != keeper:
+                        schema_errors.append("keeper_name mismatch")
+                    if not isinstance(row.get("trace_id"), str) or not row.get(
+                        "trace_id"
+                    ):
+                        schema_errors.append("trace_id must be non-empty")
+                    keeper_turn_id = row.get("keeper_turn_id")
+                    if (
+                        not isinstance(keeper_turn_id, int)
+                        or isinstance(keeper_turn_id, bool)
+                        or keeper_turn_id < 1
+                    ):
+                        schema_errors.append("keeper_turn_id must be a positive int")
+                    if row.get("runtime_id") != decision.get("runtime_id"):
+                        schema_errors.append(
+                            "top-level runtime_id does not match decision"
+                        )
+                    if schema_errors:
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:"
+                            + "; ".join(schema_errors)
+                        )
+                        continue
+                    receipt = {
+                        "path": relative_path,
+                        "line": line_number,
+                        "ts": row.get("ts"),
+                        "trace_id": row.get("trace_id"),
+                        "keeper_turn_id": row.get("keeper_turn_id"),
+                        "runtime_id": decision.get("runtime_id"),
+                        "runtime_attempt_count": decision.get("runtime_attempt_count"),
+                        "runtime_fallback_applied": decision.get(
+                            "runtime_fallback_applied"
+                        ),
+                        "runtime_outcome": decision.get("runtime_outcome"),
+                        "outcome": decision.get("outcome"),
+                        "status": row.get("status"),
+                    }
+                    is_exact_success = (
+                        row.get("status") == "ok"
+                        and decision.get("outcome") == "ok"
+                        and decision.get("runtime_outcome") == "completed"
+                        and decision.get("runtime_id") == expected_runtime
+                        and decision.get("runtime_fallback_applied") is False
+                    )
+                    if is_exact_success:
+                        exact_receipts.append(receipt)
+                        observed_runtime_ids.add(expected_runtime)
+                    elif (
+                        decision.get("runtime_fallback_applied") is True
+                        or decision.get("runtime_id") != expected_runtime
+                    ):
+                        fallback_receipts.append(receipt)
+            if observed_line_count < baseline_line_count:
+                parse_errors.append(
+                    f"{relative_path}:manifest shortened after campaign cursor "
+                    f"({observed_line_count} < {baseline_line_count})"
+                )
+
+        role_evidence[role] = {
+            "keeper": keeper,
+            "expected_runtime_id": expected_runtime,
+            "manifest_file_count": len(manifest_files),
+            "baseline_manifest_line_count": sum(keeper_cursors.values()),
+            "current_run_receipt_row_count": current_run_row_count,
+            "exact_success_count": len(exact_receipts),
+            "fallback_receipt_count": len(fallback_receipts),
+            "exact_success_receipts": exact_receipts,
+            "fallback_receipts": fallback_receipts,
+            "served": bool(exact_receipts),
+        }
+
+    all_roles_served = all(
+        evidence["served"] for evidence in role_evidence.values()
+    )
+    return {
+        "schema": "masc.keeper_runtime_serving_evidence.v1",
+        "status": "passed" if all_roles_served and not parse_errors else "failed",
+        "all_roles_served": all_roles_served,
+        "role_count": len(role_evidence),
+        "served_role_count": sum(
+            evidence["served"] for evidence in role_evidence.values()
+        ),
+        "distinct_served_runtime_count": len(observed_runtime_ids),
+        "observed_runtime_ids": sorted(observed_runtime_ids),
+        "parse_errors": parse_errors,
+        "roles": role_evidence,
+    }
+
+
+def capture_runtime_manifest_line_cursors(
+    *, base_path: pathlib.Path, keepers_by_role: dict[str, str]
+) -> dict[str, dict[str, int]]:
+    """Snapshot manifest append positions before the campaign mutates Keepers."""
+    cursors: dict[str, dict[str, int]] = {}
+    for keeper in sorted(set(keepers_by_role.values())):
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        keeper_cursors: dict[str, int] = {}
+        for manifest_path in sorted(manifest_root.glob("*.jsonl")):
+            relative_path = str(manifest_path.relative_to(base_path))
+            with manifest_path.open(encoding="utf-8") as handle:
+                keeper_cursors[relative_path] = sum(1 for _ in handle)
+        cursors[keeper] = keeper_cursors
+    return cursors
+
+
 def default_health_url(mcp_url: str) -> str:
     parsed = urllib.parse.urlsplit(mcp_url)
     return urllib.parse.urlunsplit(
@@ -846,7 +1046,7 @@ class MissionRun:
         self.token = token
         self.timeout = timeout
         self.run_id = run_id
-        self.slug = safe_slug(run_id, 16)
+        self.slug = campaign_identity_slug(run_id, 16)
         self.marker = f"keeper-collab-{self.slug}"
         # RW20/RW21 tokens. Deterministic per run so evaluators match them
         # exactly; the debate tokens are handed only to their originator's
@@ -886,6 +1086,10 @@ class MissionRun:
             "reviewer": f"rw-{self.slug}-review",
             "researcher": f"rw-{self.slug}-research",
         }
+        self.runtime_manifest_line_cursors = capture_runtime_manifest_line_cursors(
+            base_path=pathlib.Path(self.expected_base_path),
+            keepers_by_role=self.roles,
+        )
         self.task_ids: dict[str, str] = {}
         self.verifier_task_id = ""
         self.task_create_receipts: dict[str, ToolObservation] = {}
@@ -897,6 +1101,7 @@ class MissionRun:
         self.persistence_browser_proof: dict[str, Any] = {}
         self.goal_verifier_browser_proof: dict[str, Any] = {}
         self.goal_verifier_evidence: dict[str, Any] = {}
+        self.runtime_serving_evidence: dict[str, Any] = {}
 
     def runtime_for_role(self, role: str) -> str | None:
         return self.runtime_by_role.get(role, self.runtime_id)
@@ -958,8 +1163,10 @@ class MissionRun:
         phase: str,
         completion_state: str | None = None,
         criterion_state: str | None = None,
-        timeout: float = 300.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
+        if timeout is None:
+            timeout = goal_verifier_convergence_timeout(self.timeout)
         deadline = time.monotonic() + timeout
         attempt = 0
         last: dict[str, Any] | None = None
@@ -1003,47 +1210,6 @@ class MissionRun:
             "Goal verifier state did not converge: "
             f"expected phase={phase} criterion={criterion_state} "
             f"completion={completion_state}, last={json.dumps(last, ensure_ascii=False)}"
-        )
-
-    def find_task(self, value: Any, task_id: str) -> dict[str, Any] | None:
-        if isinstance(value, dict):
-            if value.get("id") == task_id or value.get("task_id") == task_id:
-                if "task_status" in value or "status" in value:
-                    return value
-            for nested in value.values():
-                found = self.find_task(nested, task_id)
-                if found is not None:
-                    return found
-        elif isinstance(value, list):
-            for nested in value:
-                found = self.find_task(nested, task_id)
-                if found is not None:
-                    return found
-        return None
-
-    def wait_for_verifier_task_status(
-        self, expected_status: str, timeout: float = 300.0
-    ) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
-        attempt = 0
-        last: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            attempt += 1
-            observation = self.call(
-                f"goal-verifier-task-poll-{expected_status}-{attempt}",
-                "masc_tasks",
-                {"include_done": True, "include_cancelled": True},
-            )
-            last = self.find_task(observation.data, self.verifier_task_id)
-            if isinstance(last, dict) and (
-                last.get("task_status") == expected_status
-                or last.get("status") == expected_status
-            ):
-                return last
-            time.sleep(2.0)
-        raise AcceptanceError(
-            f"verifier Task did not reach {expected_status}: "
-            f"last={json.dumps(last, ensure_ascii=False)}"
         )
 
     def wait_for_verifier_task_verdict(
@@ -1146,43 +1312,6 @@ class MissionRun:
                 "priority": 1,
             },
         )
-        self.call(
-            "goal-assign",
-            "masc_goal_assign",
-            {"goal_id": self.goal_id, "owner": self.roles["coordinator"]},
-        )
-        self.call(
-            "goal-verifier-upsert",
-            "masc_goal_upsert",
-            {
-                "id": self.verifier_goal_id,
-                "title": f"Artifact-gated Goal verifier mission {self.marker}",
-                "metric": (
-                    f"owner artifact {self.verifier_artifact} contains the exact "
-                    f"token {self.verifier_success_token}"
-                ),
-                "target_value": self.verifier_success_token,
-                "priority": 1,
-            },
-        )
-        self.call(
-            "goal-verifier-assign",
-            "masc_goal_assign",
-            {
-                "goal_id": self.verifier_goal_id,
-                "owner": self.roles["coordinator"],
-            },
-        )
-        for role, keeper in self.roles.items():
-            arguments: dict[str, Any] = {
-                "name": keeper,
-                "active_goal_ids": [self.goal_id],
-            }
-            runtime_id = self.runtime_for_role(role)
-            if runtime_id:
-                arguments["runtime_id"] = runtime_id
-            self.call(f"keeper-goal-scope-{role}", "masc_keeper_up", arguments)
-
         task_specs = {
             "builder-a": "Build the first durable collaboration artifact",
             "builder-b": "Build the second durable collaboration artifact",
@@ -1452,7 +1581,7 @@ class MissionRun:
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=browser_proof_subprocess_timeout(self.timeout),
         )
         if completed.returncode != 0:
             raise AcceptanceError(
@@ -1685,6 +1814,20 @@ class MissionRun:
         )
 
     def run_goal_verifier_refute_reenter_prove(self) -> None:
+        self.call(
+            "goal-verifier-upsert",
+            "masc_goal_upsert",
+            {
+                "id": self.verifier_goal_id,
+                "title": f"Artifact-gated Goal verifier mission {self.marker}",
+                "metric": (
+                    f"producer artifact {self.verifier_artifact} contains the exact "
+                    f"token {self.verifier_success_token}"
+                ),
+                "target_value": self.verifier_success_token,
+                "priority": 1,
+            },
+        )
         self.wait_for_goal_state(
             phase="executing",
             criterion_state="viable",
@@ -1709,17 +1852,9 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-refute-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"exact Task {self.verifier_task_id}를 claim하세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}에 "
-                f"정확히 '{failure_token}' 한 줄만 쓰세요. 다른 토큰을 추가하지 마세요. "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "제출하세요. 실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
-            ),
+            self._goal_verifier_refute_prompt(failure_token),
         )
         rejected_task_verdict = self.wait_for_verifier_task_verdict("in_progress")
-        self.wait_for_verifier_task_status("in_progress")
         self.writer.write_json(
             "observations/goal-verifier-task-refuted.json",
             rejected_task_verdict,
@@ -1747,17 +1882,9 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-proven-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}를 "
-                f"정확히 '{self.verifier_success_token}' 한 줄로 교체하세요. "
-                "쓴 뒤 파일의 exact content를 다시 읽어 확인하고, "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "다시 제출하세요."
-            ),
+            self._goal_verifier_proven_prompt(),
         )
         approved_task_verdict = self.wait_for_verifier_task_verdict("done")
-        self.wait_for_verifier_task_status("done")
         self.writer.write_json(
             "observations/goal-verifier-task-proven.json",
             approved_task_verdict,
@@ -1832,6 +1959,32 @@ class MissionRun:
         self.writer.write_json(
             "observations/goal-verification-runs.json",
             {"payload": runs_payload, "evidence": self.goal_verifier_evidence},
+        )
+
+    def _goal_verifier_refute_prompt(self, failure_token: str) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"exact Task {self.verifier_task_id}를 claim하세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{failure_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 제출하세요. "
+            "실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
+        )
+
+    def _goal_verifier_proven_prompt(self) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"반려 뒤 in_progress인 exact Task {self.verifier_task_id}만 계속 처리하세요. "
+            "keeper_task_release, masc_add_task, keeper_task_claim을 호출하지 말고 "
+            "Task를 release하거나 대체 Task를 만들거나 claim하지 마세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{self.verifier_success_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"tool_read_file도 path='{self.verifier_artifact}'로 호출해 exact content를 확인하세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 다시 제출하세요."
         )
 
     def restart_and_recall(self, post_id: str) -> None:
@@ -1987,6 +2140,22 @@ class MissionRun:
             self.writer.write_json(
                 f"observations/tool-calls-{role}.json", tool_calls
             )
+        runtime_receipt = runtime_strategy_receipt(
+            runtime_id=self.runtime_id,
+            runtime_by_role=self.runtime_by_role,
+            require_heterogeneous=self.require_heterogeneous_runtimes,
+            roles=set(self.roles),
+        )
+        self.runtime_serving_evidence = collect_runtime_serving_evidence(
+            base_path=pathlib.Path(self.expected_base_path),
+            keepers_by_role=self.roles,
+            expected_runtime_by_role=runtime_receipt["runtime_by_role"],
+            manifest_line_cursors_by_keeper=self.runtime_manifest_line_cursors,
+        )
+        self.writer.write_json(
+            "observations/runtime-serving-by-role.json",
+            self.runtime_serving_evidence,
+        )
         calls = {
             "goals": ("masc_goal_list", {}),
             "tasks": ("masc_tasks", {"include_done": True, "include_cancelled": True}),
@@ -2099,6 +2268,15 @@ class MissionRun:
         board_text = json.dumps(board, ensure_ascii=False)
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
+        goal_rows = goals.get("goals", []) if isinstance(goals, dict) else []
+        shared_goal = next(
+            (
+                row
+                for row in goal_rows
+                if isinstance(row, dict) and row.get("id") == self.goal_id
+            ),
+            None,
+        )
         history_text = json.dumps(histories, ensure_ascii=False)
         qa_verdicts = [
             self._completion_verdict(key) for key in ("qa-implement", "qa-test")
@@ -2578,6 +2756,19 @@ class MissionRun:
             for path in self.writer.output_dir.rglob("*.json")
             if path.name not in {"bundle.json", "assertions.json"}
         ]
+        expected_runtime_ids = {
+            runtime_id
+            for role in self.roles
+            for runtime_id in [self.runtime_for_role(role)]
+            if isinstance(runtime_id, str) and runtime_id
+        }
+        runtime_serving_passed = (
+            self.runtime_serving_evidence.get("status") == "passed"
+            and self.runtime_serving_evidence.get("served_role_count")
+            == len(self.roles)
+            and self.runtime_serving_evidence.get("distinct_served_runtime_count")
+            == len(expected_runtime_ids)
+        )
         checks: dict[str, tuple[bool, str]] = {
             "all_keepers_live": (
                 len(self.statuses) == len(self.roles)
@@ -2590,10 +2781,20 @@ class MissionRun:
                 all(self.roles[role].lower() in self._status_text(role) for role in self.roles),
                 "each final status contains its exact Keeper identity",
             ),
+            "runtime_assignment_serving_observed": (
+                runtime_serving_passed,
+                (
+                    "durable no-fallback runtime receipts served "
+                    f"{self.runtime_serving_evidence.get('served_role_count', 0)}/"
+                    f"{len(self.roles)} roles across "
+                    f"{self.runtime_serving_evidence.get('distinct_served_runtime_count', 0)}/"
+                    f"{len(expected_runtime_ids)} configured runtimes"
+                ),
+            ),
             "goal_visible": (self.goal_id.lower() in goal_text.lower(), self.goal_id),
-            "goal_assignment_visible": (
-                self.roles["coordinator"].lower() in goal_text.lower(),
-                self.roles["coordinator"],
+            "goal_shared_open_set_visible": (
+                isinstance(shared_goal, dict) and "owner" not in shared_goal,
+                "shared Goal is present and the removed owner field is absent",
             ),
             "tasks_linked_to_goal": (
                 # Goal linkage is judged from the creation receipts (the

@@ -7,7 +7,6 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
   Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 

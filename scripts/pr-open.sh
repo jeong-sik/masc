@@ -17,9 +17,8 @@ Options:
 Behavior:
   1) push current branch
   2) create draft PR if absent
-  3) auto-label docs/enhancement by changed files
-  4) add extra labels
-  5) optionally watch checks
+  3) add extra labels
+  4) optionally watch checks
 USAGE
 }
 
@@ -85,13 +84,6 @@ validate_no_staged_changes() {
     git diff --cached --name-only >&2
     exit 1
   fi
-}
-
-is_doc_path() {
-  case "$1" in
-    docs/*|examples/trpg-mvp/*|README.md|*.md) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 ensure_pr_is_draft() {
@@ -167,15 +159,6 @@ require_cmd jq
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-load_changed_files() {
-  local range="$1"
-  changed_files=()
-  while IFS= read -r file; do
-    [[ -n "$file" ]] || continue
-    changed_files+=("$file")
-  done < <(git diff --name-only "$range" 2>/dev/null || true)
-}
-
 branch="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   echo "refusing to open PR from branch '$branch'" >&2
@@ -215,31 +198,7 @@ fi
 
 ensure_pr_is_draft "$pr_number" "create/reuse"
 
-load_changed_files "origin/$base...HEAD"
-if [[ ${#changed_files[@]} -eq 0 ]]; then
-  load_changed_files "HEAD~1..HEAD"
-fi
-
-docs_only=1
-has_docs=0
-for f in "${changed_files[@]}"; do
-  if [[ -z "$f" ]]; then
-    continue
-  fi
-  if is_doc_path "$f"; then
-    has_docs=1
-  else
-    docs_only=0
-  fi
-done
-
 labels=()
-if [[ $has_docs -eq 1 ]]; then
-  labels+=("docs")
-fi
-if [[ $docs_only -eq 0 || ${#changed_files[@]} -eq 0 ]]; then
-  labels+=("enhancement")
-fi
 
 if [[ -n "$extra_labels" ]]; then
   IFS=',' read -r -a extra <<< "$extra_labels"

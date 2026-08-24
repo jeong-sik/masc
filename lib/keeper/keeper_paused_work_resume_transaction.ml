@@ -1,7 +1,4 @@
-type request =
-  { owner_nonce : int
-  ; operator_operation_id : string
-  }
+type request = { operator_operation_id : string }
 
 type projection_stage =
   | Durable_meta
@@ -16,18 +13,9 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_transcript_reset_required
   | Registry_owner_missing
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_identity_changed
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Projection_failed of
@@ -71,29 +59,15 @@ let failure_to_string = function
   | Receipt_read_failed detail -> "Resume_owner receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Resume_owner operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Resume_owner operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail -> "Resume_owner receipt write failed: " ^ detail
   | Durable_meta_read_failed detail -> "Resume_owner durable meta read failed: " ^ detail
   | Durable_meta_missing -> "Resume_owner durable Keeper metadata is missing"
-  | Durable_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Resume_owner durable generation changed: expected %d, actual %d"
-      expected
-      actual
   | Durable_owner_identity_changed -> "Resume_owner durable trace identity changed"
   | Durable_owner_not_paused -> "Resume_owner requires a durably paused Keeper"
-  | Durable_owner_transcript_reset_required ->
-    "Resume_owner cannot replay a structurally corrupted checkpoint; reset the \
-     Keeper checkpoint first"
   | Registry_owner_missing -> "Resume_owner requires the exact registered Keeper lane"
-  | Registry_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Resume_owner registry generation changed: expected %d, actual %d"
-      expected
-      actual
   | Registry_owner_identity_changed -> "Resume_owner registry trace identity changed"
   | Registry_owner_not_paused phase ->
     Printf.sprintf
@@ -122,16 +96,13 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_nonce < 0
-  then Error "owner generation must not be negative"
-  else if String.equal (String.trim request.operator_operation_id) ""
+  if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
   else Ok ()
 ;;
 
 let receipt_matches_request ~keeper_name request receipt =
   String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name keeper_name
-  && Int.equal receipt.expected_generation request.owner_nonce
   && String.equal receipt.operator_operation_id request.operator_operation_id
   && receipt.operation = Keeper_paused_work_disposition_receipt.Resume_owner
 ;;
@@ -156,88 +127,9 @@ let read_meta config keeper_name =
 
 let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
       (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.nonce receipt.expected_generation)
-  then
-    Error
-      (Durable_owner_nonce_changed
-         { expected = receipt.expected_generation; actual = meta.runtime.nonce })
-  else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id receipt.expected_trace_id)
+  if not (Keeper_id.Trace_id.equal meta.runtime.trace_id receipt.expected_trace_id)
   then Error Durable_owner_identity_changed
   else Ok ()
-;;
-
-type transcript_recovery =
-  | Transcript_already_dispatchable
-  | Transcript_closed_open_tail of Agent_core.Types.message list
-  | Transcript_unrecoverable
-
-(* The latch records that the transcript was broken when it was written, not
-   that it is broken now. A keeper whose checkpoint has since become
-   dispatchable is held by a stale record, so re-read the checkpoint and let its
-   current structure decide.
-
-   Two shapes clear it. A transcript that already validates needs nothing. A
-   transcript whose only defect is the open ToolUse tail that checkpoint
-   persistence preserves on purpose is closed by [close_open_tail], which
-   appends one typed ToolResult per unresolved id recording that the call was
-   issued and no result was observed. Anything that fails to parse keeps
-   latching — that is the contract [close_open_tail] documents, and this does
-   not override it. *)
-(* The decision, with no I/O in it: read the current messages and say what the
-   latch is still worth. Kept separate so the three outcomes are testable
-   without seeding a checkpoint on disk. *)
-let classify_transcript messages =
-  match Keeper_compaction_unit.validate_provider_transcript messages with
-  | Ok () -> Transcript_already_dispatchable
-  | Error _ ->
-    (match Keeper_compaction_unit.close_open_tail messages with
-     | Error _ -> Transcript_unrecoverable
-     | Ok closure -> Transcript_closed_open_tail closure.Keeper_compaction_unit.messages)
-;;
-
-(* Commit the downgrade instead of returning a meta nobody stores. Pause with
-   an Operator_paused reason keeps [paused = true] and only replaces the
-   classification, so the existing resume path below sees an ordinary operator
-   pause and mark_resumed clears it. Reset_latch would drop the pause bit too,
-   and resume then refuses the keeper as Durable_owner_not_paused. *)
-let commit_transcript_latch_downgrade config ~keeper_name =
-  match
-    Keeper_owner_registry.apply_meta
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-      (Keeper_owner_reducer.Pause
-         { reason =
-             Keeper_latched_reason.Operator_paused
-               { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive }
-         ; updated_at = Keeper_meta_contract.now_iso ()
-         })
-  with
-  | Ok (Some _) -> Ok ()
-  | Ok None | Error _ -> Error Durable_owner_transcript_reset_required
-;;
-
-let recover_transcript_latch config ~keeper_name (meta : Keeper_meta_contract.keeper_meta)
-  =
-  let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let session_dir = Keeper_fs.keeper_session_dir config session_id in
-  match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
-  | Error _ -> Error Durable_owner_transcript_reset_required
-  | Ok (checkpoint, source_ref) ->
-    (match classify_transcript checkpoint.Agent_core.Checkpoint.messages with
-     | Transcript_unrecoverable -> Error Durable_owner_transcript_reset_required
-     | Transcript_already_dispatchable ->
-       commit_transcript_latch_downgrade config ~keeper_name
-     | Transcript_closed_open_tail messages ->
-       (match
-          Keeper_checkpoint_store.save_agent_core_if_source
-            ~session_dir
-            ~expected_source_ref:source_ref
-            { checkpoint with Agent_core.Checkpoint.messages = messages }
-        with
-        | Keeper_checkpoint_store.Not_installed _ ->
-          Error Durable_owner_transcript_reset_required
-        | Keeper_checkpoint_store.Installed _ ->
-          commit_transcript_latch_downgrade config ~keeper_name))
 ;;
 
 let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
@@ -247,10 +139,6 @@ let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-  | Keeper_lifecycle_admission.Paused
-      (Keeper_lifecycle_admission.Classified
-        Keeper_latched_reason.Transcript_corruption_reset_required) ->
-    Error Durable_owner_transcript_reset_required
   | Keeper_lifecycle_admission.Paused _ ->
     let* () = validate_identity receipt meta in
     Ok meta
@@ -263,12 +151,6 @@ let registered_owner_opt config receipt =
       receipt.Keeper_paused_work_disposition_receipt.keeper_name
   with
   | None -> Ok None
-  | Some entry when entry.meta.runtime.nonce <> receipt.expected_generation ->
-    Error
-      (Registry_owner_nonce_changed
-         { expected = receipt.expected_generation
-         ; actual = entry.meta.runtime.nonce
-         })
   | Some entry
     when not
            (Keeper_id.Trace_id.equal
@@ -355,26 +237,9 @@ let create_receipt config ~keeper_name request =
     | None -> Error Durable_meta_missing
     | Some current -> Ok current
   in
-  (* A transcript latch is a record of the transcript that was written, not a
-     claim about the one on disk now. Re-read it before honouring the latch: if
-     the checkpoint dispatches today, downgrade the classification durably and
-     continue through the ordinary resume path. An unparseable checkpoint keeps
-     the latch and this returns the same error it always did. *)
-  let* current =
-    match current.latched_reason with
-    | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
-      let* () = recover_transcript_latch config ~keeper_name current in
-      let* refreshed = read_meta config keeper_name in
-      (match refreshed with
-       | None -> Error Durable_meta_missing
-       | Some refreshed -> Ok refreshed)
-    | Some (Keeper_latched_reason.Operator_paused _)
-    | None -> Ok current
-  in
   let receipt : Keeper_paused_work_disposition_receipt.t =
     { keeper_name
     ; expected_trace_id = current.runtime.trace_id
-    ; expected_generation = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; requested_at = Time_compat.now ()
     ; operation = Keeper_paused_work_disposition_receipt.Resume_owner
@@ -433,7 +298,6 @@ let resume config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

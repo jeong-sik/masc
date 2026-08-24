@@ -21,9 +21,9 @@ function apAge(sec) {
 }
 
 const AP_RESOLVED = {
-  approved: { lbl: '승인됨', cls: 'ok',  glyph: '✓' },
-  denied:   { lbl: '거부됨', cls: 'bad', glyph: '✕' },
-  deferred: { lbl: '보류됨', cls: 'warn', glyph: '⏸' },
+  approved: { lbl: '승인됨', cls: 'ok',  glyph: '\u2713' },
+  denied:   { lbl: '거부됨', cls: 'bad', glyph: '\u2715' },
+  deferred: { lbl: '보류됨', cls: 'warn', glyph: '\u23F8' },
 };
 
 // Gate 처분 모드 — 비계층. 새 외부효과 요청의 기본 처분을 정한다.
@@ -63,7 +63,7 @@ const AP_ORIGIN = {
 
 function ApprovalCard({ a, onResolve, onOpenKeeper, onNav }) {
   const k = apKeeper(a.keeper);
-  const kind = (window.APPROVAL_KIND || {})[a.kind] || { lbl: a.kind, glyph: '◈' };
+  const kind = (window.APPROVAL_KIND || {})[a.kind] || { lbl: a.kind, glyph: '\u25C8' };
   return (
     <article className="ap-card">
       <div className="ap-rail"></div>
@@ -88,7 +88,7 @@ function ApprovalCard({ a, onResolve, onOpenKeeper, onNav }) {
           </div>
         </div>
         {a.origin && a.origin !== 'dashboard' && AP_ORIGIN[a.origin] && (
-          <div className="ap-cont">{'↩'} 해소되면 <b>{a.keeper}</b> · {AP_ORIGIN[a.origin].resume}</div>
+          <div className="ap-cont">{'\u21A9'} 해소되면 <b>{a.keeper}</b> · {AP_ORIGIN[a.origin].resume}</div>
         )}
         <div className="ap-actions">
           <button className="ap-act approve" onClick={() => onResolve(a.id, 'approved')}>승인</button>
@@ -211,7 +211,7 @@ function ApHistory({ session }) {
         {shown.map(h => {
           const k = apKeeper(h.keeper);
           const r = AP_RESOLVED[h.decision] || AP_RESOLVED.deferred;
-          const kind = (window.APPROVAL_KIND || {})[h.kind] || { lbl: h.kind, glyph: '◈' };
+          const kind = (window.APPROVAL_KIND || {})[h.kind] || { lbl: h.kind, glyph: '\u25C8' };
           const by = AP_BY[h.decided_by] || AP_BY.operator;
           return (
             <div key={h.id} className={`ap-hist-row dec-${r.cls}`}>
@@ -294,7 +294,7 @@ function ApprovalsSurface({ statusMap, onResolve, onOpenKeeper, onNav }) {
 
         {open.length === 0 && deferred.length === 0 ? (
           <div className="ap-clear">
-            <div className="ico">{'✓'}</div>
+            <div className="ico">{'\u2713'}</div>
             <h3>열린 요청이 없습니다</h3>
             <div className="ap-clear-sub">Gate 큐가 비어 있습니다 — keeper 들이 결재 대기 없이 진행 중입니다.</div>
           </div>

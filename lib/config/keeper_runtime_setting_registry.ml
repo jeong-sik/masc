@@ -470,42 +470,6 @@ let all =
       ~category:"memory"
       "Enable post-turn memory librarian extraction"
   ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"25"
-      ~consumers:[ "Keeper dashboard compaction snapshot inspector" ]
-      ~category:"dashboard"
-      "Default compaction-snapshot query item limit"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"100"
-      ~consumers:[ "Keeper dashboard compaction snapshot inspector" ]
-      ~category:"dashboard"
-      "Maximum compaction-snapshot query item limit"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"8"
-      ~consumers:[ "Keeper dashboard compaction snapshot inspector" ]
-      ~category:"dashboard"
-      "Minimum compaction manifests scanned per query"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"4"
-      ~consumers:[ "Keeper dashboard compaction snapshot inspector" ]
-      ~category:"dashboard"
-      "Requested-limit multiplier for compaction manifest scans"
-  ; setting
       ~range:(int_range ~min:1 ~max:10485760 ())
       ~env_name:"MASC_KEEPER_VISION_MAX_IMAGE_BYTES"
       ~exposure:Env_only
@@ -858,7 +822,6 @@ let schema_to_yojson () =
     ; "active_count", `Int (List.length active)
     ; "toml_count", `Int toml_count
     ; "env_only_count", `Int env_only_count
-    ; "retired_count", `Int (List.length all - List.length active)
     ; "settings", `List (List.map setting_to_yojson all)
     ]
 ;;

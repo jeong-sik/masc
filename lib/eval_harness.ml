@@ -46,7 +46,6 @@ type grader =
 (* ================================================================ *)
 
 type tool_expectation = {
-  tool_name : string;            (** Legacy diagnostic label / exact tool fallback *)
   selector : Eval_tool_selector.t;    (** Descriptor-aware selector to match *)
   required : bool;               (** Must this tool be called? *)
   max_calls : int option;        (** Max times this tool should be called *)
@@ -60,10 +59,6 @@ type tool_expectation = {
 type ownership =
   | Self_owned
   | Foreign
-
-let ownership_to_string = function
-  | Self_owned -> "self_owned"
-  | Foreign -> "foreign"
 
 type scenario = {
   id : string;                        (** Unique scenario identifier *)
@@ -394,7 +389,6 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("mean_score", `Float r.mean_score);
     ("consistency", `Float r.consistency);
     ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("num_runs", `Int (List.length r.runs));
     ("ci95_low", `Float r.ci95_low);
     ("ci95_high", `Float r.ci95_high);
     ("min_runs_met", `Bool r.min_runs_met);
@@ -501,29 +495,20 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       | Some (`List items) ->
           List.filter_map (fun te ->
             try
-              let legacy_tool =
-                match Json_util.get_string te "tool" with
-                | Some tool -> tool
-                | None -> (
-                  match Json_util.get_string te "tool_name" with
-                  | Some tool_name -> tool_name
-                  | None -> "")
-              in
+              (* [selector] is the only accepted spelling. The bare [tool] /
+                 [tool_name] strings it replaced are not read, and a selector
+                 that fails to decode is dropped rather than downgraded to a
+                 name match -- that downgrade turned a malformed selector into
+                 a silently weaker expectation. *)
               let selector =
                 match Json_util.assoc_member_opt "selector" te with
-                | Some selector_json -> (
-                    match Eval_tool_selector.of_yojson selector_json with
-                    | Ok selector -> selector
-                    | Error _ -> Eval_tool_selector.Tool_name legacy_tool)
-                | None -> Eval_tool_selector.Tool_name legacy_tool
+                | Some selector_json -> Eval_tool_selector.of_yojson selector_json
+                | None -> Error "tool_expectation requires a selector"
               in
-              let tool_name =
-                if String.trim legacy_tool = ""
-                then Eval_tool_selector.label selector
-                else legacy_tool
-              in
+              match selector with
+              | Error _ -> None
+              | Ok selector ->
               Some {
-                tool_name;
                 selector;
                 required = (match Json_util.assoc_member_opt "required" te with
                   | Some (`Bool b) -> b | _ -> false);

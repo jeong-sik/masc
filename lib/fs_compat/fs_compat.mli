@@ -1221,8 +1221,6 @@ val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
-val durable_append_failure_to_string : durable_append_failure -> string
-
 (** Render a structured durable-append failure without discarding the original
     [Unix.error] or rollback failures. *)
 val durable_append_error_to_string : durable_append_error -> string

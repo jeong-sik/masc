@@ -89,9 +89,7 @@ val request_force_json_response : Httpun.Request.t -> bool
 val force_json_response : bool
 (** Module-init cache of the [MASC_FORCE_JSON_RESPONSE] env flag (truthy
     semantics matching {!request_force_json_response}).  Forces every
-    response to plain JSON regardless of Accept negotiation.  The retired
-    [MCP_FORCE_JSON_RESPONSE] spelling is ignored with a one-time warning
-    (masc#25123 Wave 2). *)
+    response to plain JSON regardless of Accept negotiation. *)
 
 (** {1 Header builders} *)
 

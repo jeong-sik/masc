@@ -33,10 +33,6 @@ let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_lig
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
 let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
-let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
-let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
-let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
-let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt
 
 
 type operator_snapshot_publication =
@@ -160,7 +156,8 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
            ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr
            ())
-    |> with_projection_diagnostics ~surface:"mission" ~started_at ~extra:[]
+    |> Server_dashboard_http_core_cache.with_projection_diagnostics
+         ~surface:"mission" ~started_at ~extra:[]
   in
   let full_json =
     match actor with
@@ -473,7 +470,7 @@ let dashboard_shell_payload_json
       ; "config_resolution", config_resolution_json
       ; "runtime_resolution", runtime_resolution_json
       ]
-    |> with_projection_diagnostics
+    |> Server_dashboard_http_core_cache.with_projection_diagnostics
          ~surface:"shell"
          ~started_at
          ~extra:
@@ -698,7 +695,6 @@ let dashboard_shell_http_json
        ; "fallback_source", `String fallback_source
        ; "timeout_cache_key", `String cache_key
        ; "timeout_sec", `Float timeout_sec
-       ; "timeout_light", `Bool light
        ]
        @ shell_projection_trace_diagnostics cache_key)
   in

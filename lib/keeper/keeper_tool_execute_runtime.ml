@@ -179,10 +179,10 @@ let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
-let typed_input_env = function
-  | Keeper_tool_execute_typed_input.Exec { env; _ }
-  | Keeper_tool_execute_typed_input.Pipeline { env; _ } ->
-    env
+let typed_input_env
+      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  env
 ;;
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
@@ -200,22 +200,8 @@ type dispatch_bundle =
   ; cleanup : unit -> unit
   }
 
-let input_with_cwd cwd = function
-  | Keeper_tool_execute_typed_input.Exec
-      { argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
-    Keeper_tool_execute_typed_input.Exec
-      { argv
-      ; cwd = Some cwd
-      ; env
-      ; timeout_sec
-      ; stdin
-      ; stdout
-      ; stderr
-      }
-  | Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = _; env; timeout_sec } ->
-    Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = Some cwd; env; timeout_sec }
+let input_with_cwd cwd (input : Keeper_tool_execute_typed_input.execute_input) =
+  { input with Keeper_tool_execute_typed_input.cwd = Some cwd }
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -407,7 +393,26 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox input with
+        (* A Docker stage writes redirect paths as the container sees them.
+           The two roots below are what turns one of those into a path this
+           process can open, and they hold only inside the shared mount. On
+           the host the command's namespace is already this one. *)
+        let redirect_namespace =
+          match dispatch_sandbox with
+          | Masc_exec.Sandbox_target.Host ->
+            Keeper_tool_execute_typed_input.Command_filesystem
+          | Masc_exec.Sandbox_target.Docker _ ->
+            Keeper_tool_execute_typed_input.Bound_mount
+              { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+              ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
+              }
+        in
+        match
+          Keeper_tool_execute_typed_input.to_shell_ir
+            ~sandbox:dispatch_sandbox
+            ~namespace:redirect_namespace
+            input
+        with
         | Error e ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd ]
@@ -464,7 +469,6 @@ let handle_tool_execute_typed
           ; base_path = config.base_path
           ; causal_context = Option.map (fun current -> current ()) gate_context
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-          ; goal_ids = meta.active_goal_ids
           ; continuation_channel
           }
         in
@@ -779,7 +783,7 @@ let handle_tool_execute_typed
                   disposition marked the whole turn
                   Terminal_effect_failed (sticky), so a keeper probing a
                   missing path with `ls` died mid-mission — four turn
-                  deaths across the E0 campaign and the polisher pilot
+                  deaths across the E0 campaign and a pilot Keeper
                   (masc#28983). Only infra failures — sandbox dispatch,
                   secret projection, output/manifest persistence — keep
                   the failure disposition. *)

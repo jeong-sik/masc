@@ -56,8 +56,6 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
-val short_json_repr : Yojson.Safe.t -> string
 
 (** Actions an *agent* may drive. A completion verdict is not among them; a
     trusted operator or judge caller constructs its authority provenance
@@ -166,9 +164,6 @@ type task_reclaim_policy =
 
 val task_reclaim_policy_to_string : task_reclaim_policy -> string
 val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
-val task_reclaim_policy_to_yojson : task_reclaim_policy -> Yojson.Safe.t
-val task_reclaim_policy_of_yojson : Yojson.Safe.t -> (task_reclaim_policy, string) result
-
 type task_handoff_context =
   { summary : string [@default ""]
   ; reason : string option [@default None]
@@ -228,6 +223,12 @@ type task =
 val task_last_transition_at : task -> string
 
 val task_to_yojson : task -> Yojson.Safe.t
+
+(** Listing row without the task body: [id], [title], [priority], [created_at]
+    and the status fields ([status], [assignee], timestamps). [task_to_yojson]
+    is the full record. *)
+val task_compact_to_yojson : task -> Yojson.Safe.t
+
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
 type task_claim_readiness =

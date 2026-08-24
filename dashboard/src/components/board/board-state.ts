@@ -86,7 +86,6 @@ export const replyingTo = signal<string | null>(null)
 
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
-export const boardFilterMode = signal<'all' | 'mod'>('all')
 export const boardComposerMode = signal<'post' | 'mention'>('post')
 export const boardComposerDraft = signal('')
 
@@ -344,7 +343,7 @@ function visibilityAuditLabel(vis: string | null | undefined): string {
 }
 
 export function postVisibilityAuditDetails(post: BoardPost): string {
-  const scoreLabel = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const scoreLabel = `점수 ${post.votes}`
   const updatedLabel = isUpdated(post) ? '최근 갱신됨' : '원본 작성 시각 기준'
   return [
     visibilityAuditLabel(post.visibility),

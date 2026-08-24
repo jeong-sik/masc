@@ -54,18 +54,15 @@ let with_sidecar_paths prefix dir f =
     with_envs (env_names "_BINDING_STORE_PATH") (Some binding_path) (fun () ->
       with_envs (env_names "_BINDING_AUDIT_PATH") (Some audit_path) f))
 
-let test_resolve_connector_status_name_prefers_explicit_name () =
-  check (option string) "name wins and normalizes" (Some "discord")
-    (Routes.resolve_connector_status_name ~name:"  Discord  "
-       ~channel:"telegram" ())
-
-let test_resolve_connector_status_name_normalizes_legacy_channel () =
-  check (option string) "legacy channel lowercased" (Some "discord")
-    (Routes.resolve_connector_status_name ~channel:"  DISCORD  " ())
+let test_resolve_connector_status_name_trims_and_lowercases () =
+  check (option string) "name is trimmed and lowercased" (Some "discord")
+    (Routes.resolve_connector_status_name ~name:"  Discord  " ())
 
 let test_resolve_connector_status_name_ignores_blank_inputs () =
-  check (option string) "blank query params ignored" None
-    (Routes.resolve_connector_status_name ~name:"   " ~channel:"   " ())
+  check (option string) "blank name ignored" None
+    (Routes.resolve_connector_status_name ~name:"   " ());
+  check (option string) "absent name ignored" None
+    (Routes.resolve_connector_status_name ())
 
 let python_utc_iso_now () =
   let z = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -160,9 +157,8 @@ let test_slack_default_paths_resolve_under_base_path () =
         with_env "MASC_BASE_PATH_INPUT" None (fun () ->
           with_envs
             [
-              "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "SLACK_BINDING_STORE_PATH"
-            ; "MASC_SLACK_BINDING_STORE_PATH"; "SLACK_BINDING_AUDIT_PATH"
-            ; "MASC_SLACK_BINDING_AUDIT_PATH"
+              "SLACK_BINDING_STORE_PATH"; "MASC_SLACK_BINDING_STORE_PATH"
+            ; "SLACK_BINDING_AUDIT_PATH"; "MASC_SLACK_BINDING_AUDIT_PATH"
             ]
             None
             (fun () ->
@@ -259,9 +255,9 @@ let test_error_json_wire_shape () =
     (json |> U.member "error" |> U.to_string)
 
 let test_error_json_unknown_keeper_includes_name () =
-  let json = Channel_gate.error_json "unknown keeper: rondo" in
+  let json = Channel_gate.error_json "unknown keeper: beta" in
   check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
-  check string "error contains keeper name" "unknown keeper: rondo"
+  check string "error contains keeper name" "unknown keeper: beta"
     (json |> U.member "error" |> U.to_string)
 
 let () =
@@ -277,11 +273,9 @@ let () =
 
       ( "resolve_connector_status_name",
         [
-          test_case "prefers explicit name" `Quick
-            test_resolve_connector_status_name_prefers_explicit_name;
-          test_case "normalizes legacy channel" `Quick
-            test_resolve_connector_status_name_normalizes_legacy_channel;
-          test_case "ignores blank inputs" `Quick
+          test_case "trims and lowercases the name" `Quick
+            test_resolve_connector_status_name_trims_and_lowercases;
+          test_case "ignores blank and absent input" `Quick
             test_resolve_connector_status_name_ignores_blank_inputs;
         ] );
       ( "sidecar_connector_state",

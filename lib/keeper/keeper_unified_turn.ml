@@ -20,7 +20,6 @@ include Keeper_unified_turn_phase_plan
 
 type source_disposition =
   | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
 
 type turn_failure =
   { error : Agent_core.Error.t
@@ -73,10 +72,16 @@ let turn_failure_of_error
     }
 ;;
 
-let transcript_corruption error =
+let execution_boundary_of_turn_failure error =
   match Keeper_internal_error.classify_masc_internal_error error with
-  | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
-    Some detail
+  | Some
+      ( Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
+    (* Both failures are produced by MASC — the first over the transcript MASC
+       persisted, the second after host replay and before provider dispatch.
+       The shared [Agent_core.Error.Internal] carrier must not misattribute
+       either local boundary to AGENT_CORE. *)
+    Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
@@ -88,39 +93,8 @@ let transcript_corruption error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
-      | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.Gate_replay_repair_required _ )
-  | None ->
-    None
-;;
-
-let execution_boundary_of_turn_failure ~transcript_corruption error =
-  match
-    transcript_corruption,
-    Keeper_internal_error.classify_masc_internal_error error
-  with
-  | Some _, (Some _ | None) ->
-    Keeper_runtime_failure_route.Masc_execution
-  | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
-    (* This failure is produced by MASC after host replay and before provider
-       dispatch. The shared [Agent_core.Error.Internal] carrier must not
-       misattribute that local replay boundary to AGENT_CORE. *)
-    Keeper_runtime_failure_route.Masc_execution
-  | None,
-    Some
-      ( Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
-      | Keeper_internal_error.Resumable_cli_session _
-      | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Internal_unhandled_exception _
-      | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _
-      | Keeper_internal_error.Incomplete_tool_transcript _
-      | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Provider_attempt_effect_fenced _
-      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _ )
-  | None, None ->
+  | None ->
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
@@ -193,8 +167,6 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _ ->
@@ -283,8 +255,6 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Schedule_due _
          | Keeper_event_queue.Connector_attention _
          | Keeper_event_queue.Manual_compaction_requested
-         | Keeper_event_queue.Goal_assigned _
-         | Keeper_event_queue.Goal_reconciliation_ready _
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _ -> false)
@@ -411,7 +381,6 @@ let run_keeper_cycle
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
-      ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
@@ -474,7 +443,6 @@ let run_keeper_cycle
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
     ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; manifest_generation = Some generation
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }
   in
@@ -519,7 +487,6 @@ let run_keeper_cycle
           [
             ( "channel",
               `String (Keeper_world_observation.channel_to_string channel) );
-            ("usage_total_turns", `Int meta.runtime.usage.total_turns);
           ])
       Keeper_runtime_manifest.Turn_started
   in
@@ -619,7 +586,6 @@ let run_keeper_cycle
             record_pre_dispatch_terminal_observation
               ~config
               ~meta
-              ~generation
               ~runtime_id:effective_runtime_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
@@ -672,8 +638,7 @@ let run_keeper_cycle
               ~runtime_id:initial_execution.runtime_id
               ~max_context:initial_execution.max_context
               ~effective_budget:initial_execution.max_context_resolution.effective_budget
-              ~temperature:initial_execution.temperature
-              ~generation;
+              ~temperature:initial_execution.temperature;
             let turn_id = keeper_turn_id in
             let (_ : Keeper_turn_attempt_observer.start_observation) =
               Keeper_turn_attempt_observer.record_turn_start
@@ -701,7 +666,18 @@ let run_keeper_cycle
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
                let active_goal_summaries =
-                 Keeper_unified_prompt.active_goal_summaries ~config ~meta
+                 Keeper_unified_prompt.active_goal_summaries_of_store ~config
+               in
+               (* The briefing is pinned, so it is bounded here rather than
+                  left to the model input projection, which can only cut the
+                  conversation window. Sized from the runtime's own declared
+                  input ceiling: a runtime that declares none gets no bound,
+                  the same answer its projection gives it. Rotation to a larger
+                  lane only makes this conservative. *)
+               let context_budget_bytes =
+                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
+                 |> Option.map (fun cap ->
+                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
@@ -711,6 +687,7 @@ let run_keeper_cycle
                    ~turn_decision
                    ~current_task
                    ~active_goal_summaries
+                   ?context_budget_bytes
                    ~observation
                    ()
                in
@@ -729,7 +706,7 @@ let run_keeper_cycle
                    ~masc_root
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.nonce ()
+                   ()
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
@@ -886,7 +863,6 @@ let run_keeper_cycle
                            ; event_bus
                            ; event_bus_integrity_error_snapshot
                            ; tool_completed_count_snapshot
-                           ; generation
                            ; keeper_turn_id
                            ; meta
                            ; turn_ctx_cell
@@ -1076,6 +1052,7 @@ let run_keeper_cycle
                   in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
+                    ~category:Log.Turn
                     "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
@@ -1166,30 +1143,23 @@ let run_keeper_cycle
                      final execution identity, and record typed failure plus
                      telemetry here. Exhausted failures remain visible without
                      dispatching a second LLM call. *)
-                  let transcript_corruption = transcript_corruption err in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:
-                        (execution_boundary_of_turn_failure
-                           ~transcript_corruption
-                           err)
+                      ~boundary:(execution_boundary_of_turn_failure err)
                       err
                   in
-                  let source_disposition, turn_state =
-                    match transcript_corruption with
-                    | Some detail ->
-                      Pause_after_transcript_corruption { detail }, turn_state
-                    | None ->
-                      (* Capacity failures (context overflow, request-body
-                         caps, serving-input rejection) follow the ordinary
-                         typed failure route. The automatic overflow-compaction
-                         recovery that used to branch here was removed
-                         (#26546) because it never produced a committed
-                         compaction on record. #26545 bounds conversation
-                         history only; whole-request provider fit is tracked
-                         separately in #26551. *)
-                      Follow_failure_route, turn_state
-                  in
+                  (* Every failure follows the ordinary typed route, including
+                     an incomplete tool transcript: a past structural defect is
+                     evidence, not a scheduling gate. Boot-time
+                     [Keeper_transcript_tail_recovery] closes the open cycles a
+                     process death leaves behind. Capacity failures (context
+                     overflow, request-body caps, serving-input rejection) also
+                     route here; the automatic overflow-compaction recovery
+                     that used to branch was removed (#26546) because it never
+                     produced a committed compaction on record. #26545 bounds
+                     conversation history only; whole-request provider fit is
+                     tracked separately in #26551. *)
+                  let source_disposition = Follow_failure_route in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
@@ -1297,7 +1267,6 @@ let run_keeper_cycle
     Keeper_unified_turn_phase_gate.decide_and_record
       ~config
       ~meta
-      ~generation
       ~keeper_turn_id
       ~append_phase_gate_decision:append_phase_gate_decision_for_gate
       ~turn_state

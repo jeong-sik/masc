@@ -27,7 +27,7 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f =
+let with_seeded_owner ?(registered = true) ?latched_reason ~paused f =
   let base_path = Filename.temp_dir "keeper-paused-cancel-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
@@ -54,7 +54,6 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          { meta with
            paused
          ; latched_reason
-         ; runtime = { meta.runtime with nonce = generation }
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
@@ -97,12 +96,11 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
        f config keeper_name source)
 ;;
 
-let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
+let with_pending_lane ?registered ?latched_reason ~paused f =
   with_seeded_owner
     ?registered
     ?latched_reason
     ~paused
-    ~generation
     (fun config keeper_name source ->
        let source_incarnation =
          Persistence.load_state_result
@@ -117,7 +115,6 @@ let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
        let request : Transaction.pending_request =
          { source
          ; source_incarnation
-         ; owner_nonce = generation
          ; operator_operation_id = "operator-pending-cancel-1"
          ; reason = "operator rejected exact pending paused work"
          }
@@ -162,7 +159,6 @@ let test_pending_cancellation_commits_exact_remove () =
   with_pending_lane
     ~registered:false
     ~paused:true
-    ~generation:16
     (fun config keeper_name request ->
        let first =
          Transaction.cancel_pending config ~keeper_name request
@@ -191,7 +187,6 @@ let test_pending_cancellation_busy_has_zero_mutation () =
   with_pending_lane
     ~registered:false
     ~paused:true
-    ~generation:17
     (fun config keeper_name request ->
        let base_path = config.Workspace.base_path in
        (match
@@ -221,7 +216,6 @@ let test_unrelated_enqueue_preserves_pending_incarnation () =
   with_pending_lane
     ~registered:false
     ~paused:true
-    ~generation:18
     (fun config keeper_name request ->
        let unrelated : Queue.stimulus =
          { post_id = "unrelated-cancellation-source"
@@ -267,7 +261,6 @@ let test_reinserted_source_rejects_old_pending_incarnation () =
   with_pending_lane
     ~registered:false
     ~paused:true
-    ~generation:19
     (fun config keeper_name request ->
        let base_path = config.Workspace.base_path in
        let old_selection : State.pending_selection =
@@ -302,15 +295,13 @@ let test_reinserted_source_rejects_old_pending_incarnation () =
          (Queue.length (State.pending state)))
 ;;
 
-let resume_request generation operation_id : Resume_transaction.request =
-  { owner_nonce = generation
-  ; operator_operation_id = operation_id
-  }
+let resume_request operation_id : Resume_transaction.request =
+  { operator_operation_id = operation_id }
 ;;
 
 let test_resume_owner_commits_receipt_and_preserves_pending () =
-  with_seeded_owner ~paused:true ~generation:21 (fun config keeper_name source ->
-    let request = resume_request 21 "operator-resume-1" in
+  with_seeded_owner ~paused:true (fun config keeper_name source ->
+    let request = resume_request "operator-resume-1" in
     let first =
       Resume_transaction.resume config ~keeper_name request
       |> Result.map_error Resume_transaction.error_to_string
@@ -380,12 +371,7 @@ let test_resume_owner_commits_receipt_and_preserves_pending () =
      | Resume_transaction.Already_committed -> ()
      | Resume_transaction.Committed ->
        Alcotest.fail "Resume_owner replay created a second receipt");
-    let conflicting = { request with owner_nonce = 20 } in
-    (match Resume_transaction.resume config ~keeper_name conflicting with
-     | Error { Resume_transaction.cause = Resume_transaction.Receipt_conflict _; _ } -> ()
-     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
-     | Ok _ -> Alcotest.fail "Resume_owner operation ID accepted a different request");
-    let second_operation = resume_request 21 "operator-resume-2" in
+    let second_operation = resume_request "operator-resume-2" in
     (match Resume_transaction.resume config ~keeper_name second_operation with
      | Error
          { Resume_transaction.cause = Resume_transaction.Durable_owner_not_paused
@@ -405,8 +391,8 @@ let test_resume_owner_commits_receipt_and_preserves_pending () =
 ;;
 
 let test_resume_owner_completes_prepared_receipt_projection () =
-  with_seeded_owner ~paused:true ~generation:22 (fun config keeper_name _source ->
-    let request = resume_request 22 "operator-resume-prepared" in
+  with_seeded_owner ~paused:true (fun config keeper_name _source ->
+    let request = resume_request "operator-resume-prepared" in
     let durable =
       Keeper_meta_store.read_meta config keeper_name
       |> require_ok "read prepared Resume_owner durable owner"
@@ -415,7 +401,6 @@ let test_resume_owner_completes_prepared_receipt_projection () =
     let prepared : Disposition_receipt.t =
       { keeper_name
       ; expected_trace_id = durable.runtime.trace_id
-      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 5.0
       ; operation = Disposition_receipt.Resume_owner
@@ -486,37 +471,12 @@ let test_resume_owner_completes_prepared_receipt_projection () =
     Alcotest.(check bool) "prepared receipt clears durable pause" false resumed.paused)
 ;;
 
-let test_resume_owner_rejects_stale_generation_without_receipt () =
-  with_seeded_owner ~paused:true ~generation:23 (fun config keeper_name _source ->
-    let request = resume_request 22 "operator-resume-stale" in
-    (match Resume_transaction.resume config ~keeper_name request with
-     | Error
-         { Resume_transaction.cause =
-             Resume_transaction.Durable_owner_nonce_changed
-               { expected = 22; actual = 23 }
-         ; reservation_release = Some release
-         } ->
-       check_resume_released release
-     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
-     | Ok _ -> Alcotest.fail "stale Resume_owner generation committed");
-    match
-      Disposition_receipt.load
-        config
-        ~keeper_name
-        ~operator_operation_id:request.operator_operation_id
-    with
-    | Ok None -> ()
-    | Ok (Some _) -> Alcotest.fail "stale Resume_owner persisted a receipt"
-    | Error detail -> Alcotest.fail detail)
-;;
-
 let test_resume_owner_commits_for_unregistered_durable_lane () =
   with_seeded_owner
     ~registered:false
     ~paused:true
-    ~generation:25
     (fun config keeper_name source ->
-       let request = resume_request 25 "operator-resume-unregistered" in
+       let request = resume_request "operator-resume-unregistered" in
        let outcome =
          Resume_transaction.resume config ~keeper_name request
          |> Result.map_error Resume_transaction.error_to_string
@@ -560,104 +520,6 @@ let test_resume_owner_commits_for_unregistered_durable_lane () =
    transcript latch; only one leaves the keeper in a state resume accepts.
    Reset_latch drops the pause bit too, and resume then refuses the keeper as
    Durable_owner_not_paused, so the caller trades one refusal for another. *)
-let test_pause_downgrade_keeps_the_keeper_resumable () =
-  with_seeded_owner
-    ~registered:false
-    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
-    ~paused:true
-    ~generation:31
-    (fun config keeper_name _source ->
-       match
-         Keeper_owner_registry.apply_meta
-           ~base_path:config.Workspace.base_path
-           ~keeper_name
-           (Keeper_owner_reducer.Pause
-              { reason =
-                  Keeper_latched_reason.Operator_paused
-                    { operator_actor =
-                        Keeper_latched_reason.operator_actor_grpc_directive
-                    }
-              ; updated_at = Keeper_meta_contract.now_iso ()
-              })
-       with
-       | Ok (Some meta) ->
-         Alcotest.(check bool) "still paused" true meta.Keeper_meta_contract.paused;
-         (match meta.Keeper_meta_contract.latched_reason with
-          | Some (Keeper_latched_reason.Operator_paused _) -> ()
-          | _ -> Alcotest.fail "latch must read as an operator pause after downgrade");
-         (match
-            Keeper_lifecycle_admission.state
-              ~paused:meta.Keeper_meta_contract.paused
-              ~latched_reason:meta.Keeper_meta_contract.latched_reason
-          with
-          | Keeper_lifecycle_admission.Paused
-              (Keeper_lifecycle_admission.Classified
-                Keeper_latched_reason.Transcript_corruption_reset_required) ->
-            Alcotest.fail "resume would still refuse this keeper"
-          | Keeper_lifecycle_admission.Paused _ -> ()
-          | _ -> Alcotest.fail "downgrade must leave the keeper paused")
-       | Ok None -> Alcotest.fail "owner metadata missing"
-       | Error _ -> Alcotest.fail "downgrade command rejected")
-
-let test_reset_latch_would_make_resume_refuse () =
-  with_seeded_owner
-    ~registered:false
-    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
-    ~paused:true
-    ~generation:32
-    (fun config keeper_name _source ->
-       match
-         Keeper_owner_registry.apply_meta
-           ~base_path:config.Workspace.base_path
-           ~keeper_name
-           (Keeper_owner_reducer.Reset_latch
-              { updated_at = Keeper_meta_contract.now_iso () })
-       with
-       | Ok (Some meta) ->
-         Alcotest.(check bool)
-           "pause bit dropped"
-           false
-           meta.Keeper_meta_contract.paused;
-         (match
-            Keeper_lifecycle_admission.state
-              ~paused:meta.Keeper_meta_contract.paused
-              ~latched_reason:meta.Keeper_meta_contract.latched_reason
-          with
-          | Keeper_lifecycle_admission.Active -> ()
-          | _ -> Alcotest.fail "Reset_latch must leave the keeper active")
-       | Ok None -> Alcotest.fail "owner metadata missing"
-       | Error _ -> Alcotest.fail "reset command rejected")
-
-let test_resume_owner_rejects_transcript_reset_without_receipt () =
-  with_seeded_owner
-    ~registered:false
-    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
-    ~paused:true
-    ~generation:24
-    (fun config keeper_name _source ->
-       let request = resume_request 24 "operator-resume-corrupted" in
-       (match Resume_transaction.resume config ~keeper_name request with
-        | Error
-            { Resume_transaction.cause =
-                Resume_transaction.Durable_owner_transcript_reset_required
-            ; reservation_release = Some release
-            } ->
-          check_resume_released release
-        | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
-        | Ok _ ->
-          Alcotest.fail "Resume_owner replayed a structurally corrupted checkpoint");
-       match
-         Disposition_receipt.load
-           config
-           ~keeper_name
-           ~operator_operation_id:request.operator_operation_id
-       with
-       | Ok None -> ()
-       | Ok (Some _) ->
-         Alcotest.fail "reset-required Resume_owner persisted a receipt"
-       | Error detail -> Alcotest.fail detail)
-;;
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -699,25 +561,10 @@ let () =
             `Quick
             test_resume_owner_completes_prepared_receipt_projection
         ; Alcotest.test_case
-            "Resume_owner rejects stale generation without receipt"
-            `Quick
-            test_resume_owner_rejects_stale_generation_without_receipt
-        ; Alcotest.test_case
             "Resume_owner commits for unregistered durable lane"
             `Quick
             test_resume_owner_commits_for_unregistered_durable_lane
-        ; Alcotest.test_case
-            "Resume_owner rejects transcript reset without receipt"
-            `Quick
-            test_resume_owner_rejects_transcript_reset_without_receipt
-        ; Alcotest.test_case
-            "Pause downgrade keeps the keeper resumable"
-            `Quick
-            test_pause_downgrade_keeps_the_keeper_resumable
-        ; Alcotest.test_case
-            "Reset_latch would make resume refuse"
-            `Quick
-            test_reset_latch_would_make_resume_refuse
+
         ] )
     ]
 ;;

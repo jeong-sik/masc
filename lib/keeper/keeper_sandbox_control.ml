@@ -21,7 +21,6 @@ let stop_scope_to_string = Contract.stop_scope_to_string
 let parse_stop_scope = Contract.parse_stop_scope
 let managed_kind = stop_scope_to_string Stop_managed
 let turn_kind = stop_scope_to_string Stop_turn
-let all_kind = stop_scope_to_string Stop_all
 
 let now_ms () =
   int_of_float (Unix.gettimeofday () *. 1000.0)
@@ -244,10 +243,6 @@ let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
     ~base_path:config.base_path
     ~timeout_sec
     ()
-
-let stop_managed_containers ?keeper_name ~(config : Workspace.config)
-    ~(timeout_sec : float) () =
-  stop_containers ?keeper_name ~scope:Stop_managed ~config ~timeout_sec ()
 
 let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
   Keeper_sandbox_runtime.cleanup_stale_containers
@@ -528,16 +523,16 @@ module For_testing = struct
   ;;
 end
 
-let preflight_status_json ~timeout_sec =
+let preflight_status ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()
-  |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
 
-let preflight_ok = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "ok" fields with
-      | Some (`Bool value) -> Some value
-      | _ -> None)
-  | _ -> None
+(* [docker_preflight] already answers [ok] as a bool. Serialising the record
+   and reading the field back out of an [`Assoc] meant a typo in the key, or a
+   rename upstream, produced [None] — indistinguishable from "the probe did
+   not run" — instead of a compile error. Keep the record typed to the point
+   where the payload is built. *)
+let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
+  Option.map (fun (p : Keeper_sandbox_runtime.docker_preflight) -> p.ok) preflight
 
 let container_mode (meta : keeper_meta) containers =
   if meta.sandbox_profile = Local then
@@ -605,7 +600,7 @@ let live_status_json ?(include_preflight = true)
     | Some cached -> cached
     | None ->
       if include_preflight && meta.sandbox_profile = Docker then
-        preflight_status_json ~timeout_sec
+        preflight_status ~timeout_sec
       else
         None
   in
@@ -634,11 +629,15 @@ let live_status_json ?(include_preflight = true)
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
       ("effective_mode", `String (container_mode meta containers));
       ("managed_container_kind", `String managed_kind);
-      ("container_count", `Int (List.length containers));
       ("containers",
        `List (List.map Keeper_sandbox_runtime.live_container_to_yojson containers));
       ( "preflight",
-        if verbose then Json_util.option_to_yojson Fun.id preflight else `Null );
+        if verbose
+        then
+          Json_util.option_to_yojson
+            Keeper_sandbox_runtime.docker_preflight_to_yojson
+            preflight
+        else `Null );
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",

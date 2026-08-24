@@ -76,6 +76,38 @@ let get_int ~default name =
         reject_malformed_env ~name ~raw:v ~type_name:"int";
         default)
 
+(* One reading of a MASC_*_RETENTION_DAYS knob, because the value decides
+   whether files are deleted and the stores disagreed about a malformed one.
+   tool_usage_log and keeper_runtime_manifest_housekeeping kept files forever;
+   keeper_tool_call_log started pruning at its 30-day default. Both cited the
+   third in a comment as the model they followed. A single operator typo —
+   3O for 30 — therefore deleted from one store and stopped deleting from
+   another, silently (#27110).
+
+   Malformed now means the same thing everywhere: the store's declared
+   default, with the WARN [reject_malformed_env] already emits. An explicit
+   zero or negative is the one way to say "keep everything", and it means that
+   in every store. *)
+type retention =
+  | Retain_forever
+  | Prune_after_days of int
+
+let get_retention_days ~default name =
+  match raw_value_opt name with
+  | None -> default
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then default
+    else (
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some days when days > 0 -> Prune_after_days days
+      | Some _ -> Retain_forever
+      | None ->
+        reject_malformed_env ~name ~raw ~type_name:"retention days (integer)";
+        default)
+;;
+
 let get_float ~default name =
   match raw_value_opt name with
   | None -> default
@@ -552,10 +584,9 @@ let pubsub_max_messages () =
 
 (** Day-file retention for the JSONL stores under [.masc]. Default: 30.
 
-    Read by the startup prune, the periodic maintenance prune, and the
-    catch-up digest's look-back clamp. Those three decide which day files
-    are deleted and how far a digest may scan; a default that differed
-    between them would delete data one of them still expects to read.
+    Read by the startup prune and the periodic maintenance prune. Both decide
+    which day files are deleted; a default that differed between them would
+    let one prune delete files the other still expects to keep.
 
     @category Policies @ops_class operator *)
 let default_jsonl_retention_days = 30

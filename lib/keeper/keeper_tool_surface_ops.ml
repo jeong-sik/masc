@@ -35,10 +35,9 @@ type json_cache = {
   key : string option;
   value : Yojson.Safe.t option;
   expires_at : float;
-  generation : int;
 }
-let empty_json_cache ~generation = { key = None; value = None; expires_at = 0.0; generation }
-let keeper_list_cache = Atomic.make (empty_json_cache ~generation:0)
+let empty_json_cache () = { key = None; value = None; expires_at = 0.0 }
+let keeper_list_cache = Atomic.make (empty_json_cache ())
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | None -> default
@@ -68,8 +67,7 @@ let cache_ttl_seconds env_var ~default =
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
 let invalidate_json_cache cache_ref =
-  Lockfree_atomic.update cache_ref (fun current ->
-    empty_json_cache ~generation:(current.generation + 1))
+  Atomic.set cache_ref (empty_json_cache ())
 let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
 let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
@@ -85,7 +83,6 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
           key = Some key;
           value = Some value;
           expires_at = Time_compat.now () +. ttl_s;
-          generation = cache.generation;
         }
       in
       if Atomic.compare_and_set cache_ref cache next then value
@@ -97,7 +94,7 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
 
 module For_testing = struct
   let reset_keeper_list_cache () =
-    Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
+    Atomic.set keeper_list_cache (empty_json_cache ())
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_data ~key ~ttl_s compute =
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
@@ -138,7 +135,6 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
              ; trace_history =
                  Json_util.dedupe_keep_order
                    (previous_trace_id :: meta.runtime.trace_history)
-             ; generation = meta.runtime.nonce + 1
              ; updated_at = Keeper_meta_contract.now_iso ()
              })
       with
@@ -203,7 +199,6 @@ let startup_not_ready_error_data elapsed =
           (Printf.sprintf
              "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
              elapsed) )
-    ; ("retry_after_ms", `Int 3000)
     ]
 let with_keeper_startup_gate f =
   if not (Server_startup_state.snapshot ()).state_ready then begin
@@ -867,6 +862,7 @@ let handle_keeper_msg_stream_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?continuation_channel
       ctx
       message
@@ -886,6 +882,7 @@ let handle_keeper_msg_stream_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ctx

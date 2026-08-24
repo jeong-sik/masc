@@ -1,0 +1,136 @@
+type decision =
+  | Idle
+  | Wait_until of int64
+  | Render
+
+type request =
+  | Input
+  | Background
+  | Force
+
+type t
+
+val create : min_interval_ns:int64 -> unit -> t
+val request : t -> request -> unit
+val take : t -> now_ns:int64 -> decision
+val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
+val nonnegative_width : int -> int
+val keeper_context_bar_width : inner_width:int -> int
+val normalize_keeper_detail_scroll :
+  line_count:int -> content_height:int -> int -> int
+
+type overview_event_window = {
+  oew_offset : int;
+  oew_first_position : int;
+  oew_last_position : int;
+}
+
+val project_overview_event_window :
+  event_count:int -> visible_rows:int -> int -> overview_event_window
+val scroll_overview_events_older :
+  event_count:int -> visible_rows:int -> int -> int
+val scroll_overview_events_newer :
+  event_count:int -> visible_rows:int -> int -> int
+val overview_event_offset_after_prepend : retained_count:int -> int -> int
+
+module Input_wait : sig
+  type 'a poll_result =
+    | Ready of 'a
+    | Timed_out
+    | Interrupted
+
+  val await :
+    now_ns:(unit -> int64) ->
+    timeout_ns:int64 ->
+    poll:(float -> 'a poll_result) ->
+    'a option
+end
+
+module Input_shortcut : sig
+  val is_quit : message_mode:bool -> string -> bool
+  val opens_keepers : message_mode:bool -> string -> bool
+end
+
+module Viewport : sig
+  val minimum_fixed_chrome_rows : int
+  val requires_compact_frame : rows:int -> bool
+end
+
+type overview_allocation = {
+  attention_rows : int;
+  task_error_rows : int;
+  task_rows : int;
+  filler_rows : int;
+      (** Blank rows the renderer draws between the task block and the bottom
+          border. Without them a surface whose content is shorter than the
+          terminal ends partway down the screen and leaves its own footer in
+          the middle of it. *)
+}
+
+val allocate_overview :
+  terminal_rows:int ->
+  has_cluster:bool ->
+  attention_count:int ->
+  event_count:int ->
+  task_count:int ->
+  has_task_error:bool ->
+  overview_allocation
+
+type board_read_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+val allocate_board_read :
+  terminal_rows:int ->
+  body_line_count:int ->
+  comment_count:int ->
+  board_read_allocation
+
+type board_read_scroll = {
+  normalized_scroll : int;
+  body_offset : int;
+  comment_offset : int;
+}
+
+val project_board_read_scroll :
+  body_line_count:int ->
+  body_rows:int ->
+  comment_count:int ->
+  comment_rows:int ->
+  int ->
+  board_read_scroll
+
+(** {1 Keeper roster columns} *)
+
+val keeper_marker_width : int
+val keeper_status_width : int
+val keeper_flags_width : int
+val keeper_turns_width : int
+
+type keeper_columns = {
+  kcol_show_flags : bool;
+  kcol_show_runtime : bool;
+  kcol_name : int;
+  kcol_runtime : int;
+  kcol_task : int;
+}
+(** Plain-text cell budgets for one roster row, in cells. *)
+
+val allocate_keeper_columns : inner_width:int -> keeper_columns
+(** Divide the box's inner width across the roster columns. Columns drop from
+    the right as the terminal narrows; the keeper's name and its status never
+    drop. Above the minimum, slack goes to name and runtime before task. *)
+
+val keeper_columns_used_width : keeper_columns -> int
+(** Total cells the allocation occupies, separators included. Never exceeds the
+    [inner_width] it was allocated for, and equals it once that width admits
+    the minimum row. *)
+
+module Terminal_size_cache : sig
+  type t
+
+  val create : fallback:int * int -> t
+  val invalidate : t -> unit
+  val get : t -> probe:(unit -> (int * int) option) -> int * int
+end

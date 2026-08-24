@@ -47,7 +47,6 @@ let test_round_trip_preserves_exact_evidence () =
     registry
     ~run_id:"run-1"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
@@ -77,7 +76,6 @@ let test_completion_without_slot_receipt_writes_explicit_null () =
     registry
     ~run_id:"run-no-receipt"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -108,7 +106,6 @@ let test_missing_selected_slot_is_not_replayed () =
     registry
     ~run_id:"legacy-run"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -146,13 +143,133 @@ let test_missing_selected_slot_is_not_replayed () =
   remove_if_exists path
 ;;
 
+(* #29277. A hard cut leaves rows carrying a field no current decoder reads.
+   Such a row only leaves the log through compaction, and [replay] declines to
+   compact while one is present — so the store keeps it, and the retention
+   bound stops applying to that store. Live evidence on 2026-08-23: 2 000 rows
+   in [exact-lane-runs-v4.jsonl] surviving every boot, 36 MB serving zero
+   readable runs. This pins that the deployment cut is the way out. *)
+let test_hard_cut_artifact_does_not_poison_compaction_forever () =
+  let path = Filename.temp_file "exact-lane-hard-cut-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"live-run"
+    ~lane:R.Board_attention
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"live-run"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let live_lines =
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  (* A registration written before the field was cut, same shape the live
+     store held. *)
+  let artifact =
+    match Yojson.Safe.from_string (List.nth live_lines 0) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "id"
+              then name, `String "hard-cut-run"
+              else if String.equal name "registration"
+              then (
+                match value with
+                | `Assoc registration ->
+                  name, `Assoc (("subject_id", `String "s-1") :: registration)
+                | _ -> fail "registration event must carry an object payload")
+              else name, value)
+           fields)
+    | _ -> fail "registration event must be an object"
+  in
+  Fs_compat.save_file
+    path
+    (String.concat "\n" (live_lines @ [ Yojson.Safe.to_string artifact; "" ]));
+  let replayed = R.replay path in
+  check
+    (option string)
+    "the readable run still replays"
+    (Some "succeeded")
+    (R.get replayed ~run_id:"live-run"
+     |> Option.map (fun run -> R.status_label run.R.status));
+  let after_replay : Run_registry_core.cut_report =
+    R.cut_replay_log ~execute:false path
+  in
+  check int "replay left the unreadable row on disk" 1 after_replay.malformed_lines;
+  let cut : Run_registry_core.cut_report = R.cut_replay_log ~execute:true path in
+  check bool "the cut rewrote the store" true cut.rewritten;
+  check int "the cut dropped the unreadable row" 1 cut.malformed_lines;
+  let after_cut : Run_registry_core.cut_report =
+    R.cut_replay_log ~execute:false path
+  in
+  check int "nothing unreadable is left" 0 after_cut.malformed_lines;
+  check int "the readable run survived the cut" 1 after_cut.retained_entries;
+  check
+    (option string)
+    "and still replays"
+    (Some "succeeded")
+    (R.replay path
+     |> R.get ~run_id:"live-run"
+     |> Option.map (fun run -> R.status_label run.R.status));
+  remove_if_exists path
+;;
+
+(* The unterminated-tail guard is the one the cut keeps: a partial read must
+   not become a truncating rewrite. *)
+let test_cut_refuses_a_store_with_an_unterminated_tail () =
+  let path = Filename.temp_file "exact-lane-torn-tail-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"live-run"
+    ~lane:R.Board_attention
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"live-run"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let content = Fs_compat.load_file path in
+  Fs_compat.save_file path (content ^ "{\"event\":\"reg");
+  let cut : Run_registry_core.cut_report = R.cut_replay_log ~execute:true path in
+  check bool "the cut left the store alone" false cut.rewritten;
+  (* A caller that only reads [rewritten] cannot tell "nothing needed cutting"
+     from "the cut declined". [reached_end] is what separates them, and the
+     dry run reports it too — otherwise a deploy step would call this a
+     success. *)
+  check bool "and says why" false cut.reached_end;
+  check
+    bool
+    "the dry run predicts the refusal"
+    false
+    (R.cut_replay_log ~execute:false path).reached_end;
+  check
+    string
+    "the bytes are untouched"
+    (content ^ "{\"event\":\"reg")
+    (Fs_compat.load_file path);
+  remove_if_exists path
+;;
+
 let test_blank_selected_slot_is_rejected_before_write () =
   let registry = R.create () in
   R.register_running
     registry
     ~run_id:"blank-slot"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input `Null);
@@ -179,7 +296,6 @@ let test_running_shape_has_no_invented_completion () =
     registry
     ~run_id:"run-live"
     ~lane:R.Board_attention
-    ~subject_id:"candidate-1"
     ~actor:"keeper-a"
     ~started_at:20.0
     ~input:(R.Exact_input `Null);
@@ -193,7 +309,42 @@ let test_running_shape_has_no_invented_completion () =
 ;;
 
 let test_current_storage_generation () =
-  check string "current store file" "exact-lane-runs-v4.jsonl" R.storage_filename
+  check string "current store file" "exact-lane-runs-v5.jsonl" R.storage_filename
+;;
+
+(* The registration decoder is exact-field, so removing a field from it makes
+   every row written with that field unreadable, and the store then never
+   compacts again (#29598 did this to v4: 2,000 of 4,090 live rows skipped on
+   every boot). A removed field has to ride on the store version. This test
+   holds the two together: the fixture below is a full v5 registration row, so
+   a decoder that stops accepting one of its keys fails here, and the fix is
+   to change the fixture and [storage_filename] in the same commit. *)
+let v5_registration_row =
+  {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
+
+(* The same row as v4 wrote it: [subject_id] inside the registration. *)
+let v4_registration_row =
+  {|{"event":"register","id":"exact-board-attention-pin","started_at":30.0,"registration":{"lane":"board_attention_exact","subject_id":"s","actor":"keeper-a","input":{"kind":"exact","payload":{"candidate_id":"c"}}}}|}
+
+let test_store_version_pins_the_registration_shape () =
+  (* Reads the decoder's verdict on the row, not what survives replay. A
+     registration that decodes is still dropped from the replayed registry —
+     running exact-output fibers do not outlive a restart — so "does the run
+     come back" cannot tell an accepted row from a refused one. [cut_replay_log]
+     reports what the same decoder read, and counts what it refused. *)
+  let malformed_lines row =
+    let path = Filename.temp_file "exact-lane-shape-" ".jsonl" in
+    Fs_compat.save_file path (row ^ "\n");
+    let report = R.cut_replay_log ~execute:false path in
+    remove_if_exists path;
+    report.Run_registry_core.lines_read, report.Run_registry_core.malformed_lines
+  in
+  check string "the row shape below belongs to this store version"
+    "exact-lane-runs-v5.jsonl" R.storage_filename;
+  check (pair int int) "a v5 registration row is read and accepted"
+    (1, 0) (malformed_lines v5_registration_row);
+  check (pair int int) "the field v4 carried and v5 removed is rejected, not ignored"
+    (1, 1) (malformed_lines v4_registration_row)
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which
@@ -224,7 +375,6 @@ let test_completed_runs_are_bounded () =
       registry
       ~run_id
       ~lane:R.Librarian
-      ~subject_id:run_id
       ~actor:"keeper-a"
       ~started_at:(float_of_int index)
       ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
@@ -265,7 +415,6 @@ let test_exact_history_is_not_pruned_across_lanes () =
       registry
       ~run_id
       ~lane
-      ~subject_id:run_id
       ~actor:"keeper-a"
       ~started_at:(float_of_int index)
       ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
@@ -291,7 +440,6 @@ let test_failed_durable_registration_is_not_published_in_memory () =
         registry
         ~run_id:"not-published"
         ~lane:R.Librarian
-        ~subject_id:"trace"
         ~actor:"keeper-a"
         ~started_at:1.0
         ~input:(R.Exact_input `Null);
@@ -312,7 +460,6 @@ let test_failed_durable_completion_is_explicitly_visible () =
     registry
     ~run_id:"completion-not-published"
     ~lane:R.Librarian
-    ~subject_id:"trace"
     ~actor:"keeper-a"
     ~started_at:1.0
     ~input:(R.Exact_input `Null);
@@ -417,7 +564,6 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
              registry
              ~run_id:"writer-blocked-on-durable-lock"
              ~lane:R.Compaction
-             ~subject_id:"trace"
              ~actor:"keeper-a"
              ~started_at:1.0
              ~input:(R.Exact_input `Null));
@@ -443,7 +589,6 @@ let test_pages_are_a_total_order_over_equal_timestamps () =
          registry
          ~run_id
          ~lane:R.Librarian
-         ~subject_id:"trace-1"
          ~actor:"keeper-a"
          ~started_at:10.0
          ~input:(R.Exact_input (`Assoc [ "n", `Int 1 ])))
@@ -474,7 +619,6 @@ let test_summary_carries_no_payload () =
     registry
     ~run_id:"run-1"
     ~lane:R.Librarian
-    ~subject_id:"trace-1"
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "conversation_history", `String "…megabytes…" ]));
@@ -510,8 +654,14 @@ let () =
             test_missing_selected_slot_is_not_replayed
         ; test_case "blank selected slot is rejected before write" `Quick
             test_blank_selected_slot_is_rejected_before_write
+        ; test_case "hard-cut artifact does not poison compaction forever" `Quick
+            test_hard_cut_artifact_does_not_poison_compaction_forever
+        ; test_case "cut refuses a store with an unterminated tail" `Quick
+            test_cut_refuses_a_store_with_an_unterminated_tail
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
         ; test_case "current storage generation" `Quick test_current_storage_generation
+        ; test_case "store version pins the registration shape" `Quick
+            test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
         ; test_case "retention is derived from the monitor page size" `Quick

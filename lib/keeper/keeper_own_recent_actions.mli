@@ -16,8 +16,10 @@ type outcome =
 type call =
   { tool : string
   ; input : string
-      (** The argument object verbatim. Not truncated: it is the thing the
-          keeper has to read to recognise the call it got refused for. *)
+      (** The argument object verbatim, never truncated. The prompt renders it
+          on a refusal only: recognising the call it got refused for is what
+          the keeper needs it for, and on a success the fact that the call
+          landed is the whole of what this section is there to say. *)
   ; outcome : outcome
   }
 

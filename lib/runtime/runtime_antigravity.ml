@@ -88,8 +88,8 @@ type usage =
 
 (* Nothing in this tree branches on [permission_mode]: the only read of the
    field is its own parse site. It was closed, and the one member the CLI added
-   ended a turn, parked the official-client session, and stopped the keeper --
-   taskmaster, 110 turns in one hour (#28008). Adding that member leaves the
+   ended a turn, parked the official-client session, and stopped a live Keeper
+   after 110 turns in one hour (#28008). Adding that member leaves the
    next one to do it again, so an unseen mode is carried rather than rejected.
    [step_type] took the same route in #28027. *)
 type permission_mode =
@@ -106,6 +106,7 @@ type turn_result =
   ; permission_mode : permission_mode
   ; tool_steps : int
   ; tool_errors : int
+  ; trajectory_error : string option
   ; resumed : bool
   ; wall_duration_s : float
   }
@@ -277,7 +278,7 @@ let parse_step_state stage value =
    we have not seen carries no decision we could get wrong -- but rejecting it
    ends the turn and parks the session, which blocks every later turn for that
    Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
-   taskmaster stopped (#28027).
+   the affected Keeper stopped (#28027).
 
    #28029 opened this with [Unrecognized]; #28037 closed it again and named
    [System_message] instead. Naming the member that stalled a keeper leaves the
@@ -636,7 +637,11 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        else (
          (match status with
           | Success -> emit_stream_event on_stream_event (Text_delta response)
-          | Result_error -> ());
+          | Result_error ->
+            if Agent_core.Response_shape.has_deliverable_content
+                 (Agent_core.Response_shape.summarize_blocks
+                    [ Agent_core.Types.Text response ])
+            then emit_stream_event on_stream_event (Text_delta response));
          Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 
@@ -819,6 +824,34 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
       ; permission_mode
       ; tool_steps = state.tool_steps
       ; tool_errors = state.tool_errors
+      ; trajectory_error = None
+      ; resumed =
+          (match conversation_mode with
+           | Start -> false
+           | Resume _ -> true)
+      ; wall_duration_s
+      }
+  (* The CLI reports status=ERROR whenever any step of the trajectory
+     errored, including a tool call the model already corrected and went
+     on from. A reply was still produced, so the turn completed; the step
+     error is carried as [trajectory_error] and counted in [tool_errors]. *)
+  | _, Some (conversation_id, model, permission_mode),
+    Some (Result_error, text, error, num_turns, usage)
+    when Agent_core.Response_shape.has_deliverable_content
+           (Agent_core.Response_shape.summarize_blocks
+              [ Agent_core.Types.Text text ]) ->
+    emit_stream_event on_stream_event (Turn_finished { text });
+    Ok
+      { conversation_id
+      ; model
+      ; text
+      ; num_turns
+      ; usage
+      ; permission_mode
+      ; tool_steps = state.tool_steps
+      ; tool_errors = state.tool_errors
+      ; trajectory_error =
+          Some (match error with Some detail -> detail | None -> "status=ERROR")
       ; resumed =
           (match conversation_mode with
            | Start -> false

@@ -73,27 +73,33 @@ type attempt_record =
   ; operator_next_action : string
   }
 
-type attempt_record_decode_error =
-  | Attempt_record_not_object of string
-  | Attempt_record_invalid_field of
+(* One decode-error shape for both persisted records (desired + attempt):
+   the same field helpers produce them, and [read_record_result] renders
+   them the same way. *)
+type record_decode_error =
+  | Record_not_object of string
+  | Record_invalid_field of
       { field : string
       ; expected : string
       ; actual : string
       }
-  | Attempt_record_unknown_result of string
-  | Attempt_record_invalid_timestamp of
+  | Record_unknown_value of
+      { field : string
+      ; value : string
+      }
+  | Record_invalid_timestamp of
       { field : string
       ; value : string
       }
 
-let attempt_record_decode_error_to_string = function
-  | Attempt_record_not_object actual ->
-    Printf.sprintf "attempt record must be an object, got %s" actual
-  | Attempt_record_invalid_field { field; expected; actual } ->
+let record_decode_error_to_string = function
+  | Record_not_object actual ->
+    Printf.sprintf "record must be an object, got %s" actual
+  | Record_invalid_field { field; expected; actual } ->
     Printf.sprintf "field %S must be %s, got %s" field expected actual
-  | Attempt_record_unknown_result value ->
-    Printf.sprintf "field %S has unknown result %S" "last_attempt_result" value
-  | Attempt_record_invalid_timestamp { field; value } ->
+  | Record_unknown_value { field; value } ->
+    Printf.sprintf "field %S has unknown value %S" field value
+  | Record_invalid_timestamp { field; value } ->
     Printf.sprintf "field %S has invalid ISO-8601 timestamp %S" field value
 ;;
 
@@ -120,7 +126,6 @@ let attempt_record_json (record : attempt_record) =
   `Assoc
     [ "connector_id", `String record.connector_id
     ; "generation", `Int attempt.generation
-    ; "attempt_id", `String attempt.attempt_id
     ; "attempt_number", `Int attempt.attempt_number
     ; "last_attempt_result", `String (Attempt.result_to_string attempt.last_result)
     ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at record) )
@@ -129,35 +134,32 @@ let attempt_record_json (record : attempt_record) =
     ]
 ;;
 
-let invalid_attempt_field ~field ~expected actual =
+let invalid_field ~field ~expected actual =
   Error
-    (Attempt_record_invalid_field
+    (Record_invalid_field
        { field; expected; actual = Json_util.kind_name actual })
 ;;
 
 let required_string_field fields field =
   match List.assoc_opt field fields with
   | Some (`String value) -> Ok value
-  | Some actual -> invalid_attempt_field ~field ~expected:"string" actual
+  | Some actual -> invalid_field ~field ~expected:"string" actual
   | None ->
-    Error
-      (Attempt_record_invalid_field { field; expected = "string"; actual = "missing" })
+    Error (Record_invalid_field { field; expected = "string"; actual = "missing" })
 ;;
 
 let required_int_field fields field =
   match List.assoc_opt field fields with
   | Some (`Int value) -> Ok value
-  | Some actual -> invalid_attempt_field ~field ~expected:"integer" actual
+  | Some actual -> invalid_field ~field ~expected:"integer" actual
   | None ->
-    Error
-      (Attempt_record_invalid_field
-         { field; expected = "integer"; actual = "missing" })
+    Error (Record_invalid_field { field; expected = "integer"; actual = "missing" })
 ;;
 
 let parse_timestamp_field ~field value =
   match Types_core.parse_iso8601_opt value with
   | Some unix -> Ok unix
-  | None -> Error (Attempt_record_invalid_timestamp { field; value })
+  | None -> Error (Record_invalid_timestamp { field; value })
 ;;
 
 let optional_next_retry_unix fields =
@@ -167,7 +169,7 @@ let optional_next_retry_unix fields =
     (match parse_timestamp_field ~field:"next_retry_at" value with
      | Ok unix -> Ok (Some unix)
      | Error _ as error -> error)
-  | Some actual -> invalid_attempt_field ~field:"next_retry_at" ~expected:"string or null" actual
+  | Some actual -> invalid_field ~field:"next_retry_at" ~expected:"string or null" actual
 ;;
 
 let attempt_record_of_json_result = function
@@ -175,13 +177,15 @@ let attempt_record_of_json_result = function
     let ( let* ) = Result.bind in
     let* connector_id = required_string_field fields "connector_id" in
     let* generation = required_int_field fields "generation" in
-    let* attempt_id = required_string_field fields "attempt_id" in
     let* attempt_number = required_int_field fields "attempt_number" in
     let* last_attempt_result = required_string_field fields "last_attempt_result" in
     let* last_result =
       match Attempt.result_of_string_opt last_attempt_result with
       | Some result -> Ok result
-      | None -> Error (Attempt_record_unknown_result last_attempt_result)
+      | None ->
+        Error
+          (Record_unknown_value
+             { field = "last_attempt_result"; value = last_attempt_result })
     in
     let* next_retry_unix = optional_next_retry_unix fields in
     let* operator_next_action = required_string_field fields "operator_next_action" in
@@ -191,7 +195,6 @@ let attempt_record_of_json_result = function
       { connector_id
       ; attempt =
           { generation
-          ; attempt_id
           ; attempt_number
           ; last_result
           ; next_retry_unix
@@ -199,13 +202,7 @@ let attempt_record_of_json_result = function
           }
       ; operator_next_action
       }
-  | other -> Error (Attempt_record_not_object (Json_util.kind_name other))
-;;
-
-let attempt_record_of_json json =
-  match attempt_record_of_json_result json with
-  | Ok record -> Some record
-  | Error _ -> None
+  | other -> Error (Record_not_object (Json_util.kind_name other))
 ;;
 
 let desired_record_json (record : desired_record) =
@@ -218,25 +215,24 @@ let desired_record_json (record : desired_record) =
     ]
 ;;
 
-let desired_record_of_json = function
+let desired_record_of_json_result = function
   | `Assoc fields ->
-    (match
-       ( List.assoc_opt "connector_id" fields
-       , List.assoc_opt "desired_state" fields
-       , List.assoc_opt "generation" fields
-       , List.assoc_opt "updated_by" fields
-       , List.assoc_opt "updated_at" fields )
-     with
-     | ( Some (`String connector_id)
-       , Some (`String desired_state)
-       , Some (`Int generation)
-       , Some (`String updated_by)
-       , Some (`String updated_at) ) ->
-       desired_state_of_string desired_state
-       |> Option.map (fun desired_state ->
-         { connector_id; desired_state; generation; updated_by; updated_at })
-     | _ -> None)
-  | _ -> None
+    let ( let* ) = Result.bind in
+    let* connector_id = required_string_field fields "connector_id" in
+    let* desired_state_value = required_string_field fields "desired_state" in
+    let* desired_state =
+      match desired_state_of_string desired_state_value with
+      | Some desired_state -> Ok desired_state
+      | None ->
+        Error
+          (Record_unknown_value
+             { field = "desired_state"; value = desired_state_value })
+    in
+    let* generation = required_int_field fields "generation" in
+    let* updated_by = required_string_field fields "updated_by" in
+    let* updated_at = required_string_field fields "updated_at" in
+    Ok { connector_id; desired_state; generation; updated_by; updated_at }
+  | other -> Error (Record_not_object (Json_util.kind_name other))
 ;;
 
 let sidecar_desired_path ~base_path id =
@@ -251,55 +247,49 @@ let sidecar_attempt_path ~base_path id =
     (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
 ;;
 
-(* Silent [Sys_error _ | Yojson.Json_error _ -> None] previously collapsed
-   distinct failure modes into "no record":
+(* Three failure modes are distinct from "no record" and are returned as
+   [Error] so callers fail closed or surface corruption:
    (1) file existed at [Sys.file_exists] check but read failed (TOCTOU
        race, permission change, partial write mid-rename),
    (2) file read OK but JSON was malformed,
-   (3) JSON was syntactically valid but semantically invalid.
-   Desired-state reads remain log-only for compatibility. Attempt-state reads
-   use [read_attempt_record_result] so reconcile/status callers can fail closed
-   or surface corruption instead of treating it as absence. *)
-let read_desired_record ~base_path id =
-  let path = sidecar_desired_path ~base_path id in
-  if not (Sys.file_exists path)
-  then None
-  else (
-    try read_file path |> Yojson.Safe.from_string |> desired_record_of_json with
-    | Sys_error msg ->
-      Log.Server.warn
-        "[sidecar/desired] file_exists OK but read failed at %s: %s"
-        path
-        msg;
-      None
-    | Yojson.Json_error msg ->
-      Log.Server.warn "[sidecar/desired] malformed JSON at %s: %s" path msg;
-      None)
-;;
-
-let read_attempt_record_result ~base_path id =
-  let path = sidecar_attempt_path ~base_path id in
+   (3) JSON was syntactically valid but semantically invalid. *)
+let read_record_result ~label ~path decode =
   if not (Sys.file_exists path)
   then Ok None
   else (
     try
       let json = read_file path |> Yojson.Safe.from_string in
-      match attempt_record_of_json_result json with
+      match decode json with
       | Ok record -> Ok (Some record)
       | Error error ->
-        let detail = attempt_record_decode_error_to_string error in
-        Log.Server.warn "[sidecar/attempt] invalid persisted state at %s: %s" path detail;
-        Error (Printf.sprintf "invalid persisted attempt state at %s: %s" path detail)
+        let detail = record_decode_error_to_string error in
+        Log.Server.warn "[sidecar/%s] invalid persisted state at %s: %s" label path detail;
+        Error (Printf.sprintf "invalid persisted %s state at %s: %s" label path detail)
     with
     | Sys_error msg ->
       Log.Server.warn
-        "[sidecar/attempt] file_exists OK but read failed at %s: %s"
+        "[sidecar/%s] file_exists OK but read failed at %s: %s"
+        label
         path
         msg;
-      Error (Printf.sprintf "attempt state read failed at %s: %s" path msg)
+      Error (Printf.sprintf "%s state read failed at %s: %s" label path msg)
     | Yojson.Json_error msg ->
-      Log.Server.warn "[sidecar/attempt] malformed JSON at %s: %s" path msg;
-      Error (Printf.sprintf "malformed attempt state JSON at %s: %s" path msg))
+      Log.Server.warn "[sidecar/%s] malformed JSON at %s: %s" label path msg;
+      Error (Printf.sprintf "malformed %s state JSON at %s: %s" label path msg))
+;;
+
+let read_desired_record_result ~base_path id =
+  read_record_result
+    ~label:"desired"
+    ~path:(sidecar_desired_path ~base_path id)
+    desired_record_of_json_result
+;;
+
+let read_attempt_record_result ~base_path id =
+  read_record_result
+    ~label:"attempt"
+    ~path:(sidecar_attempt_path ~base_path id)
+    attempt_record_of_json_result
 ;;
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
@@ -338,28 +328,32 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 ;;
 
+(* A corrupt previous record is not "generation 0": the write fails closed
+   so the operator sees the corruption instead of a generation reset. *)
 let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
-  let previous = read_desired_record ~base_path id in
-  let generation =
-    match previous with
-    | Some record -> record.generation + 1
-    | None -> 1
-  in
-  let record =
-    { connector_id = id
-    ; desired_state
-    ; generation
-    ; updated_by
-    ; updated_at = Option.value updated_at ~default:(Masc_domain.now_iso ())
-    }
-  in
-  let path = sidecar_desired_path ~base_path id in
-  ensure_parent_dir path;
-  match
-    atomic_write_file ~path (Yojson.Safe.to_string (desired_record_json record) ^ "\n")
-  with
-  | Ok () -> Ok record
+  match read_desired_record_result ~base_path id with
   | Error _ as error -> error
+  | Ok previous ->
+    let generation =
+      match previous with
+      | Some record -> record.generation + 1
+      | None -> 1
+    in
+    let record =
+      { connector_id = id
+      ; desired_state
+      ; generation
+      ; updated_by
+      ; updated_at = Option.value updated_at ~default:(Masc_domain.now_iso ())
+      }
+    in
+    let path = sidecar_desired_path ~base_path id in
+    ensure_parent_dir path;
+    (match
+       atomic_write_file ~path (Yojson.Safe.to_string (desired_record_json record) ^ "\n")
+     with
+     | Ok () -> Ok record
+     | Error _ as error -> error)
 ;;
 
 let write_attempt_record ~base_path ~id record =
@@ -544,7 +538,6 @@ let attempt_fields = function
       , `String (Attempt.result_to_string attempt.attempt.last_result) )
     ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at attempt) )
     ; "operator_next_action", `String attempt.operator_next_action
-    ; "attempt_id", `String attempt.attempt.attempt_id
     ]
 ;;
 
@@ -561,7 +554,12 @@ let lifecycle_json ~base_path id status_json =
     | Ok previous_attempt -> previous_attempt, []
     | Error msg -> None, [ "attempt_read_error", `String msg ]
   in
-  match read_desired_record ~base_path id with
+  let desired, desired_error_fields =
+    match read_desired_record_result ~base_path id with
+    | Ok desired -> desired, []
+    | Error msg -> None, [ "desired_read_error", `String msg ]
+  in
+  match desired with
   | None ->
     `Assoc
       ([ "desired_state", `Null
@@ -570,7 +568,8 @@ let lifecycle_json ~base_path id status_json =
        ; "reconcile_result", `String "none"
        ]
        @ attempt_fields previous_attempt
-       @ attempt_error_fields)
+       @ attempt_error_fields
+       @ desired_error_fields)
   | Some record ->
     `Assoc
       ([ "desired_state", `String (desired_state_to_string record.desired_state)
@@ -604,7 +603,6 @@ let sidecar_status_retention_json ~base_path ~id ~status_path =
     ; "status_path", `String status_path
     ; "default_status_path"
       , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/status.json" id))
-    ; "legacy_status_path", `String (Filename.concat base_path (legacy_status_rel id))
     ; "lifecycle_desired_path", `String (sidecar_desired_path ~base_path id)
     ; "lifecycle_attempt_path", `String (sidecar_attempt_path ~base_path id)
     ; "binding_store_path"
@@ -667,9 +665,8 @@ let read_status_json ~base_path id =
     then (
       let body = read_file path in
       let parsed =
-        (* Mirror read_desired_record/read_attempt_record: surface
-           malformed JSON instead of silently collapsing to [`Null] in
-           the response payload. *)
+        (* Mirror read_record_result: surface malformed JSON instead of
+           silently collapsing to [`Null] in the response payload. *)
         try Some (Yojson.Safe.from_string body) with
         | Yojson.Json_error msg ->
           Log.Server.warn

@@ -22,9 +22,10 @@ type section = {
   empty_msg : string;
 }
 
-type scope =
-  | All
-  | Current
+type scope = Tool_schemas_specs_types.dashboard_scope =
+  | Dashboard_scope_all
+  | Dashboard_scope_current
+(** Same vocabulary the descriptor generator emits as the [scope] enum. *)
 
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
   workspace_id : string;
@@ -38,8 +39,10 @@ type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
 
 val scope_to_string : scope -> string
 val valid_scope_strings : string list
-val scope_of_string_opt : string -> scope option
 
+val scope_of_string_opt : string -> scope option
+(** Parses what the tool schema advertises. Exposed so a test can check
+    the enum and the parser against each other. *)
 (** {1 Formatting} *)
 
 val format_section : section -> string

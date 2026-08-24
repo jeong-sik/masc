@@ -52,13 +52,11 @@ const BACKEND_EMITTED: Record<string, string> = {
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_waiting_inventory_changed: '../lib/keeper/keeper_waiting_inventory_broadcast.ml',
-  keeper_compaction_snapshots_changed: '../lib/server/server_dashboard_http_keeper_api.ml',
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
   keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',
   agent_core_telemetry_sample: '../lib/runtime/dashboard_agent_core_bridge.ml',
-  namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
@@ -72,8 +70,6 @@ const BACKEND_EMITTED: Record<string, string> = {
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
   'agent_core:agent_failed':
-    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
-  'agent_core:context_compacted':
     'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
 }
 

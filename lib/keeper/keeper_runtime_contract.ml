@@ -5,160 +5,16 @@ open Keeper_types_profile
 let current_task_id_opt (meta : keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 
-let primary_goal_id_opt (meta : keeper_meta) =
-  match meta.active_goal_ids with
-  | goal_id :: _ -> Some goal_id
-  | [] -> None
-
-(* Why a goal id in [meta.active_goal_ids] does not survive the cross-check.
-   The two are different facts about the operator's declaration — an id that
-   resolves to nothing is a typo or a deleted goal, a Completed one was correct
-   when it was written — so they are carried and reported apart instead of
-   collapsing into one "invalid" count that would misname the second. *)
-type pruned_goal =
-  | Not_in_store of string
-  | Terminal_phase of string * Goal_phase.t
-
-let describe_pruned_goal = function
-  | Not_in_store goal_id -> goal_id
-  | Terminal_phase (goal_id, phase) ->
-    Printf.sprintf "%s(%s)" goal_id (Goal_phase.to_string phase)
-
-(** Cross-check [meta.active_goal_ids] against the live MASC goal store.
-
-    Returns the goal IDs that exist AND still admit self-directed progress.
-    [Goal_phase.admits_self_directed_progress] is the same predicate the world
-    observation and the unified prompt already apply, and applying it here is
-    what makes those consumers read one answer: everything else derives from
-    [meta.active_goal_ids] after this function has replaced it — the claim-scope
-    filter, [primary_goal_id_opt], and the [goal_ids] stamped on the runtime
-    contract — so a Completed goal was scope for them and absent for the prompt
-    at the same instant.
-
-    RFC-0067 §1 names this failure ("G1 is marked completed ... Claim still
-    succeeds ... but the task is now irrelevant") and closed the seconds-wide
-    observe/claim race; its §8 comparison records that the chosen approach
-    "doesn't catch goal property changes (status, phase)", which is the residue
-    this closes. Measured 2026-08-07: sangsu carried goal-request-menu-zero for
-    5,362 tool calls across 2.5 days after it completed, stamped goal-bound the
-    whole time, with an empty Active goals section in every one of those turns.
-
-    RFC-0387 stage 2: [Verifying] deliberately SURVIVES this cross-check —
-    [Goal_phase.admits_self_directed_progress] admits it, because the gate
-    holds the phase while the proof is judged out-of-band and the keeper keeps
-    working the linked tasks. Pruning a Verifying goal here would erase it from
-    the keeper's scope at exactly the moment the gate took over (review P0-1). *)
-let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  let valid_goal_ids, pruned =
-    List.partition_map
-      (fun goal_id ->
-        match Goal_store.get_goal config ~goal_id with
-        | None -> Either.Right (Not_in_store goal_id)
-        | Some { Goal_store.phase; _ } ->
-          if Goal_phase.admits_self_directed_progress phase then Either.Left goal_id
-          else Either.Right (Terminal_phase (goal_id, phase)))
-      meta.active_goal_ids
-  in
-  let report label selected =
-    match List.filter selected pruned with
-    | [] -> ()
-    | dropped ->
-      Log.Keeper.warn ~keeper_name:meta.name
-        "pruned %d %s goal_ids from active_goal_ids: %s"
-        (List.length dropped)
-        label
-        (String.concat ", " (List.map describe_pruned_goal dropped))
-  in
-  report "invalid" (function
-    | Not_in_store _ -> true
-    | Terminal_phase _ -> false);
-  report "terminal-phase" (function
-    | Terminal_phase _ -> true
-    | Not_in_store _ -> false);
-  valid_goal_ids
-
 let backend_of_meta (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> "docker"
   | Local -> "local"
-
-let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_ids (task : Masc_domain.task) =
-  let task_goal_ids =
-    (* DET-OK: an absent bucket means no recorded links; this is the same []
-       returned by the replaced [Not_found] handler. *)
-    Option.value (Hashtbl.find_opt task_goal_index task.id) ~default:[]
-  in
-  List.exists
-    (fun goal_id -> List.mem goal_id task_goal_ids)
-    goal_ids
 
 (* Closed set of claim-scope modes. Was a bare [string] (#20674): producers
    and consumers matched on free string literals, so the compiler could not
    force a consumer to handle a new mode, and a dropped producer left a dead
    [empty_goal_scope_fallback_all_tasks] arm frozen in the consumer. A closed
    variant makes every producer/consumer exhaustive at compile time. *)
-let task_is_blocked (task : Masc_domain.task) =
-  (* Enumerate every [task_status] variant so the compiler flags any new
-     constructor here. The old [_ -> false] silently extended "not blocked"
-     to any future status (e.g. a hypothetical [BlockedOnReview]) which
-     would be exactly the wrong default for a blocked-task detector.
-     RFC-0323 G-6: [AwaitingVerification] is the normal completion lane
-     (submit -> out-of-band completion-authority verdict), not a blocked state
-     — no current status is blocked; the exhaustive match stays as the decision
-     point for any future genuinely-blocked constructor. *)
-  match task.task_status with
-  | Masc_domain.AwaitingVerification _
-  | Masc_domain.Todo
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
-    false
-
-let goal_progress_json ~(config : Workspace.config) (meta : keeper_meta) =
-      let task_goal_index =
-        Workspace_goal_index.build_task_goal_index_for_config config
-      in
-      let tasks =
-        Workspace.get_tasks_safe config
-        |> List.filter
-             (task_is_linked_to_keeper_goals
-                ~task_goal_index
-                meta.active_goal_ids)
-      in
-      let linked_task_count = List.length tasks in
-      let done_task_count =
-        List.fold_left
-          (fun acc (task : Masc_domain.task) ->
-            if Masc_domain.task_status_is_done task.task_status then acc + 1 else acc)
-          0 tasks
-      in
-      let open_task_count =
-        List.fold_left
-          (fun acc (task : Masc_domain.task) ->
-            if Masc_domain.task_status_is_terminal task.task_status then acc else acc + 1)
-          0 tasks
-      in
-      let blocked_task_count =
-        List.fold_left
-          (fun acc (task : Masc_domain.task) ->
-            if task_is_blocked task then acc + 1 else acc)
-          0 tasks
-      in
-      let convergence =
-        if linked_task_count = 0 then `Null
-        else `Float (float_of_int done_task_count /. float_of_int linked_task_count)
-      in
-      `Assoc
-        [
-          ("active_goal_count", `Int (List.length meta.active_goal_ids));
-          ("linked_task_count", `Int linked_task_count);
-          ("done_task_count", `Int done_task_count);
-          ("open_task_count", `Int open_task_count);
-          ("blocked_task_count", `Int blocked_task_count);
-          ("convergence", convergence);
-        ]
-
 let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
   | _ -> `Null
@@ -282,15 +138,42 @@ let collect_observed_paths json =
   loop [] json
   |> List.sort_uniq String.compare
 
-let target_kind_of_input input target_path =
+(* Which input key the target came from, in the order they are tried. A file
+   target and a working directory are both strings and were both reported as
+   [target_kind "path"], so a consumer reading "path" as "a file" opened a
+   directory instead: on 2026-08-18, 1,094 of the day's 1,323 Execute rows
+   carried a directory that way, and the dashboard held Execute back from Code
+   links by name to work around it (#29013, #29010). *)
+type target_source =
+  | File_target
+  | Directory_target
+
+let target_candidates =
+  [ "target_path", File_target
+  ; "path", File_target
+  ; "file_path", File_target
+  ; "repo_path", Directory_target
+  ; "cwd", Directory_target
+  ]
+;;
+
+let first_target_field input =
+  List.find_map
+    (fun (name, source) ->
+       json_string_field name input |> Option.map (fun value -> value, source))
+    target_candidates
+;;
+
+let target_kind_of_input input target =
   match json_string_field "target_kind" input with
   | Some value -> value
   | None -> (
       match json_string_field "kind" input with
       | Some value -> value
       | None -> (
-          match target_path with
-          | Some _ -> "path"
+          match target with
+          | Some (_, File_target) -> "path"
+          | Some (_, Directory_target) -> "directory"
           | None -> "tool"))
 
 let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
@@ -299,23 +182,13 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
     first_string_field [ "action"; "action_key"; "op"; "cmd"; "command" ] input
     |> Option.value ~default:tool_name
   in
-  let target_path =
-    first_string_field
-      [
-        "target_path";
-        "path";
-        "file_path";
-        "repo_path";
-        "cwd";
-      ]
-      input
-  in
+  let target = first_target_field input in
   `Assoc
     [
       ("tool_name", `String tool_name);
       ("action_key", `String action_key);
-      ("target_kind", `String (target_kind_of_input input target_path));
-      ("target_path", string_opt_json target_path);
+      ("target_kind", `String (target_kind_of_input input target));
+      ("target_path", string_opt_json (Option.map fst target));
       ("sandbox_target", string_opt_json sandbox_target);
       ("observed_paths", Json_util.json_string_list (collect_observed_paths input));
       ("success", `Bool success);
@@ -324,18 +197,8 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
     ]
 
 let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
-  let goal_progress = goal_progress_json ~config meta in
-  let blocked_task_count =
-    Safe_ops.json_int "blocked_task_count" ~default:0 goal_progress
-  in
-  `Assoc
-    [
-      ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));
-      ("goal_id", Json_util.string_opt_to_json (primary_goal_id_opt meta));
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
-      ("goal_progress", goal_progress);
-      ("blocked_task_count", `Int blocked_task_count);
-    ]
+  ignore config;
+  `Assoc [ ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta)) ]
 
 let runtime_observability_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
   let sandbox_target = backend_of_meta meta in

@@ -211,6 +211,7 @@ let attempt_runtime_candidates
       true)
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
+    ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ _error -> ())
     ?quota_scope_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
@@ -308,6 +309,10 @@ let attempt_runtime_candidates
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
+         on_attempt_error
+           ~runtime_id:attempt_runtime_id
+           ~attempt:idx
+           error;
          (* A hard-quota rejection with a provider-stated reset time is an
             account-scoped fact; remember it so later lane ordering stops
             re-dispatching into the exhausted window (RFC-0370 §3.3). The
@@ -551,6 +556,7 @@ let run_named
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
+    ?approval_gate
     ?raw_trace
     ?on_event
     ?on_yield
@@ -576,6 +582,7 @@ let run_named
     ?runtime_manifest_append
     ?deferred_runtime_lane
     ?on_runtime_retry_deferred
+    ?on_runtime_attempt_error
     ?on_deferred_runtime_consumed
     ?provider_config_transform
     ?sw
@@ -739,12 +746,6 @@ let run_named
            | None -> Missing_runtime runtime_id)
         lane_candidate_ids
   in
-  let assigned_runtime_context_window =
-    Runtime.max_context_of_runtime first_candidate
-  in
-  let first_runtime_context_window =
-    Runtime.max_context_of_runtime first_runtime
-  in
   (match reroute_decision with
    | Runtime_agent.Reroute { reason; _ } ->
      emit_runtime_manifest
@@ -758,8 +759,6 @@ let run_named
                 ("routing_reason", `String reason);
                 ("assigned_runtime_id", `String first_candidate_id);
                 ("rerouted_runtime_id", `String first_runtime_id);
-                ("assigned_context_window", `Int assigned_runtime_context_window);
-                ("rerouted_context_window", `Int first_runtime_context_window);
               ]))
        Keeper_runtime_manifest.Runtime_routed
    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());
@@ -842,6 +841,7 @@ let run_named
     ~pre_tool_rejects
     ?lane_id:lane_id_opt
     ?on_retry_deferred:on_runtime_retry_deferred
+    ?on_attempt_error:on_runtime_attempt_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
@@ -1239,6 +1239,7 @@ let run_named
             ; temperature
             ; accept
             ; hooks
+            ; approval_gate
             ; raw_trace
             ; transport_resolved
             ; checkpoint_sidecar

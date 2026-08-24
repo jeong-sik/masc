@@ -18,8 +18,6 @@ type authority =
   ; trust_class : trust_class
   }
 
-type request_context = authority
-
 type trusted_identity =
   { authority : host_port
   ; scheme : scheme
@@ -36,7 +34,7 @@ type trust_policy_error =
 
 type classification =
   | Missing
-  | Single of request_context
+  | Single of authority
   | Multiple
   | Malformed
   | Untrusted
@@ -284,7 +282,7 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
             }))
 ;;
 
-let projection_context (trust_policy : trust_policy) : request_context =
+let projection_context (trust_policy : trust_policy) : authority =
   let identity, trust_class =
     match trust_policy.explicit_trusted_host with
     | Some identity -> identity, Explicit_trusted_host

@@ -12,6 +12,11 @@ type dispatch_result = {
 
 let ( let* ) = Result.bind
 
+(* Naming the descriptors keeps their numbers out of the redirect fold. *)
+let stdin_fd = 0
+let stdout_fd = 1
+let stderr_fd = 2
+
 type redirect_target =
   | Capture_stdout
   | Capture_stderr
@@ -36,32 +41,142 @@ let set_redirect_target plan fd target =
   | 2 -> Ok { plan with stderr_target = target }
   | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
 
-let redirect_plan_of_redirects redirects =
-  let step plan = function
+(* Streams the child holds a file for. [Captured] / [Inherited] mean the
+   stream stays on the capture path, so a command with no file redirect
+   produces exactly the plumbing it did before. *)
+type attachments = {
+  stdin_from : Process_eio.input_origin;
+  stdout_to : Process_eio.output_destination;
+  stderr_to : Process_eio.output_destination;
+}
+
+let no_attachments =
+  { stdin_from = Process_eio.Inherited
+  ; stdout_to = Process_eio.Captured
+  ; stderr_to = Process_eio.Captured
+  }
+
+let holds_a_source = function
+  | Process_eio.Inherited | Process_eio.From_string _ -> false
+  | Process_eio.Read_from _ -> true
+
+let holds_a_sink = function
+  | Process_eio.Captured -> false
+  | Process_eio.Written_to _ -> true
+
+let attaches_a_file { stdin_from; stdout_to; stderr_to } =
+  holds_a_source stdin_from || holds_a_sink stdout_to || holds_a_sink stderr_to
+
+(* A redirect target is written as the command sees it, so a relative one is
+   resolved against the command's own cwd. This process's cwd is not that
+   directory -- a command without one runs at the filesystem root -- so a
+   relative target with no cwd names two different files depending on who
+   resolves it, and is refused rather than resolved against a guess. *)
+(* A target already resolved for this host is opened as given. One still in
+   the command's namespace is only this filesystem when the command runs
+   here; the caller checks that before opening. *)
+let redirect_path ~cwd target =
+  match target with
+  | Redirect_scope.On_this_host { path; _ } -> Ok path
+  | Redirect_scope.In_command_namespace scope ->
+    let raw = Path_scope.raw scope in
+    if not (Filename.is_relative raw)
+    then Ok raw
+    else (
+      match cwd with
+      | Some base -> Ok (Filename.concat base raw)
+      | None ->
+        Error
+          (Printf.sprintf
+             "relative redirect target %s needs the command to declare a cwd"
+             raw))
+
+(* A stream owns one direction, so each (descriptor, mode) pair is named
+   rather than collapsed: a new mode has to be decided here, not absorbed. *)
+let sink_of_mode ~path = function
+  | Redirect_scope.Write -> Ok (Process_eio.Written_to { path; append = false })
+  | Redirect_scope.Append -> Ok (Process_eio.Written_to { path; append = true })
+  | Redirect_scope.Read ->
+      Error (Printf.sprintf "an output stream cannot be opened for reading: %s" path)
+
+let attach_file ~cwd attach ~fd ~target ~mode =
+  let* path = redirect_path ~cwd target in
+  if fd = stdin_fd
+  then
+    match mode with
+    | Redirect_scope.Read -> Ok { attach with stdin_from = Process_eio.Read_from { path } }
+    | Redirect_scope.Write | Redirect_scope.Append ->
+        Error (Printf.sprintf "stdin cannot be opened for writing: %s" path)
+  else if fd = stdout_fd
+  then Result.map (fun sink -> { attach with stdout_to = sink }) (sink_of_mode ~path mode)
+  else if fd = stderr_fd
+  then Result.map (fun sink -> { attach with stderr_to = sink }) (sink_of_mode ~path mode)
+  else
+    Error
+      (Printf.sprintf
+         "unsupported redirect fd: %d (a command owns only %d, %d and %d)"
+         fd
+         stdin_fd
+         stdout_fd
+         stderr_fd)
+
+(* A file redirect is carried out by this process, so the path has to name a
+   file on this filesystem. Running on the host, the command's namespace is
+   this one. Running in a container it is not, and only a layer that knows the
+   mounts can translate; until it has, the target says so. *)
+let target_is_openable_here ~(sandbox : Sandbox_target.t) target =
+  match sandbox, target with
+  | _, Redirect_scope.On_this_host _ -> true
+  | Sandbox_target.Host, Redirect_scope.In_command_namespace _ -> true
+  | Sandbox_target.Docker _, Redirect_scope.In_command_namespace _ -> false
+
+(* A sandbox runner hands back what the container wrote as a string: this
+   process never holds the container's pipe, so it cannot give the child a
+   descriptor. The capture happens either way, so writing it out here costs
+   nothing over returning it -- and the bytes stop travelling back to the
+   caller, which is the point of redirecting them. *)
+let deliver_capture destination text =
+  match destination with
+  | Process_eio.Captured -> Ok text
+  | Process_eio.Written_to { path; append } ->
+    (try
+       let flags =
+         [ Open_wronly; Open_creat; (if append then Open_append else Open_trunc) ]
+       in
+       let oc = open_out_gen flags 0o644 path in
+       Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc text);
+       Ok ""
+     with
+     | Sys_error message -> Error (Printf.sprintf "cannot write %s: %s" path message))
+
+let unresolved_target_message target =
+  Printf.sprintf
+    "a file redirect to %s is not carried out for a sandboxed stage: the path \
+     names a file inside the sandbox and would be opened on this host"
+    (Path_scope.raw (Redirect_scope.target_as_written target))
+
+let redirect_plan_of_redirects ~cwd redirects =
+  let step (plan, attach) = function
     | Redirect_scope.Fd_to_fd { src; dst } ->
         let* target = redirect_target_of_fd plan dst in
-        set_redirect_target plan src target
-    | Redirect_scope.File
-        { fd; target; mode = (Redirect_scope.Write | Redirect_scope.Append) }
-      when Path_scope.is_discard_sink target ->
-        set_redirect_target plan fd Drop
-    | Redirect_scope.File { fd; target; mode = Redirect_scope.Read } ->
-        Error
-          (Printf.sprintf
-             "unsupported redirect in native dispatch: fd %d read from %s"
-             fd
-             (Path_scope.raw target))
-    | Redirect_scope.File
-        { fd; target; mode = (Redirect_scope.Write | Redirect_scope.Append) } ->
-        Error
-          (Printf.sprintf
-             "unsupported redirect in native dispatch: fd %d write to %s"
-             fd
-             (Path_scope.raw target))
+        let* plan = set_redirect_target plan src target in
+        Ok (plan, attach)
+    | Redirect_scope.File { fd; target; mode } ->
+      (* Discarding output needs no file: the capture model already has a
+         value for "throw these bytes away". Discarding input does not, so
+         it goes down the attachment path and opens the device. *)
+      (match mode with
+       | Redirect_scope.Write | Redirect_scope.Append
+         when Path_scope.is_discard_sink (Redirect_scope.target_as_written target) ->
+         let* plan = set_redirect_target plan fd Drop in
+         Ok (plan, attach)
+       | Redirect_scope.Write | Redirect_scope.Append | Redirect_scope.Read ->
+         let* attach = attach_file ~cwd attach ~fd ~target ~mode in
+         Ok (plan, attach))
   in
   List.fold_left
-    (fun acc redirect -> Result.bind acc (fun plan -> step plan redirect))
-    (Ok default_redirect_plan)
+    (fun acc redirect -> Result.bind acc (fun state -> step state redirect))
+    (Ok (default_redirect_plan, no_attachments))
     redirects
 
 let add_redirected_output target text (stdout, stderr) =
@@ -131,9 +246,13 @@ let status_is_success = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
 
-let status_is_timeout = function
-  | Unix.WEXITED 124 -> true
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+let status_is_timeout status =
+  (* Process_eio decides what a timeout status is; this used to repeat its
+     number (#28651). *)
+  match Process_eio.exit_reason_of_status status with
+  | Process_eio.Timed_out -> true
+  | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
+    false
 
 let pipeline_status current stage_status =
   if status_is_success stage_status then current else stage_status
@@ -202,9 +321,89 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
   let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
   let result =
-    match redirect_plan_of_redirects s.redirects with
+    match redirect_plan_of_redirects ~cwd s.redirects with
     | Error message -> unsupported_redirect_result message
-    | Ok redirect_plan -> (
+    | Ok (redirect_plan, attachments) when attaches_a_file attachments -> (
+      match
+        List.find_opt
+          (function
+            | Redirect_scope.Fd_to_fd _ -> false
+            | Redirect_scope.File { target; _ } ->
+              not (target_is_openable_here ~sandbox:s.sandbox target))
+          s.redirects
+      with
+      | Some (Redirect_scope.File { target; _ }) ->
+        unsupported_redirect_result (unresolved_target_message target)
+      | Some (Redirect_scope.Fd_to_fd _) | None ->
+        (match s.sandbox with
+         | Docker { runner; _ } ->
+           (* stdin from a file is read here and handed to the runner as
+              bytes, for the same reason: the runner takes a string. *)
+           let stdin_for_runner =
+             match attachments.stdin_from with
+             | Process_eio.Read_from { path } ->
+               (try
+                  let ic = open_in_bin path in
+                  Some
+                    (Fun.protect
+                       ~finally:(fun () -> close_in ic)
+                       (fun () -> really_input_string ic (in_channel_length ic)))
+                with Sys_error _ -> None)
+             | Process_eio.From_string content -> Some content
+             | Process_eio.Inherited -> stdin_content
+           in
+           (match
+              runner
+                ~on_stdout_chunk:None
+                ~on_stderr_chunk:None
+                ~stdin_content:stdin_for_runner
+                ~argv
+                ~env
+                ~cwd
+            with
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+            | status, stdout, stderr ->
+              (match
+                 ( deliver_capture attachments.stdout_to stdout
+                 , deliver_capture attachments.stderr_to stderr )
+               with
+               | Error message, _ | _, Error message ->
+                 unsupported_redirect_result message
+               | Ok stdout, Ok stderr ->
+                 apply_redirect_plan redirect_plan { status; stdout; stderr }))
+         | Host ->
+        let host_env = resolve_host_env ?base_host_env s.env in
+        let stdin_from =
+          (* A declared redirect wins over the caller's piped-in bytes: a
+             pipeline stage that names its own input is not reading the
+             previous stage. *)
+          match attachments.stdin_from with
+          | Process_eio.Read_from _ as declared -> declared
+          | Process_eio.From_string _ as declared -> declared
+          | Process_eio.Inherited ->
+            (match stdin_content with
+             | Some content -> Process_eio.From_string content
+             | None -> Process_eio.Inherited)
+        in
+        (match
+           Process_eio.run_argv_with_redirects
+             ?timeout_sec
+             ?env:host_env
+             ?cwd
+             ~stdin:stdin_from
+             ~stdout:attachments.stdout_to
+             ~stderr:attachments.stderr_to
+             argv
+         with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+         | Error message -> unsupported_redirect_result message
+         | Ok (status, stdout, stderr) ->
+           apply_redirect_plan redirect_plan { status; stdout; stderr })))
+    | Ok (redirect_plan, _) -> (
       let child_on_output_chunk =
         if s.redirects = [] then on_output_chunk else None
       in
@@ -283,20 +482,39 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
 
+(* A stage's own redirections travel with it, so a pipeline that names a file
+   still runs on real process pipes. Dropping to the buffered chain instead
+   would run each stage to completion in turn, which has no backpressure: a
+   producer that only stops when its reader closes -- `yes | head -1` -- never
+   stops at all. *)
 let host_pipeline_specs ?base_host_env stages =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
         (match simple.sandbox with
-         | Host when simple.redirects = [] ->
+         | Host ->
              let argv, _env, cwd = process_spec_of_simple simple in
-             let stage : Process_eio.pipeline_stage =
-               { argv; env = resolve_host_env ?base_host_env simple.env; cwd }
-             in
-             loop (stage :: acc) rest
-         | _unsupported -> None)
-        [@warning "-4"]
-    | Shell_ir.Pipeline _ :: _ -> None
+             (match redirect_plan_of_redirects ~cwd simple.redirects with
+              | Error _ -> None
+              | Ok (plan, attach) when plan = default_redirect_plan ->
+                  let stage : Process_eio.pipeline_stage =
+                    { argv
+                    ; env = resolve_host_env ?base_host_env simple.env
+                    ; cwd
+                    ; stdin = attach.stdin_from
+                    ; stdout = attach.stdout_to
+                    ; stderr = attach.stderr_to
+                    }
+                  in
+                  loop (stage :: acc) rest
+              (* A capture-side plan -- a merge or a discard -- is applied to
+                 captured text after the run, which a per-stage pipeline has no
+                 place to do. Those stay on the existing path. *)
+              | Ok _ -> None)
+         | Docker _ -> None)
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop [] stages
 
@@ -321,7 +539,9 @@ let docker_pipeline_specs stages =
              loop (Some pipeline_runner) (Some sandbox_target) (stage :: acc) rest
          | _ -> None)
         [@warning "-4"]
-    | Shell_ir.Pipeline _ :: _ -> None
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
   in
   loop None None [] stages
 
@@ -351,20 +571,21 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
     | _ ->
         (match host_pipeline_specs ?base_host_env stages with
          | Some specs ->
-             let status, stdout, stderr =
-               match on_output_chunk with
-               | None ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     specs
-               | Some on_chunk ->
-                   Process_eio.run_argv_pipeline_with_status_split
-                     ?timeout_sec
-                     ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
-                     ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
-                     specs
-               in
-             { status; stdout; stderr }
+             (match
+                match on_output_chunk with
+                | None ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      specs
+                | Some on_chunk ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec
+                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                      specs
+              with
+              | Ok (status, stdout, stderr) -> { status; stdout; stderr }
+              | Error message -> unsupported_redirect_result message)
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
@@ -438,11 +659,14 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                            ~status
                            ~stderr
                            rest)
-                   | Pipeline _ :: _ ->
+                   | (Pipeline _ | Sequence _) :: _ ->
                        { status = Unix.WEXITED 1
                        ; stdout = ""
                        ; stderr =
-                           stderr ^ "nested pipeline not supported in native dispatch"
+                           stderr
+                           ^ "a pipeline stage that is itself a pipeline or a \
+                              sequence needs a subshell, which native dispatch \
+                              does not spawn"
                        }
                  in
                  (match stages with
@@ -502,11 +726,42 @@ let rec dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content
                             ~status
                             ~stderr:first_result.stderr
                             rest)
-                    | Pipeline _ ->
+                    | Pipeline _ | Sequence _ ->
                         invalid_pipeline
-                          "nested pipeline not supported in native dispatch" ))))
+                          "a pipeline stage that is itself a pipeline or a \
+                           sequence needs a subshell, which native dispatch \
+                           does not spawn" ))))
   in
   emit_unseen_captured_output on_output_chunk emitted result
+
+(* [a && b] runs b only when a exited zero, and [a || b] only when it did
+   not, exactly as a shell reads them. Whatever ran last decides, so a run of
+   connectors reads left to right without any precedence of its own. Output
+   from every command that ran is concatenated in the order it ran. *)
+and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail () =
+  let run ir = dispatch ?base_host_env ?timeout_sec ?on_output_chunk ir in
+  let took_the_branch connector (status : Unix.process_status) =
+    match connector, status with
+    | Shell_ir.And_if, Unix.WEXITED 0 -> true
+    | Shell_ir.And_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
+    | Shell_ir.Or_if, Unix.WEXITED 0 -> false
+    | Shell_ir.Or_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> true
+  in
+  let rec step acc = function
+    | [] -> acc
+    | (connector, ir) :: rest ->
+      if not (took_the_branch connector acc.status)
+      then step acc rest
+      else (
+        let next = run ir in
+        step
+          { status = next.status
+          ; stdout = acc.stdout ^ next.stdout
+          ; stderr = acc.stderr ^ next.stderr
+          }
+          rest)
+  in
+  step (run head) tail
 
 and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
   match ir with
@@ -514,3 +769,5 @@ and dispatch ?base_host_env ?timeout_sec ?on_output_chunk (ir : Shell_ir.t) =
     dispatch_simple ?base_host_env ?timeout_sec ?on_output_chunk s
   | Pipeline stages ->
     dispatch_pipeline ?base_host_env ?timeout_sec ?on_output_chunk stages
+  | Sequence { head; tail } ->
+    dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail ()

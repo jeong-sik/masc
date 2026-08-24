@@ -153,7 +153,6 @@ type install_error = Install_storage_failed of storage_error
 val storage_error_to_string : storage_error -> string
 val approval_queue_unavailable_title : string
 val approval_queue_unavailable_severity : string
-val approval_queue_unavailable_icon : string
 val approval_queue_ready_state_json : Yojson.Safe.t
 val approval_queue_unavailable_state_json : storage_error -> Yojson.Safe.t
 val summary_transition_error_to_string : summary_transition_error -> string
@@ -306,7 +305,6 @@ val submit_pending :
   ?request_context:Yojson.Safe.t ->
   ?task_id:string ->
   ?goal_id:string ->
-  ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
   (pending_submission, storage_error) result

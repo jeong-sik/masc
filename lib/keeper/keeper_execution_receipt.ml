@@ -57,7 +57,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 let operator_disposition_kind_to_string = function
@@ -66,7 +65,6 @@ let operator_disposition_kind_to_string = function
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
-  | Disp_operator_reset_required -> "operator_reset_required"
   | Disp_unknown -> "unknown"
 ;;
 
@@ -76,7 +74,6 @@ let operator_disposition_kind_of_string = function
   | "pass_next_model" -> Some Disp_pass_next_model
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
-  | "operator_reset_required" -> Some Disp_operator_reset_required
   | "unknown" -> Some Disp_unknown
   | _ -> None
 ;;
@@ -160,7 +157,12 @@ let operator_disposition (receipt : t)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
-    Disp_operator_reset_required, Reason_transcript_corruption
+    (* An incomplete tool transcript no longer parks the Keeper: boot-time
+       tail recovery closes the open cycles a process death leaves, and the
+       turn otherwise follows the ordinary typed route. Keep the operator
+       alert with the typed reason rather than claiming a pause that no
+       longer happens. *)
+    Disp_unknown, Reason_transcript_corruption
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
     (* Same-turn replay stays forbidden, and the runtime lifecycle remains
        responsible for selecting a later turn. Keep the operator alert, but
@@ -319,10 +321,8 @@ let to_json_with_operator_disposition
       ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id
       ~session_id:receipt.trace_id
-      ~generation:receipt.generation
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
-      ~goal_ids:receipt.goal_ids
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
@@ -350,11 +350,9 @@ let to_json_with_operator_disposition
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; "operator_disposition", `String operator_disposition
@@ -430,7 +428,6 @@ let to_json receipt =
    receipt evidence; it makes no watchdog or liveness claim for a keeper that
    did not produce a receipt. *)
 let needs_operator_broadcast = function
-  | Disp_operator_reset_required
   | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
@@ -448,14 +445,12 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
     ; "runtime_id", `String (receipt.runtime_id)
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)

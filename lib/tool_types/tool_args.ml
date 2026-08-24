@@ -139,8 +139,17 @@ let error_result ?tool_name ?start_time msg =
     ~start_time
     msg
 
-(** [Tool_result.result] error with machine-readable error code. *)
-let error_result_typed ?tool_name ?start_time ~code msg =
+(** [Tool_result.result] error with machine-readable error code.
+    [~failure_class] defaults to [Runtime_failure]; pass it explicitly when
+    the caller-input rejection is a [Policy_rejection] or [Workflow_rejection]
+    so the typed envelope is used without losing the failure classification. *)
+let error_result_typed
+      ?tool_name
+      ?start_time
+      ?(failure_class = Tool_result.Runtime_failure)
+      ~code
+      msg
+  =
   let data =
     error_assoc
       [ ("error_code", `String (error_code_to_string code))
@@ -151,7 +160,7 @@ let error_result_typed ?tool_name ?start_time ~code msg =
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Runtime_failure
+    ~class_:failure_class
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -177,12 +186,6 @@ let get_string_required args key =
       let trimmed = String.trim s in
       if not (String.equal trimmed "") then Ok trimmed
       else Error (Printf.sprintf "%s must not be empty" key)
-  | None -> Error (Printf.sprintf "%s is required" key)
-
-(** Required integer. *)
-let get_int_required args key =
-  match Safe_ops.json_int_opt key args with
-  | Some i -> Ok i
   | None -> Error (Printf.sprintf "%s is required" key)
 
 (** Monadic bind for [('a, string) Result.t] → [Tool_result.result].

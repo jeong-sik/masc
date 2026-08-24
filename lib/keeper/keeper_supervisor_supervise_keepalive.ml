@@ -236,12 +236,11 @@ let supervise_keepalive
         (cleanup_detail "Librarian abort" librarian_abort_error)
         (cleanup_detail "registry rollback" rollback_error)
   in
-  let run_launch_transaction ~expected_generation ~register ~rollback =
+  let run_launch_transaction ~register ~rollback =
     match
       Keeper_keepalive_launch_transaction.run
         ~base_path
         ~keeper_name:meta.name
-        ~expected_generation
         ~register
         ~rollback
         launch_registered
@@ -251,7 +250,6 @@ let supervise_keepalive
   in
   let register_and_launch () =
     run_launch_transaction
-      ~expected_generation:0
       ~register:(fun token intake_token ->
         match Keeper_registry.get ~base_path meta.name with
         | Some current -> Error (`Occupied current)
@@ -283,6 +281,26 @@ let supervise_keepalive
       Keeper_activation_readiness.retained_disabled_reason_to_wire reason
     in
     record_recovery_retained reason;
+    (* This is the only durable signal that the supervisor is declining to
+       recover a keeper it will keep declining.
+
+       #29467 demoted it to the routine channel as steady-state noise. That
+       read the volume without reading what produced it. The two admission
+       rules for one keeper disagree: process boot excludes only
+       {paused, declarative_autoboot_disabled, autoboot_disabled,
+       shutdown_admission_fence} (keeper_runtime.ml), while this recovery path
+       classifies through [classify_owner_execution], which is
+       [~require_proactive:true] and so refuses any keeper with proactive
+       disabled. A keeper boot would happily start therefore cannot be brought
+       back by the sweep once it falls Offline — it retries and refuses every
+       ~30s until the server restarts.
+
+       That is what the volume was. 25 canary keepers sat Offline from
+       2026-08-21 through 2026-08-22T01:30:56Z emitting 14,017 of that day's
+       130,102 rows, and the 01:31:12Z restart moved every one of them
+       [offline -> running via fiber_started]. Quieting the line would have
+       hidden a fleet-wide liveness failure, so it stays at Info until the
+       admission asymmetry is closed. See #29487. *)
     Log.Keeper.info
       "%s: supervisor keepalive recovery retained by disabled policy: %s"
       meta.name
@@ -304,7 +322,6 @@ let supervise_keepalive
        (match reg.phase with
         | Keeper_state_machine.Offline ->
           run_launch_transaction
-            ~expected_generation:reg.transition_seq
             ~register:(fun _token _intake_token ->
               match Keeper_registry.get ~base_path meta.name with
               | Some current when same_offline_generation ~expected:reg current ->

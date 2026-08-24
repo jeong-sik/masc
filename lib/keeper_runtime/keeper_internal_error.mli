@@ -28,29 +28,9 @@ type capacity_backpressure_source =
   | Client_capacity
   | Runtime_slot
 
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
-
-val capacity_backpressure_source_of_string :
-  string -> capacity_backpressure_source option
-
 type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
-
-(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
-    It has no retry, admission, or lifecycle authority. *)
-type provider_cooldown_cause =
-  | Cooldown_provider_capacity
-  | Cooldown_soft_rate_limited
-  | Cooldown_server_error
-  | Cooldown_hard_quota
-  | Cooldown_terminal_failure
-  | Cooldown_provider_error
-  | Cooldown_rejected
-
-val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
-val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
 
 type runtime_exhaustion_reason =
   | Connection_refused
@@ -84,8 +64,6 @@ val network_error_kind_to_string :
   Llm_provider.Http_client.network_error_kind -> string
 
 val accept_rejection_kind_to_string : accept_rejection_kind -> string
-val accept_rejection_kind_of_string : string -> accept_rejection_kind option
-
 type accept_response_shape =
   | Accept_response_empty
   | Accept_response_thinking_only
@@ -95,8 +73,6 @@ type accept_response_shape =
   | Accept_response_mixed_without_deliverable_content
   | Accept_response_has_deliverable_content
 
-val accept_response_shape_to_string : accept_response_shape -> string
-val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_core :
   Agent_core.Response_shape.content_shape -> accept_response_shape
 
@@ -123,9 +99,6 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
-      cooldown_cause : provider_cooldown_cause option;
-      (** Legacy diagnostic only. Current producers use [None]; decoded values
-          never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -191,8 +164,6 @@ type masc_internal_error =
       stage : gate_replay_repair_stage;
       detail : string;
     }
-
-val masc_internal_error_prefix : string
 
 val runtime_runner_execute_site : string
 

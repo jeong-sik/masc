@@ -17,11 +17,40 @@ val reset_for_testing : unit -> unit
 
 val get_proc_mgr : unit -> (Eio_unix.Process.mgr_ty Eio.Resource.t, string) result
 val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
-val get_cwd_default : unit -> (Eio.Fs.dir_ty Eio.Path.t, string) result
-
 (** Return true when an Eio process-spawn exception should retry via the Unix
     fallback path (e.g. bind-related subprocess transport errors on macOS). *)
 val should_retry_unix_fallback : exn -> bool
+
+(** {1 Exit reason} *)
+
+type exit_reason =
+  | Completed of int
+      (** The program ran and returned this code. Never [124] — see
+          [Timed_out]. *)
+  | Timed_out
+      (** The run exceeded its budget and [Process_eio] killed it. The status
+          it synthesizes is [Unix.WEXITED 124], following timeout(1), so a
+          program that exits 124 on its own is indistinguishable from one that
+          was killed. That has been true since this status was introduced; the
+          variant names it instead of leaving every caller to compare against
+          the number. *)
+  | Signaled of int
+  | Stopped of int
+
+val exit_reason_of_status : Unix.process_status -> exit_reason
+(** Classify a status this module produced.
+
+    Three modules outside this one had come to read [Unix.WEXITED 124]
+    directly (repo_git, voice_bridge_core, exec_dispatch), which made the
+    number a contract nobody had written down: changing it here would have
+    left their arms unreachable with nothing to say so, and a repository whose
+    origin lookup timed out would have been skipped from discovery instead of
+    aborting it (#28651). *)
+
+val timed_out_status : Unix.process_status
+(** The status this module synthesizes for [Timed_out]. Exposed for the tests
+    and callers that construct one; classify with [exit_reason_of_status]
+    rather than comparing against it. *)
 
 (** {1 Observability hook (#9632)} *)
 
@@ -135,6 +164,45 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+type output_destination =
+  | Captured
+      (** today's behaviour: the child writes into a pipe this process drains
+          into the returned string *)
+  | Written_to of {
+      path : string;
+      append : bool;
+    }
+      (** the child writes into the file itself. The bytes never pass through
+          this process, so the returned string for that stream is empty and
+          the output is not bounded by any capture cap. *)
+
+type input_origin =
+  | Inherited  (** the child keeps this process's stdin *)
+  | From_string of string  (** feed the child a string this process holds *)
+  | Read_from of { path : string }  (** the child reads the file itself *)
+
+val run_argv_with_redirects :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  stdin:input_origin ->
+  stdout:output_destination ->
+  stderr:output_destination ->
+  string list ->
+  (Unix.process_status * string * string, string) result
+(** Run [argv] with each standard stream attached to a file or to a capture
+    pipe, chosen per stream.
+
+    A file is opened before the spawn, so a path that cannot be opened is
+    reported as [Error] and no process runs — the same order a shell uses, and
+    the reason the failure is a distinct value rather than an exit status this
+    function invented.
+
+    Streams set to [Captured] behave exactly as in
+    {!run_argv_with_status_split}. Streams attached to a file return [""].
+
+    @since 2.62.0 *)
+
 val run_argv_with_status_split_streaming :
   ?timeout_sec:float ->
   ?env:string array ->
@@ -152,15 +220,28 @@ type pipeline_stage = {
   argv : string list;
   env : string array option;
   cwd : string option;
+  stdin : input_origin;
+  stdout : output_destination;
+  stderr : output_destination;
 }
-(** One argv-only process stage in a native pipeline. *)
+(** One process stage in a native pipeline.
+
+    [Inherited] and [Captured] mean the stage takes the pipeline's own
+    plumbing: the pipe from the stage before it, the pipe to the stage after
+    it, the stderr this runtime collects. A file replaces that plumbing for
+    one stream, which is how a shell reads [a > f | b] -- b's stdin is still
+    the link and simply reaches EOF with nothing in it. *)
+
+val plumbed_stage :
+  argv:string list -> env:string array option -> cwd:string option -> pipeline_stage
+(** A stage whose three streams all follow the pipeline's plumbing. *)
 
 val run_argv_pipeline_with_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
   pipeline_stage list ->
-  (Unix.process_status * string * string)
+  (Unix.process_status * string * string, string) result
 (** Run host stages as a native pipeline. Adjacent stages are connected with
     process pipes so intermediate stdout is streamed with backpressure rather
     than buffered into OCaml strings. The returned stdout is the final stage's

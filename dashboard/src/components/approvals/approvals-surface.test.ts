@@ -796,9 +796,9 @@ describe('ApprovalsSurface', () => {
     expect(history?.textContent).toContain('Human')
     expect(history?.textContent).toContain('unattributed')
     expect(history?.textContent).toContain('appr-done')
-    expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
-    expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
-    expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
+    expect(history?.querySelector('.ap-hist-dec')?.className).toContain('bad')
+    expect(history?.querySelector('.ap-hist-dec')?.className).not.toContain('operator denied')
+    expect(history?.querySelector('.ap-hist-at')?.textContent).toContain('2026')
   }, 20000)
 
   it('unfolds judge evidence and slot only on rows that carry judge evidence', async () => {
@@ -865,6 +865,99 @@ describe('ApprovalsSurface', () => {
     const plain = container.querySelector('[data-approval-id="appr-plain"]')
     expect(plain?.querySelector('[data-testid="approval-history-slot"]')).toBeNull()
     expect(plain?.querySelector('[data-testid="approval-history-judge"]')).toBeNull()
+  }, 20000)
+
+  it('renders the recorded decision rationale in the reason slot only when the audit has one', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [
+        resolvedApproval({
+          id: 'appr-with-reason',
+          decision: 'reject',
+          decision_source: 'human_operator',
+          decision_reason: 'path outside the sandbox boundary',
+          resolved_at: '2026-07-28T02:53:47Z',
+        }),
+        resolvedApproval({
+          id: 'appr-no-reason',
+          decision: 'approve',
+          decision_reason: null,
+          resolved_at: '2026-07-28T02:40:00Z',
+        }),
+      ],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+
+    const withReason = container.querySelector('[data-approval-id="appr-with-reason"]')
+    expect(withReason?.querySelector('[data-testid="approval-history-reason"]')?.textContent)
+      .toBe('path outside the sandbox boundary')
+    const noReason = container.querySelector('[data-approval-id="appr-no-reason"]')
+    expect(noReason?.querySelector('[data-testid="approval-history-reason"]')).toBeNull()
+  }, 20000)
+
+  it('filters history by decision source and counts Auto Judge in the summary', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [
+        resolvedApproval({
+          id: 'appr-human',
+          decision: 'approve',
+          decision_source: 'human_operator',
+          resolved_at: '2026-07-28T03:00:00Z',
+        }),
+        resolvedApproval({
+          id: 'appr-judged',
+          decision: 'approve',
+          decision_source: 'auto_judge',
+          resolved_at: '2026-07-28T02:00:00Z',
+        }),
+        resolvedApproval({
+          id: 'appr-always',
+          decision: 'approve',
+          decision_source: 'always_allowed',
+          resolved_at: '2026-07-28T01:00:00Z',
+        }),
+      ],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
+    await flushUi()
+
+    const history = container.querySelector('[data-testid="approvals-history-view"]')
+    const judgeStat = Array.from(history?.querySelectorAll('.ap-hist-stat') ?? [])
+      .find(stat => stat.textContent?.includes('Auto Judge'))
+    expect(judgeStat?.textContent).toContain('1')
+
+    const pill = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('.ap-hist-f'))
+        .find(button => button.textContent === label)
+
+    pill('Auto Judge')?.click()
+    await flushUi()
+    expect(history?.textContent).toContain('appr-judged')
+    expect(history?.textContent).not.toContain('appr-human')
+    expect(history?.textContent).not.toContain('appr-always')
+
+    pill('HITL 수동')?.click()
+    await flushUi()
+    expect(history?.textContent).toContain('appr-human')
+    expect(history?.textContent).not.toContain('appr-judged')
+
+    pill('Always')?.click()
+    await flushUi()
+    expect(history?.textContent).toContain('appr-always')
+    expect(history?.textContent).not.toContain('appr-human')
+
+    // The design's 보류 pill stays out: no live decision produces it.
+    expect(pill('보류')).toBeUndefined()
   }, 20000)
 
   it('shows contract-violating queue rows as a visible banner instead of a clean empty queue', async () => {

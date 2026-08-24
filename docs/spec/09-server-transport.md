@@ -288,9 +288,9 @@ SSE 재연결 폭주(connection storm)를 방지하는 rate limiter:
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 0.0 (비활성) | session별 최소 재연결 간격 |
-| `MASC_SSE_CONNECT_WINDOW_S` | 0.0 (비활성) | sliding window 크기 |
-| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 0 (비활성) | window 내 최대 연결 수 |
+| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | session별 최소 재연결 간격 (`<= 0` 이면 비활성) |
+| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | sliding window 크기 (`<= 0` 이면 비활성) |
+| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | window 내 최대 연결 수 (`<= 0` 이면 비활성) |
 
 제한 초과 시 `429 Too Many Requests` + `Retry-After` 헤더를 반환한다.
 
@@ -724,9 +724,9 @@ sequenceDiagram
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 0.0 | 최소 재연결 간격 |
-| `MASC_SSE_CONNECT_WINDOW_S` | 0.0 | Rate limit window |
-| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 0 | Window 내 최대 연결 수 |
+| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | 최소 재연결 간격 |
+| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | Rate limit window |
+| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | Window 내 최대 연결 수 |
 
 ### 15.5 HTTP Compression
 
@@ -839,6 +839,6 @@ sequenceDiagram
 | httpun-ws | https://github.com/anmonteiro/httpun-ws |
 | grpc-direct | `workspace/yousleepwhen/grpc-direct` |
 | Cloudflare Tunnel | `docs/spec/01-system-overview.md` |
-| QUICK-START.md | `docs/QUICK-START.md` |
+| README quickstart | `README.md#start-here` |
 | COMMON-PITFALLS.md | `docs/COMMON-PITFALLS.md` |
 | 02-types-and-invariants | `docs/spec/02-types-and-invariants.md` |

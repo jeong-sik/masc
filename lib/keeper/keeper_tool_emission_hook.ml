@@ -75,8 +75,6 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     Multimodal.Tool_emission.emit_from_tool_results
       ~emit:Multimodal.Keeper_emitter.emit ~working_context items
 
-let global_accumulator = create_accumulator ()
-
 (* Tier K4c — per-keeper registry. Each keeper gets its own
    accumulator so concurrent multi-keeper tool emissions cannot
    bleed across attribution boundaries. The registry itself is

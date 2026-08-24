@@ -47,6 +47,19 @@ run_opam_install_attempt() {
   echo "Starting opam install attempt ${attempt}/3 (timeout: ${INSTALL_TIMEOUT_MINUTES}m)"
 
   set +e
+  # WORKAROUND: production-blocking, deprecated path. --locked belongs here and
+  # #29746 put it here for a reason: without it a cache miss re-solves
+  # masc.opam's floors and takes whatever is newest, which is how yojson 3.0
+  # broke every build on main (#28327). It is off because masc.opam.locked
+  # currently describes a switch opam can no longer build from today's
+  # repository, so every install failed from #29746 onward:
+  #
+  #   ocamlfind = 1.9.8         needs ocaml < 5.5.0~, and masc pins 5.5.0
+  #   compiler-cloning enabled  ocaml-compiler = 5.5.0 now requires it disabled
+  #
+  # Both are lock contents, not solver behaviour, so the flag cannot come back
+  # until the lock is regenerated on the platform CI installs on.
+  # removal target: #29811 (regenerate masc.opam.locked against OCaml 5.5.0)
   timeout --signal=TERM --kill-after=60s "${INSTALL_TIMEOUT_MINUTES}m" \
     opam install . --deps-only "${install_args[@]}" --yes &
   opam_pid=$!

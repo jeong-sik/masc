@@ -76,14 +76,7 @@ type invariants_check = {
 
     Pure: no side effects, no clock, no I/O. *)
 
-(** [PhaseTurnAlignment]: when KSM is in [Compacting], the turn phase must
-    also be [Turn_compacting]; conversely no other KSM phase may carry a
-    live [Turn_compacting]. *)
-val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.packed_turn_phase -> bool
 
-(** [CompactionAtomicity]:
-    [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
-val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
 (** [NoRuntimeBeforeMeasurement] is specified as: runtime selection past
     [idle] requires a captured measurement. The implementation discards both
@@ -94,8 +87,6 @@ val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.p
 val check_no_runtime_before_measurement :
   runtime_state:runtime_state -> measurement_captured:bool -> bool
 
-val check_phase_derivation_agreement :
-  Keeper_registry.registry_entry -> bool
 (** Runtime-visible mirror of
     [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
     phase must equal [Keeper_state_machine.derive_phase conditions]. *)

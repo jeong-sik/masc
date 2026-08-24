@@ -267,13 +267,26 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     in
     Option.bind agent_opt (fun (agent : Masc_domain.agent) -> agent.current_task)
   in
-  let _ = Workspace.init config ~agent_name:(Some "taskmaster") in
+  let _ = Workspace.init config ~agent_name:(Some "fixture-observer") in
+  let observer =
+    match Workspace.get_agents_raw config with
+    | [ agent ] -> agent.Masc_domain.name
+    | _ -> Alcotest.fail "expected exactly one bound observer"
+  in
+  let _ =
+    Workspace.bind_session
+      config
+      ~agent_name:"fixture-subject"
+      ~capabilities:[ "test" ]
+      ()
+  in
+  let subject = Workspace.resolve_agent_name config "fixture-subject" in
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
+  let _ = Workspace.claim_task config ~agent_name:subject ~task_id:"task-001" in
   (match
      transition_done_r
        config
-       ~agent_name:"nick0cave"
+       ~agent_name:subject
        ~task_id:"task-001"
        ~notes:"terminal in backlog"
    with
@@ -288,18 +301,38 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check (option string))
     "assignee current_task already cleared before invariant"
     None
-    (current_task_for "nick0cave");
+    (current_task_for subject);
+
+  let agent_file =
+    Filename.concat
+      (Workspace.agents_dir config)
+      (Workspace.safe_filename subject ^ ".json")
+  in
+  let stale_agent =
+    match Workspace.read_json config agent_file |> Masc_domain.agent_of_yojson with
+    | Ok agent ->
+      { agent with status = Masc_domain.Busy; current_task = Some "task-001" }
+    | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+  in
+  Workspace.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
 
   let stale_message =
-    "@nick0cave task-001 stale claim detected: current_task_id=null but \
-     MASC still lists task-001 as claimed by you. Please release it."
+    Printf.sprintf
+      "@%s task-001 stale claim detected: current_task_id=null but the cache \
+       still lists task-001 as active."
+      subject
   in
   let since_seq =
     Workspace.get_all_messages_raw config ~since_seq:0
     |> List.fold_left (fun acc msg -> max acc msg.Masc_domain.seq) 0
   in
   let result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-001" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:stale_message
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -312,11 +345,11 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     (str_contains result.content "[cache_invalidated]");
   Alcotest.(check (option string))
     "delivery preserves the original mention"
-    (Some "nick0cave")
+    (Some subject)
     result.mention;
   Alcotest.(check string)
     "delivery exposes the canonical persisted sender"
-    "taskmaster-jade-heron"
+    observer
     result.from_agent;
   let messages = Workspace.get_all_messages_raw config ~since_seq in
   (match messages with
@@ -324,37 +357,136 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
      Alcotest.(check bool)
        "original stale text omitted"
        false
-       (str_contains msg.content "Please release");
+       (str_contains msg.content "still lists task-001 as active");
      Alcotest.(check bool)
        "replacement cites terminal task"
        true
-       (str_contains msg.content "task-001=done")
+       (str_contains msg.content (subject ^ " cached task task-001 as active"))
    | msgs ->
      Alcotest.failf "expected one replacement message, got %d" (List.length msgs));
   Alcotest.(check (option string))
     "stale current_task cleared"
     None
-    (current_task_for "nick0cave");
+    (current_task_for subject);
+  Alcotest.(check (option string))
+    "observer has no task cache ownership"
+    None
+    (current_task_for observer);
+
+  let before_rejected =
+    Workspace.get_all_messages_raw config ~since_seq:0 |> List.length
+  in
+  let rejected =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-001" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal without a matching subject cache"
+  in
+  Alcotest.(check bool)
+    "mismatched subject cache is rejected"
+    true
+    (match rejected with
+     | Error (Workspace_broadcast.Broadcast_policy_rejected _) -> true
+     | Error _ | Ok _ -> false);
+  Alcotest.(check int)
+    "rejected typed signal is not persisted"
+    before_rejected
+    (Workspace.get_all_messages_raw config ~since_seq:0 |> List.length);
+
+  let absent_agent =
+    match Workspace.read_json config agent_file |> Masc_domain.agent_of_yojson with
+    | Ok agent ->
+      { agent with status = Masc_domain.Busy; current_task = Some "task-ghost" }
+    | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+  in
+  Workspace.write_json config agent_file (Masc_domain.agent_to_yojson absent_agent);
+  let absent_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-ghost" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal for a task absent from the canonical backlog"
+    |> Result.get_ok
+  in
+  Alcotest.(check bool)
+    "absent canonical task invalidates an exact subject cache"
+    true
+    (str_contains absent_result.content "[cache_invalidated]");
+  Alcotest.(check (option string))
+    "absent canonical task cache is cleared"
+    None
+    (current_task_for subject);
+
+  let _ =
+    Workspace.add_task config ~title:"Active task" ~priority:1 ~description:""
+  in
+  let _ = Workspace.claim_task config ~agent_name:subject ~task_id:"task-002" in
+  let active_content = "typed signal for a still-active canonical task" in
+  let active_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-002" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:active_content
+    |> Result.get_ok
+  in
+  Alcotest.(check string)
+    "active exact subject cache is preserved"
+    active_content
+    active_result.content;
+  Alcotest.(check (option string))
+    "active exact subject cache remains owned"
+    (Some "task-002")
+    (current_task_for subject);
+
+  (* A subject record we cannot decode is a failure to look, not a subject
+     that disagrees. Rejecting it would tell a correct observer its report was
+     wrong and leave the stale cache in place. *)
+  let readable_subject_json = Workspace.read_json config agent_file in
+  Workspace.write_json config agent_file (`String "not an agent record");
+  let unreadable_result =
+    Workspace.broadcast
+      ~task_cache_signal:{ subject_agent = subject; task_id = "task-002" }
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:"typed signal whose subject record cannot be decoded"
+  in
+  Alcotest.(check bool)
+    "an undecodable subject record reports a dependency failure"
+    true
+    (match unreadable_result with
+     | Error (Workspace_broadcast.Broadcast_dependency_unavailable _) -> true
+     | Error _ | Ok _ -> false);
+  Workspace.write_json config agent_file readable_subject_json;
 
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."
   in
   let normal_result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:observer ~content:normal_update
     |> Result.get_ok
   in
   Alcotest.(check bool)
     "normal task mention is not invalidated"
     false
     (str_contains normal_result.rendered "[cache_invalidated]");
-  let operator_result =
-    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:stale_message
+  let untyped_result =
+    Workspace.broadcast
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:observer
+      ~content:stale_message
     |> Result.get_ok
   in
-  Alcotest.(check bool)
-    "non-taskmaster stale-looking prose is not invalidated"
-    false
-    (str_contains operator_result.rendered "[cache_invalidated]");
+  Alcotest.(check string)
+    "same observer prose without a typed signal is preserved"
+    stale_message
+    untyped_result.content;
 
   let _ = Workspace.reset config in
   Unix.rmdir tmp_dir
@@ -1167,22 +1299,6 @@ let test_negative_priority () =
 (* Security Tests (v2.1) - XSS Prevention                       *)
 (* ============================================================ *)
 
-let test_xss_in_message () =
-  with_test_env (fun config ->
-    ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
-    let xss_payload = "<script>alert('xss')</script>" in
-    let result =
-      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~content:xss_payload
-      |> Result.get_ok
-    in
-    (* Check that raw script tags are not in the result *)
-    let has_raw_script =
-      str_contains result.rendered "<script>"
-      || str_contains result.rendered "</script>"
-    in
-    Alcotest.(check bool) "xss sanitized" false has_raw_script
-  )
-
 let test_xss_in_agent_name () =
   with_test_env (fun config ->
     let xss_name = "<img src=x onerror=alert('xss')>" in
@@ -1211,10 +1327,10 @@ let test_xss_in_message_type () =
       | Some message -> message.msg_type
       | None -> Alcotest.fail "broadcast message not found"
     in
-    Alcotest.(check bool) "msg_type raw script removed" false
-      (str_contains msg_type "<script>" || str_contains msg_type "</script>");
-    Alcotest.(check bool) "msg_type escaped" true
-      (str_contains msg_type "&lt;script&gt;")
+    (* #29736 stopped escaping at the store, so the type comes back as the
+       caller wrote it. [test_broadcast_stores_raw_text] pins the same contract
+       for the content; the type has no coverage there, so it is pinned here. *)
+    Alcotest.(check string) "msg_type is stored as written" xss_msg_type msg_type
   )
 
 (* === Board Admin Tests === *)
@@ -1687,11 +1803,11 @@ let keeper_meta_for_self_filter agent_name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> { meta with active_goal_ids = [] }
+  | Ok meta -> meta
   | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
 
 (* Same canonical-name requirement as [keeper_meta_for_self_filter]. *)
-let keeper_meta_for_goal_filter agent_name active_goal_ids =
+let keeper_meta_for_goal_filter agent_name =
   let name =
     match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
     | Some keeper -> keeper
@@ -1702,8 +1818,6 @@ let keeper_meta_for_goal_filter agent_name active_goal_ids =
       [ ("name", `String name)
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-goal-filter")
-      ; ( "active_goal_ids"
-        , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -1737,7 +1851,7 @@ let test_read_backlog_snapshot_falls_back_to_unscoped_claimable_task () =
       Workspace.add_task config ~goal_id:"goal-b" ~title:"Goal B work"
         ~priority:1 ~description:""
     in
-    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let meta = keeper_meta_for_goal_filter keeper in
     let snapshot =
       Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
     in
@@ -1920,7 +2034,7 @@ let test_read_current_task_preserves_unavailable_and_missing () =
 let test_self_authored_scoped_task_does_not_hide_peer_work () =
   with_test_env (fun config ->
     let keeper = "keeper-goal-filter-agent" in
-    let meta = keeper_meta_for_goal_filter keeper [ "goal-a" ] in
+    let meta = keeper_meta_for_goal_filter keeper in
     let _ =
       Workspace.add_task config ~goal_id:"goal-a" ~created_by:meta.name
         ~title:"Own goal routing task" ~priority:1 ~description:""
@@ -2230,6 +2344,70 @@ let test_no_unclaimed_tasks_stop_signal () =
     | Masc_domain.Claim_next_no_unclaimed -> ()
     | _ -> Alcotest.fail "expected Claim_next_no_unclaimed")
 
+
+(* An absent backlog and a malformed one demand different operator actions, so
+   the read must not report the first as the second. [read_json_result] answers a
+   missing key with an empty object, which decodes as a schema violation unless
+   absence is split out first (#29562). *)
+
+let temp_workspace_dir () =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_backlog_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000000.)))
+  in
+  Unix.mkdir dir 0o755;
+  dir
+
+let schema_complaint = "must contain exactly one tasks list"
+
+let test_absent_backlog_is_not_reported_as_malformed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  (match Workspace_backlog.read_backlog_observation_with_source_r config with
+   | Ok _ -> Alcotest.fail "an absent backlog must not read as a backlog"
+   | Error message ->
+     Alcotest.(check bool)
+       "names the absent primary"
+       true
+       (str_contains message "no backlog at");
+     Alcotest.(check bool)
+       "names the absent recovery mirror"
+       true
+       (str_contains message "no recovery mirror at");
+     Alcotest.(check bool)
+       "does not claim a schema violation"
+       false
+       (str_contains message schema_complaint));
+  let _ = Workspace.reset config in
+  ()
+
+let test_malformed_backlog_still_reports_the_schema () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  Workspace_utils.write_json config (Workspace.backlog_path config) (`Assoc []);
+  (match Workspace_backlog.read_backlog_observation_with_source_r config with
+   | Ok _ -> Alcotest.fail "an empty object is not a backlog"
+   | Error message ->
+     Alcotest.(check bool)
+       "reports the schema violation"
+       true
+       (str_contains message schema_complaint);
+     Alcotest.(check bool)
+       "does not claim the file is absent"
+       false
+       (str_contains message "no backlog at"));
+  let _ = Workspace.reset config in
+  ()
+
 let () =
   Eio_guard.enable ();
   Random.init 42;
@@ -2369,7 +2547,6 @@ let () =
 
     (* === Security Tests (v2.1) === *)
     "security", [
-      Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
       Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
@@ -2436,6 +2613,12 @@ let () =
     "task_identity", [
       Alcotest.test_case "BUG-006: transition/complete with unsuffixed name" `Quick test_bug006_transition_with_unsuffixed_name;
       Alcotest.test_case "BUG-006: cancel with unsuffixed name" `Quick test_bug006_cancel_with_unsuffixed_name;
+    ];
+
+
+    "backlog_absence", [
+      Alcotest.test_case "absent backlog is not reported as malformed" `Quick test_absent_backlog_is_not_reported_as_malformed;
+      Alcotest.test_case "malformed backlog still reports the schema" `Quick test_malformed_backlog_still_reports_the_schema;
     ];
 
     (* === Idle loop stop signal tests === *)

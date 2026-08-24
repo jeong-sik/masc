@@ -1,7 +1,6 @@
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -9,11 +8,9 @@ type accepted_cancellation =
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
@@ -26,7 +23,6 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -70,7 +66,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v15"
+let schema = "keeper.event_queue.state.v16"
 
 let empty =
   { revision = 0L
@@ -235,8 +231,13 @@ let with_pending pending state =
       in
       reconcile available (entry :: acc) rest
   in
+  (* Urgency order is a property of the pending list, not of the
+     reprioritize/defer transitions alone: an [Immediate] arrival lands ahead
+     of every [Normal] entry on arrival, and the sort is stable so arrival
+     order is kept among entries of the same urgency. *)
   let pending_entries =
-    Keeper_event_queue.to_list pending
+    Keeper_event_queue.sort_by_urgency pending
+    |> Keeper_event_queue.to_list
     |> Keeper_event_queue.uniq_stimuli
     |> reconcile state.pending_entries []
   in
@@ -410,8 +411,6 @@ let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   then Error "accepted cancellation source post id must not be empty"
   else if Int64.compare cancellation.source_incarnation 0L < 0
   then Error "accepted cancellation source incarnation must not be negative"
-  else if cancellation.owner_nonce < 0
-  then Error "accepted cancellation owner generation must not be negative"
   else if String.equal (String.trim cancellation.operator_operation_id) ""
   then Error "accepted cancellation operator operation id must not be empty"
   else if String.equal (String.trim cancellation.reason) ""
@@ -424,16 +423,12 @@ let validate_accepted_transfer (transfer : accepted_transfer) =
   then Error "accepted transfer source post id must not be empty"
   else if Int64.compare transfer.source_incarnation 0L < 0
   then Error "accepted transfer source incarnation must not be negative"
-  else if transfer.owner_nonce < 0
-  then Error "accepted transfer owner generation must not be negative"
   else if String.equal (String.trim transfer.operator_operation_id) ""
   then Error "accepted transfer operator operation id must not be empty"
   else if String.equal (String.trim transfer.from_keeper) ""
   then Error "accepted transfer source Keeper must not be empty"
   else if String.equal (String.trim transfer.to_keeper) ""
   then Error "accepted transfer target Keeper must not be empty"
-  else if transfer.target_generation < 0
-  then Error "accepted transfer target generation must not be negative"
   else if String.equal transfer.from_keeper transfer.to_keeper
   then Error "accepted transfer source and target Keepers must differ"
   else Ok ()
@@ -450,8 +445,6 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _ ->
@@ -465,8 +458,6 @@ let validate_accepted_source_terminal
   then Error "source-terminal ACK source post id must not be empty"
   else if Int64.compare source_terminal.source_incarnation 0L < 0
   then Error "source-terminal ACK source incarnation must not be negative"
-  else if source_terminal.owner_nonce < 0
-  then Error "source-terminal ACK owner generation must not be negative"
   else if String.equal (String.trim source_terminal.operator_operation_id) ""
   then Error "source-terminal ACK operation id must not be empty"
   else (
@@ -562,7 +553,6 @@ let accepted_pending_cancellation_replay cancellation state =
 ;;
 
 let cancel_pending_accepted
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
       state
@@ -574,16 +564,6 @@ let cancel_pending_accepted
     Ok (state, Transition_already_applied receipt)
   | Ok None ->
     let* () = validate_accepted_cancellation cancellation in
-    let* () =
-      if Int.equal current_owner_nonce cancellation.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted cancellation owner generation changed: expected %d, current %d"
-             cancellation.owner_nonce
-             current_owner_nonce)
-    in
     let* () =
       validate_pending_selection
         ~selection:
@@ -636,7 +616,6 @@ let accepted_pending_transfer_replay transfer state =
 ;;
 
 let transfer_pending_accepted
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       state
@@ -647,16 +626,6 @@ let transfer_pending_accepted
   | Ok (Some receipt) -> Ok (state, Transition_already_applied receipt)
   | Ok None ->
     let* () = validate_accepted_transfer transfer in
-    let* () =
-      if Int.equal current_owner_nonce transfer.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "accepted transfer owner generation changed: expected %d, current %d"
-             transfer.owner_nonce
-             current_owner_nonce)
-    in
     let* () =
       validate_pending_selection
         ~selection:
@@ -713,19 +682,16 @@ let accepted_pending_source_terminal_ack_replay source_terminal state =
 ;;
 
 let turn_attempt_terminal_operation_id
-      ~owner_nonce
       ~admitted_revision
       source
   =
   Printf.sprintf
-    "turn-attempt-terminal:%d:%Ld:%s"
-    owner_nonce
+    "turn-attempt-terminal:%Ld:%s"
     admitted_revision
     (source_snapshot_ref source)
 ;;
 
 let ack_pending_source_terminal
-      ~current_owner_nonce
       ~applied_at
       ~source_terminal
       state
@@ -736,16 +702,6 @@ let ack_pending_source_terminal
   | Ok (Some receipt) -> Ok (state, Transition_already_applied receipt)
   | Ok None ->
     let* () = validate_accepted_source_terminal source_terminal in
-    let* () =
-      if Int.equal current_owner_nonce source_terminal.owner_nonce
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "source-terminal ACK owner generation changed: expected %d, current %d"
-             source_terminal.owner_nonce
-             current_owner_nonce)
-    in
     let* () =
       validate_pending_selection
         ~selection:
@@ -798,7 +754,6 @@ let turn_terminal_receipt_matches_replay left right =
 ;;
 
 let terminalize_pending_turn
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~source_receipt
@@ -807,7 +762,6 @@ let terminalize_pending_turn
   let { source; admitted_revision } = selection in
   let operator_operation_id =
     turn_attempt_terminal_operation_id
-      ~owner_nonce:current_owner_nonce
       ~admitted_revision
       source
   in
@@ -816,14 +770,12 @@ let terminalize_pending_turn
       ({ transition =
            Ack_source_terminal
              { source = prior_source
-             ; owner_nonce
              ; source_receipt = prior_source_receipt
              ; _
              }
        ; _
        } as receipt)
-    when Int.equal owner_nonce current_owner_nonce
-         && prior_source = source
+    when prior_source = source
          && turn_terminal_receipt_matches_replay
               prior_source_receipt
               source_receipt ->
@@ -838,27 +790,23 @@ let terminalize_pending_turn
     let source_terminal =
       { source
       ; source_incarnation = admitted_revision
-      ; owner_nonce = current_owner_nonce
       ; operator_operation_id
       ; source_receipt
       }
     in
     ack_pending_source_terminal
-      ~current_owner_nonce
       ~applied_at
       ~source_terminal
       state
 ;;
 
 let terminalize_pending_turn_attempt
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
       state
   =
   terminalize_pending_turn
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~source_receipt:(Turn_attempt_terminal { detail })
@@ -866,13 +814,11 @@ let terminalize_pending_turn_attempt
 ;;
 
 let terminalize_pending_turn_completed
-      ~current_owner_nonce
       ~applied_at
       ~selection
       state
   =
   terminalize_pending_turn
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~source_receipt:Turn_completed
@@ -918,7 +864,6 @@ let replay_transition_outbox_entry entry state =
      | Cancel_accepted cancellation, [ source ] when source = cancellation.source ->
        restore_pending_transition entry state (fun state ->
          cancel_pending_accepted
-           ~current_owner_nonce:cancellation.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~cancellation
            state)
@@ -929,7 +874,6 @@ let replay_transition_outbox_entry entry state =
      | Transfer_accepted transfer, [ source ] when source = transfer.source ->
        restore_pending_transition entry state (fun state ->
          transfer_pending_accepted
-           ~current_owner_nonce:transfer.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~transfer
            state)
@@ -941,7 +885,6 @@ let replay_transition_outbox_entry entry state =
        when source = source_terminal.source ->
        restore_pending_transition entry state (fun state ->
          ack_pending_source_terminal
-           ~current_owner_nonce:source_terminal.owner_nonce
            ~applied_at:entry.receipt.applied_at
            ~source_terminal
            state)
@@ -998,12 +941,6 @@ let float_field ~context name fields =
   | _ -> Error (Printf.sprintf "%s.%s must be a number" context name)
 ;;
 
-let int_field ~context name fields =
-  let* value = required_field ~context name fields in
-  match value with
-  | `Int value -> Ok value
-  | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
-;;
 
 let int64_field ~context name fields =
   let* value = required_field ~context name fields in
@@ -1038,7 +975,6 @@ let transition_to_yojson = function
       [ "kind", `String "cancel_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson cancellation.source
       ; "source_incarnation", int64_json cancellation.source_incarnation
-      ; "owner_nonce", `Int cancellation.owner_nonce
       ; "operator_operation_id", `String cancellation.operator_operation_id
       ; "reason", `String cancellation.reason
       ]
@@ -1047,11 +983,9 @@ let transition_to_yojson = function
       [ "kind", `String "transfer_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
       ; "source_incarnation", int64_json transfer.source_incarnation
-      ; "owner_nonce", `Int transfer.owner_nonce
       ; "operator_operation_id", `String transfer.operator_operation_id
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
-      ; "target_generation", `Int transfer.target_generation
       ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
       ]
   | Ack_source_terminal source_terminal ->
@@ -1059,7 +993,6 @@ let transition_to_yojson = function
       [ "kind", `String "ack_source_terminal"
       ; "source", Keeper_event_queue.stimulus_to_yojson source_terminal.source
       ; "source_incarnation", int64_json source_terminal.source_incarnation
-      ; "owner_nonce", `Int source_terminal.owner_nonce
       ; "operator_operation_id", `String source_terminal.operator_operation_id
       ]
     in
@@ -1092,7 +1025,6 @@ let transition_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_incarnation"
-          ; "owner_nonce"
           ; "operator_operation_id"
           ; "reason"
           ]
@@ -1101,13 +1033,12 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
     let* reason = string_field ~context "reason" fields in
     let cancellation =
-      { source; source_incarnation; owner_nonce; operator_operation_id; reason }
+      { source; source_incarnation; operator_operation_id; reason }
     in
     let* () = validate_accepted_cancellation cancellation in
     Ok (Cancel_accepted cancellation)
@@ -1119,11 +1050,9 @@ let transition_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_incarnation"
-          ; "owner_nonce"
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
-          ; "target_generation"
           ; "target_trace_id"
           ]
         fields
@@ -1131,13 +1060,11 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
     let* from_keeper = string_field ~context "from_keeper" fields in
     let* to_keeper = string_field ~context "to_keeper" fields in
-    let* target_generation = int_field ~context "target_generation" fields in
     let* target_trace_id_wire = string_field ~context "target_trace_id" fields in
     let* target_trace_id =
       Keeper_id.Trace_id.of_string target_trace_id_wire
@@ -1147,11 +1074,9 @@ let transition_of_yojson json =
     let transfer =
       { source
       ; source_incarnation
-      ; owner_nonce
       ; operator_operation_id
       ; from_keeper
       ; to_keeper
-      ; target_generation
       ; target_trace_id
       }
     in
@@ -1161,7 +1086,6 @@ let transition_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_incarnation = int64_field ~context "source_incarnation" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -1172,7 +1096,6 @@ let transition_of_yojson json =
       [ "kind"
       ; "source"
       ; "source_incarnation"
-      ; "owner_nonce"
       ; "operator_operation_id"
       ; "source_receipt_kind"
       ]
@@ -1211,7 +1134,6 @@ let transition_of_yojson json =
     let source_terminal =
       { source
       ; source_incarnation
-      ; owner_nonce
       ; operator_operation_id
       ; source_receipt
       }

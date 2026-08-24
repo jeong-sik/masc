@@ -51,7 +51,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                    , field_or_null "selected_runtime_canonical" )
                  ; "primary_model", field_or_null "primary_model"
                  ; "next_model_hint", field_or_null "next_model_hint"
-                 ; "active_goal_ids", field_or_null "active_goal_ids"
                  ; "last_autonomous_action_at", field_or_null "last_autonomous_action_at"
                  ; "autonomous_action_count", field_or_null "autonomous_action_count"
                  ; "updated_at", field_or_null "updated_at"
@@ -122,15 +121,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                     ; "status", `String status
-                    ; "generation", `Int meta.runtime.nonce
                     ; "turn_count", `Int meta.runtime.usage.total_turns
                     ; "last_model_used", `Null
                     ; "active_model", `Null
                     ; "next_model_hint", `Null
-                    ; ( "active_goal_ids"
-                      , `List
-                          (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                      )
                     ; ( "last_autonomous_action_at"
                       , if String.trim meta.runtime.last_autonomous_action_at = ""
                         then `Null

@@ -96,7 +96,6 @@ let prior_cancellation_for_request
 
 let fresh_cancellation_for_request
       ~queue_state
-      ~owner_nonce
       ~source_ref
       ~source_incarnation
       ~operator_operation_id
@@ -111,7 +110,6 @@ let fresh_cancellation_for_request
   let cancellation : Keeper_registry_event_queue.accepted_cancellation =
     { source = selection.source
     ; source_incarnation
-    ; owner_nonce
     ; operator_operation_id
     ; reason
     }
@@ -155,7 +153,6 @@ let prior_transfer_for_request
 let fresh_transfer_for_request
       ~queue_state
       ~keeper_name
-      ~owner_nonce
       ~source_ref
       ~source_incarnation
       ~operator_operation_id
@@ -171,11 +168,9 @@ let fresh_transfer_for_request
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation
-    ; owner_nonce
     ; operator_operation_id
     ; from_keeper = keeper_name
     ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -187,7 +182,6 @@ let execute_cancellation ~base_path ~keeper_name prepared =
   Keeper_registry_event_queue.cancel_pending_accepted_result
     ~base_path
     keeper_name
-    ~current_owner_nonce:cancellation.owner_nonce
     ~applied_at:prepared.applied_at
     ~cancellation
   |> Result.map (fun result ->
@@ -212,7 +206,6 @@ let execute_transfer ~base_path ~keeper_name prepared =
         ~intake_token:source_intake_token
         ~base_path
         keeper_name
-        ~current_owner_nonce:transfer.owner_nonce
         ~applied_at:prepared.applied_at
         ~transfer
       |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
@@ -376,7 +369,6 @@ let run_admitted_request
       ~config
       ~base_path
       ~keeper_name
-      ~owner_nonce
       request
   =
   let* queue_state =
@@ -405,7 +397,6 @@ let run_admitted_request
       | None ->
         fresh_cancellation_for_request
           ~queue_state
-          ~owner_nonce
           ~source_ref
           ~source_incarnation
           ~operator_operation_id
@@ -438,7 +429,6 @@ let run_admitted_request
           fresh_transfer_for_request
             ~queue_state
             ~keeper_name
-            ~owner_nonce
             ~source_ref
             ~source_incarnation
             ~operator_operation_id
@@ -460,7 +450,6 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error "keeper is not registered"
   | Some entry ->
-    let owner_nonce = entry.meta.runtime.nonce in
     (match
        Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
@@ -468,14 +457,11 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
          (fun () ->
             match Keeper_registry.get ~base_path keeper_name with
             | None -> Error "keeper registration disappeared"
-            | Some current when current.meta.runtime.nonce <> owner_nonce ->
-              Error "keeper owner nonce changed"
             | Some _ ->
               run_admitted_request
                 ~config
                 ~base_path
                 ~keeper_name
-                ~owner_nonce
                 request)
      with
      | Ok (`Ran result) -> result

@@ -1,10 +1,33 @@
 # RFC-0349 — Restore a reachable compaction admission path
 
-- Status: Draft
-- Updated: 2026-07-20
+- Status: Superseded by #26545 + #26547 + #26557. Revivable — see § 0.1.
+- Updated: 2026-08-24
 - Author: vincent (drafted by Claude Opus 4.8)
 - Related: #24906 (removed threshold trigger variants), commit `791eb4bfb4` (replaced automatic admission with a literal), #25051 (Summarizer_unavailable starvation), RFC-0344 (durable store migration — separate)
 - Supersedes: none
+- Superseded by: #26545 (quantized tail window), #26547 (automatic
+  overflow-compaction recovery removed), #26557 (overflow FSM vocabulary
+  retired) — all merged
+
+## 0.1 Why this is superseded
+
+This RFC answers "no reachable admission path" by adding a third request
+origin. The merged direction answers the same measurement differently: #26545
+bounds provider-bound history to a quantized tail window, so the condition this
+RFC admits against is meant not to arise. #26547 then removed the automatic
+recovery path and #26557 retired its FSM vocabulary.
+
+The proposal below cannot be built as written. § 2 constructs
+`Keeper_state_machine.Context_overflow_detected`, and that variant no longer
+exists — `keeper_state_machine.ml` keeps only a comment recording its
+retirement alongside `Auto_compact_triggered`.
+
+Superseded is provisional, not a rejection. The observation window that decides
+whether the tail window is sufficient is #26546, still open, and its gate is
+repeated quantization jumps plus a sustained librarian cadence. If that window
+shows keepers still degrading before any provider error, the argument in § 1
+stands and this RFC comes back — rewritten against the vocabulary that exists
+then, since the one it cites is gone.
 
 ## 0. Summary
 

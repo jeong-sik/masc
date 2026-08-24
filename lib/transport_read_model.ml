@@ -58,16 +58,20 @@ let normalize_advertised_host host =
   else trimmed
 ;;
 
+(* Rebuild through [Uri] even when the host is unchanged. [Uri.of_string]
+   reads the leading dotted quad of "127.0.0.1.example.com" as an IPv4 literal
+   and pushes the rest into the path, so returning the original text here left
+   [host] naming 127.0.0.1 while every URL built from [base_url] still went to
+   example.com. Serializing what was parsed makes the two agree: the caller
+   gets a URL whose authority is the host the check ran on (#29806). *)
 let normalize_loopback_base_url base_url =
   let trimmed = trim_trailing_slashes base_url in
   let uri = Uri.of_string trimmed in
   match Uri.host uri with
   | Some host ->
-    let normalized_host = normalize_advertised_host host in
-    if String.equal normalized_host host
-    then trimmed
-    else
-      Uri.with_host uri (Some normalized_host) |> Uri.to_string |> trim_trailing_slashes
+    Uri.with_host uri (Some (normalize_advertised_host host))
+    |> Uri.to_string
+    |> trim_trailing_slashes
   | None -> trimmed
 ;;
 
@@ -107,44 +111,6 @@ let context_from_env ?(include_configured = false) () =
 
 let maybe_configured_fields ~include_configured enabled =
   if include_configured then [ "configured", `Bool enabled ] else []
-;;
-
-(* [tcp_port_reachable] used to open a stdlib [Unix.socket], call
-   [Unix.connect] against the configured loopback host, and close the
-   socket — all synchronously on the calling fiber's Eio domain.
-
-   That implementation is incompatible with Eio's cooperative
-   scheduling: from the official docs,
-
-     "When a fiber executes CPU-bound or blocking I/O work without
-      yielding control, it blocks all other fibers in that domain."
-
-   The probe was wired into every /health response builder
-   ([websocket_discovery_json], [transport_status_json]) where it
-   short-circuits behind [Transport_metrics.{ws,grpc}_listening].
-   Under normal operation the listening flag is [true] and the
-   stdlib call never runs.  But during startup / warm-up the
-   listening flag is [false] and every concurrent /health probe
-   queued waiting for a blocking [Unix.connect], stalling every
-   other fiber on the main Eio HTTP domain for the duration of the
-   connect.  Concurrent dashboard requests saw this as multi-second
-   latency cliffs at startup.
-
-   Fix: drop the blocking probe entirely.  Callers already OR with
-   the in-memory listening flag, so:
-
-   - listening = true  → reachable = true   (unchanged)
-   - listening = false → reachable = false  (warming up, accurate)
-
-   The latter is the truthful state during warm-up — a listener that
-   has not bound the socket yet is not reachable.  The previous
-   implementation could only have flipped this to [true] by racing
-   against another listener binding the same port, which is not a
-   useful signal.
-
-   Argument kept for API stability; callers still pass [port] from
-   the relevant configured-port lookup but the value is unused. *)
-let tcp_port_reachable (_port : int) : bool = false
 ;;
 
 let get_ws_session_count () =
@@ -226,15 +192,12 @@ let transport_status_json (ctx : http_context) =
   let registrations = Atomic.get runtime_registrations in
   let grpc_enabled = Env_config.Transport.grpc_enabled () in
   let grpc_port = Env_config.Transport.grpc_port in
-  let grpc_reachable =
-    Transport_metrics.grpc_listening () || tcp_port_reachable grpc_port
-  in
+  let grpc_reachable = Transport_metrics.grpc_listening () in
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
   `Assoc
     [ "streamable_http_default", `Bool true
-    ; "legacy_endpoints_deprecated", `Bool true
     ; ( "http"
       , `Assoc
           (maybe_configured_fields ~include_configured:ctx.include_configured true

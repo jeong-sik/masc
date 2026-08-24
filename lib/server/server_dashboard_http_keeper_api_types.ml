@@ -20,9 +20,9 @@ let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_turn_records = "/turn-records"
-let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
+let keeper_suffix_trajectory = "/trajectory"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
@@ -80,7 +80,6 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
   | Keeper_post_fusion
   | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of
@@ -135,7 +134,6 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_directive then Keeper_post_directive
     else if ends_with keeper_suffix_operator_note then Keeper_post_operator_note
     else if ends_with keeper_suffix_paused_work then Keeper_post_paused_work
-    else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
     else if ends_with keeper_suffix_fusion then Keeper_post_fusion
     else Keeper_post_unknown
 
@@ -164,8 +162,18 @@ let is_keeper_checkpoints_get_path req_path =
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
-let keeper_get_permission req_path =
-  if keeper_path_ends_with req_path keeper_suffix_turn_records
+(* [include_thinking] is not in the path, so the caller reads it and passes it
+   here: this table is where a route's permission is decided, and deciding it
+   somewhere else is how the two doors ended up different.
+
+   `/raw-trace` requires CanAdmin because it returns hidden reasoning.
+   `/trajectory?include_thinking=true` returns the same reasoning and required
+   nothing, so the admin gate on the first door was reachable around. Same
+   data, same gate. *)
+let keeper_get_permission ?(include_thinking = false) req_path =
+  if keeper_path_ends_with req_path keeper_suffix_trajectory && include_thinking
+  then Some Masc_domain.CanAdmin
+  else if keeper_path_ends_with req_path keeper_suffix_turn_records
   then Some Masc_domain.CanReadState
   else if
     is_keeper_checkpoints_get_path req_path
@@ -179,7 +187,7 @@ let keeper_get_permission req_path =
   then Some Masc_domain.CanAdmin
   else None
 
-let trim_to_opt = String_util.trim_to_option
+let trim_to_opt = String_util.trim_nonempty
 
 let truncate_text ~max_chars text =
   let len = String.length text in
@@ -221,7 +229,7 @@ let unique_present_paths paths =
   paths
   |> List.filter_map (fun value ->
        match value with
-       | Some path -> String_util.trim_to_option path
+       | Some path -> String_util.trim_nonempty path
        | _ -> None)
   |> Json_util.dedupe_keep_order
 

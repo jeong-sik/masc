@@ -1,63 +1,12 @@
 import { html } from 'htm/preact'
 import type { CoverageGapDisplay } from './source-health'
 
-// Operator-actionable error pattern classifier. Returns a hint with a
-// canonical RFC link when the error string matches a known incident class.
-// Pure function — exported for unit testing in isolation.
-//
-// Pattern → RFC mapping is the SSOT for "what should an operator do when
-// they see this error in the dashboard". Add new patterns here as RFCs
-// land for new failure modes.
+// Operator-actionable hint for a coverage gap: a canonical RFC link keyed by
+// the typed error class the backend already wrote.
 export type CoverageErrorHint = {
   reason: string
   label: string
   href: string
-}
-
-// Substring vocabulary mirrors backend SSOT in
-// `lib/keeper_disk_pressure.ml` (`is_disk_exhaustion_text`) so the
-// dashboard reaches the same classification the runtime already acts on.
-// Add new patterns here only when (a) backend has a matching typed
-// detector, and (b) there is a canonical RFC describing the operator
-// remediation.
-const FD_EXHAUSTION_NEEDLES = [
-  'too many open files',
-  'enfile',
-  'emfile',
-] as const
-
-const DISK_EXHAUSTION_NEEDLES = [
-  'no space left on device',
-  'enospc',
-  'disk quota exceeded',
-  'quota exceeded',
-  'disk full',
-  'not enough space',
-] as const
-
-export function classifyCoverageError(error: string | null | undefined): CoverageErrorHint | null {
-  if (!error) return null
-  const lower = error.toLowerCase()
-  // RFC-0097: keeper-sandbox container reuse — root fix for the 2026-05-16
-  // ENFILE storm. Current FD tracking is observation-only.
-  if (FD_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
-    return {
-      reason: 'fd_exhaustion',
-      label: 'FD exhaustion — see RFC-0097',
-      href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
-    }
-  }
-  // RFC-0122: keeper disk pressure circuit breaker — mirrors backend
-  // detector at `lib/keeper_disk_pressure.ml:55` which trips spawn slot
-  // admission on these substrings.
-  if (DISK_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
-    return {
-      reason: 'disk_exhaustion',
-      label: 'Disk pressure — see RFC-0122',
-      href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
-    }
-  }
-  return null
 }
 
 // RFC-0154 PR-3: typed lookup keyed by backend short tag from
@@ -83,13 +32,8 @@ export function errorHintFromClass(errorClass: string | null | undefined): Cover
   return ERROR_CLASS_HINTS[errorClass] ?? null
 }
 
-// Cascading resolver — typed lookup first, substring fallback second.
-// Once RFC-0154 PR-2 ships (backend writes `error_class`), the typed path
-// satisfies every row; PR-4 removes the fallback once 0 v1-only rows are
-// observed for 7 days.
 export function errorHintFromGap(display: CoverageGapDisplay): CoverageErrorHint | null {
   return errorHintFromClass(display.structured.errorClass)
-    ?? classifyCoverageError(display.structured.error)
 }
 
 function causeLabel(display: CoverageGapDisplay, hint: CoverageErrorHint | null): string {

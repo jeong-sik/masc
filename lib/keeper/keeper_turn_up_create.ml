@@ -29,7 +29,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
-  let now_ts = Time_compat.now () in
   let autoboot_enabled =
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
@@ -38,26 +37,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     match p.allowed_paths_opt with
     | Some paths -> paths
     | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
-  in
-  let active_goal_ids =
-    match p.active_goal_ids_opt with
-    | Some ids -> ids
-    | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
-  in
-  let active_goal_ids_error =
-    match p.active_goal_ids_opt with
-    | None -> None
-    | Some _ ->
-        let missing =
-          List.filter
-            (fun goal_id -> Option.is_none (Goal_store.get_goal ctx.config ~goal_id))
-            active_goal_ids
-        in
-        if missing = [] then None
-        else
-          Some
-            (Printf.sprintf "unknown active_goal_ids: %s"
-               (String.concat ", " missing))
   in
   let sandbox_profile =
     resolve_sandbox_profile
@@ -83,9 +62,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  match active_goal_ids_error with
-  | Some msg -> tool_result_error msg
-  | None ->
     match
       validate_sandbox_settings ~allowed_paths
     with
@@ -121,7 +97,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   tool_result_error "internal keeper trace_id generation failed"
               | Ok trace_id_t ->
                   (match
-                     Keeper_shutdown_intake_fence.run_durable_intake_if_open
+                     Keeper_shutdown_intake_fence.run_durable_intake_observing
                        ~base_path:ctx.config.base_path
                        ~keeper_name:p.name
                        (fun intake_token ->
@@ -129,7 +105,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
                   let bundle_paths =
-                    (* Surface masc-improver/sangsu sandbox boot
+                    (* Surface per-Keeper sandbox boot
                        silent-failure (2026-05-05).  Keeper_fs.ensure_dir
                        raises on filesystem error; the previous [ignore]
                        discarded it.  Now we log + emit a Otel_metric_store
@@ -169,8 +145,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     Keeper_context_runtime.create_session ~session_id:trace_id
                       ~base_dir
                   in
-      let nonce = 1 in
-      let meta = {
+      let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
@@ -188,8 +163,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
-        active_goal_ids =
-          active_goal_ids;
         paused = false;
         latched_reason = None;
         autoboot_enabled;
@@ -216,8 +189,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_ts = 0.0;
             last_before_tokens = 0;
             last_after_tokens = 0;
-            last_check_ts = now_ts;
-            last_decision = compaction_runtime_decision_of_string "initialized";
           };
           proactive_rt = {
             count_total = 0;
@@ -229,7 +200,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          nonce;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
@@ -242,7 +212,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
           message_scope_ack_id = None;
-	          last_blocker = None;
 	          last_runtime_attempt = None;
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
@@ -266,7 +235,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation:nonce
           |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -361,7 +329,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
@@ -383,23 +350,24 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected))))))
                    with
-                   | Keeper_shutdown_intake_fence.Intake_committed result ->
-                     result
-                   | Keeper_shutdown_intake_fence.Intake_shutdown_reserved
-                       operation_id ->
-                     let detail =
-                       Printf.sprintf
-                         "keeper creation rejected by shutdown admission: keeper=%s operation=%s"
-                         p.name
-                         (Keeper_shutdown_types.Operation_id.to_string operation_id)
-                     in
+                   | result, None -> result
+                   | result, Some operation_id ->
+                     (* Observed, not obeyed. A reservation records that a
+                        shutdown began; a shutdown that never finalises never
+                        clears it, and refusing here left the sweep re-trying
+                        every 30s against a slot nothing could release —
+                        15h32m and 38,910 abandoned sessions on 2026-08-20
+                        (#29566). Creation proceeds and names what it saw. *)
                      Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string LifecycleDispatchRejections)
                        ~labels:
                          [ ("keeper", p.name)
-                         ; ("event", "create_shutdown_admission")
+                         ; ("event", "create_over_shutdown_admission")
                          ]
                        ();
-                     Log.Keeper.warn "%s" detail;
-                     Progress.stop_tracking task_id;
-                     tool_result_error detail)
+                     Log.Keeper.warn
+                       "keeper created while a shutdown reservation stood: \
+                        keeper=%s operation=%s"
+                       p.name
+                       (Keeper_shutdown_types.Operation_id.to_string operation_id);
+                     result)

@@ -16,6 +16,22 @@ module Session : sig
   val sse_grace_period_seconds : float
 end
 
+(** {1 SSE reconnect guard} *)
+
+module Sse_connect_guard : sig
+  val reconnect_min_interval_seconds : float
+  (** Minimum interval between SSE reconnects for one session.
+      [<= 0.0] disables the per-session cooldown. *)
+
+  val connect_window_seconds : float
+  (** Sliding window over which reconnects are counted.
+      [<= 0.0] disables the window limit. *)
+
+  val connect_max_in_window : int
+  (** Reconnects admitted inside one window. [<= 0] disables the window
+      limit. *)
+end
+
 (** {1 Tempo (polling interval)} *)
 
 module Tempo : sig

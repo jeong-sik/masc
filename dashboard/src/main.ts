@@ -93,9 +93,15 @@ import './styles/keeper-v2/runtime.css'
 // the statchip pill shape. Loaded last so it wins on shape (see file header).
 import './styles/keeper-v2/ops-cluster.css'
 import './styles/keeper-v2/prompt-book.css'
-// v3 prototype link order places monitor.css after prompt-book.css (verify.css /
-// registry.css sit between in the prototype but are Phase B/C — not vendored).
+import './styles/keeper-v2/verify.css'
+import './styles/keeper-v2/registry.css'
 import './styles/keeper-v2/monitor.css'
+import './styles/keeper-v2/lanes.css'
+// Tone layer (v5 "tempered"), scoped to html[data-tone="tempered"] set in
+// index.html. It restates the skin tokens only — wider ink steps, halved brass
+// glow, muted status, transparent chip grounds — so it must load after every
+// other keeper-v2 sheet. Removing the attribute restores the base v2 skin.
+import './styles/keeper-v2/tempered.css'
 import './styles/mobile-operator-targets.css'
 
 // ── CSS SSOT removal scope (PR #22081 review P1) ──

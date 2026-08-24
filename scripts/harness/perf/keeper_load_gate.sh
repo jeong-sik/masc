@@ -48,7 +48,7 @@ INJECT_AUTHOR="${INJECT_AUTHOR:-operator}"
 THRESHOLD_MS="${THRESHOLD_MS:-250}"
 MAX_AMP="${MAX_AMP:-8}"
 KEEPER_PROMPT="${KEEPER_PROMPT:-analyst}"
-# Source root holding config/keepers/<KEEPER_PROMPT>/AGENT.md.
+# Source root holding config/keepers/<KEEPER_PROMPT>.toml.
 KEEPER_SOURCE_ROOT="${MASC_KEEPER_SOURCE_ROOT:-}"
 BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an AGENT_CORE catalog id_prefix
 HOG_LEVELS="${HOG_LEVELS:-0 $((NCPU-1))}"       # host CPU hogs to sweep alongside keeper load
@@ -68,7 +68,7 @@ Usage: $(basename "$0") [options]
   --max-amp N          max p95 amplification before RED (default: $MAX_AMP)
   -h|--help            this help
 Requires: python3, curl, jq, and MASC_KEEPER_SOURCE_ROOT pointing at a
-populated MASC root with config/keepers/<name>/AGENT.md. Boots a server
+populated MASC root with config/keepers/<name>.toml. Boots a server
 with real keeper turns against a network-free mock provider; no cloud
 credentials needed.
 EOF
@@ -214,7 +214,7 @@ if [[ -z "$KEEPER_SOURCE_ROOT" ]]; then
   echo "ERROR: set MASC_KEEPER_SOURCE_ROOT to a populated MASC root" >&2
   exit 1
 fi
-KEEPER_PROMPT_SOURCE="$KEEPER_SOURCE_ROOT/config/keepers/$KEEPER_PROMPT/AGENT.md"
+KEEPER_PROMPT_SOURCE="$KEEPER_SOURCE_ROOT/config/keepers/$KEEPER_PROMPT.toml"
 if [[ ! -f "$KEEPER_PROMPT_SOURCE" ]]; then
   echo "ERROR: Keeper prompt not found: $KEEPER_PROMPT_SOURCE" >&2
   exit 1
@@ -276,15 +276,10 @@ model_id = "$BORROW_MODEL"
 EOF
 
 for ((k=1;k<=KEEPERS;k++)); do
-  mkdir -p "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}"
-  cp "$KEEPER_PROMPT_SOURCE" "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}/AGENT.md"
-  cat > "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}.toml" <<EOF
-[keeper]
-name = "perf_keeper_${k}"
-autoboot_enabled = true
-proactive_enabled = true
-sandbox_profile = "local"
-EOF
+  # The source keeper's TOML already carries its instructions; copy it and
+  # rename so every perf keeper is a complete declaration in one file.
+  sed "s/^name = .*/name = \"perf_keeper_${k}\"/" \
+    "$KEEPER_PROMPT_SOURCE" > "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}.toml"
 done
 
 # ---- start mock + server ----------------------------------------------------

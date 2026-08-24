@@ -14,16 +14,12 @@ val respond_error :
   string ->
   unit
 
-val handle_keeper_catchup_judge_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-
-(** Operator-initiated deliberation on behalf of [keeper]. Same execution path
-    as the catch-up judge (the run is owned by the keeper named in the route, so
-    its wake, board post and chat delivery are indistinguishable from a
-    self-initiated run), but the prompt, preset and topology come from the
-    request body. Omitted preset/topology fall back to the tool's own defaults;
-    validation stays in the tool so this endpoint cannot drift from what a
-    keeper-side call would accept. *)
+(** Operator-initiated deliberation on behalf of [keeper]. The run is owned by
+    the keeper named in the route, so its wake, board post and chat delivery
+    are indistinguishable from a self-initiated run; the prompt, preset and
+    topology come from the request body. Omitted preset/topology fall back to
+    the tool's own defaults; validation stays in the tool so this endpoint
+    cannot drift from what a keeper-side call would accept. *)
 val handle_keeper_fusion_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
@@ -51,7 +47,6 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
   Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
@@ -135,8 +130,8 @@ val handle_keeper_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
-(** A resume body requires [owner_nonce] and a stable
-    [operator_operation_id]; raw action-only resume is rejected. *)
+(** A resume body requires a stable [operator_operation_id]; raw
+    action-only resume is rejected. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
@@ -148,7 +143,7 @@ val handle_keeper_bulk_directive_post :
   string ->
   unit
 (** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
-    entries carry [name], [owner_nonce], and [operator_operation_id]. *)
+    entries carry [name] and [operator_operation_id]. *)
 
 module For_testing : sig
   val github_login_stream_headers : string -> Httpun.Headers.t
@@ -160,8 +155,8 @@ module For_testing : sig
     unit
 
   val parse_resume_request :
-    Yojson.Safe.t -> (int * string, string) result
+    Yojson.Safe.t -> (string, string) result
 
   val parse_bulk_resume_requests :
-    Yojson.Safe.t -> ((string * int * string) list, string) result
+    Yojson.Safe.t -> ((string * string) list, string) result
 end

@@ -92,13 +92,6 @@ val string_to_action : string -> action
 
 val entry_to_json : audit_entry -> Yojson.Safe.t
 
-val entry_of_json_r : Yojson.Safe.t -> (audit_entry, string) result
-(** Strict decoder. *)
-
-val entry_of_json : Yojson.Safe.t -> audit_entry option
-(** Lenient wrapper around {!entry_of_json_r} that logs and drops
-    bad entries. *)
-
 (** {1 Storage} *)
 
 val audit_entry_matches :

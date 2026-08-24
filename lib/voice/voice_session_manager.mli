@@ -74,19 +74,7 @@ val session_to_json : session -> Yojson.Safe.t
     voice-loop contract. Realtime bridge JSON exposes configured metadata only;
     the raw websocket endpoint is intentionally redacted. *)
 
-val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
-(** Structured capability contract for the current voice implementation.
-    MASC voice sessions are batch STT/TTS loops: operator audio is first
-    transcribed to text, then delivered through the normal keeper turn;
-    keeper output uses [keeper_voice_speak] and dashboard audio clips. *)
-
 val voice_loop_json : session_active:bool -> conversation_mode -> Yojson.Safe.t
-
-val session_of_json : Yojson.Safe.t -> session
-(** Decode failures on individual fields raise [Yojson] exceptions.
-    A corrupt [status] field defaults to [Suspended] (fail-closed —
-    the session stays visible to operators instead of being skipped
-    by the [Idle]-aware GC; #8612). *)
 
 (** {1 Lifecycle} *)
 
@@ -112,7 +100,6 @@ val resume_session : t -> agent_id:string -> unit
 
 val get_session : t -> agent_id:string -> session option
 val list_sessions : t -> session list
-val has_session : t -> agent_id:string -> bool
 val session_count : t -> int
 
 (** {1 Activity tracking} *)

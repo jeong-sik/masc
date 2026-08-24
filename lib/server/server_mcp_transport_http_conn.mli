@@ -48,21 +48,23 @@ type sse_conn_info = {
     switch.  Construct via {!make_sse_conn} so the promise is always
     paired with the connection. *)
 
-(** {1 Connect-rate guard env knobs} *)
+(** {1 Connect-rate guard knobs}
+
+    Values come from {!Env_config_runtime.Sse_connect_guard}; the names below
+    are that module's, read once at its initialisation. *)
 
 val sse_reconnect_min_interval_s : float
-(** Cached at module-init from [MASC_SSE_RECONNECT_MIN_INTERVAL_S]
-    (default [1.0]).  Minimum gap between two SSE connect
+(** [MASC_SSE_RECONNECT_MIN_INTERVAL_S], default [1.0].  Minimum gap between two SSE connect
     attempts on the same session.  Setting to [0.0] or negative
     disables the per-session cooldown. *)
 
 val sse_connect_window_s : float
-(** Cached from [MASC_SSE_CONNECT_WINDOW_S] (default [60.0]).
+(** [MASC_SSE_CONNECT_WINDOW_S], default [60.0].
     Sliding-window length for the burst-rate guard.  Setting to
     [0.0] or negative disables the window check. *)
 
 val sse_connect_max_in_window : int
-(** Cached from [MASC_SSE_CONNECT_MAX_IN_WINDOW] (default [10]).
+(** [MASC_SSE_CONNECT_MAX_IN_WINDOW], default [10].
     Max connect attempts per [sse_connect_window_s] before the
     guard returns [Error ("window_limit", _)]. *)
 

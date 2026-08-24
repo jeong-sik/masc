@@ -5,8 +5,6 @@
     HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
 
-[@@@warning "-32-69"]  (* Suppress unused values/fields during migration *)
-
 open Cmdliner
 
 (** Module aliases *)
@@ -408,7 +406,18 @@ let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  (* [Arg.opt] takes a value, not a thunk, so its default is computed while the
+     term is built — before Cmdliner has looked at argv. Calling
+     [default_base_path ()] there ran the environment-backed resolver on every
+     invocation: it logged a base path no command had selected, and it exited 1
+     when MASC_BASE_PATH was unset even though --base-path carried one. Parse
+     the flag as optional and consult the environment only when it is absent,
+     matching [run_base_path]. *)
+  let resolve = function Some raw -> raw | None -> default_base_path () in
+  Term.(
+    const resolve
+    $ Arg.(
+        value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc))
 
 let run_base_path =
   let doc =
@@ -597,19 +606,6 @@ let run_cmd host port cli_base_path =
      base_path differed from the repo checkout directory. *)
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
-  (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat canonical_base_path "logs" in
-  (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
-     let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
-     Array.iter (fun fname ->
-       if Filename.check_suffix fname ".jsonl" then begin
-         let src = Filename.concat old_log_dir fname in
-         let dst = Filename.concat log_dir fname in
-         if not (Sys.file_exists dst) then
-           (try Sys.rename src dst;
-                Log.Server.info "log migration: moved %s -> .masc/logs/" fname
-            with Sys_error _ -> ())
-          end) files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->

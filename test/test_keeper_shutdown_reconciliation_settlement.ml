@@ -101,7 +101,6 @@ let make_operation ~keeper_name ~phase ~turn_disposition =
   ; keeper_name
   ; lane_ownership = Dormant_meta
   ; trace_id = trace_id_exn "trace-reconciliation-settlement-test"
-  ; generation = 1
   ; actor = "test"
   ; cleanup_intent = { reason = Operator_stop_retain_meta; remove_session = false }
   ; turn_disposition
@@ -286,7 +285,7 @@ let test_recovery_blocks_interrupted_lane_join () =
    the same absence is observed one step later is a TOCTOU verdict split — and
    the losing side is permanent: a blocked operation fences keeper admission
    with no runtime release, so every later boot of that keeper fails until the
-   process restarts. Observed live on 2026-07-27 (sangsu).
+   process restarts. Observed live on 2026-07-27.
 
    Lane *replacement* is a different fact and must still fail: someone else
    owns the keeper, and this operation must not write its retained meta over

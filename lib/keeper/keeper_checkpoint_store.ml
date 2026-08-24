@@ -79,7 +79,6 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_core.Checkpoint.t) :
     string =
   offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.to_string ckpt)
 
-let keeper_generation_context_key = "keeper_generation"
 let compaction_commit_count_context_key = "masc_compaction_commit_count"
 
 let compaction_commit_count_of_context context =
@@ -99,20 +98,10 @@ let compaction_commit_count_of_context context =
   | Some _ -> Error "checkpoint compaction commit count is not an integer"
 ;;
 
-let keeper_generation_of_context (context : Agent_core.Context.t) : int =
-  match
-    Agent_core.Context.get_scoped context Agent_core.Context.Session
-      keeper_generation_context_key
-  with
-  | Some (`Int n) -> n
-  | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
-  | _ -> 0
-
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
-  let generation = keeper_generation_of_context ckpt.context in
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
-  Printf.sprintf "%s%013d-g%d%s"
-    agent_core_history_prefix created_ms generation agent_core_history_suffix
+  Printf.sprintf "%s%013d%s"
+    agent_core_history_prefix created_ms agent_core_history_suffix
 
 let prune_agent_core_history ~(session_dir : string) : unit =
   let files = list_agent_core_history_files ~session_dir in
@@ -522,8 +511,6 @@ let known_watermark ~canonical_path
 
 type checkpoint_identity_error =
   | Session_id_invalid of string
-  | Generation_missing
-  | Generation_not_integer
   | Ref_create_failed of Keeper_checkpoint_ref.create_error
 
 type checkpoint_ref_load_error =
@@ -601,33 +588,16 @@ let append_installation_auxiliary installation auxiliary =
       }
 ;;
 
-let checkpoint_generation_strict (checkpoint : Agent_core.Checkpoint.t) =
-  match
-    Agent_core.Context.get_scoped checkpoint.Agent_core.Checkpoint.context
-      Agent_core.Context.Session keeper_generation_context_key
-  with
-  | None -> Error Generation_missing
-  | Some (`Int generation) -> Ok generation
-  | Some (`Intlit raw) ->
-    (match int_of_string_opt raw with
-     | Some generation -> Ok generation
-     | None -> Error Generation_not_integer)
-  | Some _ -> Error Generation_not_integer
-
 let checkpoint_ref_of_canonical_bytes canonical_bytes
     (checkpoint : Agent_core.Checkpoint.t) =
   match Keeper_id.Trace_id.of_string checkpoint.Agent_core.Checkpoint.session_id with
   | Error reason -> Error (Session_id_invalid reason)
   | Ok trace_id ->
-    (match checkpoint_generation_strict checkpoint with
-     | Error _ as error -> error
-     | Ok generation ->
-       Keeper_checkpoint_ref.create
-         ~trace_id
-         ~generation
-         ~turn_count:checkpoint.turn_count
-         ~canonical_checkpoint_bytes:canonical_bytes
-       |> Result.map_error (fun error -> Ref_create_failed error))
+    Keeper_checkpoint_ref.create
+      ~trace_id
+      ~turn_count:checkpoint.turn_count
+      ~canonical_checkpoint_bytes:canonical_bytes
+    |> Result.map_error (fun error -> Ref_create_failed error)
 
 let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint =
   match checkpoint_ref_of_canonical_bytes canonical_bytes checkpoint with
@@ -731,13 +701,6 @@ let save_agent_core_if_source_with
       (Candidate_session_mismatch
          { expected = expected_source_ref.trace_id
          ; candidate = candidate_ref.trace_id
-         })
-  | Ok candidate_ref
-    when not (Int.equal expected_source_ref.generation candidate_ref.generation) ->
-    not_installed
-      (Candidate_generation_mismatch
-         { expected = expected_source_ref.generation
-         ; candidate = candidate_ref.generation
          })
   | Ok candidate_ref
     when candidate_ref.turn_count < expected_source_ref.turn_count ->

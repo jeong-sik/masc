@@ -179,7 +179,10 @@ let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
   in
   let drop_stdout =
     Masc_exec.Redirect_scope.File
-      { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write }
+      { fd = 1
+      ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+      ; mode = Masc_exec.Redirect_scope.Write
+      }
   in
   let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env:_ ~cwd:_ =
     match argv, stdin_content with
@@ -225,7 +228,10 @@ let test_docker_simple_redirect_does_not_stream_dropped_stdout () =
   in
   let drop_stdout =
     Masc_exec.Redirect_scope.File
-      { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write }
+      { fd = 1
+      ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+      ; mode = Masc_exec.Redirect_scope.Write
+      }
   in
   let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     (match on_stdout_chunk with

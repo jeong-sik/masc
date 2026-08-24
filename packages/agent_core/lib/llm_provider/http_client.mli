@@ -205,10 +205,9 @@ type http_error =
       ; retry_after_header : float option
         (** Parsed [Retry-After] response header (RFC 9110 S10.2.3), resolved
           to a delay in seconds relative to when the response was observed.
-          [None] when the header was absent, malformed, or when the call
-          site producing this error only has [(code, body)] available and
-          never saw response headers (see {!get_sync}/{!post_sync}, whose
-          callers construct [HttpError] themselves without header access).
+          [None] when the header was absent or malformed. Every synchronous
+          path now carries response headers, so an absent value means the
+          response really had none.
           This is diagnostic transport evidence only; provider-specific
           JSON body fields (e.g. an [error.retry_after] number) remain the
           more precise signal and take priority over this field wherever
@@ -358,6 +357,19 @@ val create_cache
 (** Snapshot of current cache statistics. *)
 val cache_stats : cache -> cache_stats
 
+(** Raw response from a synchronous dispatch
+    ({!get_sync}, {!post_sync}, {!post_sync_once}). No provider-specific body parsing or
+    retry policy has run. *)
+type raw_sync_response =
+  { status : int
+  ; body : string
+  ; retry_after_header : float option
+  ; content_type : string option
+        (** Raw [Content-Type] response header, trimmed, or [None] when the
+          response carried none. Kept unparsed: deciding whether a body is the
+          media the caller asked for belongs to the caller, not to transport. *)
+  }
+
 (** GET a URL synchronously, returning the full response.
     Returns [(status_code, body_string)] on success.
 
@@ -372,8 +384,7 @@ val cache_stats : cache -> cache_stats
     [timeout_s] is explicitly supplied. Enforcing that deadline also requires
     [clock]; supplying [timeout_s] without [clock] returns [AcceptRejected]. A
     timeout owned by this wrapper surfaces as
-    [TimeoutError { phase = Http_operation; _ }] which is classified as
-    retryable by {!Retry.is_retryable}. *)
+    [TimeoutError { phase = Http_operation; _ }]. *)
 val get_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
@@ -383,10 +394,11 @@ val get_sync
   -> url:string
   -> headers:(string * string) list
   -> unit
-  -> (int * string, http_error) result
+  -> (raw_sync_response, http_error) result
 
 (** POST JSON body synchronously, returning the full response.
-    Returns [(status_code, body_string)] on success.
+    Returns status, body, and the response-header evidence the caller needs
+    ([Retry-After], [Content-Type]) on success.
 
     Without [cache], the connection is closed immediately after the
     request completes. With [cache], the connection is bound to the
@@ -409,7 +421,7 @@ val post_sync
   -> headers:(string * string) list
   -> body:string
   -> unit
-  -> (int * string, http_error) result
+  -> (raw_sync_response, http_error) result
 
 (** Observable phase of a single HTTP dispatch.
 
@@ -428,14 +440,6 @@ type response_header_evidence
 (** Stable fingerprint of canonical, redacted response-header evidence. Header
     names, values, and provider-specific semantics are deliberately opaque. *)
 val response_header_evidence_fingerprint : response_header_evidence -> string
-
-(** Raw response from {!post_sync_once}. No provider-specific body parsing or
-    retry policy has run. *)
-type raw_sync_response =
-  { status : int
-  ; body : string
-  ; retry_after_header : float option
-  }
 
 (** URI, headers, and body admitted before transport effects begin. The URI has
     an explicit HTTP(S) scheme, non-empty host, and resolved port; callers cannot

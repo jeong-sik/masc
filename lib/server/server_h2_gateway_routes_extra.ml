@@ -6,7 +6,12 @@ open Server_h2_gateway_helpers
 
 (* Dispatch board, Gate, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
-let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
+(* [with_public_read] is the parent gateway's own H2 public-read gate, handed
+   in rather than rebuilt here. The five routes that take it are wrapped in
+   Server_auth.with_public_read on HTTP/1 and are not in the public-read
+   allowlist, so under MASC_HTTP_AUTH_STRICT=1 HTTP/1 answers 401 while this
+   dispatcher used to run the handler (#28161). *)
+let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   let h2_respond_auth_error error =
@@ -43,11 +48,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
   in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
-      let status, json = voice_config_payload () in
-      let status =
-        match status with `OK -> `OK | `Error -> `Internal_server_error
-      in
-      h2_respond_json_value h2_reqd json ~status ~extra_headers:cors;
+      with_public_read (fun () ->
+        let status, json = voice_config_payload () in
+        let status =
+          match status with `OK -> `OK | `Error -> `Internal_server_error
+        in
+        h2_respond_json_value h2_reqd json ~status ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board" ->
@@ -68,7 +74,6 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
       let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
       let voter = board_voter_query httpun_request in
-      let blind_votes = bool_query_param httpun_request "blind_votes" ~default:false in
       let posts =
         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
           ~exclude_automation ?author_filter ~limit:base_fetch ()
@@ -93,7 +98,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
-        board_post_dashboard_json ~blind_votes ?current_vote ~reactions
+        board_post_dashboard_json ?current_vote ~reactions
           ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
@@ -107,31 +112,33 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true)
 
   | `GET, "/api/v1/board/curation" ->
-      let json =
-        match Board_dispatch.latest_curation_snapshot () with
-        | None -> `Assoc [("snapshot", `Null)]
-        | Some snap ->
-            `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let json =
+          match Board_dispatch.latest_curation_snapshot () with
+          | None -> `Assoc [("snapshot", `Null)]
+          | Some snap ->
+              `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/hearths" ->
-      let exclude_system =
-        bool_query_param httpun_request "exclude_system" ~default:false
-      in
-      let exclude_automation =
-        bool_query_param httpun_request "exclude_automation" ~default:false
-      in
-      let hearths =
-        Board_dispatch.list_hearths ~exclude_system ~exclude_automation ()
-      in
-      let json = `Assoc [
-        ("hearths", `List (List.map (fun (name, count) ->
-          `Assoc [("name", `String name); ("count", `Int count)]
-        ) hearths));
-      ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let exclude_system =
+          bool_query_param httpun_request "exclude_system" ~default:false
+        in
+        let exclude_automation =
+          bool_query_param httpun_request "exclude_automation" ~default:false
+        in
+        let hearths =
+          Board_dispatch.list_hearths ~exclude_system ~exclude_automation ()
+        in
+        let json = `Assoc [
+          ("hearths", `List (List.map (fun (name, count) ->
+            `Assoc [("name", `String name); ("count", `Int count)]
+          ) hearths));
+        ] in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/flairs" ->
@@ -153,36 +160,42 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->
-      (* Karma ledger contract endpoint — attributed karma events.
-         Query params:
-           agent  — filter to a single recipient (case-sensitive)
-           limit  — cap result count (default: 500) *)
-      let agent = query_param httpun_request "agent" in
-      let limit =
-        int_query_param httpun_request "limit" ~default:500
-        |> clamp ~min_v:1 ~max_v:5000
-      in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals =
-        Board_dispatch.get_all_karma ()
-        |> List.sort (fun (_, a) (_, b) -> compare b a)
-      in
-      let json =
-        `Assoc
-          [
-            ("events", `List (List.map Board.karma_event_to_yojson events));
-            ("count", `Int (List.length events));
-            ("scoring_rule", `String "up=+1,down=0");
-            ( "totals",
-              `List
-                (List.map
-                   (fun (agent_name, k) ->
-                     `Assoc
-                       [ ("agent", `String agent_name); ("karma", `Int k) ])
-                   totals) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        (* Karma ledger contract endpoint — attributed karma events.
+           Query params:
+             agent  — filter to a single recipient (case-sensitive)
+             limit  — cap result count (default: 500) *)
+        let agent = query_param httpun_request "agent" in
+        let limit =
+          int_query_param httpun_request "limit" ~default:500
+          |> clamp ~min_v:1 ~max_v:5000
+        in
+        (* TEL-OK: read-only projection mirroring the HTTP/1 arm
+           [board_karma_ledger_json], which emits none either. This route
+           exists to make the two protocols answer identically, so telemetry
+           on one arm only would reintroduce the asymmetry it closes. *)
+        let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+        let totals =
+          (* TEL-OK: same read, same H1 counterpart, same reason. *)
+          Board_dispatch.get_all_karma ()
+          |> List.sort (fun (_, a) (_, b) -> compare b a)
+        in
+        let json =
+          `Assoc
+            [
+              ("events", `List (List.map Board.karma_event_to_yojson events));
+              ("count", `Int (List.length events));
+              ("scoring_rule", `String "up=+1,down=0");
+              ( "totals",
+                `List
+                  (List.map
+                     (fun (agent_name, k) ->
+                       `Assoc
+                         [ ("agent", `String agent_name); ("karma", `Int k) ])
+                     totals) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, p
@@ -203,25 +216,23 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
         true
       | Ok response_format ->
         let voter = board_voter_query httpun_request in
-        let blind_votes =
-          bool_query_param httpun_request "blind_votes" ~default:false
-        in
         let status, body =
-          board_post_detail_json ~include_moderation:false ~blind_votes ~voter
+          board_post_detail_json ~voter
             ~reaction_actor ~config ~response_format ~post_id
         in
         h2_respond_json h2_reqd body ~status ~extra_headers:cors;
         true)
 
   | `GET, "/api/v1/karma" ->
-      let karma_list = Board_dispatch.get_all_karma () in
-      let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
-      let json = `Assoc [
-        ("karma", `List (List.map (fun (agent, k) ->
-          `Assoc [("agent", `String agent); ("karma", `Int k)]
-        ) sorted));
-      ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let karma_list = Board_dispatch.get_all_karma () in
+        let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+        let json = `Assoc [
+          ("karma", `List (List.map (fun (agent, k) ->
+            `Assoc [("agent", `String agent); ("karma", `Int k)]
+          ) sorted));
+        ] in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/static/css/middleware.css" ->

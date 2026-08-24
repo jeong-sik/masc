@@ -30,7 +30,13 @@ let keeper_turn_record_source_health
   =
   match latest_age_s, live_turn_in_progress with
   | None, _ when skipped_rows > 0 -> "incompatible", "incompatible_rows"
-  | _, true -> "ok", ""
+  (* A turn is running, so the age of the newest finished record says nothing
+     about whether this store is keeping up — the record for the running turn
+     has not been written yet. This used to report "ok", which also means "the
+     newest record is inside the SLO", and the dashboard could not tell the two
+     apart: it recomputed the age, found it over the SLO, read the response as
+     a contract violation and dropped the whole payload (#28720). *)
+  | _, true -> "live", ""
   | None, false -> "empty", "no_entries"
   | Some age, false when age > freshness_slo_s ->
     "stale", "freshness_slo_exceeded"
@@ -120,18 +126,6 @@ let json_string_opt key json = Json_util.get_string_nonempty json key
 
 let json_float_opt key json = Safe_ops.json_float_opt key json
 
-let quiet_hours_active ~now_ts =
-  let current_hour =
-    let tm = Unix.gmtime now_ts in
-    (* KST = UTC+9; must use gmtime, not localtime *)
-    (tm.Unix.tm_hour + 9) mod 24
-  in
-  let quiet_start = Env_config.Autonomy.quiet_start in
-  let quiet_end = Env_config.Autonomy.quiet_end in
-  quiet_start < quiet_end
-  && current_hour >= quiet_start
-  && current_hour < quiet_end
-
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   let normalize_content item =
     match json_string_opt "content" item with
@@ -174,21 +168,45 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
+(* Wire vocabularies shared with the dashboard. Both are closed here so a new
+   case cannot reach the wire without the compiler naming every consumer. *)
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
+
+let keeper_quiet_reason_to_string = function
+  | Proactive_disabled -> "disabled"
+  | Keepalive_not_running -> "not_running"
+  | Starting_up -> "startup"
+  | Never_started -> "never_started"
+
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
+
+let keeper_next_action_path_to_string = function
+  | Auto_restart -> "auto_restart"
+  | Recover -> "recover"
+  | Probe -> "probe"
+  | Direct_message -> "direct_message"
+
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts =
-  let quiet_active = quiet_hours_active ~now_ts in
   if not meta.proactive.enabled then
-    Some "disabled"
+    Some Proactive_disabled
   else if not keepalive_running then
-    Some "not_running"
+    Some Keepalive_not_running
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
       match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= agent_staleness_threshold_s then Some "startup" else Some "never_started"
-  else if quiet_active then
-    Some "quiet_hours"
+    if keeper_age_s <= agent_staleness_threshold_s then Some Starting_up
+    else Some Never_started
   else None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
@@ -222,15 +240,14 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
 
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
-  | KH_zombie -> "auto_restart"
-  | KH_offline | KH_stale | KH_degraded -> "recover"
+  | KH_zombie -> Auto_restart
+  | KH_offline | KH_stale | KH_degraded -> Recover
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "quiet_hours" -> "manual_social_poke"
-      | Some "not_running" -> "recover"
-      | Some "startup" -> "probe"
-      | Some "disabled" -> "recover"
-      | _ -> "direct_message")
+      | Some Keepalive_not_running -> Recover
+      | Some Proactive_disabled -> Recover
+      | Some Starting_up -> Probe
+      | Some Never_started | None -> Direct_message)
 
 let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
@@ -240,15 +257,14 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "disabled" ->
+      | Some Proactive_disabled ->
           "Keeper proactive automation is disabled. Direct messages still work, but scheduled social ticks will stay quiet."
-      | Some "not_running" ->
+      | Some Keepalive_not_running ->
           "Keeper keepalive is enabled, but its loop is not running."
-      | Some "quiet_hours" ->
-          "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
-      | Some "never_started" ->
+      | Some Never_started ->
           "Keeper metadata exists but no reply turn has been recorded yet."
-      | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
+      | Some Starting_up | None ->
+          "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
     ~(keepalive_running : bool)
@@ -420,9 +436,12 @@ let keeper_diagnostic_json
   `Assoc
     [
       ("health_state", `String (keeper_health_to_string health_state));
-      ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
-      ("next_action_path", `String next_action_path);
-      ("recoverable", `Bool (String.equal next_action_path "recover"));
+      ( "quiet_reason",
+        Json_util.string_opt_to_json
+          (Option.map keeper_quiet_reason_to_string quiet_reason) );
+      ("next_action_path",
+       `String (keeper_next_action_path_to_string next_action_path));
+      ("recoverable", `Bool (next_action_path = Recover));
       ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);

@@ -22,7 +22,6 @@ import {
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
-  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
   fetchKeeperTurnTranscript,
@@ -175,10 +174,6 @@ describe('fetchDashboardExecutionTrust', () => {
           latest_age_s: null,
           health: 'coverage_gap',
         },
-        migration: {
-          body_shape: 'root_fields_preserved',
-          rule: 'additive envelope first',
-        },
       },
       freshness_slo_s: 900,
       entry_count: 0,
@@ -224,7 +219,6 @@ describe('fetchDashboardExecutionTrust', () => {
         key: 'execution-trust:default',
         stale_reason: 'execution_receipt_append_failed',
       },
-      migration: { body_shape: 'root_fields_preserved' },
     })
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_agent_run.execution_receipt',
@@ -524,7 +518,6 @@ describe('keeper tool telemetry fetchers', () => {
               },
               eval_tags: [],
               readonly: true,
-              retryable: true,
               cwd_scope: null,
               polling_read: false,
               tool_name: 'keeper_time_now',
@@ -568,7 +561,6 @@ describe('keeper tool telemetry fetchers', () => {
       backend: 'ocaml_runtime',
       runtime_handler: 'tool_time_now',
       readonly: true,
-      retryable: true,
     })
     expect(entry?.route_evidence?.receipt_labels).toEqual({
       descriptor_id: 'keeper.time.now',
@@ -767,178 +759,6 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
     expect(result.entries[1]?.record.selected_model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
-  })
-
-  it('decodes durable compaction snapshots with nullable token fields', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({
-        schema: 'keeper.compaction_snapshots.v1',
-        keeper: 'keeper-alpha',
-        source: 'runtime_manifest|keeper_meta',
-        producer: 'keeper_runtime_manifest|keeper_meta_store',
-        limit: 2,
-        count: 2,
-        read_error_count: 1,
-        read_errors: [{ scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' }],
-        scan_truncated: false,
-        hydration_status: 'ready',
-        items: [
-          {
-            id: 'manifest:trace-a:context_compacted:2026-06-26T03:03:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T03:03:00Z',
-            ts_unix: 1_782_444_580,
-            trace_id: 'trace-a',
-            keeper_turn_id: 12,
-            source: 'runtime_manifest',
-            trigger: 'proactive(85%)',
-            runtime_id: 'agent-core-seoul-1',
-            display_runtime: 'agent-core-seoul-1',
-            before_tokens: 210000,
-            after_tokens: 120000,
-            saved_tokens: 90000,
-            compaction_id: 'cmp-42',
-            compaction_source: 'provider_overflow',
-            compaction_outcome: 'checkpoint_committed',
-            cause: 'compaction completion dispatch failed',
-            status: 'retryable_failure',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
-              before_message_count: 8, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'reinserted', keeper_turn_id: 13,
-              checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
-            },
-          },
-          {
-            id: 'manifest:trace-b:context_compacted:2026-06-26T04:03:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:03:00Z',
-            ts_unix: null,
-            trace_id: 'trace-b',
-            keeper_turn_id: null,
-            source: 'runtime_manifest',
-            trigger: 'pre_dispatch_hygiene',
-            runtime_id: null,
-            display_runtime: 'pre_dispatch_hygiene',
-            before_tokens: null,
-            after_tokens: null,
-            saved_tokens: null,
-            compaction_id: null,
-            compaction_source: 'pre_dispatch_hygiene',
-            compaction_outcome: 'retry_without_checkpoint',
-            cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
-            links: {},
-            exact_evidence: null,
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-          {
-            id: 'manifest:trace-c:context_compacted:2026-06-26T04:04:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:04:00Z',
-            ts_unix: null,
-            trace_id: 'trace-c',
-            keeper_turn_id: 14,
-            source: 'runtime_manifest',
-            trigger: 'proactive(90%)',
-            runtime_id: 'agent-core-seoul-1',
-            display_runtime: 'agent-core-seoul-1',
-            before_tokens: 180000,
-            after_tokens: 90000,
-            saved_tokens: 90000,
-            compaction_id: 'cmp-43',
-            compaction_source: 'event_bus',
-            compaction_outcome: 'checkpoint_committed',
-            cause: 'lifecycle cleanup failed',
-            status: 'lifecycle_cleanup_failed',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
-              before_message_count: 9, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-          {
-            id: 'manifest:trace-contradictory:context_compacted:2026-06-26T04:05:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:05:00Z',
-            ts_unix: null,
-            trace_id: 'trace-contradictory',
-            keeper_turn_id: 15,
-            source: 'runtime_manifest',
-            trigger: 'provider_overflow',
-            runtime_id: 'agent-core-seoul-1',
-            display_runtime: 'agent-core-seoul-1',
-            before_tokens: null,
-            after_tokens: null,
-            saved_tokens: null,
-            compaction_id: 'cmp-contradictory',
-            compaction_source: 'provider_overflow',
-            compaction_outcome: 'retry_without_checkpoint',
-            cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
-              before_message_count: 8, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-        ],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperCompactionSnapshots('keeper-alpha', 2)
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
-    expect(result.items[0]?.before_tokens).toBe(210000)
-    expect(result.items[0]?.saved_tokens).toBe(90000)
-    expect(result.items[0]?.display_runtime).toBe('agent-core-seoul-1')
-    expect(result.items[0]?.reinjection_observation.state).toBe('reinserted')
-    expect(result.read_error_count).toBe(1)
-    expect(result.read_errors).toEqual([
-      { scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' },
-    ])
-    expect(result.scan_truncated).toBe(false)
-    expect(result.items[0]?.links.receipt_path).toBeNull()
-    expect(result.items[1]?.before_tokens).toBeNull()
-    expect(result.items[1]?.runtime_id).toBeNull()
-    expect(result.items[1]?.links.checkpoint_path).toBeNull()
-    expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
-    expect(result.items[0]?.compaction_outcome).toBe('checkpoint_committed')
-    expect(result.items[0]?.cause).toBe('compaction completion dispatch failed')
-    expect(result.items[2]?.compaction_outcome).toBe('checkpoint_committed')
-    expect(result.items[2]?.exact_evidence?.before_checkpoint_bytes).toBe(2048)
-    expect(result.items[2]?.cause).toBe('lifecycle cleanup failed')
-    expect(result.items).toHaveLength(3)
-    expect(result.items.some(item => item.trace_id === 'trace-contradictory')).toBe(false)
-
-    await fetchKeeperCompactionSnapshots('keeper-alpha', 2, { refresh: true })
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      '/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2&refresh=true',
-    )
   })
 })
 
@@ -1861,7 +1681,7 @@ describe('fetchTelemetrySummary', () => {
 })
 
 describe('fetchDashboardMemory', () => {
-  it('requests vote-blind dashboard board rows for the current actor', async () => {
+  it('requests dashboard board rows for the current actor', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
         status: 200,
@@ -1875,7 +1695,6 @@ describe('fetchDashboardMemory', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/dashboard/board?')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 
@@ -2731,7 +2550,6 @@ describe('dashboard goals decoding', () => {
       tree: [makeRawGoalNode()],
       summary: {
         total_goals: 3,
-        active_goals: 2,
         phase_counts: { executing: 1, blocked: 1, completed: 1 },
       },
     }
@@ -2746,94 +2564,7 @@ describe('dashboard goals decoding', () => {
 
     const result = await fetchDashboardGoalsTree()
 
-    expect(result.summary.active_goals).toBe(2)
     expect(result.summary.phase_counts).toEqual({ executing: 1, blocked: 1, completed: 1 })
-  })
-
-  it('decodes goal attainment projections on tree payloads', async () => {
-    const rawResponse = {
-      approval_queue_state: { state: 'ready' },
-      tree: [
-        makeRawGoalNode({
-          metric: 'completion_pct',
-          target_value: '75%',
-          attainment: {
-            state: 'attained',
-            basis: 'metric_target_percent',
-            metric: 'completion_pct',
-            target_value: '75%',
-            target_parse_status: 'parseable',
-            unit: 'percent',
-            observed_value: 75,
-            target_numeric: 75,
-            attainment_pct: 100,
-            task_done_count: 3,
-            task_count: 4,
-            note: 'Derived from linked task completion against a percent target.',
-          },
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'attained',
-      basis: 'metric_target_percent',
-      metric: 'completion_pct',
-      target_value: '75%',
-      target_parse_status: 'parseable',
-      unit: 'percent',
-      observed_value: 75,
-      target_numeric: 75,
-      attainment_pct: 100,
-      task_done_count: 3,
-      task_count: 4,
-    })
-  })
-
-  it('falls back to unmeasured goal attainment when payloads are old', async () => {
-    const rawResponse = {
-      approval_queue_state: { state: 'ready' },
-      tree: [
-        makeRawGoalNode({
-          metric: 'latency',
-          target_value: 'fast enough',
-          task_done_count: 1,
-          task_count: 2,
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: 'latency',
-      target_value: 'fast enough',
-      target_parse_status: 'unparseable',
-      task_done_count: 1,
-      task_count: 2,
-    })
   })
 
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
@@ -2846,7 +2577,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: 'task-1',
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -2980,7 +2710,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: null,
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -3039,7 +2768,6 @@ describe('fetchKeeperConfig', () => {
   it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
-      active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
       max_context_override: 64_000,
       autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
@@ -3097,12 +2825,6 @@ describe('fetchKeeperConfig', () => {
       workspace: {
         mention_targets: 'sangsu',
         bound_workspace_ids: 'default',
-        active_goal_ids: ['goal-runtime'],
-        active_goals: [
-          { id: 'goal-runtime', title: 'Ship runtime clarity' },
-        ],
-        active_goal_count: '1',
-        missing_active_goal_ids: [],
       },
       sources: {
         live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -3158,9 +2880,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
-    expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')

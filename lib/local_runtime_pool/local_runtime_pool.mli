@@ -91,11 +91,6 @@ module For_testing : sig
   (** Install a deterministic runtime snapshot under the pool lock. *)
 end
 
-val current_fingerprint : unit -> string
-(** Stable hash of the current discovery cache snapshot.
-    Equality of two consecutive calls means no endpoints
-    were added / removed / re-discovered. *)
-
 val runtime_id_of_base_url : string -> string
 (** Derives a stable runtime id from a [base_url] (e.g.
     ["http://127.0.0.1:8081"] →

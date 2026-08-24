@@ -48,7 +48,9 @@ let api_base =
 (* Discord requires a specific User-Agent format:
    "DiscordBot ($url, $version)". *)
 let user_agent =
-  "DiscordBot (https://github.com/jeong-sik/masc, 0.1)"
+  Printf.sprintf
+    "DiscordBot (https://github.com/jeong-sik/masc, %s)"
+    Build_version.current
 
 let auth_headers ~token =
   [ "Authorization", "Bot " ^ token
@@ -169,8 +171,11 @@ let build_guild_member_request ~token ~guild_id ~user_id () =
   in
   (url, auth_headers ~token, "")
 
-let parse_json_safe s =
-  try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
+(* [Safe_ops.parse_json_safe] is the parser for this shape: it trims, treats an
+   empty body as an empty object, repairs UTF-8, and hands back the decoder's
+   message. The copy that used to sit here did none of that and dropped the
+   message, so a malformed connector response arrived as a bare [None]. *)
+let parse_json_safe s = Safe_ops.parse_json_safe ~context:"discord_rest_client" s
 
 let unique_field_opt name = function
   | `Assoc fields ->
@@ -182,9 +187,9 @@ let unique_field_opt name = function
 
 let error_of_non2xx ~request_id ~status ~body =
   match parse_json_safe body with
-  | None ->
+  | Error _ ->
     Http_status { request_id; code = status; body_bytes = String.length body }
-  | Some json ->
+  | Ok json ->
       let code =
         match unique_field_opt "code" json with
         | Ok (Some (`Int c)) -> c
@@ -202,14 +207,14 @@ let parse_response ?request_id ~status ~body () =
   in
   if status >= 200 && status < 300 then
     match parse_json_safe body with
-    | None ->
+    | Error msg ->
         Error
           (Other
              { request_id
-             ; reason = "2xx response body is not valid JSON"
+             ; reason = Printf.sprintf "2xx response body is not valid JSON: %s" msg
              ; body_bytes = String.length body
              })
-    | Some json ->
+    | Ok json ->
         (match unique_field_opt "id" json with
          | Ok (Some (`String id)) -> Ok id
          | Error reason ->
@@ -235,12 +240,12 @@ let parse_json_response ?request_id ~status ~body () =
   in
   if status >= 200 && status < 300 then
     match parse_json_safe body with
-    | Some json -> Ok json
-    | None ->
+    | Ok json -> Ok json
+    | Error msg ->
       Error
         (Other
            { request_id
-           ; reason = "2xx response body is not valid JSON"
+           ; reason = Printf.sprintf "2xx response body is not valid JSON: %s" msg
            ; body_bytes = String.length body
            })
   else

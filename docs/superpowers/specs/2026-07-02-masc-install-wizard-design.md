@@ -49,7 +49,9 @@ A wizard removes this friction and prevents the common "server exits immediately
 ## User Flow (TTY)
 
 ```text
-$ curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+$ TAG=vX.Y.Z
+$ curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
+$ bash /tmp/masc-install.sh --version "$TAG"
 ==> platform: masc-macos-arm64
 ==> version: v0.19.51
 ==> installed: ~/.local/bin/masc

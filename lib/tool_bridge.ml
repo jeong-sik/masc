@@ -194,13 +194,13 @@ let externalization_tool_error ~recoverable error =
 ;;
 
 let agent_core_error_class_of_tool_failure_class = function
-  | Tool_result.Transient_error -> Agent_core.Types.Transient
   | Tool_result.Policy_rejection
   | Tool_result.Workflow_rejection
   (* Operator interrupt: final for the model — it must not re-attempt what
      an operator explicitly stopped (#28810). *)
   | Tool_result.Operator_cancelled ->
     Agent_core.Types.Deterministic
+  | Tool_result.Dependency_unavailable -> Agent_core.Types.Transient
   | Tool_result.Runtime_failure -> Agent_core.Types.Unknown
 ;;
 
@@ -250,7 +250,6 @@ let params_of_json_schema schema =
 let project_result
       ?base_path
       ?on_externalization_error
-      ~externalization_error_recoverable
       ~model_projection
       ~structured_content
       ~metadata
@@ -277,16 +276,13 @@ let project_result
   | Ok content -> on_content content
   | Error error ->
     Option.iter (fun observe -> observe error) on_externalization_error;
-    externalization_tool_error
-      ~recoverable:externalization_error_recoverable
-      error
+    externalization_tool_error ~recoverable:false error
 ;;
 
 let to_agent_core_typed_result
       ?base_path
       ?(model_projection = Tool_output.default_model_projection)
       ?on_externalization_error
-      ?(externalization_error_recoverable = true)
       (tr : Tool_result.result)
   : Agent_core.Types.tool_result
   =
@@ -295,7 +291,6 @@ let to_agent_core_typed_result
     project_result
       ?base_path
       ?on_externalization_error
-      ~externalization_error_recoverable
       ~model_projection
       ~structured_content:(Tool_result.data tr)
       ~metadata:(Tool_result.metadata tr)
@@ -315,7 +310,6 @@ let to_agent_core_typed_result
     project_result
       ?base_path
       ?on_externalization_error
-      ~externalization_error_recoverable
       ~model_projection
       ~structured_content:(Tool_result.data tr)
       ~metadata:(Tool_result.metadata tr)
@@ -337,14 +331,13 @@ let to_agent_core_typed_result
     project_result
       ?base_path
       ?on_externalization_error
-      ~externalization_error_recoverable
       ~model_projection
       ~structured_content:(Tool_result.data tr)
       ~metadata:(Tool_result.metadata tr)
       message
       (fun message ->
        make_tool_error
-         ~recoverable:(Tool_result.is_retryable class_)
+         ~recoverable:false
          ~error_class:(agent_core_error_class_of_tool_failure_class class_)
          message)
 
@@ -365,7 +358,6 @@ let agent_core_tool_of_masc
     ?base_path
     ?model_projection
     ?on_externalization_error
-    ?externalization_error_recoverable
     ~name
     ~description
     ~input_schema
@@ -376,7 +368,6 @@ let agent_core_tool_of_masc
       ?base_path
       ?model_projection
       ?on_externalization_error
-      ?externalization_error_recoverable
       (handler json_args)
   in
   Agent_core.Tool.create ?descriptor ~name ~description ~parameters agent_core_handler
@@ -386,7 +377,6 @@ let agent_core_tool_of_masc_with_execution_env
     ?base_path
     ?model_projection
     ?on_externalization_error
-    ?externalization_error_recoverable
     ~name
     ~description
     ~input_schema
@@ -398,7 +388,6 @@ let agent_core_tool_of_masc_with_execution_env
       ?base_path
       ?model_projection
       ?on_externalization_error
-      ?externalization_error_recoverable
       (handler execution_env json_args)
   in
   match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with

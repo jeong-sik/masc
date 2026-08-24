@@ -47,6 +47,44 @@ type protocol =
 
 let reject reason = Error (Http_client.AcceptRejected { reason })
 
+(* A 2xx from an OpenAI-compatible gateway does not prove the body is audio.
+   LiteLLM/one-api style proxies answer 200 with a JSON error object, and the
+   raw-bytes branch below would store that JSON as if it were the audio the
+   caller asked for. Content-Type is the only transport-level signal that tells
+   the two apart, so reject a JSON body before it becomes audio. *)
+let body_is_json_media content_type =
+  match content_type with
+  | None -> false
+  | Some raw ->
+    let media =
+      match String.index_opt raw ';' with
+      | None -> raw
+      | Some i -> String.sub raw 0 i
+    in
+    let media = String.lowercase_ascii (String.trim media) in
+    String.equal media "application/json" || String.ends_with ~suffix:"+json" media
+;;
+
+let%test "body_is_json_media: absent content-type is not JSON" =
+  body_is_json_media None = false
+;;
+
+let%test "body_is_json_media: bare application/json" =
+  body_is_json_media (Some "application/json") = true
+;;
+
+let%test "body_is_json_media: parameters and casing are ignored" =
+  body_is_json_media (Some "Application/JSON; charset=utf-8") = true
+;;
+
+let%test "body_is_json_media: structured suffix counts as JSON" =
+  body_is_json_media (Some "application/problem+json") = true
+;;
+
+let%test "body_is_json_media: audio is not JSON" =
+  body_is_json_media (Some "audio/mpeg") = false
+;;
+
 let parse_failure message =
   Error
     (Http_client.ProviderFailure
@@ -280,11 +318,21 @@ let generate
             ()
         with
         | Error _ as error -> error
-        | Ok (code, response_body) when code >= 200 && code < 300 ->
+        | Ok { status; body = response_body; content_type; _ }
+          when status >= 200 && status < 300 ->
           (match protocol with
            | Openai_speech ->
              if response_body = ""
              then parse_failure "OpenAI Speech API returned an empty body"
+             else if body_is_json_media content_type
+             then
+               parse_failure
+                 (Printf.sprintf
+                    "OpenAI Speech API answered %d with a JSON body (content-type %s), \
+                     not audio: %s"
+                    status
+                    (Option.value content_type ~default:"<absent>")
+                    response_body)
              else
                Ok
                  { provider_response_id = None
@@ -299,8 +347,8 @@ let generate
                  ; usage = None
                  }
            | Gemini_interaction -> parse_gemini_response format response_body)
-        | Ok (code, body) ->
-          Error (Http_client.HttpError { code; body; retry_after_header = None })))
+        | Ok { status; body; retry_after_header; _ } ->
+          Error (Http_client.HttpError { code = status; body; retry_after_header })))
 ;;
 
 let test_caps task = { Capabilities.default_capabilities with task }

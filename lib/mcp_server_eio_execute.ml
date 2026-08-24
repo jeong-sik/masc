@@ -138,9 +138,7 @@ let execute_tool_eio
       let details =
         `Assoc
           [ "source", `String "mcp_server_eio_execute"
-          ; "visible_in_tools_list", `Bool (Tool_catalog.is_visible name)
           ; "allow_direct_call", `Bool (Tool_catalog.allow_direct_call name)
-          ; "mcp_session_id_present", `Bool (Option.is_some mcp_session_id)
           ; "argument_keys", `List argument_keys_json
           ]
       in

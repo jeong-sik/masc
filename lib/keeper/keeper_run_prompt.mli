@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -35,11 +34,6 @@ type extra_system_context_assembly =
 val sanitize_user_message : string -> string
 (** Normalize malformed UTF-8 before appending the complete user message to
     the AGENT_CORE context. This boundary does not classify or rewrite its meaning. *)
-
-val normalize_memory_fragment : string -> string
-(** Normalize malformed UTF-8 while preserving the complete recalled memory.
-    Trust and relevance are interpreted by the configured model, not by a
-    local string deny-list. *)
 
 val assemble_extra_system_context :
   existing_extra_system_context:string option ->

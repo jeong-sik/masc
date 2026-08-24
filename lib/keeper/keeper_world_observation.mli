@@ -21,6 +21,11 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
+      (** A vote landed on a post or comment this Keeper wrote. Payload-carrying
+          like {!Completion_authority_rejected}: the voter and direction are the
+          fact the row states, and [post_id] is the post the vote belongs to
+          (the parent post for a comment vote). *)
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is
@@ -36,12 +41,6 @@ type pending_board_event_kind =
           identity visible in the current Keeper prompt. The Librarian reads
           the same producer-owned attention record through its bounded durable
           projection. *)
-  | Goal_assigned
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
-  | Goal_reconciliation_ready
-      (** All linked Tasks are terminal; the Keeper must re-read SSOT and
-          choose completion, blocking, or follow-up work. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation
@@ -89,9 +88,7 @@ type pending_board_event = {
     it to [Scheduled_automation_stimulus] independently of this partition
     ([scheduled_automation.due_ready_count] is a separate live-store
     observation, not the stimulus's trigger; it can already be zero once
-    dispatch begins). [Goal_reconciliation_ready] has no dedicated event-queue
-    trigger, so classifying an isolated reconciliation event [false] also
-    removes [Board_event_pending] and suppresses its intended reactive turn.
+    dispatch begins).
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by its source contract and pin the answer in a test. *)
@@ -305,11 +302,6 @@ val collect_board_events_without_advancing_cursor :
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
-val board_signal_match :
-  meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
-  board_signal_match
-
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
     event so the woken turn can inspect it as neutral Board context.
@@ -349,12 +341,6 @@ val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
-
-val read_scheduled_automation_observation :
-  keeper_name:string option ->
-  config:Workspace.config ->
-  now:float ->
-  scheduled_automation_observation
 
 (** Build a world observation from workspace state and keeper metadata.
 
@@ -396,5 +382,3 @@ val keeper_cycle_decision :
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
-val should_run_keeper_cycle :
-  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

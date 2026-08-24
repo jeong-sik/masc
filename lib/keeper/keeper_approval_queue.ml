@@ -301,7 +301,12 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 8
+(* Bumped to 9 by the goal_ids removal: #29256 dropped the field from the entry
+   contract without moving the version, so an installed v8 store failed the
+   field check with "contains unsupported field goal_ids" instead of the version
+   check that tells an operator what to do about it. A format change the version
+   does not record is a format change nobody can diagnose. *)
+let pending_store_version = 9
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -369,11 +374,13 @@ let replay_results_store_path ~base_path =
 ;;
 
 let report_pending_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", pending_store_surface; "reason", reason ]
+        ~labels:[ "surface", pending_store_surface; "reason", reason_wire ]
         ())
     ~surface:pending_store_surface
     ~reason
@@ -382,13 +389,15 @@ let report_pending_read_drop ~reason ~path ~detail =
 ;;
 
 let report_replay_results_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
         ~labels:
           [ "surface", replay_results_store_surface
-          ; "reason", reason
+          ; "reason", reason_wire
           ]
         ())
     ~surface:replay_results_store_surface
@@ -425,7 +434,6 @@ let pending_entry_to_yojson
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", Json_util.json_string_list entry.goal_ids
       ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
       ; "summary_status", summary_status_to_yojson entry.summary_status
       ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
@@ -703,8 +711,6 @@ let reject_unknown_fields = Json_util.reject_unknown_fields
 let required_string = Json_util.require_field_string
 let required_float = Json_util.require_field_float
 let required_positive_int = Json_util.require_field_positive_int
-let required_string_list = Json_util.require_field_string_list
-
 let required_member ~surface field fields =
   match List.assoc_opt field fields with
   | Some value -> Ok value
@@ -853,7 +859,6 @@ let pending_entry_of_yojson ~base_path json =
           ; "request_context_version"
           ; "task_id"
           ; "goal_id"
-          ; "goal_ids"
           ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
@@ -906,7 +911,6 @@ let pending_entry_of_yojson ~base_path json =
     in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
-    let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
       let* summary_json = required_member ~surface "summary_status" fields in
@@ -941,7 +945,6 @@ let pending_entry_of_yojson ~base_path json =
       ; request_context
       ; task_id
       ; goal_id
-      ; goal_ids
       ; continuation_channel
         ; audit_base_path = base_path
         ; summary_status
@@ -1376,7 +1379,7 @@ let load_snapshot_unlocked ~base_path =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_pending_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         Error { path; reason }
@@ -1407,7 +1410,7 @@ let load_snapshot_unlocked ~base_path =
            else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
          | Error reason ->
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            Error { path; reason }))
@@ -1416,7 +1419,7 @@ let load_snapshot_unlocked ~base_path =
   | exn ->
     let reason = Printexc.to_string exn in
     report_pending_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     Error { path; reason }
@@ -1474,7 +1477,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_replay_results_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         delivery_map, Some { path; reason }
@@ -1482,7 +1485,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
         (match replay_results_of_yojson json with
          | Error reason ->
            report_replay_results_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            delivery_map, Some { path; reason }
@@ -1491,7 +1494,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
             | Ok delivery_map -> delivery_map, None
             | Error reason ->
               report_replay_results_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               delivery_map, Some { path; reason })))
@@ -1500,7 +1503,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
   | exn ->
     let reason = Printexc.to_string exn in
     report_replay_results_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     delivery_map, Some { path; reason }
@@ -1753,7 +1756,6 @@ let consume_approved_resolution
         ?turn_id:entry.turn_id
         ?task_id:entry.task_id
         ?goal_id:entry.goal_id
-        ~goal_ids:entry.goal_ids
         ~source_approval_id:id
         ~decision_source:delivery.source
         ~decision:Decision.Approve
@@ -1782,7 +1784,6 @@ let create_entry
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ~continuation_channel
       ~audit_base_path
       ()
@@ -1799,7 +1800,6 @@ let create_entry
   ; request_context
   ; task_id
   ; goal_id
-  ; goal_ids
     ; continuation_channel
     ; audit_base_path
     ; summary_status = Summary_not_requested
@@ -1822,7 +1822,6 @@ let pending_entry_json_fields
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
   ]
   @ (if include_input
      then
@@ -1880,7 +1879,6 @@ let record_pending (entry : pending_approval) =
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
       ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
       ()
   in
   broadcast_pending entry audit_receipt;
@@ -2868,7 +2866,6 @@ let resolve_entry
       ?turn_id:entry.turn_id
       ?task_id:entry.task_id
       ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
       ?actor
       ~decision_source:source
       ~decision
@@ -2917,7 +2914,6 @@ let pending_entry_matches
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
@@ -2926,7 +2922,6 @@ let pending_entry_matches
   && String.equal entry.input_hash input_hash
   && entry.task_id = task_id
   && entry.goal_id = goal_id
-  && entry.goal_ids = goal_ids
   && Yojson.Safe.equal
        (Keeper_continuation_channel.to_yojson entry.continuation_channel)
        (Keeper_continuation_channel.to_yojson continuation_channel)
@@ -2940,7 +2935,6 @@ let find_pending_id_in_map
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -2957,7 +2951,6 @@ let find_pending_id_in_map
              ~input_hash
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          then Some id
          else None)
@@ -2980,7 +2973,6 @@ let find_unconsumed_grant_id_in_deliveries
       ~input_hash
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -3001,7 +2993,6 @@ let find_unconsumed_grant_id_in_deliveries
                    ~input_hash
                    ~task_id
                    ~goal_id
-                   ~goal_ids
                    ~continuation_channel
             then Some id
             else None))
@@ -3020,7 +3011,6 @@ let submit_pending
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ()
   : (pending_submission, storage_error) result
@@ -3050,7 +3040,6 @@ let submit_pending
              ~input_hash
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          with
          | Some id -> Ok (`Deduplicated id)
@@ -3064,7 +3053,6 @@ let submit_pending
                 ~input_hash
                 ~task_id
                 ~goal_id
-                ~goal_ids
                 ~continuation_channel
             with
             | Some id -> Ok (`Folded_onto_unconsumed_grant id)
@@ -3088,7 +3076,6 @@ let submit_pending
               ?request_context
               ?task_id
               ?goal_id
-              ~goal_ids
               ~continuation_channel
               ~audit_base_path:base_path
               ()
@@ -3460,7 +3447,7 @@ let install_persistence_internal ~after_load ~base_path =
          | Error reason, _ | _, Error reason ->
            let path = pending_store_path ~base_path in
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            let error = { path; reason } in
@@ -3476,7 +3463,7 @@ let install_persistence_internal ~after_load ~base_path =
                   id
               in
               report_pending_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               let error = { path; reason } in

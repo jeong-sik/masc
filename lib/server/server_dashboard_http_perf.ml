@@ -112,7 +112,7 @@ let benchmark_results_dir_candidates (config : Workspace.config) =
     ]
   in
   dedupe_strings
-    (match String_util.trim_to_option (Option.value ~default:"" env_dir) with
+    (match String_util.trim_nonempty (Option.value ~default:"" env_dir) with
      | Some dir -> [ dir ]
      | None -> scoped_dirs)
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)

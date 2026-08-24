@@ -178,13 +178,6 @@ let json_bool_field key json ~default =
 let keeper_live keeper =
   json_bool_field "keepalive_running" keeper ~default:false
 
-let keeper_has_goal keeper =
-  json_list_field "active_goal_ids" keeper <> []
-
-let keeper_actor_names keeper =
-  [ json_string_field_opt "name" keeper; json_string_field_opt "agent_name" keeper ]
-  |> List.filter_map Fun.id
-
 let task_is_active task =
   match json_string_field_opt "status" task with
   | Some ("todo" | "claimed" | "in_progress" | "awaiting_verification") -> true
@@ -254,28 +247,9 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     count_where live_keepers (fun keeper ->
       Option.is_some (json_string_field_opt "runtime_blocker_class" keeper))
   in
-  let goalful_keeper_names =
-    List.fold_left
-      (fun acc keeper ->
-        if keeper_has_goal keeper then
-          keeper_actor_names keeper
-          |> List.fold_left (fun names name -> String_set.add name names) acc
-        else acc)
-      String_set.empty keepers
-  in
-  let goalful_keeper_count = String_set.cardinal goalful_keeper_names in
-  let goal_dark_live_count =
-    count_where live_keepers (fun keeper -> not (keeper_has_goal keeper))
-  in
   let unassigned_active_tasks =
     count_where tasks (fun task ->
       Option.is_none (json_string_field_opt "assignee" task))
-  in
-  let assigned_goal_dark_tasks =
-    count_where tasks (fun task ->
-      match json_string_field_opt "assignee" task with
-      | Some assignee -> not (String_set.mem assignee goalful_keeper_names)
-      | None -> false)
   in
   let missing_audit_live_count =
     count_where live_keepers (fun keeper ->
@@ -332,31 +306,14 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   let goal_coherence_reasons =
     List.filter_map Fun.id
       [
-        (if tasks <> [] && goalful_keeper_count = 0 then
-           Some "Active tasks exist, but no keeper exposes linked goals"
-         else None);
         (if unassigned_active_tasks > 0 then
            Some
              (Printf.sprintf "%d active tasks are still unassigned" unassigned_active_tasks)
          else None);
-        (if assigned_goal_dark_tasks > 0 then
-           Some
-             (Printf.sprintf "%d active tasks are assigned to keepers without visible goal context"
-                assigned_goal_dark_tasks)
-         else None);
-        (if goal_dark_live_count > 0 then
-           Some
-             (Printf.sprintf "%d live keepers are active without linked goal context"
-                goal_dark_live_count)
-         else None);
       ]
   in
   let goal_coherence_status =
-    if (tasks <> [] && goalful_keeper_count = 0) || unassigned_active_tasks > 0
-    then "bad"
-    else if assigned_goal_dark_tasks > 0 || goal_dark_live_count > 0
-    then "warn"
-    else "ok"
+    if unassigned_active_tasks > 0 then "bad" else "ok"
   in
   let operational_clarity_reasons =
     List.filter_map Fun.id
@@ -403,14 +360,12 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"goal_coherence"
         ~label:"Goal Coherence"
         ~status:goal_coherence_status
-        ~ok_message:"Active work is attached to keepers with visible goal context."
+        ~ok_message:"Active tasks all carry an assignee."
         ~reasons:goal_coherence_reasons
         ~metrics:
           [
             ("active_tasks", List.length tasks);
-            ("goalful_keepers", goalful_keeper_count);
             ("unassigned_tasks", unassigned_active_tasks);
-            ("goal_dark_keepers", goal_dark_live_count);
           ];
       readiness_pillar_json
         ~key:"operational_clarity"
@@ -444,6 +399,31 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
           ~recommended_action:"Review approvals in Operations"
           ~requires_decision:true ~provenance:"derived" ()
         :: !events;
+    (* Tool calls a keeper is holding right now. Unlike the rows above, these
+       expire: a held call is denied when its wait runs out, so an operator
+       who never sees it loses the call rather than deferring it. Read live
+       from the registry -- there is nothing durable to read, because the wait
+       exists only while the turn is parked on it. *)
+    (match Keeper_tool_approval_registry.pending
+             (Keeper_tool_approval_registry.shared ())
+     with
+     | [] -> ()
+     | held ->
+       let names =
+         held
+         |> List.map (fun (p : Keeper_tool_approval_registry.pending) ->
+              p.keeper_name)
+         |> List.sort_uniq String.compare
+       in
+       events :=
+         attention_event_json ~severity:"bad" ~kind:"tool_approval_held"
+           ~summary:
+             (Printf.sprintf
+                "%d tool call(s) waiting on you: %s"
+                (List.length held) (String.concat ", " names))
+           ~recommended_action:"Answer in the keeper's chat before the wait ends"
+           ~requires_decision:true ~provenance:"live" ()
+         :: !events);
     List.rev !events
   in
   let keeper_events =
@@ -466,14 +446,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
                       (Printf.sprintf "%s is blocked by %s" keeper_name blocker)
                     ~keeper_name ~target_type:"keeper" ~target_id:keeper_name
                     ~recommended_action:"Open the keeper row and inspect the blocker"
-                    ~provenance:"execution" ())
-           | None when not (keeper_has_goal keeper) ->
-               Some
-                 (attention_event_json ~severity:"warn" ~kind:"goal_unscoped"
-                    ~summary:
-                      (Printf.sprintf "%s is active without linked goal context" keeper_name)
-                    ~keeper_name ~target_type:"keeper" ~target_id:keeper_name
-                    ~recommended_action:"Add a short/mid/long goal or link active goals"
                     ~provenance:"execution" ())
            | None when Option.is_none (json_string_field_opt "tool_audit_at" keeper) ->
                Some

@@ -16,14 +16,6 @@ let get_payload args =
   Json_util.get_object args "payload" |> Option.value ~default:(`Assoc [])
 ;;
 
-let merge_json_objects left right =
-  match left, right with
-  | `Assoc left_fields, `Assoc right_fields -> `Assoc (left_fields @ right_fields)
-  | `Assoc left_fields, _ -> `Assoc left_fields
-  | _, `Assoc right_fields -> `Assoc right_fields
-  | _, _ -> `Assoc []
-;;
-
 (* remote_confirm_ttl_seconds + context helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
@@ -415,7 +407,6 @@ let keepers_json
                          ; "status", `String status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
-                         ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; ( "keeper_keepalive_interval_s"
                            , `Float keeper_keepalive_interval_s )
@@ -432,11 +423,6 @@ let keepers_json
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
-                           ; ( "active_goal_ids"
-                             , `List
-                                 (List.map
-                                    (fun goal_id -> `String goal_id)
-                                    meta.active_goal_ids) )
                            ; ( "last_autonomous_action_at"
                              , if String.trim meta.runtime.last_autonomous_action_at = ""
                                then `Null
@@ -483,10 +469,6 @@ let keepers_json
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
-                           ; ( "last_blocker"
-                             , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
-                               | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ; ( "recent_activity"

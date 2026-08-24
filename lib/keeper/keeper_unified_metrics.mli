@@ -154,7 +154,6 @@ val append_metrics_snapshot :
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
   turn_cost:float ->
-  turn_generation:int ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->
   message_count:int ->
@@ -182,7 +181,6 @@ val append_decision_record :
 
 val broadcast_lifecycle_events :
   name:string ->
-  turn_generation:int ->
   handoff_json:Yojson.Safe.t option ->
   unit
 

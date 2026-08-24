@@ -44,12 +44,6 @@ val provider_content_messages :
   projected_messages:Agent_core.Types.message list ->
   Agent_core.Types.message list option
 
-val empty_prompt_segment_metrics : prompt_segment_metrics
-
-(** Compute byte count and fingerprint for a single text segment after
-    UTF-8 sanitisation. *)
-val prompt_segment_metrics_of_text : string -> prompt_segment_metrics
-
 val build_prompt_metrics :
   system_prompt:string ->
   dynamic_context:string ->
@@ -64,9 +58,6 @@ module For_testing : sig
     user_message:string ->
     prompt_metrics
 end
-
-val prompt_segment_metrics_to_json :
-  prompt_segment_metrics -> Yojson.Safe.t
 
 val prompt_metrics_to_json : prompt_metrics -> Yojson.Safe.t
 

@@ -20,16 +20,8 @@ let client_kind_to_string = function
   | Antigravity -> "antigravity"
 ;;
 
-let failure_to_string = function
-  | Keeper_official_client_session_store.Transient_spawn_failed ->
-    "transient_spawn_failed"
-  | Owner_stopped_turn -> "owner_stopped_turn"
-  | Transport_interrupted -> "transport_interrupted"
-  | Protocol_failed -> "protocol_failed"
-  | Provider_rejected -> "provider_rejected"
-  | Host_hook_failed -> "host_hook_failed"
-  | State_persistence_failed -> "state_persistence_failed"
-  | Process_restarted -> "process_restarted"
+let failure_to_string =
+  Keeper_official_client_session_store.recovery_failure_to_string
 ;;
 
 let settlement_json (settlement : Keeper_official_client_session_store.settlement) =
@@ -350,12 +342,27 @@ let resolve_body ~config ~actor ~body =
       | Error { code; message; _ } -> code ^ ": " ^ message
       | Ok _ -> "official-client recovery resolution failed"
     in
-    ignore
-      (audit_resolution
+    (* The success path carries its audit result into the response, so an
+       operator sees a failed audit write. This path dropped it with [ignore],
+       which is the moment it matters most: the resolution already failed, and
+       the record of that failure could fail too with nothing left behind
+       (#29361). The response shape here is the typed error, so the audit
+       outcome goes to the log rather than the body. *)
+    (match
+       audit_resolution
          config
          ~actor
          request
          ~application:None
-         ~outcome:(Audit_log.Failure detail));
+         ~outcome:(Audit_log.Failure detail)
+     with
+     | Ok () -> ()
+     | Error audit_error ->
+       Log.Server.error
+         "official_client_session_recovery_resolve: audit write failed for \
+          recovery_id=%s after resolution failure (%s): %s"
+         request.recovery_id
+         detail
+         audit_error);
     mapped
 ;;

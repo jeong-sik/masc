@@ -2,7 +2,10 @@
     accompanying message-activity event. *)
 
 
-type broadcast_error = Broadcast_not_persisted of string
+type broadcast_error =
+  | Broadcast_not_persisted of string
+  | Broadcast_policy_rejected of string
+  | Broadcast_dependency_unavailable of string
 
 val broadcast_error_to_string : broadcast_error -> string
 
@@ -36,6 +39,18 @@ type mention_delivery =
 type audience =
   | Fleet_conversation
   | System_record
+
+type task_cache_signal =
+  { subject_agent : string
+  ; task_id : string
+  }
+
+val task_cache_signal_of_args :
+  Yojson.Safe.t -> (task_cache_signal option, string) result
+(** Read [task_cache_subject_agent] and [task_cache_task_id] out of a tool
+    call. Both blank or absent is [Ok None]; one without the other is an
+    [Error] carrying the message the caller reports, so every tool surface
+    rejects a half-given signal in the same words. *)
 
 type broadcast_delivery =
   { request_id : string
@@ -92,8 +107,6 @@ type reconciliation_report =
 val mention_outbox_quarantine_reason_to_string :
   mention_outbox_quarantine_reason -> string
 
-val message_schema_rejection_to_string : message_schema_rejection -> string
-
 (** Reject any retained workspace message row that predates the current
     request-id + mention-delivery schema. Startup calls this synchronously
     before installing Keeper delivery, so the documented pre-deploy purge is
@@ -131,6 +144,7 @@ val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
+           ?task_cache_signal:task_cache_signal ->
            audience:audience ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string ->

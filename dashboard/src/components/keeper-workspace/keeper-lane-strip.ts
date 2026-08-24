@@ -1,42 +1,56 @@
-// Keeper Workspace — lane state section (#23507 PR-L1/L2, slice 1).
+// Keeper Workspace — lane state section (#23507 PR-L1/L2, #29473 PR-3).
 // Consume-only surface over the keeper-scoped `keeper_waiting_inventory`
-// read model: per-keeper lane state (idle/busy/waiting/deferred) plus
-// the waiting rows behind it. The UI gives the closed server vocabulary clear
-// operator labels while preserving raw values in titles/details; a keeper
-// absent from the inventory renders an explicit data gap instead of a guessed
-// "idle".
+// read model: per-keeper lane state (idle/busy/waiting/deferred) plus the
+// waiting rows behind it, in the shape of `prototypes/keeper-v2/lanes.jsx`:
 //
-// Counts are the one place that rule cuts the other way. `waiting_count` and
-// `sources` are both folds over a list the server already capped
-// (`server_keeper_waiting_inventory.ml:529` takes 64 external-attention rows,
-// then `:870`/`:877` measure what survived), so rendering either as a bare
-// integer states a total the server never computed. When the server sets
-// `waiting_count_truncated` the same numbers are lower bounds and must render
-// as such.
+// - sources grouped into the stage pipeline they enter the keeper through
+//   (external → schedule → queue → operator → keeper);
+// - rows oldest first on a log age axis (지금 / 1시간 / 1일), bar width = age;
+// - the server's operator sentence (`row.what`) by default, the raw wire
+//   vocabulary (`waiting_on` / `wake_producer` / `next_action` / `detail`)
+//   behind the 기술 상세 toggle.
+//
+// A keeper absent from the inventory renders an explicit data gap instead of
+// a guessed "idle". The order is an observation order only: independent
+// source queues retain their own processing authority, so no row is labelled
+// as the next one to run.
+//
+// Counts are the one place the "raw values stay visible" rule cuts the other
+// way. `waiting_count` and `sources` are both folds over a list the server
+// already capped (`server_keeper_waiting_inventory.ml` takes 64
+// external-attention rows, then measures what survived), so rendering either
+// as a bare integer states a total the server never computed. When the server
+// sets `waiting_count_truncated` the same numbers are lower bounds and must
+// render as such.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
-import type {
-  DashboardKeeperWaitingInventory,
-  DashboardKeeperWaitingKeeper,
-  DashboardKeeperWaitingRow,
-  DashboardKeeperWaitingSource,
+import {
+  parseDashboardKeeperWaitingSource,
+  type DashboardKeeperWaitingInventory,
+  type DashboardKeeperWaitingKeeper,
+  type DashboardKeeperWaitingRow,
+  type DashboardKeeperWaitingSource,
 } from '../../api'
 import { StatusChip } from '../common/status-chip'
-import {
-  enumLabel,
-  sourceTone,
-  stateTone,
-} from '../tools/keeper-waiting-inventory-panel'
-import { formatDateTimeKo, formatTimeUntil, relativeTime } from '../../lib/format-time'
+import { enumLabel, stateTone } from '../tools/keeper-waiting-inventory-panel'
+import { formatDateTimeKo, formatRelativeSec, formatTimeUntil } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { JsonViewerCard } from '../common/json-viewer'
 import {
   keeperWaitingInventoryState,
   subscribeKeeperWaitingInventory,
 } from '../../keeper-waiting-inventory-store'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { shellAuthSummary } from '../../store'
+import {
+  LaneEventRecoveries,
+  LaneEventRowActions,
+  useLaneEventQueueActions,
+  type LaneEventQueueActions,
+} from './keeper-lane-event-actions'
 
 const LANE_STATE_LABELS: Record<string, string> = {
   idle: '비어 있음',
@@ -45,7 +59,7 @@ const LANE_STATE_LABELS: Record<string, string> = {
   deferred: '외부 응답 대기',
 }
 
-const LANE_SOURCE_LABELS: Record<string, string> = {
+const LANE_SOURCE_LABELS: Record<DashboardKeeperWaitingSource, string> = {
   event_queue_pending: '자율 이벤트',
   chat_operation_queued: '채팅 대기',
   chat_operation_running: '채팅 처리 중',
@@ -71,12 +85,46 @@ const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   read_error: 'var(--color-danger)',
 }
 
+/** The stage a source enters the keeper through. The pipeline reads left to
+ *  right in this order; each source has exactly one stage. */
+type LaneStage = 'external' | 'schedule' | 'queue' | 'operator' | 'keeper'
+
+const LANE_STAGES: readonly LaneStage[] = ['external', 'schedule', 'queue', 'operator', 'keeper']
+
+const LANE_STAGE_LABELS: Record<LaneStage, { label: string; wire: string }> = {
+  external: { label: '외부 자극', wire: 'connector · attention store' },
+  schedule: { label: '예약', wire: 'schedule_runner' },
+  queue: { label: '큐', wire: 'keeper_event_queue' },
+  operator: { label: '운영자', wire: 'hitl · console' },
+  keeper: { label: 'keeper', wire: 'turn 실행' },
+}
+
+const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
+  event_queue_pending: 'queue',
+  chat_operation_queued: 'queue',
+  chat_operation_running: 'keeper',
+  hitl_pending: 'operator',
+  external_attention: 'external',
+  fusion_running: 'keeper',
+  schedule_waiting: 'schedule',
+  owner_shutdown: 'keeper',
+  operator_pending_confirm: 'operator',
+  read_error: 'queue',
+}
+
+const SECONDS_PER_MINUTE = 60
+const HOUR_MINUTES = 60
+const DAY_MINUTES = 24 * HOUR_MINUTES
+/** A bar never shrinks below this so a fresh row stays clickable. */
+const MIN_BAR_PERCENT = 6
+
 function laneStateLabel(value: string): string {
   return LANE_STATE_LABELS[value] ?? enumLabel(value)
 }
 
 function laneSourceLabel(value: string): string {
-  return LANE_SOURCE_LABELS[value] ?? enumLabel(value)
+  const source = parseDashboardKeeperWaitingSource(value)
+  return source === null ? enumLabel(value) : LANE_SOURCE_LABELS[source]
 }
 
 function inventoryEntry(
@@ -108,23 +156,6 @@ function boundedCount(value: number, truncated: boolean): string {
   return truncated ? `≥${value}` : `${value}`
 }
 
-/** Per-source counts, each marked with the server's own per-source truncation
- *  verdict. Sorted by count so the source driving the lane reads first. */
-function sourceBreakdown(entry: DashboardKeeperWaitingKeeper): Array<{
-  source: string
-  label: string
-  count: string
-}> {
-  const truncated = entry.truncated_sources ?? {}
-  return Object.entries(entry.sources ?? {})
-    .sort(([, a], [, b]) => b - a)
-    .map(([source, count]) => ({
-      source,
-      label: laneSourceLabel(source),
-      count: boundedCount(count, truncated[source] === true),
-    }))
-}
-
 /** Sources the server reported as capped, for the attribution line. */
 function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
   return Object.entries(entry.truncated_sources ?? {})
@@ -139,81 +170,207 @@ function rowSince(row: DashboardKeeperWaitingRow): number | null {
   return Number.isFinite(parsed) ? parsed / 1000 : null
 }
 
-/** Git log convention: newest observation first. Equal/missing timestamps keep
- * their server order, and missing timestamps stay visible at the end. This is
- * an observation order only; independent source queues retain their own
- * processing authority. */
-function waitingRowsNewestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
+/** Oldest observation first. Equal/missing timestamps keep their server order,
+ * and missing timestamps stay visible at the end. */
+function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
   return rows
     .map((row, serverIndex) => ({ row, serverIndex, since: rowSince(row) }))
     .sort((left, right) => {
       if (left.since == null && right.since == null) return left.serverIndex - right.serverIndex
       if (left.since == null) return 1
       if (right.since == null) return -1
-      return right.since - left.since || left.serverIndex - right.serverIndex
+      return left.since - right.since || left.serverIndex - right.serverIndex
     })
     .map(({ row }) => row)
 }
 
+function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
+  const since = rowSince(row)
+  if (since == null) return null
+  return Math.max(0, (nowMs / 1000 - since) / SECONDS_PER_MINUTE)
+}
+
+/** Log position on the age axis: a 2-minute and a 3-day row both stay
+ *  readable on one strip. `axisMax` is the axis end in minutes. */
+function axisPosition(minutes: number, axisMax: number): number {
+  return Math.min(100, (Math.log10(1 + minutes) / Math.log10(1 + axisMax)) * 100)
+}
+
+interface StageItem {
+  source: string
+  label: string
+  count: string
+  color: string | null
+}
+
+/** Per-stage source counts, each marked with the server's own per-source
+ *  truncation verdict. Sorted by count so the source driving the stage reads
+ *  first. A key outside the closed source vocabulary is kept visible under
+ *  `unknown` rather than filed into a stage it was never assigned. */
+function stageBreakdown(entry: DashboardKeeperWaitingKeeper): {
+  byStage: Record<LaneStage, StageItem[]>
+  unknown: StageItem[]
+} {
+  const truncated = entry.truncated_sources ?? {}
+  const byStage: Record<LaneStage, StageItem[]> = {
+    external: [],
+    schedule: [],
+    queue: [],
+    operator: [],
+    keeper: [],
+  }
+  const unknown: StageItem[] = []
+  Object.entries(entry.sources ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .forEach(([key, count]) => {
+      const source = parseDashboardKeeperWaitingSource(key)
+      const item: StageItem = {
+        source: key,
+        label: laneSourceLabel(key),
+        count: boundedCount(count, truncated[key] === true),
+        color: source === null ? null : LANE_SOURCE_GRAPH_COLORS[source],
+      }
+      if (source === null) unknown.push(item)
+      else byStage[LANE_SOURCE_STAGE[source]].push(item)
+    })
+  return { byStage, unknown }
+}
+
+function StageItems({ items, dev }: { items: StageItem[]; dev: boolean }): VNode {
+  return html`${items.map(item => html`
+    <div
+      key=${item.source}
+      class="flex items-baseline gap-1.5 border-l-2 border-[var(--color-border-default)] pl-1.5 text-2xs text-[var(--color-fg-secondary)]"
+      style=${item.color === null ? null : { borderLeftColor: item.color }}
+      title=${item.source}
+    ><span>${dev ? item.source : item.label}</span><b class="ml-auto font-mono font-normal text-[var(--color-fg-primary)]">${item.count}</b></div>
+  `)}`
+}
+
+function LanePipeline({ entry, dev }: { entry: DashboardKeeperWaitingKeeper; dev: boolean }): VNode {
+  const { byStage, unknown } = stageBreakdown(entry)
+  const stageBox = (active: boolean) =>
+    `flex min-w-[7rem] flex-1 flex-col gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-page)] px-2 py-1.5 ${active ? '' : 'opacity-50'}`
+  return html`
+    <div class="flex items-stretch gap-1.5 overflow-x-auto pb-0.5" data-testid="keeper-lane-pipeline" aria-label="자극이 keeper 에 닿는 단계">
+      ${LANE_STAGES.map((stage, index) => {
+        const items = byStage[stage]
+        const active = items.length > 0
+        return html`
+          ${index === 0 ? null : html`<span class=${`self-center text-xs ${active ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-border-default)]'}`} aria-hidden="true">→</span>`}
+          <div key=${stage} class=${stageBox(active)} data-stage=${stage} data-active=${active ? 'true' : 'false'}>
+            <div class="grid gap-px">
+              <b class="text-3xs font-medium uppercase tracking-wide text-[var(--color-fg-secondary)]">${LANE_STAGE_LABELS[stage].label}</b>
+              ${dev ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">${LANE_STAGE_LABELS[stage].wire}</span>` : null}
+            </div>
+            ${active
+              ? html`<${StageItems} items=${items} dev=${dev} />`
+              : html`<div class="text-2xs text-[var(--color-fg-muted)]">—</div>`}
+          </div>
+        `
+      })}
+      ${unknown.length === 0
+        ? null
+        : html`
+            <div class=${stageBox(true)} data-stage="unknown" data-active="true">
+              <div class="grid gap-px">
+                <b class="text-3xs font-medium uppercase tracking-wide text-[var(--status-warn)]">미분류 source</b>
+              </div>
+              <${StageItems} items=${unknown} dev=${true} />
+            </div>
+          `}
+    </div>
+  `
+}
+
+function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
+  const ticks: Array<{ label: string; at: number }> = [
+    { label: '지금', at: 0 },
+    { label: '1시간', at: axisPosition(HOUR_MINUTES, axisMax) },
+    { label: '1일', at: axisPosition(DAY_MINUTES, axisMax) },
+  ]
+  // The axis end is labelled only once it reads differently from the 1일
+  // tick, which already sits near the edge for a one-to-two-day axis.
+  const edgeDays = Math.round(axisMax / DAY_MINUTES)
+  if (edgeDays >= 2) {
+    ticks.push({ label: `${edgeDays}일`, at: 100 })
+  }
+  return html`
+    <div class="relative h-4 border-b border-dashed border-[var(--color-border-default)] font-mono text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-age-axis" aria-hidden="true">
+      ${ticks.map(tick => html`
+        <span
+          key=${tick.label}
+          class="absolute top-0 whitespace-nowrap"
+          style=${{
+            left: `${tick.at}%`,
+            transform: tick.at === 0 ? 'none' : tick.at === 100 ? 'translateX(-100%)' : 'translateX(-50%)',
+          }}
+          data-axis-tick=${tick.label}
+        >${tick.label}</span>
+      `)}
+    </div>
+  `
+}
+
 function LaneWaitingRow({
   row,
-  first,
-  last,
+  age,
+  axisMax,
+  dev,
+  actions,
 }: {
   row: DashboardKeeperWaitingRow
-  first: boolean
-  last: boolean
+  /** Minutes waited, or null when the server recorded no timestamp. */
+  age: number | null
+  axisMax: number
+  dev: boolean
+  /** Admin operator actions; null renders the row read-only. */
+  actions: LaneEventQueueActions | null
 }): VNode {
   const graphColor = LANE_SOURCE_GRAPH_COLORS[row.source]
-  const sinceRelative = row.since_iso == null ? null : relativeTime(row.since_iso)
+  const width = age == null ? MIN_BAR_PERCENT : Math.max(MIN_BAR_PERCENT, axisPosition(age, axisMax))
+  const ageText = age == null ? '시각 미기록' : formatRelativeSec(age * SECONDS_PER_MINUTE)
+  const reading = dev ? row.waiting_on : row.what
   return html`
-    <article
+    <details
       data-testid="keeper-lane-waiting-row"
       data-source=${row.source}
       data-waiting-on=${row.waiting_on}
-      class="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2"
+      class="grid min-w-0 gap-1"
     >
-      <div class="relative min-h-full" aria-hidden="true">
-        ${first ? null : html`<span class="absolute left-1/2 top-0 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
-        ${last ? null : html`<span class="absolute bottom-0 left-1/2 h-1/2 -translate-x-1/2 border-l border-[var(--color-border-default)]"></span>`}
-        <span
-          class="absolute left-1/2 top-4 h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-[var(--color-bg-surface)] shadow-[0_0_0_1px_var(--color-border-default)]"
-          style=${{ background: graphColor }}
-        ></span>
-      </div>
-      <div class="my-1 grid min-w-0 gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-page)] p-2">
-        <div
-          class="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-3xs text-[var(--color-fg-muted)]"
-          data-testid="keeper-lane-waiting-time"
-        >
+      <summary
+        class="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] border-l-[3px] bg-[var(--color-bg-page)] px-2 py-1 hover:bg-[var(--color-bg-hover)] [&::-webkit-details-marker]:hidden"
+        style=${{ width: `${width}%`, borderLeftColor: graphColor }}
+        data-testid="keeper-lane-waiting-bar"
+        title=${dev ? row.what : row.waiting_on}
+      >
+        <span class="whitespace-nowrap text-2xs text-[var(--color-fg-secondary)]">${laneSourceLabel(row.source)}</span>
+        <span class=${`min-w-0 truncate text-xs text-[var(--color-fg-primary)] ${dev ? 'font-mono' : ''}`} data-testid="keeper-lane-waiting-what">${reading}</span>
+        <span class="ml-auto whitespace-nowrap font-mono text-3xs text-[var(--color-fg-muted)]">${ageText}</span>
+      </summary>
+      <div class="grid min-w-0 gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)]" style=${{ overflowWrap: 'anywhere' }}>
+        <div class="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5" data-testid="keeper-lane-waiting-time">
+          <span class="text-[var(--color-fg-secondary)]">${reading}</span>
           ${row.since_iso == null
             ? html`<span>시각 미기록</span>`
-            : html`<time dateTime=${row.since_iso}>${formatDateTimeKo(row.since_iso)}</time>`}
-          ${sinceRelative == null ? null : html`<span>${sinceRelative}</span>`}
+            : html`<span>대기 시작 · <time dateTime=${row.since_iso}>${formatDateTimeKo(row.since_iso)}</time></span>`}
+          ${row.due_at_iso == null
+            ? null
+            : html`<span class="text-[var(--status-warn)]">실행 예정 · <time dateTime=${row.due_at_iso}>${formatDateTimeKo(row.due_at_iso)}</time> · ${formatTimeUntil(row.due_at_iso)}</span>`}
+          ${dev
+            ? html`
+                <span>source · <code>${row.source}</code></span>
+                <span>wake · <code>${row.wake_producer ?? '미기록'}</code></span>
+                <span>다음 동작 · <code>${row.next_action}</code></span>
+              `
+            : null}
         </div>
-        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-          <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false} title=${row.source}>${laneSourceLabel(row.source)}<//>
-          <span class="min-w-0 truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${row.waiting_on}>${row.waiting_on}</span>
-        </div>
-        <div class="flex min-w-0 items-start gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-          <span aria-hidden="true">↳</span>
-          <span>다음 동작 · <span class="font-mono text-[var(--color-fg-secondary)]">${enumLabel(row.next_action)}</span></span>
-        </div>
-        ${row.due_at_iso == null
-          ? null
-          : html`<div class="text-2xs text-[var(--status-warn)]">실행 예정 · <time dateTime=${row.due_at_iso}>${formatDateTimeKo(row.due_at_iso)}</time> · ${formatTimeUntil(row.due_at_iso)}</div>`}
-        <details class="min-w-0 text-3xs text-[var(--color-fg-muted)]" style=${{ overflowWrap: 'anywhere' }}>
-          <summary class="cursor-pointer select-none">Typed queue evidence</summary>
-          <div class="mt-2 grid min-w-0 gap-2">
-            <div class="flex min-w-0 flex-wrap gap-x-3">
-              <span>wake producer · <code>${row.wake_producer ?? '미기록'}</code></span>
-              <span>source · <code>${row.source}</code></span>
-            </div>
-            <${JsonViewerCard} title="detail · typed" data=${row.detail ?? {}} />
-          </div>
-        </details>
+        ${actions !== null && row.source === 'event_queue_pending'
+          ? html`<${LaneEventRowActions} row=${row} actions=${actions} />`
+          : null}
+        ${dev ? html`<${JsonViewerCard} title="detail · typed" data=${row.detail ?? {}} />` : null}
       </div>
-    </article>
+    </details>
   `
 }
 
@@ -224,6 +381,7 @@ export function KeeperLaneStrip({
   ready,
   loading,
   error,
+  eventActions = null,
 }: {
   keeper: Keeper
   inventory: DashboardKeeperWaitingInventory | null | undefined
@@ -232,13 +390,19 @@ export function KeeperLaneStrip({
   ready: boolean
   loading: boolean
   error: string | null
+  /** Present only for a session admitted to the event-queue operator route;
+   *  absent renders every row read-only. */
+  eventActions?: LaneEventQueueActions | null
 }): VNode {
+  const [dev, setDev] = useState(false)
   const entry = inventoryEntry(inventory, keeper)
-  const rows = waitingRowsNewestFirst(entry?.waiting_on ?? [])
+  const rows = waitingRowsOldestFirst(entry?.waiting_on ?? [])
+  const nowMs = Date.now()
+  const ages = rows.map(row => ageMinutes(row, nowMs))
+  const axisMax = Math.max(DAY_MINUTES, ...ages.filter((age): age is number => age != null))
   const waitingCount = entry?.waiting_count ?? 0
   const countTruncated = entry?.waiting_count_truncated === true
   const truncatedSources = entry ? truncatedSourceLabels(entry) : []
-  const breakdown = entry ? sourceBreakdown(entry) : []
   const rowLimit = inventory?.external_attention_row_limit
   return html`
     <div class="ctx-sec" data-testid="keeper-lane-section">
@@ -247,6 +411,14 @@ export function KeeperLaneStrip({
         ${waitingCount > 0
           ? html`<${CountBadge}>${boundedCount(waitingCount, countTruncated)}<//>`
           : null}
+        <button
+          type="button"
+          class=${`ml-auto rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-normal ${dev ? 'border-[var(--color-accent)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+          aria-pressed=${dev}
+          title="내부 식별자 · 원본 필드 표시"
+          data-testid="keeper-lane-dev-toggle"
+          onClick=${() => setDev(current => !current)}
+        >기술 상세</button>
       </h4>
       ${entry
         ? html`
@@ -254,40 +426,35 @@ export function KeeperLaneStrip({
               <div class="flex flex-wrap items-center gap-1.5">
                 <${StatusChip} tone=${stateTone(entry.state)} uppercase=${false} title=${entry.state}>${laneStateLabel(entry.state)}<//>
               </div>
+              ${Object.keys(entry.sources ?? {}).length > 0
+                ? html`<${LanePipeline} entry=${entry} dev=${dev} />`
+                : null}
+              ${eventActions === null
+                ? null
+                : html`<${LaneEventRecoveries} actions=${eventActions} />`}
               ${rows.length > 0
                 ? html`
                     <div class="grid gap-1">
-                      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-muted)]">
-                        <span class="font-semibold uppercase tracking-wide text-[var(--color-fg-secondary)]">HEAD</span>
-                        <span>최신 → 오래된</span>
+                      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
+                      <${LaneAgeAxis} axisMax=${axisMax} />
+                      <div class="grid max-h-[30rem] gap-1 overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 나이순 작업 흐름">
+                        ${rows.map((row, index) => html`
+                          <${LaneWaitingRow}
+                            key=${`${row.source}:${row.waiting_on}:${index}`}
+                            row=${row}
+                            age=${ages[index] ?? null}
+                            axisMax=${axisMax}
+                            dev=${dev}
+                            actions=${eventActions}
+                          />
+                        `)}
                       </div>
-                    <div class="max-h-[30rem] overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 시작 시각순 작업 흐름">
-                      ${rows.map((row, index) => html`
-                        <${LaneWaitingRow}
-                          key=${`${row.source}:${row.waiting_on}:${index}`}
-                          row=${row}
-                          first=${index === 0}
-                          last=${index === rows.length - 1}
-                        />
-                      `)}
-                    </div>
                     </div>
                   `
                 : null}
               ${countTruncated
                 ? html`<div class="text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-truncation">
                     서버 상한${rowLimit != null ? ` ${rowLimit}` : ''}에서 잘림${truncatedSources.length > 0 ? ` — ${truncatedSources.join(', ')}` : ''}. 실제 대기 건수는 더 많습니다.
-                  </div>`
-                : null}
-              ${breakdown.length > 0
-                ? html`<div class="flex flex-wrap gap-1" data-testid="keeper-lane-sources">
-                    ${breakdown.map(item => html`
-                      <span
-                        key=${item.source}
-                        class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-2 py-0.5 text-2xs text-[var(--color-fg-secondary)]"
-                        title=${item.source}
-                      >${item.label} <span class="font-mono text-[var(--color-fg-primary)]">${item.count}</span></span>
-                    `)}
                   </div>`
                 : null}
             </div>
@@ -303,14 +470,18 @@ export function KeeperLaneStrip({
   `
 }
 
-/** Read only this keeper's lane projection. Queue commits and reconnects
- * invalidate the shared keeper-scoped store; no periodic poll is mounted. */
+/** Read this keeper's lane projection. Queue commits and reconnects
+ * invalidate the shared keeper-scoped store; no periodic poll is mounted.
+ * Event-queue operator actions mount only for an Admin session, the same
+ * admission the `/events/operator` route enforces. */
 export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
   useEffect(() => {
     return subscribeKeeperWaitingInventory(keeper.name)
   }, [keeper.name])
 
   const current = keeperWaitingInventoryState(keeper.name)
+  const eventActions = useLaneEventQueueActions(keeper.name)
+  const operatorAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   return html`
     <${KeeperLaneStrip}
       keeper=${keeper}
@@ -318,6 +489,7 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
       ready=${current.ready}
       loading=${current.loading}
       error=${current.error}
+      eventActions=${operatorAccess.allowed ? eventActions : null}
     />
   `
 }

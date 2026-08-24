@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v15.json"
+    "event-queue-v17.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -163,7 +163,7 @@ let load_queue_state ~base_path ~keeper_name =
   | Ok state -> state
   | Error detail -> Alcotest.fail detail
 
-let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
      Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -184,11 +184,9 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
   let transfer : Keeper_event_queue_persistence.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
-    ; owner_nonce
     ; operator_operation_id = operation_id
     ; from_keeper
     ; to_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -196,7 +194,6 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
      Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
        ~base_path
        from_keeper
-       ~current_owner_nonce:owner_nonce
        ~applied_at:101.0
        ~transfer
    with
@@ -320,6 +317,68 @@ let () =
         assert (Float.equal updated_at 5.0)
       | _ -> Alcotest.fail "reaction board stimulus round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("reaction board stimulus round-trip failed: " ^ msg));
+
+  (* #29457: a vote is a board stimulus whose payload names the target, the
+     voted-on author, the voter, and the direction; all four must survive the
+     durable round-trip, and the post id stays the enclosing stimulus id. *)
+  let vote_payload () =
+    Board_signal
+      { kind =
+          Vote_cast
+            { target = Vote_on_comment "c1"
+            ; target_author = "poster"
+            ; voter = "peer"
+            ; direction = Vote_down
+            }
+      ; author = "peer"
+      ; title = "parent"
+      ; content = "body"
+      ; hearth = None
+      ; updated_at = Some 6.0
+      }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "p-vote"; urgency = Normal; arrived_at = 6.0; payload = vote_payload () })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Board_signal
+          { kind =
+              Vote_cast
+                { target = Vote_on_comment target_id; target_author; voter; direction = Vote_down }
+          ; author
+          ; hearth = None
+          ; _
+          } ->
+        assert (String.equal s.post_id "p-vote");
+        assert (String.equal target_id "c1");
+        assert (String.equal target_author "poster");
+        assert (String.equal voter "peer");
+        assert (String.equal author "peer")
+      | _ -> Alcotest.fail "vote board stimulus round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("vote board stimulus round-trip failed: " ^ msg));
+  (match
+     stimulus_of_yojson
+       (`Assoc
+          [ "post_id", `String "p-vote"
+          ; "urgency", `String "normal"
+          ; "arrived_at_unix", `Float 6.0
+          ; ( "payload"
+            , `Assoc
+                [ "kind", `String "board_signal"
+                ; "board_kind", `String "vote_cast"
+                ; "author", `String "peer"
+                ; "title", `String "parent"
+                ; "content", `String "body"
+                ; "hearth", `Null
+                ; "updated_at_unix", `Null
+                ] )
+          ])
+   with
+   | Ok _ -> Alcotest.fail "vote_cast without vote payload fields must not decode"
+   | Error _ -> ());
 
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
@@ -574,115 +633,6 @@ let () =
       (hitl_stimulus Hitl_approved)
       (hitl_stimulus (Hitl_rejected "operator declined"))));
 
-  (* --- RFC-0315 P3 W0: Goal_assigned --- *)
-  let assignment =
-    { ga_goal_id = "goal-9"
-    ; ga_goal_title = "Harden wake continuity"
-    ; ga_assigned_by = "keeper_up"
-    }
-  in
-  assert (
-    String.equal (goal_assignment_post_id assignment) "goal-assigned:goal-9");
-  assert (
-    String.equal (payload_kind_label (Goal_assigned assignment)) "goal_assigned");
-  (match
-     stimulus_of_yojson
-       (stimulus_to_yojson
-          { post_id = goal_assignment_post_id assignment
-          ; urgency = Normal
-          ; arrived_at = 7.0
-          ; payload = Goal_assigned assignment
-          })
-   with
-   | Ok s ->
-     (match s.payload with
-      | Goal_assigned ga ->
-        assert (String.equal ga.ga_goal_id "goal-9");
-        assert (String.equal ga.ga_goal_title "Harden wake continuity");
-        assert (String.equal ga.ga_assigned_by "keeper_up")
-      | _ -> Alcotest.fail "Goal_assigned codec round-trip changed payload shape")
-   | Error msg ->
-     Alcotest.fail ("Goal_assigned stimulus round-trip failed: " ^ msg));
-  (* Identity strips display-only fields: re-assigning the same goal via a
-     different actor or after a title edit still dedups. *)
-  let assignment_stim =
-    { post_id = goal_assignment_post_id assignment
-    ; urgency = Normal
-    ; arrived_at = 7.0
-    ; payload = Goal_assigned assignment
-    }
-  in
-  let assignment_retitled =
-    { assignment_stim with
-      arrived_at = 8.0
-    ; payload =
-        Goal_assigned
-          { assignment with
-            ga_goal_title = "Harden wake continuity (v2)"
-          ; ga_assigned_by = "toml_reconcile"
-          }
-    }
-  in
-  assert (stimulus_identity_equal assignment_stim assignment_retitled);
-  let reconciliation =
-    { gr_goal_id = "goal-9"; gr_triggering_task_id = "task-4" }
-  in
-  let reconciliation_stim =
-    { post_id = goal_reconciliation_ready_post_id reconciliation
-    ; urgency = Immediate
-    ; arrived_at = 9.0
-    ; payload = Goal_reconciliation_ready reconciliation
-    }
-  in
-  assert (
-    String.equal
-      reconciliation_stim.post_id
-      "goal-reconciliation-ready:goal-9");
-  assert (
-    String.equal
-      (payload_kind_label reconciliation_stim.payload)
-      "goal_reconciliation_ready");
-  (match stimulus_of_yojson (stimulus_to_yojson reconciliation_stim) with
-   | Ok { payload = Goal_reconciliation_ready decoded; _ } ->
-     assert (String.equal decoded.gr_goal_id "goal-9");
-     assert (String.equal decoded.gr_triggering_task_id "task-4")
-   | Ok _ -> Alcotest.fail "Goal_reconciliation_ready codec changed payload"
-   | Error msg ->
-     Alcotest.fail
-       ("Goal_reconciliation_ready stimulus round-trip failed: " ^ msg));
-  let prompt_event =
-    match
-      Masc.Keeper_world_observation.pending_board_event_of_stimulus
-        ~meta:(event_queue_test_meta "goal-reconciler" "trace-goal-reconciler")
-        reconciliation_stim
-    with
-    | Ok (Some event) -> event
-    | Ok None -> Alcotest.fail "goal reconciliation wake produced no prompt event"
-    | Error _ -> Alcotest.fail "goal reconciliation wake prompt projection failed"
-  in
-  assert (
-    match prompt_event.event_kind with
-    | Masc.Keeper_world_observation.Goal_reconciliation_ready -> true
-    | _ -> false);
-  assert (
-    String_util.string_contains_substring
-      ~needle:"Re-read Goal and Task SSOT"
-      prompt_event.preview);
-  (* The Board-activity partition decides which prompt section renders this
-     event and whether it reaches [Keeper_contract_classifier]'s
-     [board_activity_count]. Classifying a reconciliation wake as scheduled
-     work compiles cleanly but drops it from the Board Activity prompt section
-     and from [board_activity_count]; when the event is isolated, it also
-     removes [Board_event_pending] and suppresses the intended reactive turn,
-     so pin both sides here. *)
-  assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
-  assert (
-    not
-      (Masc.Keeper_world_observation.is_board_activity_event
-         { prompt_event with
-           event_kind = Masc.Keeper_world_observation.Schedule_due scheduled_wake
-         }));
-
   (* A completion-authority rejection is a system LLM result delivered to the
      producer Keeper. It is neither a Keeper identity nor a generic Board
      signal, so its typed task/verification/reason fields must survive the
@@ -791,19 +741,6 @@ let () =
              Completion_authority_rejected
                { rejection with car_reason = "different reason" }
          }));
-
-  (* Producer diff is edge-only: additions wake, removals and unchanged ids
-     never do. *)
-  assert (
-    Masc.Keeper_goal_assignment_wake.added_goal_ids
-      ~old_ids:[ "goal-1"; "goal-2" ]
-      ~new_ids:[ "goal-2"; "goal-9" ]
-    = [ "goal-9" ]);
-  assert (
-    Masc.Keeper_goal_assignment_wake.added_goal_ids
-      ~old_ids:[ "goal-1" ]
-      ~new_ids:[]
-    = []);
 
   (* --- queue operations preserved --- *)
   let board_stim =
@@ -1010,7 +947,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:23
         ~operation_id:"recover-transfer-target";
       Alcotest.(check int)
         "source outbox awaits target projection"
@@ -1060,7 +996,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:27
         ~operation_id:"transfer-during-target-shutdown";
       let transfer =
         match
@@ -1134,7 +1069,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"post-purge-transfer-recovery";
       let config = Masc.Workspace.default_config base_path in
       let shutdown_operation_id =
@@ -1218,11 +1152,9 @@ let () =
         let target_meta = event_queue_test_meta to_keeper ("trace-" ^ to_keeper) in
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
-        ; owner_nonce = 31
         ; operator_operation_id = "source-transfer-during-shutdown"
         ; from_keeper
         ; to_keeper
-        ; target_generation = target_meta.runtime.nonce
         ; target_trace_id = target_meta.runtime.trace_id
         }
       in
@@ -1251,7 +1183,6 @@ let () =
               Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
                 ~base_path
                 from_keeper
-                ~current_owner_nonce:31
                 ~applied_at:31.0
                 ~transfer
             with
@@ -1287,7 +1218,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-source-shutdown";
       let target_dir =
         Filename.concat
@@ -1364,7 +1294,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-target-shutdown";
       let shutdown_operation_id =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
@@ -1433,7 +1362,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"recover-transfer-target-failure";
       let target_path =
         Filename.concat
@@ -1483,7 +1411,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-first";
       let first_transition_id =
         match
@@ -1506,7 +1433,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:bootstrap_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-second";
       let second_transition_id =
         match
@@ -1607,25 +1533,27 @@ let () =
           |> Yojson.Safe.to_string
         in
         write_file path malformed;
+        (* The reader fails open: a snapshot this binary cannot decode starts
+           an empty queue instead of stopping the keeper. What it must never do
+           is present the malformed rows as state, and it must leave the file
+           alone so the evidence survives for the operator. *)
+        ignore expected_detail;
         (match
            Keeper_event_queue_persistence.load_state_result
              ~base_path
              ~keeper_name
          with
-         | Ok _ ->
-           Alcotest.failf "persisted malformed payload loaded: %s" label
          | Error detail ->
-           Alcotest.(check bool)
-             (label ^ " error requires reset")
-             true
-             (String_util.string_contains_substring ~needle:"reset required" detail);
-           (match expected_detail with
-            | None -> ()
-            | Some expected ->
-              Alcotest.(check bool)
-                (label ^ " error preserves decoder detail")
-                true
-                (String_util.string_contains_substring ~needle:expected detail)));
+           Alcotest.failf
+             "malformed payload must fail open, got an error: %s (%s)"
+             label
+             detail
+         | Ok state ->
+           Alcotest.(check int)
+             (label ^ " starts from an empty queue")
+             0
+             (Keeper_event_queue.length
+                (Keeper_event_queue_state.pending state)));
         Alcotest.(check string)
           (label ^ " evidence is not rewritten")
           malformed
@@ -1699,7 +1627,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v15.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v17.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
@@ -2180,3 +2108,28 @@ let () =
       with
       | Error msg -> assert (String.length msg > 0)
       | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
+
+  (* --- version contract: a snapshot written under the previous envelope is
+     rejected, never decoded. Dropping a durable stimulus variant changes the
+     persisted shape, so the cut rides on the schema version; a reader that
+     still accepted the older string would meet payload kinds the current sum
+     no longer carries. #29490 removed Goal_reconciliation_ready without
+     turning this crank and four keepers could not boot. --- *)
+  (match
+     Keeper_event_queue_state.of_yojson
+       (`Assoc
+           [ "schema", `String "keeper.event_queue.state.v15"
+           ; "revision", `Int 1
+           ; "pending", `List []
+           ; "last_transition", `Null
+           ; "projected_dispositions", `List []
+           ; "transition_outbox", `List []
+           ; "accepted_transfer_projections", `List []
+           ])
+   with
+   | Ok _ -> Alcotest.fail "prior-schema event queue snapshot was accepted"
+   | Error message ->
+     assert (
+       String.equal
+         message
+         "unsupported keeper event queue state schema: keeper.event_queue.state.v15"))

@@ -27,6 +27,25 @@ val consume_truncation_info :
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)
 
+val set_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  disposition:(unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  unit
+(** [set_disposition ~invocation ~disposition] records the typed outcome for
+    the exact invocation, alongside {!set_truncation_info} and for the same
+    reason: the boundary between the masc dispatch and the hook that writes
+    the row narrows the value, and the hook cannot get it back. AGENT_CORE
+    hands the hook a [tool_result] that cannot represent [Deferred] and whose
+    error class is a different taxonomy from [tool_failure_class]. *)
+
+val consume_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition option
+(** [consume_disposition ~invocation ()] returns the typed outcome for the
+    exact invocation and clears it. [None] for a call that did not come
+    through the masc dispatch boundary. *)
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
     [run_turn] invocation and threaded to every context reader of the
@@ -46,11 +65,9 @@ val set_turn_context :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
@@ -63,9 +80,9 @@ val set_turn_context :
 
 val get_turn_context :
   cell:turn_ctx_cell ->
-  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option
+  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
-    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
+    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id,
     sandbox_profile, network_mode)] for
     the run, or [None] values when no turn context has
     been recorded. *)
@@ -160,6 +177,8 @@ val log_call :
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
   ?typed_result:Tool_result.result ->
+  ?disposition:
+    (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?composition_tool:string ->
   ?composition_run_id:string ->
   ?composition_node_id:string ->
@@ -168,11 +187,9 @@ val log_call :
   ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
   ?allowed_paths:string list ->

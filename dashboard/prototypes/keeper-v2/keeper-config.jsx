@@ -111,7 +111,7 @@ function KcfGoalsPicker({ assigned, onToggle }) {
 // and live_meta override wins over the manifest. ──
 const KASM_SRC = {
   base:     { lbl: '월드 프롬프트', path: '~/.masc/config/prompts/keeper.world.md' },
-  manifest: { lbl: '매니페스트',     path: '~/.masc/config/keepers/{id}.toml ← personas/{persona}/profile.json' },
+  manifest: { lbl: '프롬프트 파일',   path: '~/.masc/config/keepers/{id}/AGENT.md' },
   override: { lbl: 'live override', path: '~/.masc/keepers/{id}.json' },
   goals:    { lbl: '배정 목표',      path: 'goal store · 소유 goal' },
   world:    { lbl: '월드 상태',      path: 'runtime · 턴 시작 스냅샷' },
@@ -124,8 +124,7 @@ function kasmAssignedTitles(ids) {
 function KcfAssembly({ f, keeper }) {
   const segs = [
     { src: 'base', text: '너는 MASC 멀티에이전트 코딩 keeper다. namespace 를 공유하고 task 를 소유하며, 브로드캐스트로 다른 keeper 와 협응한다. 모든 턴 출력은 검증 게이트를 통과해야 한다.' },
-    { src: 'manifest', label: 'persona', text: f.prompt.persona || '—' },
-    { src: 'manifest', label: 'objective', text: f.prompt.objective || '—' },
+    { src: 'manifest', label: 'AGENT.md', text: [f.prompt.persona, f.prompt.objective].filter(Boolean).join('\n\n') || '—' },
     { src: 'override', label: 'instructions', text: f.prompt.instructions || '—', win: true },
     { src: 'goals', label: `배정 goal ${f.goals.assigned.length}개`, text: kasmAssignedTitles(f.goals.assigned) },
     { src: 'world', label: 'scope', text: `${f.health.scopeMsg} · running fibers ${f.health.runningFibers} · occupancy not_observed` },
@@ -145,7 +144,7 @@ function KcfAssembly({ f, keeper }) {
               <div className="kasm-seg-h">
                 <span className="kasm-seg-src">{meta.lbl}</span>
                 {sg.label && <span className="kasm-seg-field mono">{sg.label}</span>}
-                {sg.win && <span className="kasm-seg-win">매니페스트 덮어씀</span>}
+                {sg.win && <span className="kasm-seg-win">파일 위에 덮어씀</span>}
                 <span className="kasm-seg-path mono">{meta.path.replace('{id}', keeper.id)}</span>
               </div>
               <div className="kasm-seg-text">{sg.text}</div>
@@ -329,7 +328,7 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
             <div className="kcf-top-sub mono">{keeper.model}</div>
           </div>
           <span className="kcf-top-phase"><StatusDot status={keeper.status} pulse={keeper.status === 'run'} />{keeper.phase}</span>
-          {keeper.sandbox && <span className="kcf-top-sandbox" title="git worktree 격리 · 단일 머신 localhost-trust — OS·컨테이너 sandbox 없음">⬡ {keeper.sandbox}</span>}
+          {keeper.sandbox && <span className="kcf-top-sandbox" title="이 keeper 전용 작업 폴더 — git worktree 로 갈라 놔서 다른 keeper 와 파일이 섞이지 않습니다 (OS·컨테이너 샌드박스는 아님)">⬡ {keeper.sandbox}</span>}
           <div className="kcf-top-spacer" />
           <button className="kcf-top-x" onClick={onClose} title="닫기 (Esc)">✕</button>
         </div>
@@ -362,7 +361,7 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
                     ['runtime profile', f.identity.runtimeProfile, true],
                   ]} />
                 </KcfSec>
-                <KcfSec title="레지스트리 · 소스" desc="등록 상태와 매니페스트 경로는 읽기 전용입니다.">
+                <KcfSec title="레지스트리 · 소스" desc="등록 상태와 파일 경로는 읽기 전용입니다.">
                   <KcfFacts rows={[
                     ['레지스트리', f.identity.registry], ['파이버', f.identity.fiber],
                     ['live meta', f.identity.liveMetaPath, true], ['manifest', f.identity.manifestPath, true],
@@ -376,12 +375,12 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
                 <KcfSec title="목표" desc="이 keeper 의 목표 — 프롬프트 상단에 조립됩니다.">
                   <KcfTextField label="목표 (objective)" value={f.prompt.objective} onChange={v => upd('prompt', 'objective', v)} rows={3} />
                 </KcfSec>
-                <KcfSec title="지시사항 · 성격" desc="이 keeper 고유 — 공유 베이스 위에 쌓입니다.">
-                  <KcfTextField label="지시사항 (instructions)" value={f.prompt.instructions} onChange={v => upd('prompt', 'instructions', v)} rows={5} />
-                  <KcfTextField label="성격 (persona)" value={f.prompt.persona} onChange={v => upd('prompt', 'persona', v)} rows={2} />
+                <KcfSec title="프롬프트" desc="keepers/{id}/AGENT.md 한 장이 이 keeper 프롬프트 전체입니다 — 무대(keeper.world.md) 위에 쌓입니다.">
+                  <KcfTextField label="AGENT.md" value={f.prompt.persona} onChange={v => upd('prompt', 'persona', v)} rows={5} />
+                  <KcfTextField label="지시사항 (instructions · 라이브 오버라이드)" value={f.prompt.instructions} onChange={v => upd('prompt', 'instructions', v)} rows={4} />
                   <div className="kcf-traits">{(f.prompt.traits || []).map((t, i) => <span key={i} className="kcf-trait">{t}</span>)}</div>
                 </KcfSec>
-                <KcfSec title="조립 추적" desc="이 keeper 의 시스템 프롬프트가 어느 레이어에서 조립됐는지 — 위에서 아래로 쌓이고, live override(live_meta)가 매니페스트를 덮어씁니다.">
+                <KcfSec title="조립 추적" desc="이 keeper 의 시스템 프롬프트가 어느 레이어에서 조립됐는지 — 위에서 아래로 쌓이고, live override(live_meta)가 파일 값을 덮어씁니다.">
                   <KcfAssembly f={f} keeper={keeper} />
                 </KcfSec>
               </React.Fragment>
@@ -394,7 +393,7 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
                   <KcfFacts rows={[['runtime_id', f.runtime.runtimeId, true], ['활성 런타임', f.runtime.activeRuntime, true]]} />
                 </KcfSec>
                 <KcfSec title="라이브 오버라이드">
-                  <SetRow label="라이브 오버라이드" hint="live_meta 가 매니페스트를 덮어씀">
+                  <SetRow label="라이브 오버라이드" hint="live_meta 가 파일 값을 덮어씀">
                     <Toggle on={f.runtime.liveOverride} onChange={v => upd('runtime', 'liveOverride', v)} />
                   </SetRow>
                 </KcfSec>
@@ -437,8 +436,8 @@ function KeeperConfigFull({ keeper, onClose, onNav }) {
                   <SetRow label="외부 호출" hint="Slack·Discord 발신"><Toggle on={f.access.net} onChange={v => upd('access', 'net', v)} /></SetRow>
                 </KcfSec>
                 <KcfSec title="샌드박스">
-                  <SetRow label="sandbox_profile"><Segmented options={['local', 'container', 'none']} value={f.access.sandbox} onChange={v => upd('access', 'sandbox', v)} /></SetRow>
-                  <SetRow label="network_mode"><Segmented options={['inherit', 'off', 'allow']} value={f.access.network} onChange={v => upd('access', 'network', v)} /></SetRow>
+                  <SetRow label="sandbox_profile"><Segmented options={['local', 'docker']} value={f.access.sandbox} onChange={v => upd('access', 'sandbox', v)} /></SetRow>
+                  <SetRow label="network_mode"><Segmented options={['none', 'inherit']} value={f.access.network} onChange={v => upd('access', 'network', v)} /></SetRow>
                   <div className="kcf-paths">
                     <div className="kcf-tf-h"><label>allowed_paths</label><span className="kcf-tf-hint">한 줄에 하나 · 명시 경로만 허용</span></div>
                     <textarea className="kcf-text mono" rows={2} value={f.access.allowedPaths} onChange={e => upd('access', 'allowedPaths', e.target.value)} />

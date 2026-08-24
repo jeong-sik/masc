@@ -3,7 +3,17 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.23.0)
+(version 0.24.0)
+
+; Format OCaml, and only OCaml. CI's formatting check runs ocamlformat over
+; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing
+; about dune files, but `dune fmt` formats every language it knows — so it
+; rewrote 18 dune files nobody checks, and the one blank line it added to
+; lib/dune pushed lib_dune_lines past its ratchet baseline. The repo's own
+; formatter broke the repo's own gate (#29253). Scoping formatting to the
+; language CI enforces makes `dune fmt` agree with it.
+(formatting
+ (enabled_for ocaml))
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -39,7 +49,15 @@
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
-  (yojson (>= 3.0))
+  ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
+  ; constraint on a cache miss and broke every build on main (#28327); the
+  ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the
+  ; exact version now, so this is the answer for anything that resolves
+  ; without the lock.
+  (yojson
+   (and
+    (>= 3.0)
+    (< 4.0)))
   (otoml (>= 1.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))
@@ -95,6 +113,8 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (markup (>= 1.0.3))
+  (uucp (>= 17.0.0))
+  (uuseg (>= 17.0.0))
   (uuidm (>= 0.9.10))
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →

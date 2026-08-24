@@ -25,8 +25,10 @@ const LANE_STATE = {
   waiting: { lbl: '대기 중', tone: 'warn' }, deferred: { lbl: '외부 응답 대기', tone: 'warn' },
 };
 const LANE_SOURCE = {
+  /* 원본 대기 소스는 10종(dashboard-tools-prompts.ts DASHBOARD_KEEPER_WAITING_SOURCE_VALUES).
+     workspace_message는 대기 소스가 아니라 이벤트 큐 payload_kind(keeper_event_queue.ml)라
+     여기 없다 — keeper가 보낸 메시지는 event_queue_pending으로 잡힌다. */
   event_queue_pending: { lbl: '자율 이벤트', tone: 'volt', stage: 'queue' },
-  workspace_message: { lbl: '다른 keeper 메시지', tone: 'volt', stage: 'queue' },
   chat_operation_queued: { lbl: '채팅 대기', tone: 'volt', stage: 'queue' },
   chat_operation_running: { lbl: '채팅 처리 중', tone: 'warn', stage: 'keeper' },
   hitl_pending: { lbl: '승인 대기', tone: 'warn', stage: 'operator' },
@@ -48,11 +50,11 @@ const STAGE = {
 const WAIT_INVENTORY = {
   schema: 'masc.dashboard.keeper_waiting_inventory.v3', generated_at: '14:00', external_attention_row_limit: 64,
   keepers: {
-    'masc-improver': { state: 'busy', waiting_count: 3, sources: { chat_operation_running: 1, event_queue_pending: 1, workspace_message: 1 },
+    'masc-improver': { state: 'busy', waiting_count: 3, sources: { chat_operation_running: 1, event_queue_pending: 2 },
       rows: [
         { source: 'chat_operation_running', waiting_on: 'op_7c19 · keeper_chat', what: '운영자와 진행 중인 대화', wake: 'chat_operation_store', since: 2, next: 'await_turn_finalize', detail: { operation_id: 'op_7c19', turn: 41 } },
         { source: 'event_queue_pending', waiting_on: 'masc.task_assigned', what: '새로 배정된 작업 (T-3880)', wake: 'keeper_event_queue', since: 11, next: 'keeper_process_event', detail: { event_id: 'evt-3f0a', task: 'T-3880' } },
-        { source: 'workspace_message', waiting_on: 'workspace-message:wmsg-1f4c', what: '닉케이브가 보낸 메시지 (즉시)', wake: 'keeper_event_queue', since: 4, next: 'keeper_process_event', detail: { payload_kind: 'workspace_message', message_request_id: 'wmsg-1f4c', message_from: 'nick0cave', urgency: 'immediate' } },
+        { source: 'event_queue_pending', waiting_on: 'workspace-message:wmsg-1f4c', what: 'nick0cave가 보낸 메시지 (즉시)', wake: 'keeper_event_queue', since: 4, next: 'keeper_process_event', detail: { payload_kind: 'workspace_message', message_request_id: 'wmsg-1f4c', message_from: 'nick0cave', urgency: 'immediate' } },
       ] },
     sangsu: { state: 'waiting', waiting_count: 64, waiting_count_truncated: true, sources: { external_attention: 62, schedule_waiting: 1, hitl_pending: 1 }, truncated_sources: { external_attention: true },
       rows: [
@@ -64,7 +66,7 @@ const WAIT_INVENTORY = {
     nick0cave: { state: 'deferred', waiting_count: 2, sources: { fusion_running: 1, operator_pending_confirm: 1 },
       rows: [
         { source: 'fusion_running', waiting_on: 'fus_2b71 · panel 3 · judge', what: 'Fusion 판정 · 패널 3', wake: 'fusion_runner', since: 4, next: 'await_fusion_verdict', detail: { run_id: 'fus_2b71', panel: 3 } },
-        { source: 'operator_pending_confirm', waiting_on: 'handoff → sangsu', what: '상수에게 넘기기 확인', wake: 'operator_console', since: 19, next: 'await_operator_confirm', detail: { intent: 'handoff', to: 'sangsu' } },
+        { source: 'operator_pending_confirm', waiting_on: 'handoff → sangsu', what: 'sangsu에게 넘기기 확인', wake: 'operator_console', since: 19, next: 'await_operator_confirm', detail: { intent: 'handoff', to: 'sangsu' } },
       ] },
     scholar: { state: 'waiting', waiting_count: 1, sources: { owner_shutdown: 1 },
       rows: [{ source: 'owner_shutdown', waiting_on: 'drain · 소유 태스크 2건', what: '맡은 작업 2건 마무리', wake: 'keeper_supervisor', since: 3, next: 'drain_then_stop', detail: { owned: 2, phase: 'Draining' } }] },
@@ -73,7 +75,7 @@ const WAIT_INVENTORY = {
   },
 };
 function laneEntry(id) { return WAIT_INVENTORY.keepers[id] || null; }
-function bounded(n, t) { return t ? '≥' + n : String(n); }
+function bounded(n, t) { return t ? '\u2265' + n : String(n); }
 function agoTxt(m) { return m == null ? '시각 미기록' : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.floor(m / 60)}시간 전` : `${Math.floor(m / 1440)}일 전`; }
 function untilTxt(m) { return m < 60 ? `${m}분 후` : m < 1440 ? `${Math.floor(m / 60)}시간 후` : `${Math.floor(m / 1440)}일 후`; }
 function secTxt(s) { return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${(s / 3600).toFixed(1)}h`; }
@@ -230,7 +232,9 @@ function Pipeline({ entry }) {
   const dev = useDev();
   const byStage = {};
   Object.keys(entry.sources || {}).forEach(s => {
-    const st = (LANE_SOURCE[s] || {}).stage || 'queue';
+    /* 모르는 소스는 큐에 흡수하지 않는다 — 원본(keeper-lane-strip.ts)은 미분류 source
+       박스로 따로 보여서 새 소스가 조용히 사라지는 일이 없게 한다. */
+    const st = (LANE_SOURCE[s] || {}).stage || 'unclassified';
     (byStage[st] = byStage[st] || []).push({ s, n: entry.sources[s], trunc: (entry.truncated_sources || {})[s] === true });
   });
   const order = ['external', 'schedule', 'queue', 'operator', 'keeper'];
@@ -240,7 +244,7 @@ function Pipeline({ entry }) {
         const items = byStage[st] || [];
         return (
           <React.Fragment key={st}>
-            {i > 0 && <span className={`pl-arrow ${items.length ? 'on' : ''}`} aria-hidden="true">{'→'}</span>}
+            {i > 0 && <span className={`pl-arrow ${items.length ? 'on' : ''}`} aria-hidden="true">{'\u2192'}</span>}
             <div className={`pl-stage ${items.length ? 'on' : ''}`}>
               <div className="pl-stage-h"><b>{STAGE[st].lbl}</b>{dev && <span className="mono">{STAGE[st].sub}</span>}</div>
               {items.length
@@ -254,6 +258,19 @@ function Pipeline({ entry }) {
           </React.Fragment>
         );
       })}
+      {(byStage.unclassified || []).length > 0 && (
+        <React.Fragment>
+          <span className="pl-arrow on" aria-hidden="true">{'→'}</span>
+          <div className="pl-stage on" data-stage="unknown">
+            <div className="pl-stage-h"><b>미분류 source</b>{dev && <span className="mono">unknown</span>}</div>
+            {byStage.unclassified.map(it => (
+              <div key={it.s} className="pl-item" data-tone="bad">
+                <span>{it.s}</span><b className="mono">{bounded(it.n, it.trunc)}</b>
+              </div>
+            ))}
+          </div>
+        </React.Fragment>
+      )}
     </div>
   );
 }
@@ -397,8 +414,10 @@ function DrainMatrix() {
 }
 
 /* ── 라이프사이클 이벤트 (supervisor) ───────────────────────────────── */
-const LC_TONE = { started: 'ok', reconciled: 'ok', restarted: 'warn', dead_cleaned: 'bad', purged: 'info' };
-const LC_LBL = { started: '기동됨', reconciled: '재조정됨', restarted: '재시작됨', dead_cleaned: '종료 정리됨', purged: '완전 삭제됨' };
+/* 원본 어휘(#29218 이후): supervisor_cleaned · '부재 Keeper 정리됨' · neutral.
+   dead_cleaned는 Dead phase·tombstone과 함께 사라진 옛 키다. */
+const LC_TONE = { started: 'ok', reconciled: 'ok', restarted: 'warn', supervisor_cleaned: 'neutral', purged: 'info' };
+const LC_LBL = { started: '기동됨', reconciled: '재조정됨', restarted: '재시작됨', supervisor_cleaned: '부재 Keeper 정리됨', purged: '완전 삭제됨' };
 const LIFECYCLE = {
   'masc-improver': [{ ev: 'started', phase: 'Running', ago: '3일 전', detail: '처음 기동 · 모델 opus-4.6', detailDev: 'supervisor boot · runtime opus-4.6' }],
   drifter: [
@@ -409,7 +428,7 @@ const LIFECYCLE = {
   scholar: [{ ev: 'reconciled', phase: 'Draining', ago: '3분 전', detail: '운영자의 정리 요청 반영', detailDev: 'owner drain 요청 반영' }, { ev: 'started', phase: 'Running', ago: '1일 전', detail: '처음 기동', detailDev: 'supervisor boot' }],
   'qa-king': [{ ev: 'started', phase: 'HandingOff', ago: '6시간 전', detail: '처음 기동', detailDev: 'supervisor boot' }],
   nick0cave: [{ ev: 'started', phase: 'Running', ago: '5일 전', detail: '처음 기동', detailDev: 'supervisor boot' }],
-  sangsu: [{ ev: 'dead_cleaned', phase: 'Dead', ago: '어제', detail: '중단 정리 후 다시 기동', detailDev: 'dead 정리 후 재기동' }, { ev: 'started', phase: 'Running', ago: '어제', detail: '처음 기동', detailDev: 'supervisor boot' }],
+  sangsu: [{ ev: 'supervisor_cleaned', ago: '어제', detail: '부재 keeper 정리 후 다시 기동', detailDev: 'supervisor_cleaned 후 재기동' }, { ev: 'started', phase: 'Running', ago: '어제', detail: '처음 기동', detailDev: 'supervisor boot' }],
 };
 function LifecycleEvents({ id }) {
   const dev = useDev();

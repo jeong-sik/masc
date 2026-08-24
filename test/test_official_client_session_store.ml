@@ -359,7 +359,7 @@ let test_moved_tool_surface_starts_fresh () =
    operator's judgement on what a crash left behind; the owner knows the turn
    did not finish and why, and already classifies the operation as
    Turn_cancelled. Routing it to Recovery_required blocked every later turn for
-   that keeper until someone resolved it by hand -- kidsnote re-entered three
+   that keeper until someone resolved it by hand -- gamma re-entered three
    minutes after being cleared (#28012). *)
 let test_owner_stop_releases_without_recovery () =
   check bool
@@ -910,6 +910,127 @@ let test_restart_fresh_lets_the_next_fresh_turn_start () =
       fail ("a fresh conversation after restart was rejected: " ^ detail))
 ;;
 
+(* RFC claude-code-context-overflow-bounded-restart §6.2 admission rules: a
+   typed input rejection must not be auto-superseded by the next claim on the
+   same runtime, while every other recovery keeps the supersede and the
+   operator resolution path stays the only way back in. *)
+let test_input_rejected_recovery_is_not_auto_superseded () =
+  with_workspace "masc-official-client-store-input-rejected-" (fun base_path ->
+    let keeper_name = "input-rejected" in
+    check string
+      "effect-fenced wire label"
+      "input_rejected_effect_fenced"
+      (recovery_failure_to_string (Input_rejected Effect_fenced));
+    check string
+      "floor wire label"
+      "input_rejected_bootstrap_floor_exceeded"
+      (recovery_failure_to_string (Input_rejected Bootstrap_floor_exceeded));
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id:"claude_code.claude-sonnet-5"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:(Input_rejected Effect_fenced)
+        ~detail:
+          "Claude Code context window exceeded (response_emitted=true): \
+           terminal subtype=success api_status=400: Prompt is too long"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    (* The durable write already encodes the new failure; loading it back
+       proves the decoder admits the same label the encoder produced. *)
+    (match load ~base_path ~keeper_name with
+     | Ok (Some { phase = Recovery_required required; _ }) ->
+       check bool
+         "durable failure decodes as the same typed rejection"
+         true
+         (required.failure = Input_rejected Effect_fenced);
+       check bool
+         "input rejection is fatal"
+         true
+         (failure_disposition required.failure = Fatal)
+     | Ok None | Ok (Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ })
+     | Error _ ->
+       fail "input-rejected recovery did not survive the durable round-trip");
+    (* Same runtime: the heartbeat replay path must be refused. *)
+    (match plan_claim ~expected:(Some recovery) ~client_kind:Claude_code ~runtime_id:"claude_code.claude-sonnet-5" with
+     | Error _ -> ()
+     | Ok _ -> fail "same-runtime claim auto-superseded an input rejection");
+    (* A different runtime is an operator-driven change and still starts fresh. *)
+    (match
+       plan_claim
+         ~expected:(Some recovery)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-haiku-4-5"
+     with
+     | Ok _ -> ()
+     | Error detail -> fail ("cross-runtime claim was refused: " ^ detail));
+    (* Contrast: a generic provider rejection keeps the automatic supersede. *)
+    let other =
+      claim_new
+        ~base_path
+        ~keeper_name:"generic-rejected"
+        ~client_kind:Claude_code
+        ~runtime_id:"claude_code.claude-sonnet-5"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let generic =
+      require_recovery
+        ~base_path
+        ~keeper_name:"generic-rejected"
+        ~expected:other
+        ~failure:Provider_rejected
+        ~detail:"subscription required"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    (match
+       plan_claim
+         ~expected:(Some generic)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-sonnet-5"
+     with
+     | Ok _ -> ()
+     | Error detail -> fail ("generic rejection lost its automatic supersede: " ^ detail));
+    (* The only way back on the same runtime is the operator resolution. *)
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "input rejection did not enter recovery"
+    in
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:3.0
+      |> Result.get_ok
+    in
+    check bool "restart applied" true (application = Applied);
+    (match
+       plan_claim
+         ~expected:(Some restarted)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-sonnet-5"
+     with
+     | Ok plan -> check int "resolved session claims ordinal one" 1 plan.turn_count
+     | Error detail -> fail ("resolved session was still fenced: " ^ detail)))
+;;
+
 let write_file path content =
   let output = open_out_bin path in
   Fun.protect
@@ -1010,6 +1131,10 @@ let () =
             "restart fresh lets the next fresh turn start"
             `Quick
             test_restart_fresh_lets_the_next_fresh_turn_start
+        ; test_case
+            "input-rejected recovery is not auto-superseded"
+            `Quick
+            test_input_rejected_recovery_is_not_auto_superseded
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

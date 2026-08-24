@@ -42,13 +42,6 @@ val close : t -> unit
 
 (** {1 Unary RPCs} *)
 
-(** Get current project status. *)
-val get_status :
-  t ->
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  (Masc_grpc_types.StatusResponse.t, string) result
-
 (** Call an MCP tool via gRPC. *)
 val tool_call :
   t ->

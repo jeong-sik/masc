@@ -32,7 +32,7 @@ interface UnifiedStatusResult {
 /** The keeper vocabulary wins whenever the status is a keeper token.
  *
  *  `statusLabel` is the generic status vocabulary (tasks, connectors,
- *  fusion runs, board moderation). Where the two keyspaces overlap they
+ *  fusion runs). Where the two keyspaces overlap they
  *  disagree — `compacting` is `컴팩팅` there and `압축 중` in the keeper
  *  SSOT, `handoff` is `핸드오프` vs `인계 중`, `running` is `진행 중` vs
  *  `실행 중` — so the agent detail header used to disagree with the

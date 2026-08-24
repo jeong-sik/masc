@@ -42,7 +42,6 @@ val key_scope : string
 val key_slots : string
 val key_ts_unix : string
 val key_name : string
-val key_generation : string
 val key_active : string
 val key_tool_call_count : string
 val key_cache_read_tokens : string
@@ -95,8 +94,9 @@ val inference_telemetry_to_runtime_json :
     provider/model identity is collapsed before leaving the AGENT_CORE boundary. *)
 
 val context_max_of_telemetry :
-  Agent_core.Types.inference_telemetry option -> int
-(** Provider-reported context window max, or [0] when telemetry omits it. *)
+  Agent_core.Types.inference_telemetry option -> int option
+(** Provider-reported context window max, or [None] when telemetry omits it or
+    reports a non-positive window. *)
 
 type thinking_log_summary =
   { thinking_present : bool

@@ -53,36 +53,6 @@ type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
 
-(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
-    It has no retry, admission, or lifecycle authority. *)
-type provider_cooldown_cause =
-  | Cooldown_provider_capacity
-  | Cooldown_soft_rate_limited
-  | Cooldown_server_error
-  | Cooldown_hard_quota
-  | Cooldown_terminal_failure
-  | Cooldown_provider_error
-  | Cooldown_rejected
-
-let provider_cooldown_cause_to_string = function
-  | Cooldown_provider_capacity -> "provider_capacity"
-  | Cooldown_soft_rate_limited -> "soft_rate_limited"
-  | Cooldown_server_error -> "server_error"
-  | Cooldown_hard_quota -> "hard_quota"
-  | Cooldown_terminal_failure -> "terminal_failure"
-  | Cooldown_provider_error -> "provider_error"
-  | Cooldown_rejected -> "rejected"
-
-let provider_cooldown_cause_of_string = function
-  | "provider_capacity" -> Some Cooldown_provider_capacity
-  | "soft_rate_limited" -> Some Cooldown_soft_rate_limited
-  | "server_error" -> Some Cooldown_server_error
-  | "hard_quota" -> Some Cooldown_hard_quota
-  | "terminal_failure" -> Some Cooldown_terminal_failure
-  | "provider_error" -> Some Cooldown_provider_error
-  | "rejected" -> Some Cooldown_rejected
-  | _ -> None
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -267,9 +237,6 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
-      cooldown_cause : provider_cooldown_cause option;
-      (* Legacy diagnostic only. Current producers use [None]; decoded values
-         never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -346,7 +313,7 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    payload that begins with the prefix up to
    [blocker_detail_structured_max_chars] and truncates plain narrative text
    to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
-   runtime builds last_blocker.detail
+   runtime builds a blocker detail string
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 
@@ -426,18 +393,12 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
       | Explicit s -> [ "retry_after_sec", `Float s ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
-    in
-    let cooldown_cause_fields =
-      match cooldown_cause with
-      | Some cause ->
-        [ ("cooldown_cause", `String (provider_cooldown_cause_to_string cause)) ]
-      | None -> []
     in
     `Assoc
       ([
@@ -446,8 +407,7 @@ let masc_internal_error_to_json = function
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
-      @ retry_after_fields
-      @ cooldown_cause_fields)
+      @ retry_after_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -587,27 +547,19 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
   && response_shape = Some Accept_response_thinking_only
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
         | No_retry_hint -> ""
       in
-      let cooldown_cause_suffix =
-        match cooldown_cause with
-        | Some cause ->
-          Printf.sprintf "; cooldown_cause=%s"
-            (provider_cooldown_cause_to_string cause)
-        | None -> ""
-      in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s%s"
+           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
            (runtime_id_to_string runtime_id)
            (capacity_backpressure_source_to_string source)
            detail
-           retry_after_suffix
-           cooldown_cause_suffix)
+           retry_after_suffix)
   | Accept_rejected
       {
         scope;
@@ -831,29 +783,15 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                       ; "detail"
                       ; "retry_after_sec"
                       ]
-                      fields
-                    || exact_fields
-                         [ "kind"
-                         ; "runtime_id"
-                         ; "source"
-                         ; "detail"
-                         ; "retry_after_sec"
-                         ; "cooldown_cause"
-                         ]
-                         fields ->
+                      fields ->
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
                  | None -> No_retry_hint
                  | Some s -> Explicit s
                in
-               let cooldown_cause =
-                 match string_opt_of_assoc "cooldown_cause" json with
-                 | Some raw -> provider_cooldown_cause_of_string raw
-                 | None -> None
-               in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after; cooldown_cause })
+                    { runtime_id; source; detail; retry_after })
              | Some _ | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (

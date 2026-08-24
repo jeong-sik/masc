@@ -1442,20 +1442,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 3: wait-free read via
-            [Dashboard_snapshot.current ()].namespace_truth when the
-            refresh fiber has populated it.  Cold start (or refresh
-            spawned without ~state) falls through to the synchronous
-            namespace-truth path inside the timing measurement. *)
-         let json =
-           Server_dashboard_snapshot_select.select_project_snapshot_json
-             ~state ~sw ~clock ~timing req
-         in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* The default execution surface is a large proactive cached snapshot.
@@ -1815,12 +1801,14 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key = "transport_health" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_transport_health_http_json ~state))
-         in
+         (* No route cache here. The producer is not a computation — it reads a
+            published cell and derives cache_state, stale_reason and
+            stale_age_ms from it. A second 30s cache in front of that served
+            the previous "fresh" payload after the inner surface had gone to an
+            error state, and froze stale_age_ms, so a client watching the age
+            saw it stand still while the surface aged (#27652). Every other
+            route cache on this router wraps an actual computation. *)
+         let json = dashboard_transport_health_http_json ~state in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/perf" (fun request reqd ->
@@ -1994,22 +1982,13 @@ let add_routes ~sw ~clock router =
            request
            reqd
        | None ->
-       match
-         Keeper_event_queue_operator.pending_get_route
-           (Http.Request.path request)
-       with
-       | Some keeper_name ->
-         with_token_permission_auth
-           ~permission:Keeper_event_queue_operator.operator_permission
-           (fun state _agent_name _req reqd ->
-             Keeper_event_queue_operator.handle_get
-               state
-               request
-               reqd
-               ~keeper_name)
-           request reqd
-       | None ->
-         (match Keeper_api.keeper_get_permission (Http.Request.path request) with
+         (match
+            Keeper_api.keeper_get_permission
+              ~include_thinking:
+                (Server_utils.bool_query_param request "include_thinking"
+                   ~default:false)
+              (Http.Request.path request)
+          with
           | Some permission ->
            with_token_permission_auth ~permission
              (fun state _agent_name req reqd ->
@@ -2023,6 +2002,12 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_turn_interrupt state request reqd) request reqd)
+
+  (* Answers a tool call the keeper is holding. Same authority as interrupting
+     a turn: both decide what a running turn is allowed to do next. *)
+  |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval state request reqd) request reqd)
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
@@ -2137,13 +2122,6 @@ let add_routes ~sw ~clock router =
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_paused_work_post state req reqd body_str
-               )
-             ) request reqd
-       | Keeper_api.Keeper_post_catchup_judge ->
-           with_tool_auth ~tool_name:"masc_fusion"
-             (fun state req reqd ->
-               Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_catchup_judge_post state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_fusion ->

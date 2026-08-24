@@ -296,8 +296,6 @@ let test_session_id_parsing_uses_uri_and_cookie_contracts () =
   check (option string) "first duplicate query value" (Some "first")
     (Transport.get_session_id_query
        "/mcp?session_id=first&session_id=second");
-  check (option string) "legacy camel-case query key" (Some "legacy")
-    (Transport.get_session_id_query "/mcp?sessionId=legacy");
   let cookie_request =
     request ~headers:[ ("cookie", "mcp-session-id=exact=value; Other=x") ]
       "/mcp"
@@ -507,6 +505,52 @@ let test_h2_oauth_route_and_authority_lifetime () =
    token leg deterministically fails without a bearer token and the decision
    falls to the same-origin leg.  If the strict default ever flips, these
    deny cases must fail loudly — that is a security posture change. *)
+(* H1 and H2 return the same 401, the same typed code and the same bearer
+   challenge, and used to return different CORS headers: H1 reflected
+   get_origin, which answers "*" with no Origin present, while H2 ran the
+   origin through admission and emitted only vary: Origin (#28166). One
+   function answers for both now, and admission is what it reads. *)
+let auth_error_cors ~headers =
+  let request =
+    Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/api/v1/keepers"
+  in
+  match
+    Server_request_authority.classify_http1_request
+      ~trust_policy:request_trust_policy
+      request
+  with
+  | Server_request_authority.Single authority ->
+    Server_request_authority.with_current authority (fun () ->
+      Server_auth.auth_error_cors_headers request)
+  | Server_request_authority.Missing
+  | Server_request_authority.Multiple
+  | Server_request_authority.Malformed
+  | Server_request_authority.Untrusted -> fail "expected valid authority"
+;;
+
+let test_auth_error_cors_reads_admission_not_the_raw_origin () =
+  let vary_only = [ ("vary", "Origin") ] in
+  check (list (pair string string))
+    "no Origin header: vary only, never a wildcard reflection"
+    vary_only
+    (auth_error_cors ~headers:[ ("host", "127.0.0.1:8935") ]);
+  check (list (pair string string))
+    "rejected cross origin: vary only"
+    vary_only
+    (auth_error_cors
+       ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "https://evil.example") ]);
+  check (list (pair string string))
+    "malformed Origin does not raise out of the error responder"
+    vary_only
+    (auth_error_cors ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "not a url") ]);
+  let same_origin =
+    auth_error_cors
+      ~headers:[ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+  in
+  check bool "same origin is reflected" true
+    (List.mem ("access-control-allow-origin", "http://127.0.0.1:8935") same_origin)
+;;
+
 let ws_absent_base_path () =
   Filename.concat
     (Filename.get_temp_dir_name ())
@@ -617,7 +661,20 @@ let test_transport_guarded_paths_are_not_public_read () =
         (Printf.sprintf "%s is not public-read" path)
         false
         (Server_auth.is_public_read_path path))
-    [ "/graphql"; "/api/v1/dashboard/workspace"; "/api/v1/status" ]
+    [ "/graphql"
+    ; "/api/v1/dashboard/workspace"
+    ; "/api/v1/status"
+      (* Wrapped in with_public_read on HTTP/1 and answered unauthenticated
+         over h2c until #28161: the H2 arms ran their handlers with no gate at
+         all. They stay out of the allowlist, or wrapping them changes
+         nothing. *)
+    ; "/api/v1/openapi.json"
+    ; "/api/v1/voice/config"
+    ; "/api/v1/board/curation"
+    ; "/api/v1/board/hearths"
+    ; "/api/v1/board/karma/ledger"
+    ; "/api/v1/karma"
+    ]
 
 (* serve_auto hands h2c connections to Server_h2_gateway and everything else to
    the HTTP/1 router, so a route's authorization is decided independently on
@@ -652,7 +709,33 @@ let test_h1_h2_read_gate_wiring_parity () =
   (* [with_server_state] performs no authorization; no read route may reach it
      directly. The arms that still call it (MCP) authorize inside. *)
   assert_not_contains "H2 /graphql no longer reads state without authorizing"
-    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2
+    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2;
+  (* The delegated module has no gate of its own; it takes this gateway's.
+     Five of its routes are with_public_read on HTTP/1 and ran unauthenticated
+     over h2c (#28161). *)
+  let h2_extra = source_file "lib/server/server_h2_gateway_routes_extra.ml" in
+  assert_contains "H2 hands the delegated routes its own public-read gate"
+    ~needle:"~with_public_read:(fun f ->" h2;
+  List.iter
+    (fun (path, needle) ->
+      assert_contains
+        (Printf.sprintf "H2 %s passes through the public-read gate" path)
+        ~needle
+        h2_extra)
+    [ "/api/v1/voice/config",
+      "| `GET, \"/api/v1/voice/config\" ->\n      with_public_read"
+    ; "/api/v1/board/curation",
+      "| `GET, \"/api/v1/board/curation\" ->\n      with_public_read"
+    ; "/api/v1/board/hearths",
+      "| `GET, \"/api/v1/board/hearths\" ->\n      with_public_read"
+    ; "/api/v1/board/karma/ledger",
+      "| `GET, \"/api/v1/board/karma/ledger\" ->\n      with_public_read"
+    ; "/api/v1/karma",
+      "| `GET, \"/api/v1/karma\" ->\n      with_public_read"
+    ];
+  assert_contains "H2 openapi.json passes through the public-read gate"
+    ~needle:"| `GET, \"/api/v1/openapi.json\" ->\n          (*"
+    h2
 
 let () =
   Eio_main.run @@ fun env ->
@@ -693,6 +776,8 @@ let () =
             test_transport_guarded_paths_are_not_public_read;
           test_case "H1/H2 read gate wiring parity" `Quick
             test_h1_h2_read_gate_wiring_parity;
+          test_case "auth-error CORS reads admission, not the raw Origin" `Quick
+            test_auth_error_cors_reads_admission_not_the_raw_origin;
         ] );
       ( "ws-upgrade-admission",
         [

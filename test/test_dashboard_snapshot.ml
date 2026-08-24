@@ -4,7 +4,6 @@
     - current () is None before any publish
     - publish_for_test writes a slot, current () reads it
     - reset_for_test clears the slot back to None
-    - generation counter is monotonically increasing across snapshots
     - make_for_test produces a snapshot whose fields are byte-identical
       to its arguments (no transformation, no rounding) *)
 
@@ -54,26 +53,6 @@ let test_reset_clears_slot () =
     true (Option.is_none (Dashboard_snapshot.current ()))
 ;;
 
-let test_generation_monotonic () =
-  Dashboard_snapshot.reset_for_test ();
-  let s1 =
-    Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null ()
-  in
-  let s2 =
-    Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null ()
-  in
-  let s3 =
-    Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null ()
-  in
-  Alcotest.(check bool) "s2.generation > s1.generation"
-    true (s2.generation > s1.generation);
-  Alcotest.(check bool) "s3.generation > s2.generation"
-    true (s3.generation > s2.generation)
-;;
-
 let test_generated_at_recent () =
   let before = Unix.gettimeofday () in
   let s =
@@ -101,8 +80,6 @@ let () =
         ] );
       ( "metadata",
         [
-          Alcotest.test_case "generation monotonic"
-            `Quick test_generation_monotonic;
           Alcotest.test_case "generated_at within call window"
             `Quick test_generated_at_recent;
         ] );

@@ -410,15 +410,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             }
           in
           let cleared_ctx = { checkpoint } in
-          (* Increment generation from meta to signal a new context epoch.
-             Using a hardcoded value would violate generation monotonicity
-             — the keeper_unified_turn retry loop uses meta.runtime.nonce
-             to detect stale contexts. *)
-          let current_gen =
-            match meta_for_trace with
-            | Some meta -> meta.runtime.nonce
-            | None -> 0
-          in
           (match meta_for_trace with
            | Some meta ->
                (match
@@ -428,7 +419,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                     ~session
                     ~agent_name:meta.agent_name
                     ~ctx:cleared_ctx
-                    ~generation:(current_gen + 1)
                 with
                 | Ok _ -> ()
                 | Error err ->
@@ -553,6 +543,7 @@ let dispatch_keeper_msg_stream_admitted
       ?on_text_delta
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?continuation_channel
       ctx
       ~message
@@ -567,6 +558,7 @@ let dispatch_keeper_msg_stream_admitted
           ?on_text_delta
           ?on_event
           ?on_tool_result_ready
+      ?approval_gate
           ?continuation_channel
           ctx
           message))

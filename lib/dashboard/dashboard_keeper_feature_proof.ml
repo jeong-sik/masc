@@ -424,20 +424,10 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
     enabled
     |> List.map (fun snapshot ->
       let stat = decision_stat_for snapshot.keeper_name in
-      let meta_count =
-        match snapshot.meta with
-        | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.count_total
-        | None -> 0
-      in
       let meta_last_ts =
         match snapshot.meta with
         | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.last_ts
         | None -> 0.0
-      in
-      let meta_recent =
-        match snapshot.meta with
-        | Some meta -> has_recent_meta_evidence meta
-        | None -> false
       in
       let meta_outcome =
         match snapshot.meta with
@@ -449,12 +439,10 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       in
       `Assoc [
         ("keeper", `String snapshot.keeper_name);
-        ("meta_proactive_count_total", `Int meta_count);
         ( "meta_last_proactive_ts",
           if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
         ( "meta_last_proactive_outcome",
           Json_util.string_opt_to_json meta_outcome );
-        ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])
   in
@@ -542,7 +530,6 @@ let json ~config ?window_hours ?now () =
        ("fail_count", `Int fail_count);
        ("gap_count", `Int (warn_count + fail_count));
        ("keeper_count", `Int (keeper_count snapshots));
-       ("keeper_meta_count", `Int (count_meta snapshots));
        ("window_hours",
         (match window_hours with
          | Some hours -> `Float hours

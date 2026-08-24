@@ -125,8 +125,8 @@ let test_snapshot_counts_malformed_decision_rows () =
        let keeper_name = "runtime-trust-decision-drop" in
        let meta = make_meta keeper_name in
        let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
-       let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
-       let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
        let before_entry_error = drop_value entry_error in
        let before_invalid_payload = drop_value invalid_payload in
        write_file
@@ -183,8 +183,8 @@ let test_snapshot_counts_unterminated_tail_separately () =
        let keeper_name = "runtime-trust-decision-tail" in
        let meta = make_meta keeper_name in
        let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
-       let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
-       let tail_partial = Safe_ops.persistence_read_drop_reason_tail_partial_write in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let tail_partial = Read_drop_reason.to_wire Read_drop_reason.Tail_partial_write in
        let before_entry_error = drop_value entry_error in
        let before_tail_partial = drop_value tail_partial in
        write_file
@@ -569,112 +569,6 @@ let test_no_visible_output_active_receipt_does_not_mark_attention () =
           | _ -> false))
 ;;
 
-let test_runtime_blocker_supersedes_completion_observation () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> remove_tree base_dir)
-    (fun () ->
-       with_env "MASC_BASE_PATH" base_dir
-       @@ fun () ->
-       let config = Masc.Workspace.default_config base_dir in
-       init_runtime_default_for_tests ();
-       let keeper_name = "runtime-trust-provider-exhausted" in
-       let blocker_detail = "No configured provider runtime remained available."
-       in
-       let blocker =
-         Masc.Keeper_meta_contract.blocker_info_of_class
-           ~detail:blocker_detail
-           (Masc.Keeper_meta_contract.Runtime_exhausted
-              Masc.Keeper_meta_contract.No_providers_available)
-       in
-       let meta =
-         make_meta keeper_name
-         |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
-           { rt with
-             last_blocker = Some blocker
-           ; usage = { rt.usage with last_turn_ts = 1_800_000_000.0 }
-           })
-       in
-       let receipt_store =
-         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
-       in
-       Dated_jsonl.append
-         receipt_store
-         (`Assoc
-             [ "ended_at", `String "2026-06-01T00:00:00Z"
-             ; "operator_disposition", `String "pass"
-             ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "success"
-             ; "completion_contract_result", `String "no_visible_output"
-             ]);
-       let snapshot = K.snapshot_json ~config ~meta in
-       let open Yojson.Safe.Util in
-       Alcotest.(check string)
-         "runtime blocker class"
-         "runtime_exhausted"
-         (snapshot
-          |> member "runtime_blockers"
-          |> member "runtime_blocker_class"
-          |> to_string);
-       Alcotest.(check string)
-         "runtime blocker remains the display reason"
-         "runtime_exhausted"
-         (snapshot |> member "disposition_reason" |> to_string);
-       Alcotest.(check string)
-         "attention follows runtime blocker"
-         "runtime_attempts_exhausted"
-         (snapshot |> member "attention_reason" |> to_string);
-       Alcotest.(check bool)
-         "runtime blocker summary remains typed runtime evidence"
-         true
-         (String.equal
-            blocker_detail
-               (snapshot
-                |> member "runtime_blockers"
-                |> member "runtime_blocker_summary"
-                |> to_string)))
-;;
-
-let test_runtime_exhausted_blocker_uses_typed_parser () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> remove_tree base_dir)
-    (fun () ->
-       with_env "MASC_BASE_PATH" base_dir
-       @@ fun () ->
-       let config = Masc.Workspace.default_config base_dir in
-       let keeper_name = "runtime-trust-runtime-exhausted" in
-       let blocker =
-         Masc.Keeper_meta_contract.blocker_info_of_class
-           (Masc.Keeper_meta_contract.Runtime_exhausted
-              (Masc.Keeper_meta_contract.Other_detail "runtime_exhausted"))
-       in
-       let meta =
-         make_meta keeper_name
-         |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
-           { rt with last_blocker = Some blocker })
-       in
-       let snapshot = K.snapshot_json ~config ~meta in
-       let open Yojson.Safe.Util in
-       Alcotest.(check string)
-         "runtime exhausted blocker display reason"
-         "runtime_exhausted"
-         (snapshot |> member "disposition_reason" |> to_string);
-       Alcotest.(check string)
-         "runtime exhausted blocker class"
-         "runtime_exhausted"
-         (snapshot
-          |> member "runtime_blockers"
-          |> member "runtime_blocker_class"
-          |> to_string))
-;;
-
 let test_unknown_completion_observation_is_explicit () =
   Eio_main.run
   @@ fun env ->
@@ -1024,14 +918,6 @@ let () =
             "no-visible-output active receipt does not mark attention"
             `Quick
             test_no_visible_output_active_receipt_does_not_mark_attention
-        ; Alcotest.test_case
-            "runtime blocker supersedes completion observation"
-            `Quick
-            test_runtime_blocker_supersedes_completion_observation
-        ; Alcotest.test_case
-            "runtime exhausted blocker display uses typed parser"
-            `Quick
-            test_runtime_exhausted_blocker_uses_typed_parser
         ; Alcotest.test_case
             "completion-observation labels reject drift before typed parser"
             `Quick

@@ -151,7 +151,7 @@ let test_handoff_success () =
   check phase_t "handing off" KSM.HandingOff tr.new_phase;
 
   let tr = dispatch "handoff"
-    (KSM.Handoff_completed { new_trace_id = "trace-2"; generation = 2 }) in
+    (KSM.Handoff_completed { new_trace_id = "trace-2" }) in
   check phase_t "back to running" KSM.Running tr.new_phase
 
 let test_pause_resume () =
@@ -182,7 +182,7 @@ let test_full_chaos_sequence () =
   check phase_t "handoff" KSM.HandingOff tr.new_phase;
   (* Handoff completes but fiber crashes immediately after *)
   let tr = dispatch "chaos"
-    (KSM.Handoff_completed { new_trace_id = "trace-fail"; generation = 1 }) in
+    (KSM.Handoff_completed { new_trace_id = "trace-fail" }) in
   check phase_t "handoff complete → running" KSM.Running tr.new_phase;
   let tr = dispatch "chaos"
     (KSM.Fiber_terminated { outcome = "handoff target unreachable"; provider_id = None; http_status = None }) in

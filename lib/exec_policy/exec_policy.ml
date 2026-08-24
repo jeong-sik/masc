@@ -42,10 +42,6 @@ let block_reason_to_string = function
 ;;
 
 
-let strict_syntax_policy : Exec_shell_gate.syntax_policy =
-  { allow_pipes = false; redirect_allowed = false }
-;;
-
 let tool_execute_syntax_policy ?(allow_pipes = true) ()
   : Exec_shell_gate.syntax_policy =
   { allow_pipes; redirect_allowed = false }
@@ -75,6 +71,9 @@ let rec shell_ir_has_unquoted_glob = function
   | Masc_exec.Shell_ir.Simple simple -> simple_has_unquoted_glob simple
   | Masc_exec.Shell_ir.Pipeline stages ->
     List.exists shell_ir_has_unquoted_glob stages
+  | Masc_exec.Shell_ir.Sequence { head; tail } ->
+    shell_ir_has_unquoted_glob head
+    || List.exists (fun (_connector, part) -> shell_ir_has_unquoted_glob part) tail
 ;;
 
 let validate_no_unquoted_glob ast =
@@ -103,6 +102,9 @@ let block_reason_of_exec_too_complex
       | `Function_def
       | `Glob_brace
       | `Background
+      (* A separated list, not a redirect: it used to land in the arm above
+         because the classifier found a supported [2>/dev/null] first. *)
+      | `Command_separator
       | `Unknown_construct _ ) -> Injection
 ;;
 
@@ -119,28 +121,6 @@ let parse_string_to_ir ~mode cmd =
     | Masc_exec.Parsed.Too_complex reason ->
       Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
     | Masc_exec.Parsed.Parsed ir -> Ok ir)
-;;
-
-let command_context ir =
-  let verdict =
-    Exec_shell_gate.gate_typed
-      ~ir
-      ~syntax_policy:strict_syntax_policy
-      ~sandbox:Exec_shell_gate.host_sandbox
-      ()
-  in
-  match verdict with
-  | Allow context ->
-    (match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-     | Error _ as err -> err
-     | Ok () -> Ok context)
-  | Reject { reason; _ } -> Error (block_reason_of_exec_reject reason)
-  | Cannot_parse _ -> Error Chain_or_redirect
-  | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
-;;
-
-let validate_command ir =
-  command_context ir |> Result.map (fun _ -> ())
 ;;
 
 let command_context_tool_execute
@@ -258,7 +238,9 @@ let validate_shell_ir_paths ?workdir shell_ir =
       let rec validate_redirects = function
         | [] -> Ok ()
         | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
-          let target = Masc_exec.Path_scope.raw target in
+          let target =
+            Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target)
+          in
           (match validate_path_value ~requires_existing_dir:false target with
            | Ok () -> validate_redirects rest
            | Error _ as err -> err)
@@ -277,19 +259,17 @@ let validate_shell_ir_paths ?workdir shell_ir =
       in
       let rec validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
-        | Masc_exec.Shell_ir.Pipeline stages ->
-          let rec loop = function
-            | [] -> Ok ()
-            | Masc_exec.Shell_ir.Simple simple :: rest ->
-              (match validate_simple simple with
-               | Ok () -> loop rest
-               | Error _ as err -> err)
-            | Masc_exec.Shell_ir.Pipeline nested :: rest ->
-              (match validate_parsed_shell_ir (Masc_exec.Shell_ir.Pipeline nested) with
-               | Ok () -> loop rest
-               | Error _ as err -> err)
-          in
-          loop stages
+        | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
+        | Masc_exec.Shell_ir.Sequence { head; tail } ->
+          (match validate_parsed_shell_ir head with
+           | Error _ as err -> err
+           | Ok () -> validate_each (List.map snd tail))
+      and validate_each = function
+        | [] -> Ok ()
+        | part :: rest ->
+          (match validate_parsed_shell_ir part with
+           | Ok () -> validate_each rest
+           | Error _ as err -> err)
       in
       validate_parsed_shell_ir shell_ir
 ;;

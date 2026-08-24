@@ -40,7 +40,7 @@ This document is the operator-facing SSOT for:
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
 | `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
-| `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Namespace truth dashboard snapshot. |
+| `project_snapshot` | After project-snapshot recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Project dashboard snapshot. |
 
 ## Keeper Context Observation Contract
 
@@ -213,7 +213,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
 | agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:context_compacted`, `agent_core:task_state_changed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:pre_compact`, `agent_core:masc:harness:handoff` |
-| Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
+| Server-push snapshots | `project_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
 ### 2. Agent Core custom events published by MASC
 
@@ -234,7 +234,7 @@ Domain publishers emit typed `Agent_core.Event_bus.Custom` payloads and
 | Event name | Status | Notes |
 | --- | --- | --- |
 | `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `agent_core:masc:keeper:lifecycle` for lifecycle detail. |
-| `workspace_truth_snapshot` | removed legacy alias | Replaced by `namespace_truth_snapshot`; same payload shape, canonical event name only. |
+| `workspace_truth_snapshot` | removed legacy alias | Replaced by `project_snapshot`; same payload shape, canonical event name only. |
 
 ## Representative Messages
 

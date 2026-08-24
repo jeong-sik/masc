@@ -130,11 +130,7 @@ let read_guarded_meta
     when not
            (Keeper_id.Trace_id.equal
               latest.runtime.trace_id
-              observed.runtime.trace_id)
-         || not
-              (Int.equal
-                 latest.runtime.nonce
-                 observed.runtime.nonce) ->
+              observed.runtime.trace_id) ->
     Error Meta_snapshot_identity_changed
   | Ok (Some latest) ->
     ignore cleanup_reason;
@@ -266,7 +262,6 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
                    ; keeper_name = current.name
                    ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition
@@ -353,7 +348,6 @@ let prepare_dormant
                    ; keeper_name = durable_meta.name
                    ; lane_ownership = Dormant_meta
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition = No_inflight_turn

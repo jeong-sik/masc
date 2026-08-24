@@ -120,6 +120,57 @@ let test_roundtrip_text_preserved () =
   Alcotest.(check string) "text preserved"
     (text_of original) (text_of reparsed)
 
+(* [message_to_json] calls the provider-wire projection for every block, and
+   that projection drops the ToolResult fields a history reader needs: the
+   typed [json] payload is not emitted at all, and [outcome] is flattened to
+   [is_error], so Tool_failed provenance cannot come back. This file says
+   content_blocks is the write-side source of truth; for ToolResult it is a
+   wire copy (#25109). *)
+let test_roundtrip_preserves_tool_result_payload_and_provenance () =
+  let original : T.message =
+    {
+      T.role = T.Tool;
+      content =
+        [
+          T.ToolResult
+            {
+              tool_use_id = "toolu_roundtrip";
+              content = "2 rows matched";
+              outcome =
+                T.Tool_failed
+                  {
+                    failure_kind = T.Validation_error;
+                    error_class = None;
+                  };
+              json = Some (`Assoc [ ("rows", `Int 2) ]);
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = Some "toolu_roundtrip";
+      metadata = [];
+    }
+  in
+  let reparsed = C.message_of_json (C.message_to_json original) in
+  match reparsed.content with
+  | [ T.ToolResult { json; outcome; _ } ] ->
+      Alcotest.(check string)
+        "typed json payload survives the round-trip"
+        {|{"rows":2}|}
+        (match json with
+         | Some value -> Yojson.Safe.to_string value
+         | None -> "<none>");
+      Alcotest.(check string)
+        "the exact failure kind survives the round-trip"
+        "Types.Validation_error"
+        (match outcome with
+         | T.Tool_failed { failure_kind; _ } ->
+             T.show_tool_failure_kind failure_kind
+         | T.Tool_succeeded -> "<succeeded>")
+  | blocks ->
+      Alcotest.failf "expected one ToolResult block, got %d" (List.length blocks)
+;;
+
 let test_roundtrip_preserves_thinking_signature () =
   let original : T.message =
     {
@@ -297,7 +348,6 @@ let test_checkpoint_save_load_preserves_exact_messages () =
            ~session
            ~agent_name:"checkpoint-exact"
            ~ctx:context
-           ~generation:1
        with
        | Ok checkpoint ->
          Alcotest.(check bool) "save returns exact source messages" true
@@ -316,6 +366,37 @@ let test_checkpoint_save_load_preserves_exact_messages () =
       | Some loaded_context ->
         Alcotest.(check bool) "load preserves every source message" true
           (C.messages_of_context loaded_context = messages))
+
+(* --- persist_message: one timestamp key --- *)
+
+let test_persist_message_writes_single_ts_unix_key () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-history-ts-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"history-ts" ~base_dir in
+      C.persist_message session (text_message "hello");
+      let path =
+        Filename.concat session.session_dir "history.jsonl"
+      in
+      let line =
+        In_channel.with_open_bin path In_channel.input_all |> String.trim
+      in
+      match Yojson.Safe.from_string line with
+      | `Assoc fields ->
+          Alcotest.(check bool) "no timestamp key" false
+            (List.mem_assoc "timestamp" fields);
+          (match List.assoc_opt "ts_unix" fields with
+           | Some (`Float ts) ->
+               Alcotest.(check bool) "ts_unix is a positive epoch" true (ts > 0.0)
+           | other ->
+               Alcotest.failf "ts_unix must be a float, got %s"
+                 (match other with
+                  | Some json -> Yojson.Safe.to_string json
+                  | None -> "<missing>"))
+      | _ -> Alcotest.fail "history line is not an object")
 
 let test_checkpoint_write_accepts_exact_open_tool_cycle () =
   Eio_main.run @@ fun env ->
@@ -347,7 +428,6 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
           ~session
           ~agent_name:"checkpoint-open-cycle"
           ~ctx:context
-          ~generation:1
       with
       | Ok checkpoint ->
         Alcotest.(check bool) "open cycle is persisted exactly" true
@@ -393,7 +473,6 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
            ~session
            ~agent_name:session_id
            ~ctx:context
-           ~generation:1
        with
        | Error
            (C.Tool_history_invalid
@@ -421,6 +500,28 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
           detail
       | Ok _ -> Alcotest.fail "invalid checkpoint created a durable file")
 
+let test_naming_a_session_does_not_open_one () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-session-name-only-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"never-written" ~base_dir in
+      Alcotest.(check bool)
+        "naming a session leaves no directory"
+        false
+        (Sys.file_exists session.session_dir);
+      let _session, ctx =
+        C.load_context_from_checkpoint ~trace_id:"never-written" ~base_dir
+      in
+      Alcotest.(check bool) "no checkpoint to load" true (Option.is_none ctx);
+      Alcotest.(check bool)
+        "reading a checkpoint leaves no directory"
+        false
+        (Sys.file_exists session.session_dir))
+;;
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -441,6 +542,8 @@ let () =
             test_roundtrip_text_preserved;
           Alcotest.test_case "round-trip thinking signature preserved" `Quick
             test_roundtrip_preserves_thinking_signature;
+          Alcotest.test_case "round-trip tool_result payload preserved" `Quick
+            test_roundtrip_preserves_tool_result_payload_and_provenance;
           Alcotest.test_case "thinking block JSON uses AGENT_CORE signature" `Quick
             test_thinking_block_json_uses_agent_core_signature;
           Alcotest.test_case "legacy thinking_type is not promoted" `Quick
@@ -452,6 +555,16 @@ let () =
             test_history_jsonl_text_uses_blocks_first;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
+        ] );
+      ( "persist_message",
+        [
+          Alcotest.test_case "writes ts_unix only" `Quick
+            test_persist_message_writes_single_ts_unix_key;
+        ] );
+      ( "session_dir",
+        [
+          Alcotest.test_case "naming a session does not open one" `Quick
+            test_naming_a_session_does_not_open_one;
         ] );
       ( "checkpoint_projection",
         [

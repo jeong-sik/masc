@@ -3,7 +3,7 @@
     Drives many concurrent OCaml threads against [Trajectory.append_entry]
     for the same trace file (the contention surface that produced ~89
     utf-8 multibyte-tear lines in
-    [.masc/trajectories/{analyst,imseonghan,sangsu,ramarama,issue_king,…}]
+    [.masc/trajectories/{delta,tau,alpha,nu,kappa_keeper,…}]
     on 2026-05-17). Post-fix the file must contain every record exactly
     once and every line must parse as JSON. *)
 

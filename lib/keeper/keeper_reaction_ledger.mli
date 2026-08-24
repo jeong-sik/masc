@@ -15,10 +15,6 @@ type stimulus_kind =
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Manual_compaction
-  | Goal_assigned
-      (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_reconciliation_ready
-      (** Linked Tasks reached a terminal boundary and Goal synthesis is ready. *)
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
   | Task_cancelled
@@ -48,9 +44,6 @@ val reaction_kind_of_string : string -> (reaction_kind, reaction_decode_error) r
 (** Closed inverse of {!reaction_kind_to_string}. Strings outside the current
     reaction algebra return a typed decoder error and can never become a
     current reaction. *)
-
-val board_stimulus_id : post_id:string -> string
-(** Stable id for board-originated stimuli. *)
 
 val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
 (** Stable id derived from the event queue stimulus payload. Scheduled wakes

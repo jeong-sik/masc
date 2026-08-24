@@ -78,27 +78,9 @@ const DM_VOICE_DEFAULT_MODEL: &str = "eleven_multilingual_v2";
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
 #[cfg(target_arch = "wasm32")]
-const DM_VOICE_MODEL_PRESETS: &[&str] = &[
-    "eleven_turbo_v2_5",
-    "eleven_flash_v2_5",
-    "eleven_multilingual_v2",
-];
-#[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_ORIGIN_PRESETS: &[&str] = &["/api/v1/trpg/tts", "/api/v1/tts", "/tts"];
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PROXY_REMOTE_PRESETS: &[&str] = &[DM_VOICE_DEFAULT_PROXY_URL];
-#[cfg(target_arch = "wasm32")]
-const DM_VOICE_ID_PRESETS: &[(&str, &str)] = &[
-    ("21m00Tcm4TlvDq8ikWAM", "Rachel"),
-    ("AZnzlk1XvdvUeBnXmlld", "Domi"),
-    ("EXAVITQu4vr4xnSDxMaL", "Bella"),
-    ("ErXwobaYiN019PkySvjV", "Antoni"),
-    ("MF3mGyEYCl7XYWbV9V6O", "Elli"),
-    ("TxGEqnHWrfWFTfGW9XjX", "Josh"),
-    ("VR6AewLTigWG4xSOukaG", "Arnold"),
-    ("pNInz6obpgDQGcFmaJgB", "Adam"),
-    ("yoZ06aMxZJJ28mfd3POQ", "Sam"),
-];
 #[cfg(target_arch = "wasm32")]
 const DM_VOICE_PREVIEW_TEXT: &str = "지금은 DM 음성 미리듣기 테스트 중입니다.";
 
@@ -840,7 +822,7 @@ fn rebuild_select_options(
 
     select.set_inner_html("");
 
-    let mut append_option = |value: &str, label: &str| {
+    let append_option = |value: &str, label: &str| {
         let Ok(option) = doc.create_element("option") else {
             return;
         };

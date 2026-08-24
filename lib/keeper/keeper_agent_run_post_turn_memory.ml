@@ -25,7 +25,8 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
         Some item
       | Keeper_external_attention.Recorded _
       | Keeper_external_attention.Resolved _
-      | Keeper_external_attention.Ignored _ -> None)
+      | Keeper_external_attention.Ignored _
+      | Keeper_external_attention.Quarantined _ -> None)
   in
   let external_delivery_keys =
     external_items
@@ -55,9 +56,8 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
     user_rows
     |> List.filter (fun message -> not (is_external_duplicate message))
     |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
-      match message.ts, Keeper_counterpart_observation.of_chat_message message with
-      | Some ts, Some observation -> Some (ts, observation)
-      | None, _ | _, None -> None)
+      Keeper_counterpart_observation.of_chat_message message
+      |> Option.map (fun observation -> message.ts, observation))
   in
   external_observations @ chat_observations
   |> List.stable_sort (fun (left_ts, _) (right_ts, _) ->
@@ -69,7 +69,6 @@ let counterpart_observations_before ~base_dir ~keeper_name ~before =
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
-  ~generation
   ~turn
   ~agent_core_turn_count
   ~actual_tools
@@ -128,7 +127,6 @@ let run
           let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
           let librarian_input : Keeper_librarian.input =
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; generation
             ; keeper_instructions = meta.instructions
             ; current = current_selection
             ; max_recall_fact_bytes =
@@ -165,9 +163,6 @@ let run
      with an empty user message, so it short-circuited to a constant
      [performed=false] while re-reading 50 history lines per turn. *)
   (try
-     let used_search =
-       List.exists (fun t -> t = "keeper_memory_search") actual_tools
-     in
      let post_turn_ms =
        Keeper_timing.round1
          ((Time_compat.now () -. post_turn_t0) *. 1000.0)
@@ -179,7 +174,6 @@ let run
           ; "keeper_name", `String meta.name
           ; "turn", `Int turn
           ; "agent_core_turn_count", `Int agent_core_turn_count
-          ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]
           @ (match inference_telemetry with

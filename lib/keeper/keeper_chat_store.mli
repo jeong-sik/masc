@@ -146,7 +146,7 @@ type chat_message = {
           are rejected at the read boundary. *)
   role : Role.t;
   content : string;
-  ts : float option;
+  ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
@@ -443,8 +443,8 @@ val load_page :
 
 (** {1 Serialisation} *)
 
-(** JSON array of messages. Entries without a timestamp omit the
-    [ts] field; [tool_call_id] / [tool_call_name] /
+(** JSON array of messages. Every entry carries [ts];
+    [tool_call_id] / [tool_call_name] /
     [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
     when present. [surface] is the sole lane identity. [delivery_key] appears

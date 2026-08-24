@@ -106,15 +106,6 @@ let request target =
 let request_with_headers target headers =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
 
-let test_keeper_post_route_classifies_catchup_judge () =
-  let path = "/api/v1/keepers/idealist/catchup-judge" in
-  check bool "catchup judge route kind" true
-    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
-     = Server_dashboard_http_keeper_api.Keeper_post_catchup_judge);
-  check string "keeper name extracted" "idealist"
-    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
-       Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
-
 let test_keeper_name_extractors_use_shared_grammar () =
   let keeper_name = "release.bot" in
   check bool "dotted keeper name is valid" true
@@ -138,7 +129,7 @@ let test_keeper_name_extractors_use_shared_grammar () =
     [ "."; ".." ]
 
 let test_keeper_paused_work_route_is_admin_exact () =
-  let path = "/api/v1/keepers/idealist/paused-work" in
+  let path = "/api/v1/keepers/fixture-keeper/paused-work" in
   check bool
     "paused-work POST route kind"
     true
@@ -150,7 +141,7 @@ let test_keeper_paused_work_route_is_admin_exact () =
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
   check string
     "paused-work keeper name"
-    "idealist"
+    "fixture-keeper"
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
        path
        Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
@@ -165,21 +156,21 @@ let test_keeper_sensitive_get_permissions_are_exact () =
   in
   List.iter
     (fun suffix ->
-       let path = "/api/v1/keepers/idealist/" ^ suffix in
+       let path = "/api/v1/keepers/fixture-keeper/" ^ suffix in
        check bool (suffix ^ " permission") true
          (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
     [ "raw-traces"; "raw-trace"; "memory-journal" ];
   check bool "checkpoint permission" true
-    (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
+    (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true
-    (permission "/api/v1/keepers/idealist/turn-records"
+    (permission "/api/v1/keepers/fixture-keeper/turn-records"
      = Some Masc_domain.CanReadState);
   check bool "turn records route rejects trailing segment" true
-    (permission "/api/v1/keepers/idealist/turn-records/extra" = None);
+    (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
-    (permission "/api/v1/keepers/idealist/trajectory" = None)
+    (permission "/api/v1/keepers/fixture-keeper/trajectory" = None)
 
 let test_internal_exact_lane_registry_is_admin_only () =
   check bool
@@ -196,28 +187,20 @@ let test_runtime_probe_route_owns_read_permission () =
      = Masc_domain.CanReadState)
 
 let test_event_queue_operator_routes_are_exact () =
-  check (option string) "event operator route is exact" (Some "idealist")
+  check (option string) "event operator route is exact" (Some "fixture-keeper")
     (Server_dashboard_http_keeper_event_queue_operator.route
-       "/api/v1/keepers/idealist/events/operator");
+       "/api/v1/keepers/fixture-keeper/events/operator");
   check (option string) "event operator route rejects extra segments" None
     (Server_dashboard_http_keeper_event_queue_operator.route
-       "/api/v1/keepers/idealist/events/operator/extra");
-  let event_pending_path = "/api/v1/keepers/idealist/events/pending" in
-  check (option string) "event pending inventory route is exact" (Some "idealist")
-    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
-       event_pending_path);
-  check (option string) "event pending inventory rejects extra segments" None
-    (Server_dashboard_http_keeper_event_queue_operator.pending_get_route
-       (event_pending_path ^ "/extra"));
-  check bool "Worker cannot enumerate pending event metadata" false
+       "/api/v1/keepers/fixture-keeper/events/operator/extra");
+  check bool "Worker cannot mutate pending events" false
     (Masc_domain.has_permission
        Masc_domain.Worker
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
-  check bool "Admin can enumerate and mutate pending events" true
+  check bool "Admin can mutate pending events" true
     (Masc_domain.has_permission
        Masc_domain.Admin
        Server_dashboard_http_keeper_event_queue_operator.operator_permission);
-  let sensitive_content = "private-board-content-must-not-cross-inventory" in
   let source : Keeper_event_queue.stimulus =
     { post_id = "board-post-sensitive"
     ; urgency = Normal
@@ -227,41 +210,12 @@ let test_event_queue_operator_routes_are_exact () =
           { kind = Post_created
           ; author = "operator"
           ; title = "private title"
-          ; content = sensitive_content
+          ; content = "private title body"
           ; hearth = None
           ; updated_at = None
           }
     }
   in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.
-            { source; admitted_revision = 23L }
-        ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check string "event pending projection retains post identity"
-    source.post_id
-    (pending_json |> member "post_id" |> to_string);
-  check string "event pending projection retains source incarnation"
-    "23"
-    (pending_json |> member "source_incarnation" |> to_string);
-  check int "event pending projection emits an opaque SHA-256 source ref"
-    64
-    (pending_json |> member "source_ref" |> to_string |> String.length);
-  check string "event pending projection retains typed payload kind"
-    "board_signal"
-    (pending_json |> member "payload_kind" |> to_string);
-  check bool "event pending projection omits raw payload content" false
-    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
-  check bool "event pending projection has no raw source object" true
-    (pending_json |> member "source" = `Null);
   let same_post_id_source : Keeper_event_queue.stimulus =
     { source with urgency = Low; payload = Bootstrap }
   in
@@ -287,14 +241,14 @@ let test_event_queue_operator_routes_are_exact () =
   check int "duplicate post ids retain two exact source refs" 2
     (List.sort_uniq String.compare refs |> List.length);
   let quarantine_path =
-    "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
+    "/api/v1/keepers/fixture-keeper/board-attention/quarantines/ba-root-123/recovery"
   in
   (match
      Server_dashboard_http_keeper_api.classify_keeper_post_route quarantine_path
    with
    | Server_dashboard_http_keeper_api
      .Keeper_post_board_attention_quarantine_recovery route ->
-     check string "quarantine route keeper" "idealist" route.keeper_name;
+     check string "quarantine route keeper" "fixture-keeper" route.keeper_name;
      check string "quarantine route partition" "ba-root-123" route.partition_id
    | _ -> fail "exact Board quarantine recovery route was not classified");
   check bool "quarantine route rejects extra segments" true
@@ -329,88 +283,6 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
-(* The operator queue panel showed a completion_authority_rejected row as its
-   post_id and payload_kind only, so the rejection's own explanation — the one
-   field that says why the keeper stopped making progress — never reached the
-   operator. It is projected explicitly, and only for this kind: the
-   accompanying assertion below pins that a board stimulus still does not leak
-   its post content through the same projection. *)
-let test_event_pending_projection_surfaces_rejection_reason () =
-  let reason =
-    "artifact_unreadable: BottomButton.tsx missing from the sandbox root"
-  in
-  let rejection : Keeper_event_queue.completion_authority_rejection =
-    { car_task_id = "task-159"
-    ; car_verification_id = "vrf-projection-test"
-    ; car_reason = reason
-    ; car_authority =
-        Masc_domain.Human_operator { operator_id = "operator-test" }
-    }
-  in
-  let source : Keeper_event_queue.stimulus =
-    { post_id =
-        Keeper_event_queue.completion_authority_rejection_post_id rejection
-    ; urgency = Immediate
-    ; arrived_at = 42.0
-    ; payload = Keeper_event_queue.Completion_authority_rejected rejection
-    }
-  in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.{ source; admitted_revision = 7L } ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check string "rejection reason reaches the operator projection" reason
-    (pending_json |> member "rejection_reason" |> to_string);
-  check string "rejection task id reaches the operator projection" "task-159"
-    (pending_json |> member "rejection_task_id" |> to_string);
-  check string "payload kind is unchanged" "completion_authority_rejected"
-    (pending_json |> member "payload_kind" |> to_string);
-  check bool "verification id stays out of the projection" true
-    (pending_json |> member "car_verification_id" = `Null)
-;;
-
-let test_event_pending_projection_omits_non_rejection_payloads () =
-  let sensitive = "board-body-must-not-ride-the-rejection-change" in
-  let source : Keeper_event_queue.stimulus =
-    { post_id = "board-post-after-rejection-field"
-    ; urgency = Normal
-    ; arrived_at = 42.0
-    ; payload =
-        Board_signal
-          { kind = Post_created
-          ; author = "operator"
-          ; title = "private title"
-          ; content = sensitive
-          ; hearth = None
-          ; updated_at = None
-          }
-    }
-  in
-  let pending_json =
-    match
-      Server_dashboard_http_keeper_event_queue_operator.For_testing.pending_page
-        ~after:0
-        ~limit:100
-        [ Keeper_event_queue_state.{ source; admitted_revision = 7L } ]
-    with
-    | [ json ] -> json
-    | _ -> fail "event pending projection must return one metadata row"
-  in
-  let open Yojson.Safe.Util in
-  check bool "board content still omitted after the rejection field landed"
-    false
-    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive);
-  check bool "no rejection field on a non-rejection payload" true
-    (pending_json |> member "rejection_reason" = `Null)
-;;
-
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
@@ -421,7 +293,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
     | Some value -> value
     | None -> fail (label ^ ": missing value")
   in
-  let make_meta ~name ~trace_id ~nonce =
+  let make_meta ~name ~trace_id =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
@@ -431,7 +303,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
           ])
     with
     | Error detail -> failf "meta fixture %s: %s" name detail
-    | Ok meta -> { meta with runtime = { meta.runtime with nonce } }
+    | Ok meta -> meta
   in
   let base_path = config.Workspace.base_path in
   let cancel_keeper = "event-source-ref-cancel-source" in
@@ -439,15 +311,12 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   let target_keeper = "event-source-ref-target" in
   let cancel_meta =
     make_meta ~name:cancel_keeper ~trace_id:"event-source-ref-cancel-trace"
-      ~nonce:41
   in
   let transfer_meta =
     make_meta ~name:transfer_keeper ~trace_id:"event-source-ref-transfer-trace"
-      ~nonce:42
   in
   let target_meta =
     make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
-      ~nonce:43
   in
   let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
     { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
@@ -1211,11 +1080,43 @@ let test_dashboard_query_cache_key_partitions_route_params () =
         (not (String.equal session_a session_b));
       check bool "actor partitions route cache" true
         (not (String.equal session_a actor_b));
+      (* The partition is the directory the cached state lives in, so a
+         scope switch cannot serve the previous workspace's projection
+         (#24504). It used to be the constant "default". *)
       check string "deterministic key shape"
         (Printf.sprintf
-           "session:%s:default:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
-           config.base_path)
+           "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
+           (Workspace_utils.masc_root_dir config))
         session_a)
+
+(* Two clusters can share a base path — the store separates them under
+   .masc/clusters/<name>. The cache partition was the constant "default", so
+   the keys did not, and a scope switch could serve the previous workspace's
+   projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_cluster () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let other_cluster =
+        { config with
+          backend_config =
+            { config.Workspace_utils.backend_config with
+              Backend_types.cluster_name = "cluster-b"
+            }
+        }
+      in
+      check bool "the two configs share a base path" true
+        (String.equal config.Workspace_utils.base_path
+           other_cluster.Workspace_utils.base_path);
+      check bool "but their cache keys differ" true
+        (not
+           (String.equal
+              (Server_dashboard_http_core_cache.dashboard_cache_key config
+                 "session" "s")
+              (Server_dashboard_http_core_cache.dashboard_cache_key
+                 other_cluster "session" "s"))))
 
 let test_dashboard_query_cache_key_encodes_delimiter_values () =
   let dir = test_dir () in
@@ -1593,10 +1494,8 @@ max-concurrent = 1
 |}
 
 let execution_trust_keeper_row_keys =
-  [ "active_goal_ids"
-  ; "agent_name"
+  [ "agent_name"
   ; "current_task_id"
-  ; "generation"
   ; "keeper_id"
   ; "name"
   ; "phase"
@@ -1624,11 +1523,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
           ; "trace_id", `String "execution-trust-narrow-trace"
           ])
     with
-    | Ok meta ->
-      { meta with
-        runtime = { meta.runtime with nonce = 17 }
-      ; active_goal_ids = [ "goal-narrow-1" ]
-      }
+    | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
@@ -1664,9 +1559,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
          ; "pipeline_stage"
          ; "status"
          ; "trace_id"
-         ; "generation"
          ; "current_task_id"
-         ; "active_goal_ids"
          ; "trust"
          ])
   in
@@ -1684,9 +1577,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     (row |> member "agent_name" |> to_string);
   check string "trace id" "execution-trust-narrow-trace"
     (row |> member "trace_id" |> to_string);
-  check int "generation" 17 (row |> member "generation" |> to_int);
-  check (list string) "active goals" [ "goal-narrow-1" ]
-    (row |> member "active_goal_ids" |> to_list |> List.map to_string);
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
 
@@ -2385,15 +2275,9 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   in
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
-  List.iter
-    (fun name ->
-      let agent_dir = Filename.concat keepers_dir name in
-      mkdir_p agent_dir;
-      write_file (Filename.concat agent_dir "AGENT.md") ("Keeper " ^ name))
-    [ "base"; "alpha"; "beta" ];
   write_file
     (Filename.concat keepers_dir "base.toml")
-    "[keeper]\nautoboot_enabled = false\n";
+    "[keeper]\nautoboot_enabled = false\ninstructions = \"Keeper base\"\n";
   write_file
     (Filename.concat keepers_dir "alpha.toml")
     "[keeper]\nautoboot_enabled = true\n";
@@ -2932,12 +2816,10 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
            ; "keepalive_running", `Bool false
-           ; "generation", `Int 1
            ; "turn_count", `Int 1
            ; "autonomous_turn_count", `Int 1
            ; "autonomous_action_count", `Int 1
            ; "noop_turn_count", `Int 0
-           ; "active_goal_ids", `List []
            ; "last_autonomous_action_at", `String now
            ; "updated_at", `String now
            ; "tool_audit_at", `String ""
@@ -3148,7 +3030,7 @@ let prepare_config_sync_keeper ~sw config name =
       ; proactive = { enabled = false }
         (* keeper_turn_up_config_persistence.persist requires instructions
            from somewhere -- explicit instructions_arg, an existing
-           AGENT.md, or here -- before it will materialize a keeper.toml.
+           keeper.toml -- before it will materialize a keeper.
            None of the three config-sync fixtures below supply the first
            two, so this stands in for "keeper already has instructions
            from its meta / prior lifecycle" the way a real config-sync
@@ -3209,75 +3091,6 @@ let post_config ~sw ~clock ~state ~name body =
     | [] -> fail "HTTP response has no body"
   in
   raw, Yojson.Safe.from_string body
-
-let post_catchup_judge ~state ~name body =
-  let output = Buffer.create 512 in
-  let connection =
-    Httpun.Server_connection.create (fun reqd ->
-      Keeper_config_post.handle_keeper_catchup_judge_post
-        state
-        (Httpun.Reqd.request reqd)
-        reqd
-        body)
-  in
-  let request =
-    Printf.sprintf
-      "POST /api/v1/keepers/%s/catchup-judge HTTP/1.1\r\nHost: x\r\n\r\n"
-      name
-  in
-  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
-  ignore
-    (Httpun.Server_connection.read_eof
-       connection
-       input
-       ~off:0
-       ~len:(Bigstringaf.length input));
-  let rec drain () =
-    match Httpun.Server_connection.next_write_operation connection with
-    | `Write iovecs ->
-      let bytes =
-        List.fold_left
-          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
-            Buffer.add_string output
-              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
-            total + iov.len)
-          0
-          iovecs
-      in
-      Httpun.Server_connection.report_write_result connection (`Ok bytes);
-      drain ()
-    | `Yield | `Close _ -> ()
-  in
-  drain ();
-  Buffer.contents output
-;;
-
-let test_catchup_judge_prompt_failure_is_server_error () =
-  let base_path = test_dir () in
-  let empty_prompts = Filename.concat base_path "empty-prompts" in
-  Unix.mkdir empty_prompts 0o755;
-  let previous_prompt_dir = Prompt_registry.get_markdown_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Option.iter Prompt_registry.set_markdown_dir previous_prompt_dir;
-      cleanup_dir base_path)
-    (fun () ->
-      Prompt_registry.set_markdown_dir empty_prompts;
-      let raw =
-        post_catchup_judge
-          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path)
-          ~name:"catchup-prompt-fixture"
-          {|{"since_unix":0}|}
-      in
-      check bool
-        "missing server-owned prompt is HTTP 500"
-        true
-        (String.starts_with ~prefix:"HTTP/1.1 500" raw);
-      check bool
-        "response identifies the unavailable prompt"
-        true
-        (String_util.contains_substring raw "judge.catchup prompt unavailable"))
-;;
 
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -3498,7 +3311,7 @@ let test_tool_call_fleet_cache_tracks_durable_revision () =
          (Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () -> `List []));
        check bool "fleet cache is seeded" true (Option.is_some (Dashboard_cache.peek key));
        Masc.Keeper_tool_call_log.log_call
-         ~keeper_name:"analyst"
+         ~keeper_name:"delta"
          ~tool_name:"keeper_time_now"
          ~input:(`Assoc [])
          ~output_text:"ok"
@@ -3548,6 +3361,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "cache key partitions by cluster" `Quick
+            test_dashboard_cache_key_partitions_by_cluster;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick
@@ -3606,8 +3421,6 @@ let () =
             test_dashboard_fleet_composite_envelope_is_cached;
           test_case "state diagram runtime projection stays empty without meta" `Quick
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
-          test_case "keeper catch-up judge route is classified" `Quick
-            test_keeper_post_route_classifies_catchup_judge;
           test_case "keeper path extraction uses shared name grammar" `Quick
             test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
@@ -3622,10 +3435,6 @@ let () =
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
-          test_case "event pending projection surfaces the rejection reason" `Quick
-            test_event_pending_projection_surfaces_rejection_reason;
-          test_case "event pending projection still omits other payload content" `Quick
-            test_event_pending_projection_omits_non_rejection_payloads;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
@@ -3642,8 +3451,6 @@ let () =
             "operator snapshot HTTP rejects stale success after store error"
             `Quick
             test_operator_snapshot_http_rejects_stale_success_after_store_error;
-          test_case "catch-up prompt failure is a server error" `Quick
-            test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick

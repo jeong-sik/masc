@@ -130,7 +130,6 @@ module For_testing : sig
 
   val prepared_window_source_indices : prepared_lane -> int list
   val flow_slot_ids : prepared_lane -> string list
-  val registry_generation : prepared_lane -> int64
 
   val attempt_observations : prepared_lane -> attempt_observation list
   val candidate_snapshot_slot_ids : prepared_lane -> string list

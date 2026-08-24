@@ -109,25 +109,18 @@ val next_fail_open_runtime_for_turn
 val record_streaming_cancelled_observation
   :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
-  -> run_generation:int
   -> runtime_id:string
   -> keeper_turn_id:int
   -> unit
   -> unit
 
-type source_disposition =
-  | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
-(** A failed turn normally follows its typed retry/rotate/escalate route —
-    including every provider capacity failure. The automatic
+type source_disposition = Follow_failure_route
+(** Every failed turn follows its typed retry/rotate/escalate route — provider
+    capacity failures and an incomplete tool transcript alike. The automatic
     overflow-compaction recovery that used to branch here was removed (#26546)
     because it had never produced a committed compaction on record. #26545
     bounds conversation history only; whole-request provider fit is tracked in
-    #26551.
-    [Pause_after_transcript_corruption] is terminal for automatic execution:
-    typed transcript admission rejected before provider dispatch, so the
-    heartbeat durably pauses the Keeper and consumes the selected source into an
-    operator-reset-required escalation with no retry successor. *)
+    #26551. *)
 
 type turn_failure =
   { error : Agent_core.Error.t
@@ -162,13 +155,6 @@ type turn_success =
     preserve the durable source for continuation. Supervisor cancellation and a
     non-executable phase remain distinct so a durable source cannot be
     acknowledged as completed work. *)
-
-val turn_success_of_stop_reason
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> continuation_route:continuation_route_disposition
-  -> Runtime_agent.stop_reason
-  -> turn_success
-(** Total typed projection used at the successful runtime boundary. *)
 
 val manual_compaction_preemption_request
   :  wake:Keeper_registry.wake_reason
@@ -209,7 +195,6 @@ val run_keeper_cycle
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
-  -> generation:int
   -> wake:Keeper_registry.wake_reason
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
   -> ?shared_context:Agent_core.Context.t
@@ -228,7 +213,6 @@ val run_keeper_cycle
     @param config Workspace configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
-    @param generation Current generation counter
     @param wake What triggered this turn (#16, 38-bug campaign PR-5):
     reactive stimulus batch or the proactive cadence tick. Installed on
     [current_turn_observation] via [Keeper_registry.mark_turn_started] so

@@ -212,6 +212,10 @@ let test_failed_authoritative_write_suppresses_fanout () =
              "typed write failure"
              "injected authoritative failure"
              detail
+         | Error error ->
+           Alcotest.failf
+             "write failure used the wrong error variant: %s"
+             (Workspace.broadcast_error_to_string error)
          | Ok _ -> Alcotest.fail "failed write reported a committed broadcast");
         Alcotest.(check int) "backend publication suppressed" 0 !publications;
         Alcotest.(check int) "activity suppressed" 0 !activities;

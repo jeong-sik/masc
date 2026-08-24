@@ -162,6 +162,7 @@ let run_named_with_masc_tools
     ?on_event
     ?on_yield
     ?on_resume
+    ?on_runtime_attempt_error
     ?transport
     ?(yield_on_tool = false)
     ?provider_config_transform
@@ -192,6 +193,7 @@ let run_named_with_masc_tools
       ?on_event
       ?on_yield
       ?on_resume
+      ?on_runtime_attempt_error
       ?transport
       ~yield_on_tool
       ?provider_config_transform

@@ -22,7 +22,7 @@
    It is a SUPERSET: the shared .mem-* selectors are duplicated 1:1 with the
    vendored design mirror styles/keeper-v2/memory.css, and this file also
    owns the real-data extension classes (.mem-trust / .mem-policy /
-   .mem-prompt-* / .mem-store-why / .mem-more / .mem-dot / .mem-disclosure /
+   .mem-prompt-* / .mem-delta / .mem-more / .mem-dot / .mem-disclosure /
    selectors that the mirror does not carry. Any change to a shared
    .mem-* selector MUST be mirrored in styles/keeper-v2/memory.css (and vice
    versa). Consolidating the two into one SSOT is tracked separately from
@@ -110,6 +110,9 @@
 .mem-prompt-n { width: 20px; height: 20px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: var(--fs-10); font-family: var(--font-mono); }
 .mem-prompt-step b { display: block; color: var(--text-bright); font-size: 11.5px; font-weight: 600; }
 .mem-prompt-step span:last-child { display: block; margin-top: 2px; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.mem-prompt-toggle { margin-top: 4px; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--text-bright); font-size: 10.5px; cursor: pointer; }
+.mem-prompt-toggle:hover { border-color: var(--text-dim); }
+.mem-prompt-capture { padding: 8px 0 4px 30px; }
 .mem-prompt-foot { margin-top: 3px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: var(--fs-10); }
 
 /* ── context composition — keeper-v2/styles/memory.css:23-33 ── */
@@ -165,7 +168,13 @@
 .mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
 .mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
-.mem-store-why { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); line-height: 1.4; }
+/* revision delta marker — the row's membership in memory_os.change.added /
+   .removed; same chip geometry as the prototype's .mem-ttl (keeper-v2/styles/memory.css:73-75) */
+.mem-delta { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-delta.added { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-delta.removed { color: var(--text-dim); border-style: dashed; }
+.mem-store-row.removed .mem-store-text { color: var(--text-dim); }
+.mem-store-row.removed .mem-kind { border-style: dashed; }
 .mem-more { margin-top: 9px; width: 100%; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text-mid); font-family: var(--font-ui); font-size: var(--fs-11); padding: 7px 10px; cursor: pointer; transition: 0.14s; }
 .mem-more:hover { border-color: var(--volt-dim); color: var(--volt); }
 .mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }

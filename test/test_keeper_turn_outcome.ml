@@ -105,15 +105,16 @@ let test_external_effect_completed_has_no_direct_reply_error () =
 
 let test_canonical_payload_carries_delivery_target () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"post-target" ~absolute_turn:3 in
-  let body_with target_json =
+  let body_for outcome target_json =
     `Assoc
       ([ "reply", `String ""
-       ; TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+       ; TO.wire_key, `String (TO.to_label outcome)
        ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
        ]
        @ target_json)
     |> Yojson.Safe.to_string
   in
+  let body_with = body_for TO.External_effect_completed in
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with
@@ -130,18 +131,50 @@ let test_canonical_payload_carries_delivery_target () =
      fail
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
           error));
+  (* The outcome and the receipt come from the same terminal_effect_state
+     (keeper_agent_run.ml), so a completed external effect always serializes
+     its target. A payload claiming the outcome without one is rejected rather
+     than projected as a null destination. *)
   (match
      Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
        (body_with [])
    with
+   | Error (Server_routes_http_keeper_stream.Missing_payload_field field) ->
+     check string "the missing field is named" "external_effect_target" field
+   | Error other ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          other)
+   | Ok _ ->
+     fail "External_effect_completed without a target must be rejected");
+  (* Absence is the ordinary shape for every other outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply [])
+   with
    | Ok canonical ->
      (match canonical.external_effect_target with
       | None -> ()
-      | Some _ -> fail "legacy payload without the field must decode to None")
+      | Some _ -> fail "a visible reply carries no delivery target")
    | Error error ->
      fail
        (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
           error));
+  (* The other direction: a target on an outcome that completed no external
+     effect is rejected, so [Some] alone proves the outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ])
+   with
+   | Error (Stream.Invalid_external_effect_target _) -> ()
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "a delivery target on a visible reply must reject the payload");
   match
     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
       (body_with
@@ -355,6 +388,38 @@ let test_repeated_exact_tool_call_boundary () =
        [ tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
+       ]);
+  (* The shape the old counter missed. sangsu ran the same git status 48 times
+     in one dispatch, always with another call in between, so a counter that
+     stopped at the first different call never left 1 and the dispatch ran 279
+     calls over 31 minutes with no answer. The list is newest-first. *)
+  check (option (pair string int)) "repeats separated by other calls still yield"
+    (Some ("Execute", 3))
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ; tool_call "Execute"
+       ]);
+  (* Interleaving does not make a different call look repeated. *)
+  check (option (pair string int)) "a call below threshold stays silent" None
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ]);
+  (* Output identity still gates it: an interleaved repeat whose result moved
+     is progress, not a loop. *)
+  check (option (pair string int)) "interleaved repeats with moving output are progress"
+    None
+    (detect
+       [ tool_call ~output:(Some "c") "Execute"
+       ; tool_call "Read"
+       ; tool_call ~output:(Some "b") "Execute"
+       ; tool_call "Grep"
+       ; tool_call ~output:(Some "a") "Execute"
        ])
 
 let test_autonomous_yield_boundary_contract () =

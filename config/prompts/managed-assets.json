@@ -2,10 +2,9 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
-    "goal_verification.criterion.md",
+    "goal_verification.lookup.md",
     "goal_verification.proof.md",
     "judge.board.md",
-    "judge.catchup.md",
     "judge.effect.md",
     "keeper.md",
     "keeper.observation.current_task_absent.md",
@@ -16,7 +15,6 @@
     "verification.md",
     "verification.contract.md",
     "verification.lookup.none.md",
-    "verification.lookup.producer_forest.md",
     "verification.lookup.producer_tree.md",
     "verification.required_evidence.md"
   ]

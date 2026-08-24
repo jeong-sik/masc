@@ -7,7 +7,7 @@
 // Actions available per keeper:
 //   pause     → POST /api/v1/keepers/:name/directive  { action: "pause" }
 //   resume    → POST /api/v1/keepers/:name/directive
-//               { action: "resume", owner_nonce, operator_operation_id }
+//               { action: "resume", operator_operation_id }
 //   wakeup    → POST /api/v1/keepers/:name/directive  { action: "wakeup" }
 //   boot      → POST /api/v1/keepers/:name/boot
 //   shutdown  → POST /api/v1/keepers/:name/shutdown
@@ -145,7 +145,6 @@ export const KEEPER_PURGE_PENDING_LABEL = {
 export async function runKeeperAction(
   name: string,
   action: KeeperActionKey,
-  ownerGeneration?: number,
 ): Promise<void> {
   if (action === 'shutdown') {
     const confirmed = await requestConfirm({
@@ -200,7 +199,7 @@ export async function runKeeperAction(
     let res: { ok: boolean; error?: string }
     switch (action) {
       case 'pause':    res = await pauseKeeper(name);    break
-      case 'resume':   res = await resumeKeeper(name, ownerGeneration);   break
+      case 'resume':   res = await resumeKeeper(name);   break
       case 'wakeup':   res = await wakeKeeper(name);     break
       case 'boot':     res = await bootKeeper(name);     break
       case 'shutdown': res = await shutdownKeeper(name); break
@@ -253,7 +252,7 @@ export function KeeperActionButtons({
     busy.value = true
     try {
       if (action === 'resume') {
-        await runKeeperAction(keeper.name, action, keeper.generation)
+        await runKeeperAction(keeper.name, action)
       } else {
         await runKeeperAction(keeper.name, action)
       }

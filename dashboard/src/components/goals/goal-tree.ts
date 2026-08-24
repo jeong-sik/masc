@@ -29,7 +29,6 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
-  GoalCompletionSummary,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
@@ -53,11 +52,6 @@ import {
   goalTaskCompletionLabel,
   goalTaskSummaryForNode,
 } from './goal-task-summary'
-import {
-  goalCompletionLabel,
-  goalCompletionSummaryForNode,
-  goalCompletionTone,
-} from './goal-completion-summary'
 import { DECK_CHIP, DECK_LABEL } from './deck-classes'
 import { errorToString } from '../../lib/format-string'
 
@@ -184,9 +178,7 @@ function goalFsmObservationLabel(
 
 function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
   const toneClass =
-    fsm.state === 'blocked'
-      ? 'border-bad/35 bg-bad/10 text-bad'
-      : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
+    'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   return html`
     <span
       class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
@@ -311,58 +303,6 @@ async function refreshGoalDetail(goalId: string) {
   }
 }
 
-// Task-derived attainment_pct must not read as a metric result when the goal
-// declares a metric that no evaluator measures (task-1743): show "미평가"
-// rather than a percentage. Distinct from "미측정" (no task data at all).
-export function attainmentValueLabel(attainment: GoalTreeNode['attainment']): string {
-  if (attainment.metric_evaluation === 'unevaluated') return '미평가'
-  if (attainment.attainment_pct == null) return '미측정'
-  return `${attainment.attainment_pct}%`
-}
-
-function attainmentTone(attainment: GoalTreeNode['attainment']): 'default' | 'ok' | 'warn' | 'bad' {
-  // A declared-but-unevaluated metric is never "attained": the pct is
-  // task-derived, so surface it as attention (warn), not success (ok).
-  if (attainment.metric_evaluation === 'unevaluated') return 'warn'
-  if (attainment.state === 'attained') return 'ok'
-  if (attainment.state === 'unmeasured') return 'warn'
-  if (attainment.state === 'not_started') return 'bad'
-  return 'default'
-}
-
-function attainmentClass(attainment: GoalTreeNode['attainment']): string {
-  switch (attainmentTone(attainment)) {
-    case 'ok': return 'border-ok/30 bg-ok/10 text-ok'
-    case 'warn': return 'border-warn/30 bg-warn/10 text-warn'
-    case 'bad': return 'border-bad/30 bg-bad/10 text-bad'
-    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
-function attainmentLabel(attainment: GoalTreeNode['attainment']): string {
-  return `달성 ${attainmentValueLabel(attainment)}`
-}
-
-function GoalAttainmentChip({ attainment }: { attainment: GoalTreeNode['attainment'] }) {
-  return html`
-    <span
-      class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${attainmentClass(attainment)}"
-      title=${`${attainment.basis}; target=${attainment.target_value ?? '-'}; observed=${attainment.observed_value ?? '-'}; ${attainment.note}`}
-    >
-      ${attainmentLabel(attainment)}
-    </span>
-  `
-}
-
-function completionToneClass(tone: 'default' | 'ok' | 'warn' | 'bad'): string {
-  switch (tone) {
-    case 'ok': return 'border-ok/30 bg-ok/10 text-ok'
-    case 'warn': return 'border-warn/30 bg-warn/10 text-warn'
-    case 'bad': return 'border-bad/30 bg-bad/10 text-bad'
-    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
-  }
-}
-
 function TreeSummary({
   summary,
   awaitingVerificationCount,
@@ -383,10 +323,6 @@ function TreeSummary({
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.completed ?? 0}</div>
         <div class="mt-1 ${DECK_LABEL}">완료</div>
-      </div>
-      <div class="${CARD_BOX} text-center">
-        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.blocked ?? 0}</div>
-        <div class="mt-1 ${DECK_LABEL}">Blocked phase</div>
       </div>
       <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.verifying ?? 0}</div>
@@ -420,82 +356,6 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
         <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent-fg">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
-    </div>
-  `
-}
-
-function goalCompletionPctLabel(summary: GoalCompletionSummary): string {
-  if (summary.metric_evaluation === 'unevaluated') return 'metric unevaluated'
-  if (summary.pct == null) return 'unmeasured'
-  return `${summary.pct}%`
-}
-
-function goalCompletionTruthTitle(
-  summary: GoalCompletionSummary,
-  label: string,
-): string {
-  const pct = summary.pct == null ? 'pct=unmeasured' : `pct=${summary.pct}%`
-  const metric = `metric_evaluation=${summary.metric_evaluation}`
-  const source = `source=${summary.pct_source}`
-  const unevaluated =
-    summary.metric_evaluation === 'unevaluated'
-      ? '; pct is task-derived/proxy data, not an evaluated goal metric'
-      : ''
-  return `Completion: ${label}; ${pct}; ${source}; ${metric}${unevaluated}`
-}
-
-function GoalCompletionStrip({
-  node,
-  compact = false,
-}: {
-  node: GoalTreeNode
-  compact?: boolean
-}) {
-  const summary = goalCompletionSummaryForNode(node)
-  const tone = goalCompletionTone(summary)
-  const label = goalCompletionLabel(summary)
-  const pctLabel = goalCompletionPctLabel(summary)
-  const title = goalCompletionTruthTitle(summary, label)
-
-  if (compact) {
-    return html`
-      <span
-        class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}"
-        title=${title}
-        data-goal-completion-metric-evaluation=${summary.metric_evaluation}
-        data-goal-completion-pct-source=${summary.pct_source}
-      >
-        ${label}
-      </span>
-    `
-  }
-
-  return html`
-    <div class=${CARD_BOX} data-goal-completion-summary>
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">완료 판정</div>
-          <div class="mt-1 text-sm text-text-body">${label} · ${pctLabel}</div>
-        </div>
-        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}">${label}</span>
-      </div>
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 text-xs">
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-          <div class="text-3xs uppercase text-text-muted">basis</div>
-          <div
-            class="mt-1 font-semibold text-text-strong"
-            title=${title}
-            data-goal-completion-metric-evaluation=${summary.metric_evaluation}
-            data-goal-completion-pct-source=${summary.pct_source}
-          >
-            ${summary.pct_source}${summary.metric_evaluation === 'unevaluated' ? ' · metric unevaluated' : ''}
-          </div>
-        </div>
-        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-          <div class="text-3xs uppercase text-text-muted">task open</div>
-          <div class="mt-1 font-semibold text-text-strong">${summary.task_open}</div>
-        </div>
-      </div>
     </div>
   `
 }
@@ -566,13 +426,15 @@ function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
   action: GoalTransitionAction
   variant: 'primary' | 'ok' | 'danger'
 }> {
-  const summary = goalCompletionSummaryForNode(node)
   const actions: Array<{
     action: GoalTransitionAction
     variant: 'primary' | 'ok' | 'danger'
   }> = []
 
-  if (summary.ready_to_request_completion) {
+  // `request_complete` is admissible from `executing` and nowhere else
+  // (Goal_phase.decide_transition). The removed `ready_to_request_completion`
+  // field said exactly this and nothing more.
+  if (node.phase === 'executing') {
     actions.push({ action: 'request_complete', variant: 'primary' })
   }
   return actions
@@ -625,7 +487,6 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal lifecycle</div>
-          <div class="mt-1 text-sm text-text-body">${goalCompletionLabel(goalCompletionSummaryForNode(node))}</div>
         </div>
         <span class="${DECK_CHIP} text-[var(--color-fg-secondary)]">${node.phase}</span>
       </div>
@@ -699,7 +560,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
           <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
-            <${GoalCompletionStrip} node=${node} compact />
             <${GoalTaskRelationStrip} node=${node} compact />
             ${node.metric ? html`
               <span
@@ -709,7 +569,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
               </span>
             ` : null}
-            <${GoalAttainmentChip} attainment=${node.attainment} />
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
@@ -1045,7 +904,6 @@ function GoalDetailPanel({
         </div>
       </div>
 
-      <${GoalCompletionStrip} node=${selectedNode} />
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
 
@@ -1082,7 +940,6 @@ function GoalDetailPanel({
         </div>
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-          <${DetailMetric} label="목표 달성" value=${attainmentValueLabel(selectedNode.attainment)} tone=${attainmentTone(selectedNode.attainment)} />
           <${DetailMetric} label="작업" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="승인 대기" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
@@ -1242,8 +1099,6 @@ export function GoalTree() {
     const counts: Record<GoalPhaseFilter, number> = {
       all: allNodes.length,
       executing: 0,
-      blocked: 0,
-      paused: 0,
       verifying: 0,
       completed: 0,
       dropped: 0,
@@ -1301,8 +1156,6 @@ export function GoalTree() {
               chips=${([
                 'all',
                 'executing',
-                'blocked',
-                'paused',
                 'verifying',
                 'completed',
                 'dropped',

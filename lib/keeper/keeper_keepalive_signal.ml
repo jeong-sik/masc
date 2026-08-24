@@ -82,12 +82,12 @@ let record_wake_payload
 let register_record_wake_payload f = Atomic.set record_wake_payload_callback f
 
 let record_tool_skipped_callback
-    : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) Atomic.t
+    : (tool_name:string -> reason_code:string -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+  Atomic.make (fun ~tool_name:_ ~reason_code:_ -> ())
 
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  (Atomic.get record_tool_skipped_callback) ~keeper_name ~tool_name ~reason_code
+let record_tool_skipped ~tool_name ~reason_code =
+  (Atomic.get record_tool_skipped_callback) ~tool_name ~reason_code
 ;;
 
 let register_record_tool_skipped f = Atomic.set record_tool_skipped_callback f
@@ -357,7 +357,9 @@ let board_signal_stimulus
           raising it to Immediate would be a separate queue decision. *)
        | Board_wake.Comment_on_self_post
        | Board_wake.Thread_reply_after_self_comment
-       | Board_wake.Reaction_after_self_activity ->
+       | Board_wake.Reaction_after_self_activity
+       | Board_wake.Vote_on_self_post
+       | Board_wake.Vote_on_self_comment ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
@@ -531,6 +533,7 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+    | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
   match Keeper_board_audience.of_board_audience addressed.audience with
   | Error error ->
@@ -769,7 +772,9 @@ let wakeup_relevant_keeper_for_board_signal
                       | Board_wake.Explicit_mention
                       | Board_wake.Comment_on_self_post
                       | Board_wake.Thread_reply_after_self_comment
-                      | Board_wake.Reaction_after_self_activity ->
+                      | Board_wake.Reaction_after_self_activity
+                      | Board_wake.Vote_on_self_post
+                      | Board_wake.Vote_on_self_comment ->
                         Keeper_registry.Reactive_signal
                     in
                     Keeper_registry.wakeup_running
@@ -866,28 +871,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
 
-let dispatch_keepalive_event_with_audit
-      ~(ctx : _ context)
-      ~(keeper_name : string)
-      ~events_fired
-      ~selected_event
-      event
-  =
-  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    (match Keeper_registry.dispatch_event_with_audit_and_log
-       ~base_path:ctx.config.base_path
-       ~events_fired
-       ~selected_event
-       keeper_name
-       event
-     with
-     | Ok _ -> ()
-     | Error err ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string KeepaliveSignalFailures)
-           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
-           ();
-         Log.Keeper.warn
-           "%s: keepalive late-event dispatch rejected: %s"
-           keeper_name
-           (Keeper_state_machine.transition_error_to_string err))

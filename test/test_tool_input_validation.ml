@@ -261,6 +261,67 @@ let test_extra_fields_allowed () =
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
+(* The four input template shapes used to live only in the tool's description
+   while the schema said `{"type":"object"}`, so a malformed template reached
+   the executor and failed there. Stated in the schema, it is refused at the
+   boundary. *)
+let plan_schema = Masc.Keeper_tool_composition_surface.plan_execute_input_schema
+
+let plan_args input =
+  `Assoc
+    [ ( "nodes"
+      , `List
+          [ `Assoc
+              [ "id", `String "n"
+              ; "tool", `String "keeper_time_now"
+              ; "input", input
+              ]
+          ] )
+    ]
+;;
+
+let test_plan_accepts_an_output_reference () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:
+        (plan_args
+           (`Assoc
+             [ "kind", `String "output"
+             ; "node", `String "clock"
+             ; "pointer", `String "/now_iso"
+             ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "an output reference must pass, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+;;
+
+(* Where the schema stops. [validate_args] reads [oneOf] and [properties] off
+   the top-level schema only, so a template stated inside [nodes.items] is
+   what the model is told, not what it is held to: an [output] with no [node]
+   passes here and is refused later by [Keeper_tool_plan]. Pinned so the day
+   the validator descends, this test says so rather than the schema quietly
+   becoming load-bearing. *)
+let test_plan_template_is_advertised_not_enforced () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:(plan_args (`Assoc [ "kind", `String "output" ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error _ ->
+    Alcotest.fail
+      "the nested template is not checked here; if it now is, move this \
+       assertion rather than deleting it"
+;;
+
 let test_empty_schema_allows_empty_args () =
   let schema = `Assoc [] in
   match
@@ -671,7 +732,7 @@ let test_registered_hook_masc_board_post_accepts_sources_array () =
 (* Regression: the board_list/search backends already read [compact]
    (board_tool_post.ml handle_post_list, board_tool_handlers.ml
    handle_search), but the Keeper Board projection omitted it, so
-   qa-king's masc_board_list compact=true was rejected as an
+   mu-king's masc_board_list compact=true was rejected as an
    unsupported field. Assert the keeper surface now accepts compact while
    additionalProperties stays false (unknown fields still rejected). *)
 let test_validate_args_masc_board_list_accepts_compact () =
@@ -776,12 +837,11 @@ let test_keeper_down_rejects_undeclared_field () =
 let test_keeper_up_accepts_live_traffic_fields () =
   let args =
     `Assoc
-      [ "name", `String "sangsu"
+      [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "active_goal_ids", `List [ `String "g1" ]
       ; "sandbox_profile", `String "local"
       ; "allowed_paths", `List [ `String "/tmp" ]
-      ; "mention_targets", `List [ `String "sangsu" ]
+      ; "mention_targets", `List [ `String "alpha" ]
       ; "autoboot_enabled", `Bool true
       ; "proactive_enabled", `Bool true
       ; "runtime_id", `String "rt"
@@ -808,7 +868,7 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       ~name:"masc_keeper_clear"
       ~args:
         (`Assoc
-          [ "name", `String "sangsu"
+          [ "name", `String "alpha"
           ; "preserve_system_prompt", `Bool true
           ; "reason", `String "context overflow"
           ])
@@ -961,9 +1021,9 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       (String.length msg > 0);
     assert_policy_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
-      "validation error points to typed argv"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "argv=[\\\"git\\\",\\\"status\\\",\\\"--short\\\"]")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_command_string () =
   let args = `Assoc [ "command", `String "pwd" ] in
@@ -982,9 +1042,9 @@ let test_validate_args_tool_execute_rejects_command_string () =
       true
       (string_contains msg "unsupported field(s): command");
     Alcotest.(check bool)
-      "validation error says command field is unavailable"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "no cmd/command field")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
@@ -1332,12 +1392,21 @@ let test_tool_execute_write_validation_stays_structural () =
 
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok (Keeper_tool_execute_typed_input.Exec { argv = program :: arguments; _ }) ->
+  | Ok
+      { source =
+          Staged
+            { program = { head = { argv = program :: arguments; _ }; tail = [] }
+            ; _
+            }
+      ; _
+      } ->
     program, arguments
-  | Ok (Keeper_tool_execute_typed_input.Exec { argv = []; _ }) ->
+  | Ok { source = Staged { program = { head = { argv = []; _ }; _ }; _ }; _ } ->
     Alcotest.fail "expected non-empty argv"
-  | Ok (Keeper_tool_execute_typed_input.Pipeline _) ->
-    Alcotest.fail "expected exec input"
+  | Ok { source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
+  | Ok { source = Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
@@ -1401,15 +1470,24 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         ])
   with
   | Ok
-      (Keeper_tool_execute_typed_input.Pipeline
-        { stages = { Keeper_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
+      { source =
+          Keeper_tool_execute_typed_input.Staged
+            { program =
+                { head = { Keeper_tool_execute_typed_input.argv; _ }
+                ; tail = _ :: _
+                }
+            ; _
+            }
+      ; _
+      } ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
       [ "find"; "-type"; "f" ]
       argv
-  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
-    Alcotest.fail "expected non-empty pipeline"
-  | Ok (Keeper_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Ok { source = Keeper_tool_execute_typed_input.Staged { program = { tail = []; _ }; _ }; _ } ->
+    Alcotest.fail "expected a multi-stage program"
+  | Ok { source = Keeper_tool_execute_typed_input.Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 
@@ -1807,7 +1885,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "tool_execute"
       , tool_execute_schema
       , `Assoc [ "cmd", `String "git status --short" ]
-      , [ "cmd"; "non-empty argv" ] )
+      , [ "cmd"; "accepted: argv" ] )
     ; ( "keeper_task_done notes-only drift"
       , "keeper_task_done"
       , keeper_task_done_schema
@@ -2213,6 +2291,10 @@ let () =
       Alcotest.test_case "null args rejected at AGENT_CORE layer" `Quick test_null_args_rejected_at_agent_core_layer;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
+      Alcotest.test_case "plan accepts an output reference" `Quick
+        test_plan_accepts_an_output_reference;
+      Alcotest.test_case "plan template is advertised, not enforced" `Quick
+        test_plan_template_is_advertised_not_enforced;
       Alcotest.test_case "empty schema allows empty args" `Quick
         test_empty_schema_allows_empty_args;
       Alcotest.test_case "empty schema rejects arguments" `Quick

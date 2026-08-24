@@ -18,7 +18,6 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
-import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
 import { applyKeeperOperationTurnEvent } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
@@ -481,31 +480,6 @@ function handleEvent(event: SSEEvent): void {
       break
     case 'keeper_compaction': {
       const keeperNameCompaction = event.name ?? agent
-      const beforeTokCompaction =
-        typeof event.before_tokens === 'number' && Number.isFinite(event.before_tokens)
-          ? event.before_tokens
-          : null
-      // Three-step fallback for the post-compaction token count: prefer the
-      // reported after_tokens, else derive it from saved_tokens relative to the
-      // known before count, else leave it unknown. Written as if/else (not a
-      // nested ternary) to satisfy no-nested-ternary and keep the priority clear.
-      let afterTokCompaction: number | null = null
-      if (typeof event.after_tokens === 'number' && Number.isFinite(event.after_tokens)) {
-        afterTokCompaction = event.after_tokens
-      } else if (
-        typeof event.saved_tokens === 'number'
-        && Number.isFinite(event.saved_tokens)
-        && beforeTokCompaction != null
-      ) {
-        afterTokCompaction = Math.max(0, beforeTokCompaction - event.saved_tokens)
-      }
-      recordSseCompaction(
-        keeperNameCompaction,
-        beforeTokCompaction,
-        afterTokCompaction,
-        event.trigger ?? '자동',
-        event.runtime ?? '—',
-      )
       addTypedJournalEntry(
         keeperNameCompaction,
         `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
@@ -804,17 +778,6 @@ function handleEvent(event: SSEEvent): void {
       const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'context_compacted') break
       const { payload } = parsed
-      const trigger = payload.phase ? `Agent Core ${payload.phase}` : 'Agent Core context_compacted'
-      // The Agent Core context_compacted wire carries no runtime field
-      // (lib/sse_event/sse_event.atd context_compacted_payload has 4 fields),
-      // so the snapshot runtime is unknown on this path.
-      recordSseCompaction(
-        payload.agent_name,
-        payload.before_tokens,
-        payload.after_tokens,
-        trigger,
-        '—',
-      )
       addTypedJournalEntry(
         payload.agent_name,
         `Agent Core compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,

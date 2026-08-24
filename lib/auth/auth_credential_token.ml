@@ -469,23 +469,6 @@ let bearer_token_owner_mismatch_message ~requested_agent ~token_owner =
     requested_agent
 ;;
 
-let missing_credential_error config ~agent_name ~token : masc_error =
-  match find_credential_by_token config ~token with
-  | Ok owner when owner.agent_name <> agent_name ->
-    record_bearer_token_mismatch ~expected_agent:agent_name ~actual_agent:owner.agent_name;
-    Auth
-      (Auth_error.Unauthorized
-         { reason = Actor_mismatch
-         ; message = bearer_token_owner_mismatch_message
-              ~requested_agent:agent_name
-              ~token_owner:owner.agent_name
-         })
-  | _ -> Auth (Auth_error.Unauthorized
-      { reason = Missing_token
-      ; message = "No credential found for " ^ agent_name
-      })
-;;
-
 (** Verify a token.
 
     Looks up the credential by exact [agent_name] match only. Generated

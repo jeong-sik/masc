@@ -36,10 +36,6 @@ type keeper_repo_mapping = {
 }
 [@@deriving yojson, show, eq]
 
-val repository_scope_of_ids : repository_id list -> repository_scope
-(** [repository_scope_of_ids repository_ids] parses the raw repository list
-    from TOML/JSON into the closed access scope. *)
-
 val make_keeper_repo_mapping :
   keeper_id:string -> repository_ids:repository_id list -> keeper_repo_mapping
 (** [make_keeper_repo_mapping ~keeper_id ~repository_ids] preserves the raw

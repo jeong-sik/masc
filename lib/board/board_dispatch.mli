@@ -37,6 +37,10 @@ type board_signal_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_change
+  | Board_vote_cast of board_vote_change
+      (** A vote landed on a post or comment. Emitted by {!vote} and
+          {!vote_comment} after the store accepted the vote; a duplicate
+          same-direction vote ([Already_voted]) emits nothing. *)
 
 and board_reaction_change = {
   target_type : Board.reaction_target_type;
@@ -44,6 +48,19 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+      (** Author of the voted-on post or comment, read from the store when the
+          vote landed, so a router can address that lane without re-reading. *)
+  voter : string;
+  direction : Board.vote_direction;
 }
 
 type board_signal = {
@@ -97,7 +114,7 @@ type board_sse_event =
 
 val set_board_signal_hook : (addressed_board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post}, {!add_comment},
-    and {!toggle_reaction}. *)
+    {!toggle_reaction}, {!vote}, and {!vote_comment}. *)
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating
@@ -216,8 +233,6 @@ val current_post_cursor : unit -> float * string option
     history. *)
 
 val delete_post : post_id:string -> (unit, Board.board_error) Result.t
-
-val delete_comment : comment_id:string -> (unit, Board.board_error) Result.t
 
 val set_thread_id :
   post_id:string ->

@@ -285,8 +285,9 @@ let test_cache_switch_releases_idle_connection () =
       (match
          Http_client.get_sync ~cache ~sw:cache_sw ~net:env#net ~url ~headers:[] ()
        with
-       | Ok (200, "cached") -> ()
-       | Ok (code, body) -> Alcotest.failf "expected 200/cached, got %d/%S" code body
+       | Ok { status = 200; body = "cached"; _ } -> ()
+       | Ok { status; body; _ } ->
+         Alcotest.failf "expected 200/cached, got %d/%S" status body
        | Error _ -> Alcotest.fail "expected cached response");
       Alcotest.(check int)
         "one idle connection before cache switch release"
@@ -390,8 +391,8 @@ let test_one_shot_get_closes_after_response () =
       start_one_shot_lifecycle_server ~sw ~net:env#net ~clock:env#clock "ok"
     in
     (match Http_client.get_sync ~sw ~net:env#net ~url ~headers:[] () with
-     | Ok (200, "ok") -> ()
-     | Ok (code, body) -> Alcotest.failf "expected 200/ok, got %d/%S" code body
+     | Ok { status = 200; body = "ok"; _ } -> ()
+     | Ok { status; body; _ } -> Alcotest.failf "expected 200/ok, got %d/%S" status body
      | Error _ -> Alcotest.fail "expected Ok response");
     await_client_disconnect ~clock:env#clock ~label:"normal response" disconnected;
     Eio.Switch.fail sw Exit
@@ -425,7 +426,8 @@ let test_one_shot_get_timeout_closes_connection () =
      with
      | Error (Http_client.TimeoutError { phase = Http_client.Http_operation; _ }) -> ()
      | Error _ -> Alcotest.fail "expected Http_operation timeout"
-     | Ok (code, body) -> Alcotest.failf "expected timeout, got %d/%S" code body);
+     | Ok { status; body; _ } ->
+       Alcotest.failf "expected timeout, got %d/%S" status body);
     await_client_disconnect ~clock:env#clock ~label:"timed-out response" disconnected;
     Eio.Switch.fail sw Exit
   with

@@ -1,14 +1,10 @@
-type review_kind =
-  | Criterion
-  | Proof
+type review_kind = Proof
 
 type outcome =
   | Reviewed
   | Committed
   | Deferred of
-      { retryable : bool
-      ; detail : string
-      }
+      { detail : string }
   | Raised of { detail : string }
 
 type run_status =
@@ -32,12 +28,10 @@ type run =
 let storage_filename = "goal-verification-runs.jsonl"
 
 let review_kind_label = function
-  | Criterion -> "criterion"
   | Proof -> "proof"
 ;;
 
 let review_kind_of_label = function
-  | "criterion" -> Ok Criterion
   | "proof" -> Ok Proof
   | label -> Error (Printf.sprintf "unknown Goal review kind %S" label)
 ;;
@@ -98,8 +92,7 @@ module Payload = struct
       match completion.outcome with
       | Reviewed -> []
       | Committed -> []
-      | Deferred { retryable; detail } ->
-        [ "retryable", `Bool retryable; "detail", `String detail ]
+      | Deferred { detail } -> [ "detail", `String detail ]
       | Raised { detail } -> [ "detail", `String detail ]
     in
     `Assoc
@@ -126,7 +119,7 @@ module Payload = struct
       match outcome_label with
       | "reviewed" -> Ok []
       | "committed" -> Ok []
-      | "deferred" -> Ok [ "retryable"; "detail" ]
+      | "deferred" -> Ok [ "detail" ]
       | "raised" -> Ok [ "detail" ]
       | label -> Error (Printf.sprintf "unknown Goal review outcome %S" label)
     in
@@ -159,14 +152,8 @@ module Payload = struct
       | "reviewed" -> Ok Reviewed
       | "committed" -> Ok Committed
       | "deferred" ->
-        let* retryable =
-          match List.assoc_opt "retryable" fields with
-          | Some (`Bool retryable) -> Ok retryable
-          | Some _ -> Error "field retryable must be a boolean"
-          | None -> Error "missing field retryable"
-        in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
-        Ok (Deferred { retryable; detail })
+        Ok (Deferred { detail })
       | "raised" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Raised { detail })
@@ -183,6 +170,7 @@ type t = Store.t
 let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 
 let notify_changed () =
@@ -249,8 +237,7 @@ let run_to_yojson run =
         match outcome with
         | Reviewed -> []
         | Committed -> []
-        | Deferred { retryable; detail } ->
-          [ "retryable", `Bool retryable; "detail", `String detail ]
+        | Deferred { detail } -> [ "detail", `String detail ]
         | Raised { detail } -> [ "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s

@@ -11,22 +11,16 @@ let display_name = "Discord"
 let channel = "discord"
 
 
-let default_status_path = ".gate/runtime/discord/status.json"
 let default_binding_store_path = ".gate/runtime/discord/bindings.json"
 let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
 
-let stale_after_sec () =
-  Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
-
+(* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
+   boot-time config overrides, so a path declared in runtime.toml is seen the
+   way every other MASC setting is (#21972 P2-1). *)
 let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  match Env_config_core.raw_value_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> Env_config_core.resolve_against_base_path raw
   | None -> Env_config_core.resolve_against_base_path default
-
-let status_path () =
-  configured_write_path "MASC_DISCORD_STATUS_PATH"
-    ~default:default_status_path
-
 
 let binding_store_path () =
   configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
@@ -44,10 +38,9 @@ let binding_audit_read_path () =
   configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
-(* [Include_empty], not [Omit]: the audit wire shape has always carried a
-   [guild_id] key for Discord rows and the dashboard reads that shape. The
-   value has been empty since the sidecar that resolved guild ids was
-   removed, so the constant-empty field is now declared at the store level
+(* [Include_empty], not [Omit]: the audit wire shape carries a [guild_id]
+   key for Discord rows and the dashboard reads that shape. Nothing resolves
+   guild ids, so the constant-empty field is declared at the store level
    instead of resolved per event. *)
 let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
@@ -156,9 +149,8 @@ let gateway_state_label = function
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
 
-(* Bot identity captured from the gateway's READY dispatch. The legacy
-   sidecar wrote this to status.json; the in-process gateway (RFC-0203)
-   keeps it in memory — nothing writes that file anymore. *)
+(* Bot identity captured from the gateway's READY dispatch; the in-process
+   gateway (RFC-0203) keeps it in memory. *)
 type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
@@ -174,7 +166,6 @@ let record_ready ~bot_user_id =
        })
 
 let status_json ?(audit_limit = 10) () =
-  let status_path = status_path () in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
   let configured_bindings_result = read_bindings_lookup_result () in
@@ -201,7 +192,6 @@ let status_json ?(audit_limit = 10) () =
     | Disconnected | Awaiting_hello | Identifying | Resuming
     | Reconnect_pending _ | Failed _ -> false
   in
-  let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -225,17 +215,16 @@ let status_json ?(audit_limit = 10) () =
       ("channel", `String channel);
       ("available", `Bool available);
       ("connected", `Bool connected);
-      ("stale", `Bool stale);
-      ("stale_after_sec", `Int (stale_after_sec ()));
       ( "status",
         `String
+          (* The gateway state machine is the liveness source; it has no
+             heartbeat file that could age out, so it is never stale. *)
           (Channel_gate_connector.connector_state_label ~available ~connected
-             ~stale) );
+             ~stale:false) );
       ("error", `String error);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
       ("trigger_policy", trigger_policy_json ());
-      ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
       ("updated_at", `String updated_at);
@@ -248,8 +237,7 @@ let status_json ?(audit_limit = 10) () =
            | Some { ready_at; _ } -> ready_at
            | None -> "") );
       (* READY carries only the bot user id; the gateway does not parse
-         the username. Empty is honest — the dead sidecar file used to
-         supply a stale value here. *)
+         the username. *)
       ("bot_user_name", `String "");
       ( "bot_user_id",
         `String
@@ -285,12 +273,9 @@ let connector_json ?(audit_limit = 10) () =
       ("status", `String (string_member status "status"));
       ("available", `Bool (bool_member status "available"));
       ("connected", `Bool (bool_member status "connected"));
-      ("stale", `Bool (bool_member status "stale"));
-      ("stale_after_sec", `Int (int_member status "stale_after_sec"));
       ("status_source", status |> U.member "status_source");
       ("gateway_state", status |> U.member "gateway_state");
       ("error", `String (string_member status "error"));
-      ("status_path", `String (string_member status "status_path"));
       ("binding_store_path", `String (string_member status "binding_store_path"));
       ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
       ("binding_store_error", status |> U.member "binding_store_error");
@@ -402,7 +387,7 @@ let unbind ~channel_id ~actor_name =
     |> Result.map (fun () -> status_json ())
 
 (* ---------------------------------------------------------------- *)
-(* In-process gateway support — replaces sidecars/discord-bot/      *)
+(* In-process gateway support                                       *)
 (* ---------------------------------------------------------------- *)
 
 type keeper_binding_resolution = {
@@ -468,9 +453,7 @@ let bound_channels ~keeper_name =
 
 let connected () =
   (* The in-process gateway (RFC-0203) is the only Discord transport;
-     its run loop publishes the typed connection state. The legacy
-     sidecar status file is not consulted: nothing writes it since the
-     Python sidecar was deleted. *)
+     its run loop publishes the typed connection state. *)
   match Discord_gateway_client.connection_state () with
   | Discord_gateway_state.Connected _ -> true
   | Disconnected | Awaiting_hello | Identifying | Resuming

@@ -28,16 +28,6 @@ and producer_scope =
   | Keeper_producer of Keeper_meta_contract.keeper_meta
   | Workspace_producer
 
-type forest_tool =
-  | Forest_read_file
-  | Forest_search_files
-  | Forest_web_fetch
-
-type forest =
-  { bindings : (string * t) list
-  ; forest_tools : (forest_tool * Types_core.tool_schema) list
-  }
-
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
   | [ descriptor ] -> Ok (tool, descriptor)
@@ -105,44 +95,121 @@ let create ~config ~producer =
   Ok { ownership_root; config; producer_scope; tools }
 ;;
 
-(* Two levels, because a checkout root sits one level below the sandbox root
-   ([repos/<name>/]) and that second level is the prefix an evaluator needs in
-   order to open anything the submitter described relative to a checkout. The
-   cap keeps a producer with many working trees from crowding the rest of the
-   review prompt out of the context window. *)
-let root_layout_depth_2_entry_cap = 64
+(* The Goal proof surface. A Goal names no producer: it is a shared intent
+   that any Keeper may advance, so there is no owned tree to bind the tools
+   to. The root is the shared playground prefix — one fixed workspace
+   location, the same for every Goal, derived from nothing the Goal happens
+   to be linked to. Every producer's tree sits under it, so a measurement
+   written anywhere in the workspace is reachable.
 
-(* [None] is "this path did not answer as a directory" — absent, a regular
-   file, or unreadable. The listing is prompt context, so none of those is
-   worth failing a review over. Cancellation is not one of them and travels
-   on. *)
+   [tool_search_files] is absent. Its containment runs through a Keeper's
+   sandbox meta and this surface has no Keeper identity; reimplementing that
+   jail here would be a second containment boundary to keep correct. The
+   judge navigates from [root_layout] instead, which names the producers and
+   the checkouts under them. *)
+let create_goal_proof ~(config : Workspace.config) =
+  let open Result.Syntax in
+  let* tools = resolve_tools [ Read_file; Web_fetch ] in
+  let project_root =
+    Workspace_verification_store.project_root_of_base_path config.base_path
+  in
+  let ownership_root =
+    Env_config_core.strip_trailing_slashes
+      (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
+  in
+  Ok { ownership_root; config; producer_scope = Workspace_producer; tools }
+;;
+
+(* The listing answers one question for the evaluator: where do the paths the
+   submitter wrote actually resolve. Two facts do that, and they are different
+   facts.
+
+   The immediate entries say what the root holds — [artifacts/] and the rest
+   are read directly and need no prefix.
+
+   The checkouts say where a repository-relative path has to be rooted, and
+   they come from [Keeper_playground_checkouts], which finds a checkout by its
+   [.git] entry wherever the keeper put it. This module must not scan for them
+   itself: that module exists because three separate scans each hardcoded a
+   [repos/] segment and each disagreed about what counted as a checkout
+   (RFC-keeper-workspace-root-only §1.2). [repos/masc] is one keeper's own
+   convention, written in its config, not a layout the system imposes — a
+   keeper with a checkout at the top level or under another name is equally
+   valid, and a fourth hardcoded scan here would miss it. *)
+let root_entry_cap = 32
+
+(* The Goal proof root lists producers rather than one producer's contents, so
+   its cap is the number of producers a workspace is expected to carry, not the
+   number of entries in one tree. A truncated producer list costs the judge a
+   place it may not look; the live workspace carries 38. *)
+let goal_root_entry_cap = 128
+
 let children path =
-  try Some (Fs_compat.read_dir path) with
+  try Ok (Fs_compat.read_dir path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> None
+  | Sys_error detail -> Error detail
+  | Unix.Unix_error (code, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
+;;
+
+let checkout_lines root =
+  match Keeper_playground_checkouts.discover ~root with
+  | Error error ->
+    Error (Keeper_playground_checkouts.scan_error_to_string error)
+  | Ok (Keeper_playground_checkouts.Partial { limit; _ }) ->
+    Error
+      (Printf.sprintf
+         "checkout discovery is partial: %s"
+         (Keeper_playground_checkouts.limit_to_string limit))
+  | Ok (Keeper_playground_checkouts.Complete checkouts) ->
+    let describe (checkout : Keeper_playground_checkouts.checkout) =
+      Printf.sprintf
+        "  %s/    (git checkout — a repository-relative path is rooted here)"
+        checkout.relative_path
+    in
+    Ok (List.map describe checkouts)
+;;
+
+let entry_lines_of root ~cap =
+  let open Result.Syntax in
+  let* entries =
+    children root
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "verification root unreadable: %s" detail)
+  in
+  let entries = List.sort String.compare entries in
+  let shown = List.filteri (fun index _ -> index < cap) entries in
+  let omitted = List.length entries - List.length shown in
+  let lines = List.map (fun entry -> "  " ^ entry) shown in
+  Ok
+    (if omitted <= 0
+     then lines
+     else lines @ [ Printf.sprintf "  ... and %d more" omitted ])
 ;;
 
 let root_layout t =
-  match children t.ownership_root with
-  | None -> []
-  | Some top ->
-    let rendered =
-      List.concat_map
-        (fun entry ->
-           let entry_path = Filename.concat t.ownership_root entry in
-           match children entry_path with
-           | None -> [ entry ]
-           | Some [] -> [ entry ^ "/  (empty)" ]
-           | Some nested ->
-             (entry ^ "/")
-             :: List.map (fun nested_entry -> entry ^ "/" ^ nested_entry) nested)
-        top
-    in
-    let shown = List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered in
-    let omitted = List.length rendered - List.length shown in
-    if omitted <= 0
-    then shown
-    else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+  let open Result.Syntax in
+  let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
+  let* checkout_lines = checkout_lines t.ownership_root in
+  Ok (entry_lines @ checkout_lines)
+;;
+
+(* The Goal proof root holds every producer, so the checkout scan that maps one
+   producer's tree does not apply: it walks all of them at once and stops on
+   the reported-checkout budget long before it is done. That stop is an
+   [Error], so running it here deferred every Goal review and the lane
+   committed no verdict at all (observed live 2026-08-23 on a workspace with
+   38 producers: "checkout budget exhausted (budget 32)", 0.85s, evaluator
+   never reached).
+
+   The scan is an [Error] once it finds more than [max_reported_checkouts]
+   checkouts (32; the live workspace had 41), so it completes only on small
+   workspaces. Leaving it out removes nothing the judge could use: the lookup
+   surface is [Read_file] and [Web_fetch], neither lists a directory, and the
+   path the judge opens comes from the Goal's metric, not from this listing.
+   The listing tells the judge which producer directories exist under the
+   root. The cap is per-producer-entry and states its own omissions. *)
+let goal_proof_root_layout t = entry_lines_of t.ownership_root ~cap:goal_root_entry_cap
 ;;
 
 (* ================================================================ *)
@@ -285,243 +352,4 @@ let dispatch t ~name ~args =
          ~argument
          ~outcome:(match result with Ok _ -> Resolved | Error _ -> Rejected);
        result)
-;;
-
-(* ================================================================ *)
-(* Multi-producer Goal proof surface                                *)
-(* ================================================================ *)
-
-let forest_tool_name = function
-  | Forest_read_file -> "verification_read_file"
-  | Forest_search_files -> "verification_search_files"
-  | Forest_web_fetch -> tool_name Web_fetch
-;;
-
-let source_tool = function
-  | Forest_read_file -> Read_file
-  | Forest_search_files -> Search_files
-  | Forest_web_fetch -> Web_fetch
-;;
-
-let surface_has_tool surface tool =
-  List.exists (fun (candidate, _) -> candidate = tool) surface.tools
-;;
-
-let eligible_bindings bindings forest_tool =
-  let tool = source_tool forest_tool in
-  List.filter (fun (_, surface) -> surface_has_tool surface tool) bindings
-;;
-
-let replace_assoc key value fields =
-  (key, value) :: List.filter (fun (candidate, _) -> not (String.equal key candidate)) fields
-;;
-
-let producer_scoped_input_schema ~producers = function
-  | `Assoc fields ->
-    let open Result.Syntax in
-    let* properties =
-      match List.assoc_opt "properties" fields with
-      | Some (`Assoc properties) -> Ok properties
-      | Some other ->
-        Error
-          (Printf.sprintf
-             "verification tool descriptor properties must be an object, got %s"
-             (Json_util.excerpt other))
-      | None -> Error "verification tool descriptor has no properties"
-    in
-    let* required =
-      match List.assoc_opt "required" fields with
-      | Some (`List required) -> Ok required
-      | Some other ->
-        Error
-          (Printf.sprintf
-             "verification tool descriptor required must be an array, got %s"
-             (Json_util.excerpt other))
-      | None -> Ok []
-    in
-    let producer_schema =
-      `Assoc
-        [ "type", `String "string"
-        ; "enum", `List (List.map (fun producer -> `String producer) producers)
-        ; ( "description"
-          , `String
-              "Exact linked-Task producer whose owned tree this read targets" )
-        ]
-    in
-    let properties = replace_assoc "producer" producer_schema properties in
-    let required =
-      `String "producer"
-      :: List.filter
-           (function
-             | `String name -> not (String.equal name "producer")
-             | _ -> true)
-           required
-    in
-    Ok
-      (`Assoc
-         (fields
-          |> replace_assoc "properties" (`Assoc properties)
-          |> replace_assoc "required" (`List required)))
-  | other ->
-    Error
-      (Printf.sprintf
-         "verification tool descriptor input schema must be an object, got %s"
-         (Json_util.excerpt other))
-;;
-
-let forest_schema bindings forest_tool =
-  let open Result.Syntax in
-  let tool = source_tool forest_tool in
-  let* _, descriptor = descriptor_of_tool tool in
-  let eligible = eligible_bindings bindings forest_tool in
-  let producers = List.map fst eligible in
-  let* input_schema =
-    match forest_tool with
-    | Forest_web_fetch -> Ok descriptor.input_schema
-    | Forest_read_file | Forest_search_files ->
-      producer_scoped_input_schema ~producers descriptor.input_schema
-  in
-  Ok
-    { Types_core.name = forest_tool_name forest_tool
-    ; description =
-        (match forest_tool with
-         | Forest_read_file ->
-           "Read a file from one exact linked-Task producer tree. "
-           ^ descriptor.description
-         | Forest_search_files ->
-           "Search files in one exact linked-Task producer tree. "
-           ^ descriptor.description
-         | Forest_web_fetch -> descriptor.description)
-    ; input_schema
-    }
-;;
-
-let rec create_bindings ~config = function
-  | [] -> Ok []
-  | producer :: rest ->
-    let open Result.Syntax in
-    let* surface = create ~config ~producer in
-    let* bindings = create_bindings ~config rest in
-    Ok ((producer, surface) :: bindings)
-;;
-
-let create_forest ~config ~producers =
-  let open Result.Syntax in
-  let producers = List.sort_uniq String.compare producers in
-  let* () =
-    match List.find_opt (fun producer -> String.equal (String.trim producer) "") producers with
-    | Some _ -> Error "verification producer identity must not be blank"
-    | None -> Ok ()
-  in
-  let* bindings =
-    match producers with
-    | [] -> Error "verification producer forest must not be empty"
-    | _ -> create_bindings ~config producers
-  in
-  let forest_tool_kinds =
-    [ Forest_read_file ]
-    @ (match eligible_bindings bindings Forest_search_files with
-       | [] -> []
-       | _ -> [ Forest_search_files ])
-    @ [ Forest_web_fetch ]
-  in
-  let rec build = function
-    | [] -> Ok []
-    | forest_tool :: rest ->
-      let* schema = forest_schema bindings forest_tool in
-      let* schemas = build rest in
-      Ok ((forest_tool, schema) :: schemas)
-  in
-  let* forest_tools = build forest_tool_kinds in
-  Ok { bindings; forest_tools }
-;;
-
-(* A forest has one root per producer, so the listing has to say which
-   producer each path belongs to: the forest dispatcher requires an exact
-   producer argument, and a bare path would not tell the evaluator which one
-   to pass. The same cap applies to the joined listing. *)
-let forest_root_layout forest =
-  let rendered =
-    List.concat_map
-      (fun (producer, tools) ->
-         match root_layout tools with
-         | [] -> [ producer ^ ": root could not be listed" ]
-         | entries -> List.map (fun entry -> producer ^ ": " ^ entry) entries)
-      forest.bindings
-  in
-  let shown =
-    List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered
-  in
-  let omitted = List.length rendered - List.length shown in
-  if omitted <= 0
-  then shown
-  else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
-;;
-
-let forest_schemas forest = List.map snd forest.forest_tools
-
-let forest_tool_of_name forest name =
-  forest.forest_tools
-  |> List.find_opt (fun (tool, _) -> String.equal (forest_tool_name tool) name)
-  |> Option.map fst
-;;
-
-let select_producer forest forest_tool args =
-  match args with
-  | `Assoc fields ->
-    (match List.assoc_opt "producer" fields with
-     | Some (`String producer) ->
-       let eligible = eligible_bindings forest.bindings forest_tool in
-       (match List.assoc_opt producer eligible with
-        | Some surface ->
-          Ok
-            ( surface
-            , `Assoc
-                (List.filter
-                   (fun (name, _) -> not (String.equal name "producer"))
-                   fields) )
-        | None ->
-          Error
-            (Printf.sprintf
-               "producer %s is not admitted for %s; admitted producers: %s"
-               producer
-               (forest_tool_name forest_tool)
-               (String.concat ", " (List.map fst eligible))))
-     | Some other ->
-       Error
-         (Printf.sprintf
-            "producer must be a string, got %s"
-            (Json_util.excerpt other))
-     | None -> Error "producer is required")
-  | other ->
-    Error
-      (Printf.sprintf
-         "%s input must be an object, got %s"
-         (forest_tool_name forest_tool)
-         (Json_util.excerpt other))
-;;
-
-let dispatch_forest forest ~name ~args =
-  match forest_tool_of_name forest name with
-  | None ->
-    Error
-      (Printf.sprintf
-         "unknown tool %s; this Goal review offers %s"
-         name
-         (forest.forest_tools
-          |> List.map (fun (tool, _) -> forest_tool_name tool)
-          |> String.concat ", "))
-  | Some Forest_web_fetch ->
-    (match forest.bindings with
-     | (_, surface) :: _ -> dispatch surface ~name:(tool_name Web_fetch) ~args
-     | [] -> Error "verification producer forest is empty")
-  | Some (Forest_read_file as forest_tool)
-  | Some (Forest_search_files as forest_tool) ->
-    (match select_producer forest forest_tool args with
-     | Error _ as error -> error
-     | Ok (surface, forwarded_args) ->
-       dispatch
-         surface
-         ~name:(tool_name (source_tool forest_tool))
-         ~args:forwarded_args)
 ;;

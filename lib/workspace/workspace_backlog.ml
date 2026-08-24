@@ -58,6 +58,14 @@ let read_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
     let recovery_path = backlog_recovery_path config in
+    (* [read_json_result] answers a missing key with an empty object, so an
+       absent mirror would otherwise reach [decode_backlog] and be reported as a
+       schema violation. Split absence out before the decode. Root fix: #29562. *)
+    if not (Workspace_utils.path_exists config recovery_path)
+    then
+      Error
+        (Printf.sprintf "%s; no recovery mirror at %s" primary_msg recovery_path)
+    else
     match read_json_result config recovery_path with
     | Ok json ->
       (match decode_backlog ~path:recovery_path json with
@@ -100,6 +108,8 @@ let read_backlog_with_source_r config =
   match cached with
   | Some backlog ->
     Ok { observed_backlog = backlog; recovered_from = None }
+  | None when not (Workspace_utils.path_exists config path) ->
+      recover (Printf.sprintf "no backlog at %s" path)
   | None -> (
       match read_json_result config path with
       | Ok json ->

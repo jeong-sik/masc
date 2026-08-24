@@ -212,8 +212,9 @@ let list_requests_uncached base_path =
       ~labels:[("surface", surface); ("reason", reason)] ()
   in
   let report_drop ~reason ~path ~detail =
+    let reason_wire = Read_drop_reason.to_wire reason in
     Safe_ops.report_persistence_read_drop
-      ~on_drop:(fun () -> observe_drop ~reason)
+      ~on_drop:(fun () -> observe_drop ~reason:reason_wire)
       ~surface
       ~reason
       ~path
@@ -222,7 +223,7 @@ let list_requests_uncached base_path =
   let dir = verifications_dir base_path in
   match Safe_ops.list_dir_safe dir with
   | Error detail ->
-    report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
+    report_drop ~reason:Read_drop_reason.List_dir_error ~path:dir ~detail;
     Error (Printf.sprintf "verification request directory unreadable: %s" detail)
   | Ok files ->
     let files = List.filter (fun f -> Filename.check_suffix f ".json") files in
@@ -235,7 +236,7 @@ let list_requests_uncached base_path =
          | Error detail ->
            let path = Filename.concat dir file in
            report_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+             ~reason:Read_drop_reason.Entry_load_error
              ~path
              ~detail;
            load

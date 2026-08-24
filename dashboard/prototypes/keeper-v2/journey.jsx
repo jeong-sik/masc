@@ -18,9 +18,9 @@ const JOURNEY = {
   'masc-improver': {
     turns: [
       { turn: 41, stimuli: [
-          { kind: 'workspace_message', from: 'nick0cave', urgency: 'immediate', what: '닉케이브가 보낸 메시지' },
-          { kind: 'workspace_message', from: 'sangsu', urgency: 'normal', what: '상수가 보낸 메시지' },
-          { kind: 'task_assigned', from: 'masc', urgency: 'normal', what: 'T-3880 배정' },
+          { kind: 'workspace_message', from: 'nick0cave', urgency: 'immediate', what: 'nick0cave가 보낸 메시지' },
+          { kind: 'workspace_message', from: 'sangsu', urgency: 'normal', what: 'sangsu가 보낸 메시지' },
+          { kind: 'board_signal', from: 'masc', urgency: 'normal', what: 'T-3880 배정' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_9a41c0', keeperTurnId: 41, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 3, providerAttemptFinishedCount: 3, eventBusCorrelatedCount: 18, contextCompactedCount: 0, contextCompactStartedCount: 0, memoryInjectedCount: 4, memoryFlushedCount: 1 },
         entries: [
           { id: 'e1', kind: 'thinking', at: 0, dur: null, status: 'unknown', source: 'trajectory', summary: '검토한 항목 중 T-3880 만 실제 수정이 필요하다고 판단', redacted: false },
@@ -31,7 +31,7 @@ const JOURNEY = {
           { id: 'e6', kind: 'tool_call', at: 21000, dur: 900, status: 'gate_rejected', source: 'tool_call_log', tool: 'masc_shell', plannedIndex: 3, batchIndex: 0, batchSize: 1, mode: 'serial', summary: 'dune build @runtest', gateReason: '쓰기 위험이 있어 운영자 승인 대기로 전환됨' },
         ] },
       { turn: 40, stimuli: [
-          { kind: 'keeper_wake', from: 'schedule', urgency: 'normal', what: '예약 실행 · board sweep' },
+          { kind: 'schedule_due', from: 'schedule', urgency: 'normal', what: '예약 실행 · board sweep' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_9a3f88', keeperTurnId: 40, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 2, providerAttemptFinishedCount: 2, eventBusCorrelatedCount: 11, contextCompactedCount: 1, contextCompactStartedCount: 1, memoryInjectedCount: 2, memoryFlushedCount: 2 },
         entries: [
           { id: 'f1', kind: 'thinking', at: 0, dur: null, status: 'unknown', source: 'trajectory', summary: '이전 턴 실패 원인부터 다시 읽는다', redacted: false },
@@ -50,7 +50,7 @@ const JOURNEY = {
   nick0cave: {
     turns: [
       { turn: 12, stimuli: [
-          { kind: 'chat_message', from: 'operator', urgency: 'immediate', what: '운영자 요청' },
+          { kind: 'hitl_resolved', from: 'operator', urgency: 'immediate', what: '운영자 승인 해소' },
           { kind: 'workspace_message', from: 'qa-king', urgency: 'normal', what: '큐에이킹이 보낸 메시지' },
         ], evidence: { health: 'healthy', staleReason: null, traceId: 'tr_2b7101', keeperTurnId: 12, maxAgentCoreTurnCount: 24, providerTerminalStatus: 'succeeded', providerTerminalExceptionKind: null, providerAttemptStartedCount: 1, providerAttemptFinishedCount: 1, eventBusCorrelatedCount: 9, contextCompactedCount: 2, contextCompactStartedCount: 2, memoryInjectedCount: 6, memoryFlushedCount: 3 },
         entries: [
@@ -121,14 +121,14 @@ function TurnCard({ t, open, onToggle, dev }) {
         {fails > 0 && <span className="lq-chip" data-tone="bad">실패 {fails}</span>}
         {gates > 0 && <span className="lq-chip" data-tone="warn">승인 대기 {gates}</span>}
         <span className="jw-turn-d mono">{msTxt(t.entries.reduce((s, e) => s + (e.dur || 0), 0))}</span>
-        <span className="jw-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span className="jw-caret" aria-hidden="true">{open ? '\u25BE' : '\u25B8'}</span>
       </button>
       {open && (
         <div className="jw-body">
           <div className="jw-track">
             <div className="jw-think">
               {t.entries.filter(e => e.kind === 'thinking').map(e => (
-                <button key={e.id} className={`jw-think-m ${pick === e.id ? 'on' : ''}`} style={{ left: `${(e.at / span) * 100}%` }} onClick={() => setPick(pick === e.id ? null : e.id)} title={e.summary}>{'◇'}</button>
+                <button key={e.id} className={`jw-think-m ${pick === e.id ? 'on' : ''}`} style={{ left: `${(e.at / span) * 100}%` }} onClick={() => setPick(pick === e.id ? null : e.id)} title={e.summary}>{'\u25C7'}</button>
               ))}
             </div>
             {lanes.map((row, ri) => (
@@ -189,16 +189,16 @@ const EV_BADGE = {
   board_post: ['POST', 'info', 'message'], board_comment: ['CMNT', 'info', 'message'], unknown: ['SYS', 'dim', 'other'],
 };
 const EV_ROWS = [
-  { t: 'keeper_tool_call', ago: '방금', text: '미소 · 셸 명령이 승인 대기로 전환됨', err: true },
-  { t: 'agent_core_turn', ago: '12초 전', text: '미소 · 41번째 턴 작업 중' },
+  { t: 'keeper_tool_call', ago: '방금', text: 'masc-improver · 셸 명령이 승인 대기로 전환됨', err: true },
+  { t: 'agent_core_turn', ago: '12초 전', text: 'masc-improver · 41번째 턴 작업 중' },
   { t: 'keeper_heartbeat', ago: '18초 전', text: '큐에이킹 · 정상 동작' },
-  { t: 'keeper_compaction', ago: '41초 전', text: '닉케이브 · 기록 정리 시작' },
-  { t: 'board_post', ago: '1분 전', text: '상수 · T-3880 에 의견 남김' },
+  { t: 'keeper_compaction', ago: '41초 전', text: 'nick0cave · 기록 정리 시작' },
+  { t: 'board_post', ago: '1분 전', text: 'sangsu · T-3880 에 의견 남김' },
   { t: 'keeper_phase_changed', ago: '2분 전', text: '스칼라 · 실행 중 → 정리 중' },
-  { t: 'agent_core_context', ago: '3분 전', text: '드리프터 · 대화량 알 수 없음' },
-  { t: 'keeper_handoff', ago: '4분 전', text: '큐에이킹 · 상수에게 넘기기 확인 대기' },
-  { t: 'unknown', ago: '6분 전', text: '드리프터 · 쓸 수 있는 모델 없음 (요청 한도 초과)', err: true },
-  { t: 'broadcast', ago: '9분 전', text: '미소 · 전체 알림 1건' },
+  { t: 'agent_core_context', ago: '3분 전', text: 'drifter · 대화량 알 수 없음' },
+  { t: 'keeper_handoff', ago: '4분 전', text: '큐에이킹 · sangsu에게 넘기기 확인 대기' },
+  { t: 'unknown', ago: '6분 전', text: 'drifter · 쓸 수 있는 모델 없음 (요청 한도 초과)', err: true },
+  { t: 'broadcast', ago: '9분 전', text: 'masc-improver · 전체 알림 1건' },
 ];
 const EV_KO = { HB: '하트비트', TURN: '턴', TOOL: '도구', CTX: '컨텍스트', 'Agent Core': '내부', HAND: '인계', COMP: '압축', PHASE: '단계', CAST: '알림', POST: '게시', CMNT: '댓글', SYS: '시스템' };
 function LiveStrip({ dev }) {

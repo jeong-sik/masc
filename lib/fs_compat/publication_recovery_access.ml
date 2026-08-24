@@ -283,11 +283,6 @@ type close_decision =
   | Already_drained
   | Close_invariant of invariant_violation
 
-let access_error_to_string = function
-  | Keeper_lane_not_available ->
-    "keeper lane publication recovery store is not available"
-;;
-
 let validation_error_to_string = Core.validation_error_to_string
 let transition_error_to_string = Core.transition_error_to_string
 

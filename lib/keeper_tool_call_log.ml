@@ -56,6 +56,49 @@ let consume_truncation_info ~invocation () =
     | None -> 0, None)
 ;;
 
+(** The typed disposition, keyed the same way and for the same reason.
+
+    The row this module writes is the only per-call record MASC keeps, and
+    until now the ordinary path filled its outcome from a boolean: the hook
+    receives AGENT_CORE's [tool_result], which says whether the call errored
+    and not why. [Deferred] has no representation there at all, and
+    agent_core's own error class is a different taxonomy. The value exists at
+    the masc dispatch boundary and is already handed to two other stores
+    ([Keeper_registry.record_tool_use], [Tool_registry.record_call]); this
+    carries it to the third.
+
+    Same weak key as the truncation table above, so a cancelled invocation
+    releases its pending entry rather than holding it. *)
+let pending_disposition :
+      (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+        Invocation_table.t
+  =
+  Invocation_table.create 8
+;;
+
+let pending_disposition_mu = Stdlib.Mutex.create ()
+
+let with_pending_disposition_lock f =
+  Stdlib.Mutex.lock pending_disposition_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_disposition_mu)
+    f
+;;
+
+let set_disposition ~invocation ~disposition =
+  with_pending_disposition_lock (fun () ->
+    Invocation_table.replace pending_disposition invocation disposition)
+;;
+
+let consume_disposition ~invocation () =
+  with_pending_disposition_lock (fun () ->
+    match Invocation_table.find_opt pending_disposition invocation with
+    | Some disposition ->
+      Invocation_table.remove pending_disposition invocation;
+      Some disposition
+    | None -> None)
+;;
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 
 let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
@@ -128,14 +171,17 @@ let queued_count_for_testing () =
    MASC_TOOL_CALL_LOG_RETENTION_DAYS=0. *)
 let retention_days_default = 30
 
+(* Opt-out: unset prunes after [retention_days_default]. A malformed value
+   lands on that same default and warns, rather than being the one store that
+   treated garbage differently from the two that cite this one (#27110). *)
 let retention_days () =
-  match Sys.getenv_opt "MASC_TOOL_CALL_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | Some _ -> None      (* explicit 0 or negative → retain forever *)
-     | None -> Some retention_days_default  (* malformed → safe default *))
-  | None -> Some retention_days_default
+  match
+    Env_config_core.get_retention_days
+      ~default:(Env_config_core.Prune_after_days retention_days_default)
+      "MASC_TOOL_CALL_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let init ?cluster_name ~base_path () =
   let cluster_name =
@@ -197,12 +243,9 @@ let current_log_path () =
   match store_dir () with
   | None -> None
   | Some dir ->
-    let tm = Unix.gmtime (Unix.gettimeofday ()) in
-    let month =
-      Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
-    in
-    let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
-    Some (Filename.concat (Filename.concat dir month) day)
+    (* Same layout this file already reads through Jsonl_writer.day_key below;
+       it was spelled out again here (#27143). *)
+    Some (Jsonl_writer.dated_path_now ~base_dir:dir).Jsonl_writer.path
 ;;
 
 let configured_masc_root () =
@@ -436,6 +479,7 @@ let log_call
       ?batch_size
       ?execution_mode
       ?typed_result
+      ?disposition
       ?composition_tool
       ?composition_run_id
       ?composition_node_id
@@ -444,11 +488,9 @@ let log_call
       ?parent_tool_use_id
       ?trace_id
       ?session_id
-      ?generation
       ?turn
       ?keeper_turn_id
       ?task_id
-      ?goal_ids
       ?sandbox_profile
       ?sandbox_root
       ?allowed_paths
@@ -587,7 +629,16 @@ let log_call
           @ (if artifact_refs = []
              then []
              else [ "artifact_refs", `List artifact_refs ])
-        | None -> []
+        | None ->
+          (* The ordinary path knows the disposition but not the payload, so it
+             cannot supply [typed_result] and cannot name artifact refs. Kept
+             as a separate argument rather than a synthesised result: a made-up
+             payload would put an empty [artifact_refs] on a row that simply
+             does not know. *)
+          (match disposition with
+           | Some d ->
+             [ "disposition", `String (Tool_result.string_of_disposition d) ]
+           | None -> [])
       in
       let composition_fields =
         [ "composition_tool", composition_tool
@@ -620,11 +671,6 @@ let log_call
         | Some value -> [ "session_id", `String value ]
         | None -> []
       in
-      let generation_field =
-        match generation with
-        | Some value -> [ "generation", `Int value ]
-        | None -> []
-      in
       let turn_field =
         match turn with
         | Some value -> [ "turn", `Int value ]
@@ -638,12 +684,6 @@ let log_call
       let task_id_field =
         match task_id with
         | Some value -> [ "task_id", `String value ]
-        | None -> []
-      in
-      let goal_ids_field =
-        match goal_ids with
-        | Some values ->
-          [ "goal_ids", `List (List.map (fun value -> `String value) values) ]
         | None -> []
       in
       let sandbox_profile_field =
@@ -667,10 +707,8 @@ let log_call
           ?agent_name
           ?trace_id
           ?session_id
-          ?generation
           ?keeper_turn_id
           ?task_id
-          ?goal_ids
           ?sandbox_profile
           ?sandbox_root
           ?allowed_paths
@@ -729,11 +767,9 @@ let log_call
            @ composition_tool_kind_field
            @ trace_id_field
            @ session_id_field
-           @ generation_field
            @ turn_field
            @ keeper_turn_id_field
            @ task_id_field
-           @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
            @ result_bytes_field

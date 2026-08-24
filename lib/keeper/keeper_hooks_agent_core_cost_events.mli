@@ -24,24 +24,6 @@ val cache_miss_input_tokens
   -> cache_read_input_tokens:int
   -> int
 
-val assemble_cost_event_payload
-  :  agent_name:string
-  -> task_id:string option
-  -> trace_id:string
-  -> keeper_turn_id:int
-  -> agent_core_turn_ordinal:int
-  -> model:string
-  -> input_tokens:int
-  -> output_tokens:int
-  -> cost_usd:float
-  -> ?cache_creation_input_tokens:int
-  -> ?cache_read_input_tokens:int
-  -> ?usage_missing:bool
-  -> ?usage_trust:Keeper_usage_trust.t
-  -> ?telemetry:Agent_core.Types.inference_telemetry
-  -> unit
-  -> assembled_cost_event_payload
-
 val cost_event_payload
   :  agent_name:string
   -> task_id:string option

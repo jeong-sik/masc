@@ -140,9 +140,10 @@ let runtime_yield_reason request =
    stays active and decides the next cycle from the yielded outcome. 3 =
    the first call plus two identical repeats: a single repeat (count 2) can
    still be legitimate (an idempotent poll or a deliberate re-read while the
-   model waits for state to change); the second consecutive repeat with an
-   unchanged input AND output fingerprint means the world did not change
-   and the model made no progress — a deterministic loop. *)
+   model waits for state to change); a second repeat with an unchanged input
+   AND output fingerprint means the world did not change and the model made
+   no progress — a deterministic loop. The repeats need not be adjacent: a
+   provider alternating between two stalled calls is the same loop. *)
 let repeated_tool_call_yield_threshold = 3
 
 let same_present_fingerprint left right =
@@ -167,12 +168,28 @@ let repeated_exact_tool_call ~threshold tool_calls =
   match tool_calls with
   | [] -> None
   | latest :: previous ->
-    let rec count_same count = function
-      | call :: rest when same_exact_tool_call latest call ->
-        count_same (count + 1) rest
-      | _ -> count
+    (* Every earlier identical call counts, not only the ones immediately
+       before [latest]. The old fold stopped at the first different call, so it
+       measured a run rather than a total, and a provider alternating between
+       two stalled calls never reached the threshold: one keeper ran
+       [git status --short --branch] 48 times with identical input in one
+       dispatch, always with a Read or a git diff in between, and the count
+       never left 1. That dispatch made 279 tool calls over 31 minutes and
+       produced no answer.
+
+       The identity test is unchanged -- input and output must both match, so
+       this still fires only on a call whose result did not move. The contract
+       in the .mli says "repeated exact tool input and output"; adjacency was
+       never part of it. Measured over 815 recorded dispatches: catches that
+       loop on call 73 instead of never, and reaches 93 of the 116 dispatches
+       that ended without an answer. The 47 answered dispatches it also stops
+       lose nothing -- a repeat yield persists a checkpoint and resumes. *)
+    let repeated_count =
+      List.fold_left
+        (fun count call -> if same_exact_tool_call latest call then count + 1 else count)
+        1
+        previous
     in
-    let repeated_count = count_same 1 previous in
     if threshold > 1 && repeated_count >= threshold
     then Some (latest.tool_name, repeated_count)
     else None
@@ -380,7 +397,6 @@ end
             and checkpoint message history, returns the final turn system prompt
      @param user_message The user's message to the keeper
     @param runtime_id Runtime profile name for model selection
-     @param generation Current generation counter
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
@@ -403,13 +419,13 @@ let run_turn
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
-      ~(generation : int)
       ?(history_user_source = "direct_user")
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       ?(history_assistant_source = "direct_assistant")
       ?temperature
       ?on_event
       ?on_tool_result_ready
+      ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
@@ -480,7 +496,6 @@ let run_turn
       ~runtime_id
       ?temperature
       ?shared_context
-      ~generation
       ()
   in
   let meta = ctx.meta in
@@ -503,7 +518,6 @@ let run_turn
       ~keeper_name:meta.name
       ~agent_name:meta.agent_name
       ~trace_id
-      ~generation
       ~keeper_turn_id:manifest_keeper_turn_id
   in
   let checkpoint_path =
@@ -516,7 +530,6 @@ let run_turn
       ~keeper_name:meta.name
       ~agent_name:meta.agent_name
       ~trace_id
-      ~generation
       ~runtime_id:runtime_id_string
       ~turn_start
       ~seq_ref
@@ -554,7 +567,6 @@ let run_turn
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
-  let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let resume_agent_core_checkpoint =
@@ -584,7 +596,6 @@ let run_turn
       ~shared_context
       ~context_injector
       ~start_turn_count
-      ~generation
       ~keeper_turn_id:manifest_keeper_turn_id
       ~turn_kind
       ~runtime_id
@@ -632,7 +643,7 @@ let run_turn
     let context_digest =
       digest_text
         (base_system_prompt ^ turn_system_prompt ^ dynamic_context
-         ^ memory_context ^ temporal_context ^ user_message
+         ^ temporal_context ^ user_message
          ^ history_messages_digest)
     in
     append_manifest
@@ -650,7 +661,6 @@ let run_turn
                 , `String (digest_text turn_system_prompt) )
               ; ( "dynamic_context_digest"
                 , `String (digest_text dynamic_context) )
-              ; "memory_context_digest", `String (digest_text memory_context)
               ; ( "temporal_context_digest"
                 , `String (digest_text temporal_context) )
               ; "user_message_digest", `String (digest_text user_message)
@@ -883,6 +893,7 @@ let run_turn
                       ~initial_messages
                       ~model_input_projection
                       ~hooks
+                      ?approval_gate
                       ~runtime_manifest_context
                       ~runtime_manifest_append:
                         (fun manifest ->
@@ -1098,7 +1109,7 @@ let run_turn
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work
-                             ~generation ~profile_defaults
+                             ~profile_defaults
                              ~manifest_keeper_turn_id
                              ~session ~append_manifest
                              ~model:manifest_model_label
@@ -1173,7 +1184,6 @@ let run_turn
          Keeper_agent_run_receipt.finalize
            ~config
            ~meta
-           ~generation
            ~manifest_keeper_turn_id
            ~runtime_id:settled_runtime_id
            ~keeper_visible_sandbox_root
@@ -1338,7 +1348,6 @@ let run_turn
           ~config
           ~keeper_name:meta.name
           ~agent_name:meta.agent_name
-          ~generation
           ~turn_kind
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id

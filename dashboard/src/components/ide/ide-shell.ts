@@ -583,7 +583,7 @@ function IdeDashboardConnectionChip({
     : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
   return html`
     <span
-      class=${`chip sm is-${tone}`}
+      class=${`tag-chip sm is-${tone}`}
       data-testid="ide-dashboard-connection"
       title=${title}
       aria-label=${`${label}; ${title}`}
@@ -726,7 +726,7 @@ function IdeCursorRailPanel() {
       </div>
       ${overlay.stream ? html`
         <div
-          class=${`ide-cursor-stream-status chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
+          class=${`ide-cursor-stream-status tag-chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
           data-testid="ide-cursor-stream-status"
           data-state=${overlay.stream.status}
           role="status"
@@ -1273,7 +1273,7 @@ export function IdeShell() {
       data-tree-width=${String(treeWidth)}
     >
       <h1 class="sr-only">MASC IDE</h1>
-      <div class="ide-v2-top">
+      <div class="ide-top">
         <button
           type="button"
           class="ide-v2-action ide-v2-tree-toggle"
@@ -1308,7 +1308,7 @@ export function IdeShell() {
           aria-label="IDE operational status"
         >
           <summary
-            class="chip sm is-warn"
+            class="tag-chip sm is-warn"
             data-testid="ide-readiness-notice"
             title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
           >
@@ -1324,7 +1324,7 @@ export function IdeShell() {
             aria-label="IDE operational status"
           >
             <span
-              class="chip sm is-brass"
+              class="tag-chip sm is-brass"
               data-testid="ide-statusbar-workspace"
               title=${statusbar.workspaceBasePath
                 ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
@@ -1333,7 +1333,7 @@ export function IdeShell() {
             ${statusbar.chips.map(chip => html`
               <span
                 key=${chip.id}
-                class=${`chip sm is-${chip.tone}`}
+                class=${`tag-chip sm is-${chip.tone}`}
                 title=${chip.title}
                 data-testid=${`ide-statusbar-chip-${chip.id}`}
               >${chip.label}</span>
@@ -1356,12 +1356,12 @@ export function IdeShell() {
         >${railsCollapsed ? '⊢' : '⊣'}</button>
       </div>
       <div
-        class="ide-plane-grid ide-v2-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
+        class="ide-plane-grid ide-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
         style=${`--ide-tree-width: ${treeWidth}px;`}
       >
         ${treeCollapsed ? null : html`
-          <div id="ide-file-tree" class="ide-plane-tree ide-v2-tree v2-ide-panel" data-testid="ide-file-tree">
+          <div id="ide-file-tree" class="ide-plane-tree ide-tree v2-ide-panel" data-testid="ide-file-tree">
             <${IdeExplorer}
               fileTreeStore=${workspaceStore.fileTreeStore}
               workspaceSource=${workspaceStore.workspaceSource}
@@ -1388,7 +1388,7 @@ export function IdeShell() {
           </div>
         `}
         <div
-          class="ide-plane-editor ide-v2-editor v2-ide-panel"
+          class="ide-plane-editor ide-ed v2-ide-panel"
         >
           ${reviewFocusActive
             ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
@@ -1432,10 +1432,10 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation ide-v2-rail v2-ide-panel"
+              class="ide-plane-conversation ide-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-v2-rail-tabs" role="tablist" aria-label="IDE right rail">
+              <div class="ide-rail-tabs" role="tablist" aria-label="IDE right rail">
                 ${IDE_RIGHT_RAIL_TABS.map(tab => html`
                   <button
                     key=${tab.id}
@@ -1444,12 +1444,12 @@ export function IdeShell() {
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
                     aria-label=${tab.title}
                     title=${tab.title}
-                    class=${`ide-v2-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
+                    class=${`ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
                 `)}
               </div>
-              <div class="ide-v2-rail-scroll">
+              <div class="ide-rail-scroll">
                 ${rightRailTab === 'activity' ? html`
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}

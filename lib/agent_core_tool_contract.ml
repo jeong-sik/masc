@@ -68,11 +68,19 @@ let agent_core_bindings : agent_core_tool_binding list =
         object_schema ~required:[ "content" ]
           [
             assoc_field "content" (string_prop "Broadcast body text");
+            assoc_field "task_cache_subject_agent"
+              (string_prop
+                 "Agent whose current-task cache was observed; supply together with task_cache_task_id");
+            assoc_field "task_cache_task_id"
+              (string_prop
+                 "Task ID observed in the subject agent cache; supply together with task_cache_subject_agent");
           ];
       arg_bindings =
         [
           ("agent_name", Agent_name);
           ("content", Input_field "content");
+          ("task_cache_subject_agent", Input_field "task_cache_subject_agent");
+          ("task_cache_task_id", Input_field "task_cache_task_id");
         ];
     };
     { name = "masc_heartbeat";

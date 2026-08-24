@@ -37,34 +37,12 @@
 
 module Types = Prompt_registry_types
 
-type prompt_metrics = Types.prompt_metrics = {
-  usage_count: int;      (** Number of times this prompt has been used *)
-  avg_score: float;      (** Average quality score (0.0 - 1.0) *)
-  last_used: float;      (** Unix timestamp of last usage *)
-}
-
-let prompt_metrics_to_yojson = Types.prompt_metrics_to_yojson
-let prompt_metrics_of_yojson = Types.prompt_metrics_of_yojson
-
 type prompt_entry = Types.prompt_entry = {
   id: string;                     (** Unique identifier *)
   template: string;               (** Prompt template with {{var}} placeholders *)
   version: string;                (** Semantic version string *)
   variables: string list;         (** Extracted variable names from template *)
-  metrics: prompt_metrics option; (** Optional usage metrics *)
   created_at: float;              (** Unix timestamp of creation *)
-  deprecated: bool;               (** Whether this prompt is deprecated *)
-}
-
-let prompt_entry_to_yojson = Types.prompt_entry_to_yojson
-let prompt_entry_of_yojson = Types.prompt_entry_of_yojson
-
-type registry_stats = Types.registry_stats = {
-  total_prompts: int;
-  active_prompts: int;
-  deprecated_prompts: int;
-  most_used: string option;
-  avg_usage: float;
 }
 
 type prompt_meta = Types.prompt_meta = {
@@ -96,40 +74,20 @@ type persisted_mutation_error =
     Returns (assoc list of key-value pairs, body after frontmatter).
     If no frontmatter found, returns ([], full content). *)
 let parse_frontmatter content =
-  let lines = String.split_on_char '\n' content in
-  match lines with
-  | first :: rest when String.trim first = "---" ->
-      let rec collect_meta acc = function
-        | [] -> (List.rev acc, "")
-        | line :: remaining when String.trim line = "---" ->
-            (List.rev acc, String.concat "\n" remaining)
-        | line :: remaining ->
-            let pair =
-              match String.index_opt line ':' with
-              | Some i ->
-                  let key = String.trim (String.sub line 0 i) in
-                  let value = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
-                  Some (key, value)
-              | None -> None
-            in
-            collect_meta (match pair with Some p -> p :: acc | None -> acc) remaining
-      in
-      collect_meta [] rest
-  | _ -> ([], content)
+  let parsed = Frontmatter.parse content in
+  parsed.Frontmatter.fields, parsed.Frontmatter.body
+;;
 
 let markdown_body content =
   let _metadata, body = parse_frontmatter content in
   body
 
-(** Parse a bracketed list value like [a, b, c] into string list. *)
+(** Parse a list value like [a, b, c] into string list. Reads through
+    {!Frontmatter.list_field}, which also accepts the unbracketed [a, b, c]
+    the other frontmatter readers used to allow; every asset in the tree
+    writes the bracketed form, so nothing already on disk changes meaning. *)
 let parse_list_value s =
-  let s = String.trim s in
-  if String.length s >= 2 && s.[0] = '[' && s.[String.length s - 1] = ']' then
-    let inner = String.sub s 1 (String.length s - 2) in
-    String.split_on_char ',' inner
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-  else []
+  Frontmatter.list_field { Frontmatter.fields = [ ("v", s) ]; body = "" } "v"
 
 (** {1 Variable Extraction} *)
 

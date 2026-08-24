@@ -315,9 +315,11 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | None -> Ok messages
     | Some project ->
       (try
-         match project messages with
-         | Ok projected -> Ok projected
-         | Error detail -> Error (config_error ~field:"model_input_projection" detail)
+         (* The projection names its own failure. Wrapping it as
+            [InvalidConfig { field = "model_input_projection" }] renamed a
+            per-candidate capacity bound into a request defect, and no reader
+            of that field ever existed. *)
+         project messages
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
@@ -535,7 +537,7 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
           active
           ~final_text:
             (Agent_core.Types.text_of_response result.response
-             |> String_util.trim_to_option)
+             |> String_util.trim_nonempty)
           ~stop_reason:
             (Some
                (Agent_core.Types.stop_reason_to_string
@@ -612,7 +614,8 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context ~tools
+let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
+    ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~repeated_call_state
@@ -626,7 +629,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
           { planned_index = Atomic.fetch_and_add next_dynamic_invocation_index 1
           ; batch_index = 0
           ; batch_size = 1
-          ; execution_mode = Agent_core.Tool.execution_mode tool
+          ; execution_mode = Agent_core.Tool.execution_mode tool ~input
           }
         in
         let invocation =
@@ -666,8 +669,25 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                  ; accumulated_cost_usd = 0.0
                  })
           in
-          match pre_tool_use with
-          | Block detail ->
+          (* Settled by the same gate AGENT_CORE's own tool loop uses, so one
+             pre_tool_use decision cannot mean two different things depending
+             on which runtime the keeper is bound to. This host used to decide
+             it here, and disagreed in two places: a failed hook came back as
+             an ordinary tool failure rather than a turn-level reject, and
+             ElicitToolApproval was refused outright instead of being offered
+             to a caller-supplied approval callback. *)
+          let settlement =
+            Agent_core.Agent_tool_pre_execution_gate.settle
+              ?tool_approval
+              ~event_bus
+              ~agent_name:keeper_name
+              ~invocation
+              ~tool_name:tool.schema.name
+              ~input
+              pre_tool_use
+          in
+          match settlement with
+          | Agent_core.Agent_tool_pre_execution_gate.Block detail ->
             (* The corrective error result goes back to the CLI, and the
                same round-trip is kept here so a CLI that kills the turn
                instead of retrying cannot erase it (masc#28885). *)
@@ -675,35 +695,20 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
             := { call_id; tool_name = tool.schema.name; input; detail }
                :: !pre_tool_rejects;
             { success = false; content = detail; abort_turn = None }
-          | HookFailed { stage; detail } ->
+          | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
+            (* A hook that failed, or a decision illegal at this stage. Both
+               are turn-level faults rather than something the model can
+               repair, so the terminal error records why the turn stopped. *)
             let detail =
               Printf.sprintf
-                "pre_tool_use hook failed at %s: %s"
+                "%s pre_tool_use rejected at %s: %s"
+                runtime_label
                 (Agent_core.Hooks.hook_stage_to_string stage)
                 detail
             in
-            { success = false; content = detail; abort_turn = None }
-          | (ElicitToolApproval _ | ElicitInput _) as decision ->
-            let detail =
-              Printf.sprintf
-                "%s dynamic tool cannot settle hook decision %s without a host approval callback"
-                runtime_label
-                (Agent_core.Hooks.decision_kind_to_string
-                   (Agent_core.Hooks.classify_decision decision))
-            in
             record_terminal_error terminal_error detail;
             { success = false; content = detail; abort_turn = None }
-          | (AdjustParams _ | Nudge _) as decision ->
-            let detail =
-              Printf.sprintf
-                "%s dynamic tool received illegal pre_tool_use decision %s"
-                runtime_label
-                (Agent_core.Hooks.decision_kind_to_string
-                   (Agent_core.Hooks.classify_decision decision))
-            in
-            record_terminal_error terminal_error detail;
-            { success = false; content = detail; abort_turn = None }
-          | Continue ->
+          | Agent_core.Agent_tool_pre_execution_gate.Admit ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
                  ~context
@@ -847,9 +852,9 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
   }
 ;;
 
-let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_bus
-    ~context_injector ~context ~terminal_effect_state ~terminal_error
-    ~pre_tool_rejects ~raw_trace_run =
+let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
+    ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
+    ~terminal_error ~pre_tool_rejects ~raw_trace_run =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -863,6 +868,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~tool_approval
             ~runtime_label
             ~keeper_name
             ~turn_count

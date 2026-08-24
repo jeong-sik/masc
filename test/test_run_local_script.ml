@@ -107,13 +107,10 @@ let make_config_root root =
   config
 
 let write_keeper_seed repo_root =
-  mkdir_p (Filename.concat repo_root "config/keepers/sangsu");
+  mkdir_p (Filename.concat repo_root "config/keepers/alpha");
   write_file
-    (Filename.concat repo_root "config/keepers/sangsu.toml")
-    "[keeper]\nautoboot_enabled = true\n";
-  write_file
-    (Filename.concat repo_root "config/keepers/sangsu/AGENT.md")
-    "Keep working autonomously.\n"
+    (Filename.concat repo_root "config/keepers/alpha.toml")
+    "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
 
 let write_fake_eio_exe exe_path =
   mkdir_p (Filename.dirname exe_path);
@@ -169,7 +166,7 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (Sys.file_exists (Filename.concat target_abs ".masc/config/runtime.json"));
       check bool "bootstrapped keepers excluded by default" false
         (Sys.file_exists
-           (Filename.concat target_abs ".masc/config/keepers/sangsu.toml"));
+           (Filename.concat target_abs ".masc/config/keepers/alpha.toml"));
       check bool "base path set" true
         (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
       check bool "config dir set" true
@@ -206,7 +203,7 @@ let test_bootstrap_keepers_flag_is_opt_in () =
         failf "run-local bootstrap-keepers failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       check bool "bootstrapped keeper copied with flag" true
-        (Sys.file_exists (Filename.concat target ".masc/config/keepers/sangsu.toml"));
+        (Sys.file_exists (Filename.concat target ".masc/config/keepers/alpha.toml"));
       check bool "keepers included message" true
         (String_util.contains_substring stderr "keepers included"))
 

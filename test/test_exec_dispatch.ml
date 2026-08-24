@@ -201,7 +201,7 @@ let () =
   in
   let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (String.trim result.stdout = "y");
-  assert (result.status <> Unix.WEXITED 124)
+  assert (result.status <> Process_eio.timed_out_status)
 
 (* --- dispatch forwards pipeline captured output chunks --- *)
 
@@ -295,7 +295,7 @@ let () =
       ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
       [ upstream_stage; timeout_stage ]
   in
-  assert (result.status = Unix.WEXITED 124);
+  assert (result.status = Process_eio.timed_out_status);
   assert (result.stdout = "visible");
   let streamed_stdout =
     List.rev !chunks
@@ -479,7 +479,21 @@ let () =
   in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
-  assert (result.stderr = "nested pipeline not supported in native dispatch")
+  (* The message names what is missing rather than what is unsupported: a
+     stage that is itself a pipeline or a sequence needs a subshell. *)
+  let mentions_subshell haystack =
+    let needle = "subshell" in
+    let n = String.length needle in
+    let rec scan i =
+      if i + n > String.length haystack
+      then false
+      else if String.sub haystack i n = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  assert (mentions_subshell result.stderr)
 
 (* --- dispatch_simple propagates sandbox runner (SND-05 regression) --- *)
 
@@ -549,7 +563,10 @@ let () =
           [
             Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 };
             Masc_exec.Redirect_scope.File
-              { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 1
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -581,7 +598,10 @@ let () =
         redirects =
           [
             Masc_exec.Redirect_scope.File
-              { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -619,7 +639,7 @@ let () =
             Masc_exec.Redirect_scope.File
               {
                 fd = 1;
-                target = unsupported_target;
+                target = Masc_exec.Redirect_scope.In_command_namespace unsupported_target;
                 mode = Masc_exec.Redirect_scope.Write;
               };
           ];
@@ -901,7 +921,10 @@ let () =
           redirects =
             [
               Masc_exec.Redirect_scope.File
-                { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+                { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
             ];
           sandbox = docker_sandbox;
         };

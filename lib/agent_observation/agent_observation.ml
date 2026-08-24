@@ -506,7 +506,6 @@ let snapshot_to_json (snap : snapshot) =
     ; ( "summary"
       , `Assoc
           [ ("tool_event_count", `Int (List.length snap.tool_events))
-          ; ("write_region_count", `Int (List.length snap.write_regions))
           ; ("annotation_count", `Int (List.length snap.annotations))
           ] )
     ]

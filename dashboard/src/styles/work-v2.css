@@ -117,7 +117,6 @@
   cursor: pointer;
   text-align: left;
   color: inherit;
-  font: inherit;
 }
 
 .wk-goal-h:hover {
@@ -261,93 +260,150 @@
   font-family: var(--font-mono);
 }
 
+/* The chip prints `metric · target_value`. Nothing bounds what a goal may
+   declare as its metric: on the live workspace the longest is 292 characters
+   of prose, 380 with its target appended, against a median of 35. With
+   `flex: none` and no cap that one goal stretched the header row past every
+   other card. Clipped here, with the full text on the element's `title`. */
 .wk-metric {
   margin-left: auto;
   flex: none;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-11);
   color: var(--text-dim);
   font-family: var(--font-mono);
 }
 
-/* ── Job / Task list ──────────────────────────────────────────────────────── */
-.wk-jobs {
-  border-top: 1px solid var(--border-soft);
-  padding: 10px 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+/* ── Job / Task list ────────────────────────────────────────────────────────
+   The expanded goal body now uses the design's own class, .wk-tasks, which the
+   vendored keeper-v2/v2.css kit styles (border-top, padding, column gap). The
+   former .wk-jobs rule here duplicated that block under a drifted name. */
 
-.wk-note {
-  font-size: var(--fs-12);
-  color: var(--text-mid);
-  line-height: 1.5;
-  padding: 2px 0 10px;
-  border-bottom: 1px dashed var(--border-soft);
-  margin-bottom: 8px;
-}
-
+/* ── Goal detail panel (expanded goal card body) ───────────────────────────
+   Two-column label/value grid. The previous chip-row layout put every field —
+   identity, completion criteria, activity — into one undifferentiated strip of
+   mono pills, so the panel had no reading order and the completion criteria
+   were indistinguishable from projection bookkeeping. */
 .wk-dossier {
   display: grid;
-  gap: 6px;
-  padding: 2px 0 10px;
+  gap: 12px;
+  padding: 2px 0 12px;
   border-bottom: 1px dashed var(--border-soft);
   margin-bottom: 8px;
+}
+
+.wk-dossier-sec {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Section headings are Korean UI text ("진행 판정 메모"). base.css puts every
+   h1-h4 in the Cinzel display face, which has no lowercase glyphs and no
+   Hangul, so the heading would fall back to a different face than the rows
+   under it — the UI face keeps the panel in one voice. No uppercase transform
+   either, for the same reason. */
+.wk-dossier-h {
+  margin: 0 0 3px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-dim);
 }
 
 .wk-dossier-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
   min-width: 0;
 }
 
 .wk-dossier-k {
-  flex: 0 0 78px;
   font-size: var(--fs-10);
   color: var(--text-dim);
-  text-transform: uppercase;
-  font-weight: 700;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.wk-dossier-chip {
-  max-width: 100%;
+.wk-dossier-v {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  font-size: var(--fs-11);
+  color: var(--text-mid);
+  line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.wk-dossier-row.ok .wk-dossier-v { color: var(--status-ok); }
+.wk-dossier-row.warn .wk-dossier-v { color: var(--status-warn); }
+.wk-dossier-row.bad .wk-dossier-v { color: var(--status-bad); }
+
+.wk-dossier-strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+.wk-dossier-sub {
+  font-size: var(--fs-10);
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.wk-dossier-sub.warn { color: var(--status-warn); }
+.wk-dossier-sub.bad { color: var(--status-bad); }
+.wk-dossier-sub.ok { color: var(--status-ok); }
+
+.wk-dossier-callout {
+  grid-column: 1 / -1;
+  margin: 2px 0 4px;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-10);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wk-dossier-callout.warn {
+  color: var(--status-warn);
+  border: 1px solid color-mix(in oklab, var(--status-warn) 32%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
+}
+
+.wk-dossier-link {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--fs-10);
   color: var(--text-mid);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xs);
   padding: 1px 6px;
   background: var(--surface-1);
+  cursor: pointer;
 }
 
-.wk-dossier-chip.ok {
-  color: var(--status-ok);
-  border-color: color-mix(in oklab, var(--status-ok) 30%, transparent);
-  background: color-mix(in oklab, var(--status-ok) 8%, transparent);
-}
-
-.wk-dossier-chip.warn {
-  color: var(--status-warn);
-  border-color: color-mix(in oklab, var(--status-warn) 32%, transparent);
-  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
-}
-
-.wk-dossier-chip.bad {
-  color: var(--status-bad);
-  border-color: color-mix(in oklab, var(--status-bad) 32%, transparent);
-  background: color-mix(in oklab, var(--status-bad) 8%, transparent);
+.wk-dossier-link:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
 }
 
 .wk-dossier-text {
+  margin: 0;
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
   font-size: var(--fs-11);
   color: var(--text-mid);
-  line-height: 1.4;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .wk-verifier {
@@ -378,11 +434,15 @@
   overflow: hidden;
 }
 
+/* The vendored `.wk-backlog` container already carries the design's 13px/15px
+   inset. This header used to add 12px/16px of its own on top, and the list
+   below another 8px/16px/10px, so the backlog sat 43px taller than the design
+   and double-inset on both edges. Spacing is the container's now; the header
+   keeps only its own type. */
 .wk-backlog-h {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
   font-size: var(--fs-13);
   font-weight: 600;
   color: var(--text-mid);
@@ -392,14 +452,11 @@
   color: var(--status-warn);
 }
 
+/* Count reads as warn-toned mono text, per the vendored kit. The filled pill
+   this used to be is the chip ground the tempered tone takes away. */
 .wk-backlog-h .n {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
-  font-weight: 700;
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--status-warn) 12%, transparent);
-  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
   color: var(--status-warn);
 }
 
@@ -410,8 +467,7 @@
 }
 
 .wk-backlog-list {
-  border-top: 1px solid var(--border-soft);
-  padding: 8px 16px 10px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -441,15 +497,6 @@
   gap: 8px;
   flex-wrap: wrap;
   min-width: 0;
-}
-
-.wk-bl-goal {
-  font-size: var(--fs-10);
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
-  background: var(--bg-sunken);
-  color: var(--text-dim);
 }
 
 .wk-bl-prio {
@@ -560,7 +607,6 @@
   font-size: 11.5px;
   white-space: nowrap;
   transition: border-color 0.15s ease, color 0.15s ease;
-  font: inherit;
 }
 
 .wk-task-kp:hover {
@@ -581,7 +627,6 @@
   border: 1px solid var(--border-highlight);
   background: var(--bg-sunken);
   color: var(--text-mid);
-  font: inherit;
   font-size: var(--fs-11);
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;
@@ -799,7 +844,7 @@
  *   var(--volt)          → var(--color-volt, var(--color-accent))
  *   var(--status-ok)     → var(--color-status-ok)
  *   var(--status-warn)   → var(--color-status-warn)
- *   var(--status-bad)    → var(--color-status-bad)
+ *   var(--status-bad)    → var(--color-status-err)
  *   var(--radius-xs)     → var(--radius-xs, 3px)
  *   var(--radius-sm)     → var(--radius-sm, 4px)
  *   var(--radius-pill)   → var(--radius-pill, 999px)
@@ -1016,15 +1061,18 @@
 }
 
 .wka-h .n,
+/* No `margin-left: auto` here. The design gives that to `.wka-h .n` — a
+   different, plain count span, which this file's own headers also use — while
+   `.wka-h-n` is the pill badge that sits inline right after the heading text.
+   Applying it to the badge pushed it 242px to the far edge of the aside, away
+   from the heading it counts. The kit owns the badge's type and border. */
 .wka-h-n {
-  margin-left: auto;
-  font-size: var(--fs-11);
   color: var(--text-muted);
   letter-spacing: 0;
 }
 
 .wka-h-n.bad {
-  color: var(--color-status-bad);
+  color: var(--color-status-err);
 }
 
 .wka-h-n.dim {
@@ -1070,7 +1118,7 @@
 }
 
 .wka-flag.st-bad {
-  border-left-color: var(--color-status-bad);
+  border-left-color: var(--color-status-err);
 }
 
 .wka-flag.st-volt {
@@ -1096,8 +1144,8 @@
 }
 
 .wka-flag-tag.bad {
-  color: var(--color-status-bad);
-  border-color: color-mix(in oklab, var(--color-status-bad) 42%, transparent);
+  color: var(--color-status-err);
+  border-color: color-mix(in oklab, var(--color-status-err) 42%, transparent);
 }
 
 .wka-flag-tag.volt {
@@ -1124,36 +1172,24 @@
 }
 
 /* ── Todo items (verify / blockers / backlog) ── */
+/* `.wka-todo` and its status variants belong to the vendored kit
+   (keeper-v2/v2.css). A hand-port of the whole component sat here and lost to
+   the kit everywhere the two agreed — except on `.wka-todo.verify/.block/.claim`,
+   which are (0,2,0) where the kit's edge comes from a (0,1,0) `border` shorthand.
+   Those three painted a coloured stripe down the card that the design does not
+   have: the design carries the status on the kind chip and leaves the card edge
+   `--border-soft`. `.block` was worse than a stray stripe — it referenced
+   `--color-status-bad`, which is defined nowhere, so its `color-mix` background
+   collapsed to transparent and the card lost its ground entirely.
+   What remains here is what the kit has no counterpart for. */
 .wka-todo {
-  text-align: left;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 9px;
-  padding: 8px 11px;
-  border: 1px solid var(--color-border-subtle);
-  border-left-width: 2px;
-  border-radius: var(--radius-sm, 4px);
-  background: var(--color-bg-surface);
-  cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease;
+  /* Shrink-to-fit guard: the live consumers are real <button>s. */
   width: 100%;
 }
 
-.wka-todo.verify {
-  border-left-color: var(--color-status-info, var(--color-info));
-}
-
-.wka-todo.block {
-  border-left-color: var(--color-status-bad);
-  background: color-mix(in oklab, var(--color-status-bad) 7%, var(--color-bg-surface));
-}
-
-.wka-todo.claim {
-  border-left-color: var(--color-status-warn);
-  background: color-mix(in oklab, var(--color-status-warn) 6%, var(--color-bg-surface));
-}
-
-.wka-todo:hover,
+/* The kit states `:hover` but not `:focus-visible`; a static mock never had to
+   answer for keyboard focus. The `:hover` half is the kit's — it restates it
+   later at equal specificity. */
 .wka-todo:focus-visible {
   background: var(--color-bg-surface-hover, var(--color-bg-surface));
   border-color: var(--border-strong);
@@ -1171,20 +1207,8 @@
   white-space: nowrap;
 }
 
-.wka-todo.verify .wka-todo-k {
-  color: var(--color-volt-strong, var(--color-accent));
-  border: 1px solid var(--color-volt-dim, var(--color-accent-subtle));
-}
-
-.wka-todo.block .wka-todo-k {
-  color: var(--color-status-bad);
-  border: 1px solid color-mix(in oklab, var(--color-status-bad) 42%, transparent);
-}
-
-.wka-todo.claim .wka-todo-k {
-  color: var(--color-status-warn);
-  border: 1px solid color-mix(in oklab, var(--color-status-warn) 40%, transparent);
-}
+/* The kind-chip variants are the kit's, restated there at the same specificity
+   and later in the cascade, so this copy never won anything. */
 
 .wka-todo-t {
   grid-column: 2;
@@ -1274,7 +1298,7 @@
 }
 
 .wka-rail-stat.bad b {
-  color: var(--color-status-bad);
+  color: var(--color-status-err);
 }
 
 .wka-rail-lbl {
@@ -1312,27 +1336,6 @@
   gap: 12px;
 }
 
-.wk-viewseg {
-  display: inline-flex;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-pill, 999px);
-  overflow: hidden;
-  background: var(--color-bg-elevated);
-}
-
-.wk-viewseg button {
-  padding: 0.375rem 0.75rem;
-  font-size: var(--text-2xs);
-  color: var(--color-fg-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.wk-viewseg button.on {
-  background: var(--color-accent-fg);
-  color: var(--color-bg-page);
-}
 
 /* ── Goal create side panel ──────────────────────────────────────────────── */
 
@@ -1360,7 +1363,7 @@
 }
 
 .wk-goal-create-eyebrow {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 600;
   letter-spacing: var(--track-section);
   text-transform: lowercase;
@@ -1396,7 +1399,7 @@
 }
 
 .wk-goal-create-label {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   color: var(--color-fg-muted);
 }
@@ -1407,12 +1410,12 @@
 }
 
 .wk-goal-create-hint {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-muted);
 }
 
 .wk-goal-create-err {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-status-err);
 }
 
@@ -1444,7 +1447,7 @@
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-elevated);
   color: var(--color-fg-muted);
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   cursor: pointer;
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
@@ -1658,12 +1661,12 @@
 }
 
 .wk-kcard-id {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-muted);
 }
 
 .wk-kcard-prio {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 700;
   padding: 0.125rem 0.375rem;
   border-radius: var(--r-0);
@@ -1692,12 +1695,12 @@
 }
 
 .wk-kcard-block {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-status-err);
 }
 
 .wk-kcard-desc {
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   color: var(--color-fg-secondary);
   line-height: 1.4;
   display: -webkit-box;
@@ -1725,7 +1728,7 @@
 }
 
 .wk-kcard-kp.none {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   color: var(--color-fg-disabled);
   cursor: default;
 }
@@ -1752,7 +1755,7 @@
 }
 
 .wk-head .ov-eyebrow {
-  font-size: var(--text-3xs);
+  font-size: var(--fs-9);
   font-weight: 600;
   letter-spacing: var(--track-section);
   text-transform: uppercase;
@@ -1776,8 +1779,14 @@
   .wk-viewseg button,
   .wk-newgoal,
   .wk-task-claim,
-  .wk-task-kp {
+  .wk-task-kp,
+  .wk-dossier-link {
     min-height: var(--mobile-touch-target-min);
+  }
+
+  .wk-dossier-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 
   .wk-metric {

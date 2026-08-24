@@ -86,7 +86,7 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     Failure classes (RFC-0189):
     - [Workflow_rejection]: invalid or rejected URL — caller-input
       violation (blocked destinations included).
-    - [Transient_error]:    rate-limit hit + transport-layer failure;
+    - [Dependency_unavailable]:    rate-limit hit + transport-layer failure;
                             both retry-friendly.
     - [Runtime_failure]:    upstream HTTP non-2xx or missing status. *)
 

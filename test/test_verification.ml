@@ -77,6 +77,22 @@ let ensure_keeper_meta config name =
   | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
 ;;
 
+let ensure_producer_playground (config : Workspace_core.config) producer =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path
+;;
+
 let test_verdict_event_preserves_typed_authority () =
   let event =
     VP.For_testing.verdict_event_json
@@ -296,6 +312,60 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_retry_disposition_is_typed () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  (match For_testing.process_outcome_of_evaluator_retryable (Some true) with
+   | For_testing.Retryable_deferred -> ()
+   | For_testing.Committed | For_testing.Deferred ->
+     Alcotest.fail "typed retryable evaluator failure must re-arm the lane");
+  List.iter
+    (fun retryable ->
+       match For_testing.process_outcome_of_evaluator_retryable retryable with
+       | For_testing.Deferred -> ()
+       | For_testing.Committed | For_testing.Retryable_deferred ->
+         Alcotest.fail "non-retryable or unclassified deferral must await action")
+    [ Some false; None ]
+
+(* One submission must review that submission. The backlog read stays whole —
+   the daemon still needs fresh task state — but the scope decides which awaiting
+   entries it acts on, so an unrelated submit no longer re-reviews every other
+   awaiting Task (task-443, 2026-08-23: 45 attempts in 5h on the same input). *)
+let test_scan_scope_limits_a_submission_to_its_own_verification () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  let key task_id verification_id : For_testing.review_key =
+    { task_id; verification_id }
+  in
+  let stuck = key "task-443" "vrf-1" in
+  let fresh = key "task-465" "vrf-9" in
+  let entries = [ stuck, "producer-a"; fresh, "producer-b" ] in
+  let names selected =
+    List.map
+      (fun ((k : For_testing.review_key), _) -> k.task_id ^ "/" ^ k.verification_id)
+      selected
+  in
+  Alcotest.(check (list string))
+    "a named target reviews only itself"
+    [ "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets [ fresh ]) entries));
+  Alcotest.(check (list string))
+    "boot recovery still reads everything"
+    [ "task-443/vrf-1"; "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:For_testing.Whole_backlog entries));
+  (* A re-submission carries a new verification_id, so it is a different key and
+     is admitted; the stale key matches nothing and drops out on its own. *)
+  Alcotest.(check (list string))
+    "a stale target admits nothing"
+    []
+    (names
+       (For_testing.entries_in_scope
+          ~scope:(For_testing.Targets [ key "task-443" "vrf-0" ])
+          entries));
+  Alcotest.(check (list string))
+    "an empty target list reviews nothing"
+    []
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
+
+
 let test_system_llm_review_notes_are_metadata_only () =
   let request : V.verification_request =
     { id = "vrf-metadata-only"
@@ -303,7 +373,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; output =
         `Assoc [ "secret_output", `String "must not be duplicated" ]
     ; criteria = [ "secret criterion should stay in the audit store" ]
-    ; worker = "keeper-executor-agent"
+    ; worker = "keeper-omega-agent"
     ; created_at = 1234.5
     }
   in
@@ -438,7 +508,7 @@ let test_unreadable_evidence_uses_structured_current_contract () =
   let request : VS.request_header =
     { id = "vrf-structured-reason"
     ; task_id = "task-structured-reason"
-    ; worker = "keeper-executor-agent"
+    ; worker = "keeper-omega-agent"
     ; created_at = 1.0
     }
   in
@@ -497,7 +567,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
          ~task_id:"task-001"
          ~output
          ~criteria:[]
-         ~worker:"keeper-executor-agent"
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
@@ -507,7 +577,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
     with
     | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
@@ -601,8 +671,8 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
 let test_system_llm_rejection_prefers_registered_producer_binding () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let keeper_name = "keeper-executor-agent" in
-    let producer = "keeper-executor-agent-agent" in
+    let keeper_name = "keeper-omega-agent" in
+    let producer = "keeper-omega-agent-agent" in
     let meta_json =
       `Assoc
         [ "name", `String keeper_name
@@ -680,7 +750,7 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
 let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let producer = "keeper-executor-agent-agent" in
+    let producer = "keeper-omega-agent-agent" in
     Masc.Keeper_registry.For_testing.clear ();
     Fun.protect
       ~finally:Masc.Keeper_registry.For_testing.clear
@@ -784,7 +854,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  Eio.Promise.resolve resolve_run_completed ()
                | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
                on_tool_result
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
@@ -812,6 +882,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ensure_producer_playground config "system-test-worker";
           ignore
             (W.add_task
                config
@@ -1012,7 +1083,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
@@ -1035,6 +1106,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
           ensure_keeper_meta config "snapshot-test-worker";
+          ensure_producer_playground config "snapshot-test-worker";
           ignore
             (W.add_task
                config
@@ -1456,13 +1528,13 @@ let test_list_requests () =
 let test_list_requests_missing_dir_stays_quiet () =
   with_temp_dir (fun base_path ->
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)
     in
     let reqs = list_requests_exn base_path in
     Alcotest.(check int) "no requests" 0 (List.length reqs);
     Alcotest.(check (float 0.1)) "missing dir does not increment metric"
       before
-      (persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error))
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)))
 
 let test_verifications_dir_resolves_active_store () =
   with_temp_dir (fun base_path ->
@@ -1491,7 +1563,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
     let dir = active_verifications_dir base_path in
     Fs_compat.save_file (Filename.concat dir "broken.json") "{not-json";
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
     in
     (match V.list_requests base_path with
      | Error detail -> Alcotest.fail detail
@@ -1518,7 +1590,7 @@ let test_list_requests_isolates_bad_entry_with_metric () =
           Alcotest.failf "expected exactly one unreadable entry, got %d"
             (List.length entries)));
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
-      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
        -. before))
 
 (* The scan reports every unreadable file, not just the one it stopped at. The
@@ -1584,7 +1656,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
     Keeper_sandbox_config.keeper_toml_path
       ~base_path
-      ~agent_name:"keeper-executor-agent"
+      ~agent_name:"keeper-omega-agent"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
   Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -1594,15 +1666,15 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         ~base_path
         ~abs_path:artifact_path
     with
-    | Some { keeper_name = "executor"; relative_path } ->
-      [ "artifact:" ^ relative_path; "note:executor summary" ]
+    | Some { keeper_name = "omega"; relative_path } ->
+      [ "artifact:" ^ relative_path; "note:producer summary" ]
     | Some _ | None ->
-      [ "artifact:../outside-worker-playground"; "note:executor summary" ]
+      [ "artifact:../outside-worker-playground"; "note:producer summary" ]
   in
   let evidence_snapshot =
     VS.snapshot_submitted_evidence_json
       ~base_path
-      ~worker:"keeper-executor-agent"
+      ~worker:"keeper-omega-agent"
       submitted_evidence
   in
   match
@@ -1614,7 +1686,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         (`Assoc
             [ "submitted_evidence", evidence_snapshot ])
       ~criteria:[ "inspect artifact" ]
-      ~worker:"keeper-executor-agent"
+      ~worker:"keeper-omega-agent"
       ()
   with
   | Ok request -> request
@@ -1650,7 +1722,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
      VP.create_submit_request
        ~config
        ~task
-       ~assignee:"keeper-executor-agent"
+       ~assignee:"keeper-omega-agent"
        ~verification_id:request_id
        ~evidence_refs
    with
@@ -1659,7 +1731,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
   task
 
 let inspect_evidence ?(task_id = "task-001")
-    ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
+    ?(task_worker = "keeper-omega-agent") ~base_path ~request_id
     () =
   VS.inspect_submitted_evidence_for_authority
     ~base_path
@@ -1673,7 +1745,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -1689,7 +1761,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
      | VS.Evidence_available
          { items =
              VS.Evidence_artifact { content; truncated = false; _ }
-             :: VS.Evidence_note "executor summary"
+             :: VS.Evidence_note "producer summary"
              :: []
          ; _
          } ->
@@ -1703,7 +1775,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "" })
     with
     | VS.Evidence_unavailable _ -> ()
@@ -1713,13 +1785,13 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1732,7 +1804,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         ~base_path
         ~request_id
         ~evidence_refs:
-          [ "artifact:artifacts/proof.txt"; "note:executor summary" ]
+          [ "artifact:artifacts/proof.txt"; "note:producer summary" ]
     in
     match
       inspect_evidence
@@ -1745,7 +1817,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         { items =
             VS.Evidence_artifact
               { reference = "artifact:artifacts/proof.txt"; content; _ }
-            :: VS.Evidence_note "executor summary"
+            :: VS.Evidence_note "producer summary"
             :: []
         ; _
         } ->
@@ -1782,13 +1854,13 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1854,12 +1926,12 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     let artifact_dir = Filename.concat producer_root "artifacts" in
     Fs_compat.mkdir_p artifact_dir;
@@ -1906,12 +1978,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p producer_root;
     let absolute_path = Filename.concat producer_root "absolute.txt" in
@@ -1920,7 +1992,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     let snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-executor-agent"
+        ~worker:"keeper-omega-agent"
         [ "artifacts/bare.txt"; absolute_path ]
     in
     let persisted_snapshot = Yojson.Safe.to_string snapshot in
@@ -1937,7 +2009,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
            ~task_id:"task-001"
            ~output:(`Assoc [ "submitted_evidence", snapshot ])
            ~criteria:[ "inspect explicit refs" ]
-           ~worker:"keeper-executor-agent"
+           ~worker:"keeper-omega-agent"
            ()
        with
        | Ok request -> request
@@ -1992,7 +2064,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
     let profile_path =
       Keeper_sandbox_config.keeper_toml_path
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
     Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -2008,7 +2080,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
             ; "truncated", `Bool false
             ; "unexpected_field", `String "not part of the current contract"
             ]
-        ; `Assoc [ "kind", `String "note"; "content", `String "executor summary" ]
+        ; `Assoc [ "kind", `String "note"; "content", `String "producer summary" ]
         ]
     in
     (match
@@ -2018,7 +2090,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-executor-agent"
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
@@ -2040,11 +2112,16 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
-    let ascii_prefix = String.make 19_999 'a' in
+    (* One byte short of the cap, so the multibyte character that follows
+       straddles it and the scanner has to drop the partial codepoint.
+       Derived from the cap so raising the cap does not require editing an
+       assertion about UTF-8. *)
+    let cap = VS.verification_evidence_max_bytes in
+    let ascii_prefix = String.make (cap - 1) 'a' in
     let full_artifact = ascii_prefix ^ "한글" ^ String.make 250_000 'z' in
     Fs_compat.save_file artifact_path full_artifact;
     let request_id = "vrf-bounded-evidence" in
@@ -2064,18 +2141,176 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         } ->
       Alcotest.(check int) "full artifact byte count preserved"
         (String.length full_artifact) bytes;
-      Alcotest.(check int) "UTF-8 boundary stays below 20KB cap" 19_999
+      Alcotest.(check int) "truncation stops before the partial codepoint" (cap - 1)
         (String.length content);
       Alcotest.(check string) "incomplete UTF-8 codepoint removed"
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
+
+(* #29615: a truncated artifact's prefix must not travel to the judge. The
+   persistence serializer keeps it for the audit record; the transport
+   projection replaces it with the size, the fact, and how to read the real
+   file. The length guard is the regression: one over-cap artifact plus a
+   readable one must not push the review request toward any slot's input
+   budget. *)
+let test_transport_projection_omits_truncated_prefix () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 50_000) 'x' in
+    Fs_compat.save_file (Filename.concat artifact_dir "large-proof.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "small-proof.txt")
+      "small readable proof";
+    let request_id = "vrf-transport-projection" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:large-proof.json"
+        ; "artifact:small-proof.txt"
+        ; "note:producer summary"
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available _ as access ->
+      Alcotest.(check bool)
+        "persistence serializer still carries the truncated prefix"
+        true
+        (String.length
+           (Yojson.Safe.to_string
+              (VS.submitted_evidence_access_to_yojson access))
+         > cap);
+      let transport =
+        Yojson.Safe.to_string
+          (VS.submitted_evidence_access_transport_to_yojson access)
+      in
+      Alcotest.(check bool)
+        "transport stays far under the snapshot cap"
+        true
+        (String.length transport < cap / 2);
+      let items =
+        match
+          VS.submitted_evidence_access_transport_to_yojson access
+        with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List items -> items
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let fields_of = function
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "transport item must be an object"
+      in
+      let by_reference reference =
+        List.find_opt
+          (fun item ->
+             match List.assoc_opt "reference" (fields_of item) with
+             | Some (`String value) -> String.equal value reference
+             | _ -> false)
+          items
+        |> Option.get
+      in
+      let large_item = fields_of (by_reference "artifact:large-proof.json") in
+      Alcotest.(check bool)
+        "truncated artifact carries no content key"
+        true
+        (not (List.mem_assoc "content" large_item));
+      Alcotest.(check bool)
+        "truncated artifact declares content_omitted"
+        true
+        (List.assoc_opt "content_omitted" large_item = Some (`Bool true));
+      (match List.assoc_opt "bytes" large_item with
+       | Some (`Int bytes) ->
+         Alcotest.(check int) "transport keeps the full byte count"
+           (String.length large) bytes
+       | _ -> Alcotest.fail "truncated artifact must keep its byte count");
+      (match List.assoc_opt "content_note" large_item with
+       | Some (`String note) ->
+         Alcotest.(check bool)
+           "note states the file size"
+           true
+           (Astring.String.is_infix
+              ~affix:(string_of_int (String.length large))
+              note);
+         Alcotest.(check bool)
+           "note points at the verification tools"
+           true
+           (Astring.String.is_infix ~affix:"verification tools" note)
+       | _ -> Alcotest.fail "truncated artifact must explain the omission");
+      let small_item = fields_of (by_reference "artifact:small-proof.txt") in
+      Alcotest.(check string)
+        "readable artifact still travels in full"
+        "small readable proof"
+        (match List.assoc "content" small_item with
+         | `String content -> content
+         | _ -> Alcotest.fail "readable artifact content must be a string")
+    | VS.Evidence_unavailable { reason; _ } ->
+      Alcotest.failf
+        "evidence unavailable: %s"
+        (VS.evidence_access_failure_to_string
+           ~request_id
+           reason))
+
+let test_truncated_snapshot_items_names_only_truncated_artifacts () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 1_000) 'y' in
+    Fs_compat.save_file (Filename.concat artifact_dir "bulky.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "compact.json")
+      "{\"ok\":true}";
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:bulky.json"; "artifact:compact.json" ]
+    in
+    match VS.truncated_snapshot_items evidence_snapshot with
+    | [ (reference, bytes) ] ->
+      Alcotest.(check string)
+        "only the over-cap artifact is reported"
+        "artifact:bulky.json"
+        reference;
+      Alcotest.(check int) "reported size is the full file" (String.length large)
+        bytes
+    | other ->
+      Alcotest.failf "expected exactly one truncated item, got %d" (List.length other))
 
 let test_submitted_evidence_rejects_malformed_utf8 () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "malformed.txt" in
@@ -2103,7 +2338,7 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let outside_path = Filename.concat base_path "outside-secret.txt" in
@@ -2168,7 +2403,7 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "assignment.txt" in
@@ -2185,11 +2420,11 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
                 [ ( "submitted_evidence"
                   , VS.snapshot_submitted_evidence_json
                       ~base_path
-                      ~worker:"keeper-executor-agent"
+                      ~worker:"keeper-omega-agent"
                       [ "artifact:assignment.txt" ] )
                 ])
           ~criteria:[ "inspect artifact" ]
-          ~worker:"keeper-executor-agent"
+          ~worker:"keeper-omega-agent"
           ()
       with
       | Ok request -> request
@@ -2235,7 +2470,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -2249,7 +2484,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
            { task with
              task_status =
                Masc_domain.AwaitingVerification
-                 { assignee = "keeper-executor-agent"
+                 { assignee = "keeper-omega-agent"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
@@ -2269,7 +2504,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
       false
       (String_util.contains_substring projection "ACTION:");
     (match
-       W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-omega-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");
@@ -2279,7 +2514,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "no Keeper may claim a pending obligation");
     (match
-       W.claim_task_r config ~agent_name:"keeper-sangsu-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-alpha-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "another Keeper claimed the pending obligation");
@@ -2405,6 +2640,10 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM retry disposition is typed" `Quick
+        test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
+        test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick
@@ -2480,6 +2719,11 @@ let () =
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
+      Alcotest.test_case "transport projection omits truncated prefix" `Quick
+        test_transport_projection_omits_truncated_prefix;
+      Alcotest.test_case "truncated snapshot items names over-cap artifacts"
+        `Quick
+        test_truncated_snapshot_items_names_only_truncated_artifacts;
       Alcotest.test_case "submitted evidence rejects unknown artifact field" `Quick
         test_submitted_evidence_rejects_unknown_artifact_field;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick

@@ -15,21 +15,14 @@ val tool_calls_fleet_cache_key : masc_root:string -> string
 
 (** {1 Trajectory projection} *)
 
-val handle_keeper_catchup_judge_post :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
-    and starting an out-of-band Fusion judge run. *)
-
 val handle_keeper_fusion_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /fusion] by starting an out-of-band deliberation owned by the
     keeper in the route, with the prompt, preset and topology supplied by the
-    operator. This is the only surface that can reach the judge-of-judges and
-    staged topologies: [POST /catchup-judge] fixes both the prompt and
-    [topology = "simple"], so before this endpoint only a keeper deciding to
-    call the tool itself could run them. *)
+    operator. This is the only HTTP surface that can reach the judge-of-judges
+    and staged topologies; before it only a keeper deciding to call the tool
+    itself could run them. *)
 
 val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
@@ -94,7 +87,6 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
   Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 (** JSON summary of an AGENT_CORE checkpoint, used by the inventory listing. *)
@@ -206,7 +198,7 @@ val handle_keeper_directive_post :
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). A resume body
-    must carry [owner_nonce] and a stable [operator_operation_id], and is
+    must carry a stable [operator_operation_id], and is
     committed through the typed paused-work disposition transaction. *)
 
 val handle_keeper_paused_work_post :
@@ -225,7 +217,7 @@ val handle_keeper_bulk_directive_post :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
     [{"names": [...]}]. Resume uses exact per-owner
-    [{"targets": [{"name", "owner_nonce", "operator_operation_id"}, ...]}]
+    [{"targets": [{"name", "operator_operation_id"}, ...]}]
     fences and commits each target through the typed paused-work disposition
     transaction. Cache invalidation runs once for the whole batch. *)
 
@@ -242,25 +234,3 @@ val memory_os_fact_json :
 (** One current fact's read-only dashboard projection. [current] is derived
     from snapshot membership; no retention, score, or legacy kind field is
     serialized. *)
-
-val compaction_snapshots_json :
-  config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t
-(** Durable compaction snapshot payload for
-    [GET /api/v1/keepers/:name/compaction-snapshots]. Reads runtime manifests
-    first, then keeper meta as a latest-only fallback, and emits only event
-    metadata/token counts/provenance — never raw prompt or compacted context
-    text. Exported for JSON contract tests. *)
-
-val cached_compaction_snapshots_json :
-  config:Workspace.config ->
-  keeper_id:string ->
-  limit:int ->
-  force_refresh:bool ->
-  Yojson.Safe.t
-(** Non-blocking HTTP projection. Returns a cached snapshot immediately, or a
-    typed [warming] envelope on a cold miss, and performs the manifest scan on
-    the shared IO pool from a background fiber. A completed refresh broadcasts
-    [keeper_compaction_snapshots_changed] so mounted clients re-read once.
-    Concurrent reads share one scan; a force refresh received during that scan
-    preserves exactly one trailing scan so the final source change is not
-    lost. *)

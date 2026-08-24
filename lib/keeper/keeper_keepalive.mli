@@ -33,8 +33,6 @@ val wakeup_keeper :
   string -> unit
 
 val not_in_registry_warn_cooldown_s : float
-val not_in_registry_warn_max_entries : int
-
 type not_in_registry_warn_decision =
   | Warn_unknown_keeper
   | Debug_throttled_unknown_keeper
@@ -48,15 +46,6 @@ val not_in_registry_warn_state_step :
   now:float ->
   float StringMap.t ->
   not_in_registry_warn_decision * float StringMap.t
-
-(** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'b) ->
-  'b
 
 (** Keepalive loop meta selection. Disk wins when it changed; otherwise
     fall back to the latest registry snapshot instead of the original boot
@@ -145,4 +134,3 @@ val request_entry_stop : Keeper_registry.registry_entry -> unit
 val stop_keepalive_and_await :
   base_path:string -> string -> joined_stop_result
 
-val stop_all_keepalives : unit -> unit

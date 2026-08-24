@@ -150,7 +150,6 @@ export type BoardAttachmentDecode =
   | { ok: false; raw: unknown }
 
 export type BoardVoteDirection = 'up' | 'down'
-export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
@@ -188,10 +187,8 @@ export interface BoardPost {
   meta?: BoardPostMeta | null
   attachments?: BoardAttachmentDecode[]
   tags: string[]
-  votes: number | null
-  vote_balance?: number | null
-  vote_blind?: boolean
-  vote_blind_reason?: string
+  votes: number
+  vote_balance?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   comment_count: number
@@ -202,8 +199,6 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
@@ -217,16 +212,12 @@ export interface BoardComment {
   author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
-  votes?: number | null
-  vote_balance?: number | null
-  votes_up?: number | null
-  votes_down?: number | null
-  vote_blind?: boolean
-  vote_blind_reason?: string
+  votes?: number
+  vote_balance?: number
+  votes_up?: number
+  votes_down?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
-  report_count?: number
-  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
 }
@@ -413,6 +404,21 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'agent_core_unrecognized_stop_reason',
   'agent_core_guardrail_violation',
   'agent_core_tripwire_violation',
+  // Emitted by `blocker_class_to_string` in lib/keeper/keeper_meta_contract.ml
+  // and previously discarded here: `asKeeperRuntimeBlockerClass` answers null
+  // for anything absent, so eleven real classes arrived and were dropped.
+  // `test_blocker_class_mirror` fails if the server gains another one.
+  'agent_core_input_required',
+  'capacity_backpressure',
+  'gate_replay_repair_required',
+  'incomplete_tool_transcript',
+  'internal_bridge_exception',
+  'internal_contract_rejected',
+  'internal_unhandled_exception',
+  'provider_attempt_effect_fenced',
+  'receipt_persistence_failed',
+  'terminal_effect_failed',
+  'tool_correction_lost',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
@@ -570,21 +576,19 @@ export interface Goal {
 
 type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
 
+// Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
 type KeeperQuietReason =
-  | 'quiet_hours'
-  | 'min_gap'
-  | 'no_recent_activity'
   | 'disabled'
+  | 'not_running'
   | 'startup'
-  | 'model_error'
-  | 'graphql_error'
   | 'never_started'
-  | 'unknown'
 
+// Exactly what Keeper_status_runtime.keeper_next_action_path serializes.
 type KeeperNextActionPath =
-  | 'direct_message'
-  | 'probe'
+  | 'auto_restart'
   | 'recover'
+  | 'probe'
+  | 'direct_message'
 
 type KeeperReplyStatus =
   | 'never'
@@ -680,8 +684,8 @@ export type KeeperTurnOutcome =
 
 // Where an `external_effect_completed` turn actually delivered its reply
 // (`external_effect_target` on the reply payload / the
-// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Absent on legacy payloads
-// that predate the field — the card then falls back to generic copy.
+// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Present exactly on those
+// turns; other outcomes carry no target and the card keeps generic copy.
 export type KeeperExternalEffectTarget =
   | { kind: 'dashboard' }
   | { kind: 'discord'; channelId: string }
@@ -906,8 +910,21 @@ export interface KeeperConversationStreamContract {
   reason?: string | null
 }
 
+// Mirrors the closed variant vocabulary in lib/keeper/surface_ref.ml —
+// same seven kinds, no open string escape. keeper-state.ts owns the one
+// closed parse (normalizeSurfaceRef); an unknown wire kind drops the
+// surface, never the row, matching keeper_chat_store.load's policy.
+export type SurfaceRefKind =
+  | 'dashboard'
+  | 'discord'
+  | 'slack'
+  | 'webhook'
+  | 'agent'
+  | 'broadcast'
+  | 'gate'
+
 export interface SurfaceRef {
-  kind: 'dashboard' | 'discord' | 'slack' | 'webhook' | 'agent' | 'gate' | string
+  kind: SurfaceRefKind
   session_id?: string
   guild_id?: string
   channel_id?: string
@@ -1150,13 +1167,11 @@ export interface Keeper {
   attention_reason?: string | null
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
-  active_goal_ids?: string[]
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
   blocked_task_count?: number | null
   goal_progress?: {
-    active_goal_count?: number
     linked_task_count?: number
     done_task_count?: number
     open_task_count?: number
@@ -1188,7 +1203,6 @@ export interface Keeper {
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null
   trust?: KeeperTrustSummary | null
-  generation?: number
   turn_count?: number
   total_turns?: number
   total_tokens?: number
@@ -1348,11 +1362,6 @@ export interface RuntimeRef {
   item: string | null
 }
 
-export interface KeeperConfigActiveGoal {
-  id: string
-  title: string
-}
-
 export interface KeeperConfigRuntimeTrust {
   disposition?: string | null
   disposition_reason?: string | null
@@ -1379,10 +1388,6 @@ interface KeeperConfigRuntime {
 interface KeeperConfigWorkspace {
   mention_targets: string[]
   bound_workspace_ids: string[]
-  active_goal_ids: string[]
-  active_goals: KeeperConfigActiveGoal[]
-  active_goal_count: number
-  missing_active_goal_ids: string[]
 }
 
 export interface KeeperConfigOverrideFieldSource {
@@ -1446,7 +1451,6 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
   /** Keeper-level autonomous wake prompt override; null inherits the fleet

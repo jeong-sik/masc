@@ -153,17 +153,12 @@ let schemas : tool_schema list = [
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");
-          ("description", `String "Complete Keeper instructions written to keepers/<name>/AGENT.md (kept across compaction/handoff).");
+          ("description", `String "Complete Keeper instructions, written to the keeper TOML declaration (kept across compaction/handoff).");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['sangsu']).");
-        ]);
-        ("active_goal_ids", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['alpha']).");
         ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
@@ -357,8 +352,8 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_keeper_reset";
-    description = "Clear a keeper's lifecycle latch: drops the pause bit, the latched \
-reason, and runtime.last_blocker in one durable write. This is the operator recovery path \
+    description = "Clear a keeper's lifecycle latch: drops the pause bit and the latched \
+reason in one durable write. This is the operator recovery path \
 for a keeper the generic resume transform refuses to unpause — Keeper_meta_contract.mark_resumed \
 deliberately leaves Transcript_corruption_reset_required unchanged, so resume alone cannot \
 free it. Does not touch usage counters, token stats, configuration, \

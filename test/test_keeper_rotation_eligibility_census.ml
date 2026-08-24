@@ -126,6 +126,19 @@ let api_context_overflow =
     (Agent_core.Retry.ContextOverflow
        { message = "context window exceeded"; limit = Some 128_000 })
 
+(* What a model-input projection returns when this candidate's declared
+   ceiling cannot carry the turn. Built through the production constructor so
+   the census measures the real path, not a hand-written copy of it. On
+   2026-08-23 this refusal was reported as [Config (InvalidConfig _)] and the
+   lane stopped at its first candidate for eight hours (#29676). *)
+let projection_capacity_refusal =
+  Runtime_model_input_tail_window.budget_error_to_core_error
+    (Runtime_model_input_tail_window.Reservation_exceeds_capacity
+       { capacity_bytes = 131_072
+       ; reserved_bytes = 3_116
+       ; undroppable_bytes = 141_937
+       })
+
 let api_invalid_request_unknown_model =
   Agent_core.Error.Api
     (Agent_core.Retry.InvalidRequest
@@ -207,6 +220,7 @@ let census_rows =
   ; "api:rate_limited", api_rate_limited, 0
   ; "api:server_error", api_server_error, 0
   ; "config:invalid", config_invalid, 0
+  ; "projection:capacity_refusal", projection_capacity_refusal, 0
   ]
 
 let test_census_report () =
@@ -277,6 +291,7 @@ let expected_rotation =
   ; "api:rate_limited", true
   ; "api:server_error", true
   ; "config:invalid", false
+  ; "projection:capacity_refusal", true
   ]
 
 let test_rotation_matches_baseline () =

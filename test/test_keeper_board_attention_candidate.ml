@@ -102,7 +102,9 @@ let comment_of_signal
       (signal : Masc.Board_dispatch.board_signal)
   : Masc.Board.comment
   =
-  { id = comment_id_exn ("comment-" ^ signal.post_id)
+  (* A comment id must have the shape [Comment_id.generate] mints; derive one
+     from the post id so the fixture stays deterministic per post. *)
+  { id = comment_id_exn (Printf.sprintf "c-%032x" (Hashtbl.hash signal.post_id))
   ; post_id = post_id_exn signal.post_id
   ; parent_id = None
   ; author = agent_id_exn "comment-author"
@@ -114,16 +116,16 @@ let comment_of_signal
   }
 ;;
 
-let keeper_context ?(active_goal_ids = []) () =
+let keeper_context ?(mention_keeper_ids = [ "alpha" ]) () =
   `Assoc
-    [ "lane_keeper_name", `String "sangsu"
-    ; "agent_name", `String "sangsu-agent"
+    [ "lane_keeper_name", `String "alpha"
+    ; "agent_name", `String "alpha-agent"
     ; "keeper_record_id", `Null
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"
-    ; "active_goal_ids", `List (List.map (fun id -> `String id) active_goal_ids)
     ; "current_task_id", `Null
-    ; "mention_keeper_ids", `List [ `String "sangsu" ]
+    ; ( "mention_keeper_ids"
+      , `List (List.map (fun id -> `String id) mention_keeper_ids) )
     ]
 ;;
 
@@ -149,7 +151,7 @@ let render_row_with_non_finite ~field ~literal json =
 let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
@@ -245,15 +247,57 @@ let record ~base_path candidate =
 ;;
 
 let load_one ~base_path =
-  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"sangsu") with
+  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"alpha") with
   | [ candidate ] -> candidate
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
+;;
+
+(* #29457: a vote signal round-trips through the candidate codec with its
+   payload under a [vote] key that only vote rows carry, so the rows written
+   before votes were a signal (exactly eight [signal] keys) still decode. *)
+let test_vote_signal_codec_round_trips_without_widening_other_rows () =
+  let vote_signal : Masc.Board_dispatch.board_signal =
+    { (signal "post-vote") with
+      kind =
+        Masc.Board_dispatch.Board_vote_cast
+          { target = Masc.Board_dispatch.Vote_on_comment "c-1"
+          ; target_author = "alpha-agent"
+          ; voter = "external-author"
+          ; direction = Masc.Board.Up
+          }
+    }
+  in
+  let original = candidate vote_signal in
+  let encoded = A.candidate_to_json original in
+  Alcotest.(check bool)
+    "vote candidate roundtrip"
+    true
+    (ok "decode vote candidate" (A.candidate_of_json encoded) = original);
+  let signal_keys (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> Alcotest.fail "signal codec did not produce an object"
+  in
+  Alcotest.(check (list string))
+    "vote row carries the vote key"
+    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at"; "vote" ]
+    (signal_keys (A.signal_to_yojson vote_signal));
+  Alcotest.(check (list string))
+    "post row keeps the eight pre-vote keys"
+    [ "author"; "content"; "hearth"; "kind"; "post_id"; "reaction"; "title"; "updated_at" ]
+    (signal_keys (A.signal_to_yojson (signal "post-plain")));
+  Alcotest.(check bool)
+    "a vote and a post on the same post_id are distinct candidates"
+    false
+    (String.equal
+       (A.candidate_id_of_signal ~keeper_name:"alpha" vote_signal)
+       (A.candidate_id_of_signal ~keeper_name:"alpha" (signal "post-vote")))
 ;;
 
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -280,7 +324,7 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (match keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] () with
+        (match keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -293,7 +337,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~active_goal_ids:[ "g-2"; "g-1" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "alpha" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
@@ -344,6 +388,47 @@ let set_assoc_field key value = function
            fields)
     else `Assoc (fields @ [ key, value ])
   | _ -> Alcotest.fail ("expected object while setting field " ^ key)
+;;
+
+let append_assoc_field key value = function
+  | `Assoc fields -> `Assoc (fields @ [ key, value ])
+  | _ -> Alcotest.fail ("expected object while appending field " ^ key)
+;;
+
+let insert_assoc_field_after anchor key value = function
+  | `Assoc fields ->
+    let rec insert reversed = function
+      | [] -> Alcotest.fail ("missing object field " ^ anchor)
+      | ((name, _) as field) :: rest ->
+        if String.equal name anchor
+        then `Assoc (List.rev_append reversed (field :: (key, value) :: rest))
+        else insert (field :: reversed) rest
+    in
+    insert [] fields
+  | _ -> Alcotest.fail ("expected object while inserting field " ^ key)
+;;
+
+let rewrite_candidate_keeper_context rewrite candidate =
+  A.candidate_to_json candidate
+  |> rewrite_assoc_field "judgment_request" (fun request ->
+    rewrite_assoc_field "keeper_context" rewrite request)
+;;
+
+let ledger_path ~base_path =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       "board_attention_candidates")
+    "alpha.jsonl"
+;;
+
+let write_ledger_rows ~base_path rows =
+  Out_channel.with_open_bin (ledger_path ~base_path) (fun channel ->
+    List.iter
+      (fun row ->
+         output_string channel (Yojson.Safe.to_string row);
+         output_char channel '\n')
+      rows)
 ;;
 
 let rewrite_first_comment rewrite = function
@@ -554,7 +639,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
       (Filename.concat
          (Common.masc_dir_from_base_path ~base_path)
          "board_attention_candidates")
-      "sangsu.jsonl"
+      "alpha.jsonl"
   in
   let non_finite_row =
     render_row_with_non_finite
@@ -756,7 +841,7 @@ let test_record_requests_worker_without_invoking_judgment () =
   Eio.Switch.run @@ fun sw ->
   with_temp_base "board-attention-candidate-wake" @@ fun base_path ->
   let registration =
-    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"sangsu")
+    ok "register worker" (Wake.register ~sw ~base_path ~keeper_name:"alpha")
   in
   let original = candidate (signal "post-wake") in
   let accepted =
@@ -869,6 +954,10 @@ let () =
             "codec and context identity are strict"
             `Quick
             test_codec_and_context_identity_are_strict
+        ; Alcotest.test_case
+            "vote signal codec round trips without widening other rows"
+            `Quick
+            test_vote_signal_codec_round_trips_without_widening_other_rows
         ; Alcotest.test_case
             "status view preserves resumability and quarantine"
             `Quick

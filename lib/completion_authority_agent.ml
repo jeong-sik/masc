@@ -17,7 +17,14 @@ type runtime =
   ; sw : Eio.Switch.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; wake : Eio.Condition.t
-  ; pending : bool Atomic.t
+  ; sweep_pending : bool Atomic.t
+      (** A whole-backlog read is due. Boot recovery and a failed backlog read
+          are the only things that need one: they have no key to aim at. *)
+  ; targets : review_key list Atomic.t
+      (** Verifications a submission or a retryable deferral asked for by name.
+          The submission hook already receives [task], [assignee] and
+          [verification_id]; carrying them here is what keeps one submission
+          from re-reviewing every other awaiting Task. *)
   ; retry_scheduled : bool Atomic.t
   ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
@@ -56,6 +63,39 @@ let release_review (runtime : runtime) key =
     then ()
     else if Atomic.compare_and_set runtime.in_flight current next
     then ()
+    else loop ()
+  in
+  loop ()
+;;
+
+(** What one wake of the daemon is allowed to look at. A submission and a
+    retryable deferral both name the verification they mean, so they get
+    [Targets]. Boot and a failed backlog read have nothing to name, so they get
+    [Whole_backlog]. Keeping the two apart is what stops one submission from
+    re-reviewing every other awaiting Task. *)
+type scan_scope =
+  | Whole_backlog
+  | Targets of review_key list
+
+(* Pure: the awaiting entries one scope admits. [Whole_backlog] admits all of
+   them; [Targets] admits only the named keys, and names a key at most once even
+   if it was requested repeatedly before the daemon woke. *)
+let entries_in_scope ~scope entries =
+  match scope with
+  | Whole_backlog -> entries
+  | Targets keys ->
+    List.filter
+      (fun (key, _) -> List.exists (review_key_equal key) keys)
+      entries
+;;
+
+let take_targets (runtime : runtime) =
+  let rec loop () =
+    let current = Atomic.get runtime.targets in
+    if current = []
+    then []
+    else if Atomic.compare_and_set runtime.targets current []
+    then current
     else loop ()
   in
   loop ()
@@ -128,7 +168,6 @@ let review_notes
              ; "task_id", `String request.task_id
              ; "worker", `String request.worker
              ; "created_at", `Float request.created_at
-             ; "criteria_count", `Int (List.length request.criteria)
              ] )
        ; ( "submitted_evidence_metadata"
          , Workspace_verification_store.submitted_evidence_access_metadata_to_yojson
@@ -276,7 +315,8 @@ let prepare_review
             (`Assoc
                [ "verification_request", Verification.request_to_yojson request
                ; ( "submitted_evidence_access"
-                 , Workspace_verification_store.submitted_evidence_access_to_yojson
+                 , Workspace_verification_store
+                    .submitted_evidence_access_transport_to_yojson
                      evidence_access )
                ])
         in
@@ -299,15 +339,21 @@ let prepare_review
 type process_outcome =
   | Committed
   | Deferred
+  | Retryable_deferred
 
-let defer ~task_id ~verification_id ~authority ~reason () =
+let process_outcome_of_evaluator_retryable = function
+  | Some true -> Retryable_deferred
+  | Some false | None -> Deferred
+;;
+
+let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
     reason;
-  Deferred
+  process_outcome_of_evaluator_retryable evaluator_retryable
 ;;
 
 let observe_rejection_wakeup
@@ -513,26 +559,31 @@ let process_task_once
            ~stage:Verification_run_registry.Lookup_surface
            ~detail:reason
        | Ok lookup_tools ->
-         let lookup =
-           Task.Anti_rationalization.Lookup_tools
-             { schemas = Verification_authority_tools.schemas lookup_tools
-             ; dispatch = Verification_authority_tools.dispatch lookup_tools
-             ; scope = Task.Anti_rationalization.Producer_tree
-             ; root_layout = Verification_authority_tools.root_layout lookup_tools
-             }
-         in
-         let result =
-           Task.Anti_rationalization.review
-             ~base_path:runtime.config.base_path
-             ~sw:(Some runtime.sw)
-             ~lookup
-             ?completion_contract:prepared.completion_contract
-             ~required_evidence:prepared.required_artifacts
-             ~on_tool_result
-             prepared.review_request
-         in
-         let evaluator_runtime = result.evaluator_runtime in
-         match result.verdict with
+         (match Verification_authority_tools.root_layout lookup_tools with
+          | Error reason ->
+            defer_unavailable
+              ~stage:Verification_run_registry.Lookup_surface
+              ~detail:reason
+          | Ok root_layout ->
+            let lookup =
+              Task.Anti_rationalization.Lookup_tools
+                { schemas = Verification_authority_tools.schemas lookup_tools
+                ; dispatch = Verification_authority_tools.dispatch lookup_tools
+                ; root_layout
+                }
+            in
+            let result =
+              Task.Anti_rationalization.review
+                ~base_path:runtime.config.base_path
+                ~sw:(Some runtime.sw)
+                ~lookup
+                ?completion_contract:prepared.completion_contract
+                ~required_evidence:prepared.required_artifacts
+                ~on_tool_result
+                prepared.review_request
+            in
+            let evaluator_runtime = result.evaluator_runtime in
+            match result.verdict with
        | None ->
          let gate = Task.Anti_rationalization.gate_to_string result.gate in
          (* Both arms are real descriptions, not a default standing in for an
@@ -557,7 +608,13 @@ let process_task_once
            ~detail;
          complete
            ~evaluator_runtime
-           ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+           ( defer
+               ~evaluator_retryable:result.evaluator_error_retryable
+               ~task_id:task.id
+               ~verification_id
+               ~authority
+               ~reason:detail
+               ()
            , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
@@ -587,7 +644,7 @@ let process_task_once
               ~verdict_label:
                 (Task.Anti_rationalization.verdict_constructor_name review_verdict)
               ~on_commit
-              ~evaluator_runtime:(Some evaluator_runtime)))
+              ~evaluator_runtime:(Some evaluator_runtime))))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -597,36 +654,79 @@ let process_task_once
       , Verification_run_registry.Raised { detail } )
 ;;
 
-let request_scan (runtime : runtime) =
-  Atomic.set runtime.pending true;
+(* Boot and a failed backlog read have no key to aim at. Everything else does,
+   and must use [request_review] instead. *)
+let request_sweep (runtime : runtime) =
+  Atomic.set runtime.sweep_pending true;
   Eio.Condition.broadcast runtime.wake
 ;;
 
-let schedule_retry (runtime : runtime) =
+let request_review (runtime : runtime) key =
+  let rec loop () =
+    let current = Atomic.get runtime.targets in
+    if List.exists (review_key_equal key) current
+    then ()
+    else if Atomic.compare_and_set runtime.targets current (key :: current)
+    then ()
+    else loop ()
+  in
+  loop ();
+  Eio.Condition.broadcast runtime.wake
+;;
+
+let schedule_retry (runtime : runtime) key =
   if Atomic.compare_and_set runtime.retry_scheduled false true
   then
     Eio.Fiber.fork ~sw:runtime.sw (fun () ->
       Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
       Atomic.set runtime.retry_scheduled false;
-      request_scan runtime)
+      request_review runtime key)
+;;
+
+let schedule_sweep_retry (runtime : runtime) =
+  if Atomic.compare_and_set runtime.retry_scheduled false true
+  then
+    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
+      Atomic.set runtime.retry_scheduled false;
+      request_sweep runtime)
 ;;
 
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
   then (
-    (* The outcome is already durable where it belongs: the run registry, and
-       for a review that committed no verdict the Board post as well. Nothing
-       here re-arms a timer — that outcome is a fact for the producer Keeper
-       to act on, and its resubmission is what rescans the backlog. The
-       annotated binding keeps that discard deliberate: a future outcome the
-       caller must handle changes this line's type. *)
-    let (_ : process_outcome) =
+    (* A retryable evaluator failure has no producer action that can legally
+       advance the Task: it is still [AwaitingVerification]. Re-arm the
+       application-owned scan after the durable run/Board observation is
+       recorded. Non-retryable deferrals keep the existing producer/operator
+       contract, and restart recovery still comes from [start]'s initial
+       pending scan. *)
+    let outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    ())
+    match outcome with
+    | Retryable_deferred ->
+      Log.Misc.info
+        "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+        task.id
+        verification_id
+        runtime.retry_interval_sec;
+      schedule_retry runtime key
+    | Committed -> ()
+    | Deferred ->
+      (* Nothing schedules another look at this key: the scope rule admits it
+         again only through a fresh submission, or through the sweep, which is
+         armed at boot and after a failed backlog read rather than on a timer.
+         So the Task sits in [AwaitingVerification] until a producer or operator
+         acts, and this is the one line that says so — at the level its
+         retryable sibling above already uses. *)
+      Log.Misc.info
+        "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
+        task.id
+        verification_id)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -634,41 +734,54 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
       verification_id
 ;;
 
-let process_pending (runtime : runtime) =
+let process_scope (runtime : runtime) ~scope =
   match Workspace_backlog.read_backlog_r runtime.config with
   | Error detail ->
     Log.Misc.error
       "system LLM completion authority backlog read failed; pending tasks remain unresolved: %s"
       detail;
-    schedule_retry runtime
+    (* The read failed, so which keys are awaiting is unknown. Re-read the whole
+       backlog rather than guess. *)
+    schedule_sweep_retry runtime
   | Ok backlog ->
+    let entries =
+      List.filter_map
+        (fun (task : Masc_domain.task) ->
+           match task.task_status with
+           | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+             Some ({ task_id = task.id; verification_id }, (task, assignee))
+           | Masc_domain.Todo
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.Done _
+           | Masc_domain.Cancelled _ -> None)
+        backlog.tasks
+    in
     List.iter
-      (fun (task : Masc_domain.task) ->
-         match task.task_status with
-         | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-           Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-             Eio.Semaphore.acquire runtime.review_slots;
-             (* fun-protect-finally-ok: [Eio.Semaphore.release] is
-                non-suspending and must return the bounded review slot on
-                normal completion, exception, or cancellation. *)
-             Fun.protect
-               ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
-               (fun () -> process_task runtime task ~assignee ~verification_id))
-         | Masc_domain.Todo
-         | Masc_domain.Claimed _
-         | Masc_domain.InProgress _
-         | Masc_domain.Done _
-         | Masc_domain.Cancelled _ -> ())
-      backlog.tasks
+      (fun (key, (task, assignee)) ->
+         Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+           Eio.Semaphore.acquire runtime.review_slots;
+           (* fun-protect-finally-ok: [Eio.Semaphore.release] is
+              non-suspending and must return the bounded review slot on
+              normal completion, exception, or cancellation. *)
+           Fun.protect
+             ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
+             (fun () ->
+                process_task runtime task ~assignee ~verification_id:key.verification_id)))
+      (entries_in_scope ~scope entries)
 ;;
 
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
-    if Atomic.exchange runtime.pending false
-    then (
-      process_pending runtime;
-      None)
-    else None)
+    (* Targets first: a named verification is the common case and costs one
+       backlog read for the batch that accumulated since the last wake. The
+       sweep stays for boot and for a failed read, which have no key to aim at. *)
+    (match take_targets runtime with
+     | [] -> ()
+     | (_ :: _) as keys -> process_scope runtime ~scope:(Targets keys));
+    if Atomic.exchange runtime.sweep_pending false
+    then process_scope runtime ~scope:Whole_backlog;
+    None)
 ;;
 
 let install_callback (runtime : runtime) =
@@ -686,7 +799,7 @@ let install_callback (runtime : runtime) =
            "system LLM completion authority rejected empty verification id task_id=%s"
            task.id
        else (
-         request_scan runtime;
+         request_review runtime { task_id = task.id; verification_id };
          Log.Misc.info
            "system LLM completion authority scheduled task_id=%s verification_id=%s producer=%s"
            task.id
@@ -701,7 +814,8 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; sw
     ; clock
     ; wake = Eio.Condition.create ()
-    ; pending = Atomic.make true
+    ; sweep_pending = Atomic.make true
+    ; targets = Atomic.make []
     ; retry_scheduled = Atomic.make false
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
@@ -747,5 +861,19 @@ module For_testing = struct
   type nonrec process_outcome = process_outcome =
     | Committed
     | Deferred
+    | Retryable_deferred
 
+  let process_outcome_of_evaluator_retryable =
+    process_outcome_of_evaluator_retryable
+
+  type nonrec review_key = review_key =
+    { task_id : string
+    ; verification_id : string
+    }
+
+  type nonrec scan_scope = scan_scope =
+    | Whole_backlog
+    | Targets of review_key list
+
+  let entries_in_scope = entries_in_scope
 end

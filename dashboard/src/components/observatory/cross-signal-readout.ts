@@ -1,8 +1,9 @@
-// Cross-signal readout card (RFC-MASC-006 Phase 2c)
+// Cross-signal readout — keeper-v2 monitor-more design (.ob-readout).
 //
-// When the cursor is active, show aligned values across all tracks at the
-// cursor's time — the core "읽기" primitive of Observatory. Reads directly
-// from `cursorPosition` signal + track data passed by parent.
+// One dashed strip under the panel: an .ia-k label plus either the dim hint
+// (no cursor) or a mono line reading all three tracks at the cursor's time —
+// events, tool calls (+ failures), success rate, recent call count.
+// Live values come from cursorPosition + track data passed by the parent.
 
 import { html } from 'htm/preact'
 import type { TelemetryEntry, ToolQualityHourlyPoint } from '../../api/dashboard'
@@ -44,31 +45,17 @@ function nearestTrendPoint(
   return best?.point ?? null
 }
 
-function Row({
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  label: string
-  value: string | number
-  tone?: 'neutral' | 'ok' | 'warn' | 'bad'
-}) {
-  const toneClass =
-    tone === 'ok' ? 'text-[var(--color-status-ok)]'
-      : tone === 'warn' ? 'text-[var(--color-status-warn)]'
-      : tone === 'bad' ? 'text-[var(--bad-light)]'
-      : 'text-text-strong'
-  return html`
-    <div class="flex items-center justify-between gap-4 text-2xs">
-      <span class="text-text-dim">${label}</span>
-      <span class="font-mono font-semibold ${toneClass}">${value}</span>
-    </div>
-  `
-}
-
 export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props) {
   const cursor = cursorPosition.value
-  if (cursor === null) return null
+
+  if (cursor === null) {
+    return html`
+      <div class="ob-readout" role="status" aria-live="polite" aria-label="커서 위치 메트릭 요약">
+        <span class="ia-k">Cross-signal readout</span>
+        <span class="dim">트랙 위에 커서를 올리면 같은 시점의 이벤트 · 도구 호출 · 지표를 함께 읽습니다.</span>
+      </div>
+    `
+  }
 
   const totalEvents = countEventsNear(events, cursor.ts, eventWindowMs)
   const toolCalls = countEventsNear(events, cursor.ts, eventWindowMs, isToolCall)
@@ -80,41 +67,20 @@ export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props
   )
   const trendPoint = nearestTrendPoint(hourlyTrend, cursor.ts)
 
-  const successRateTone: 'ok' | 'warn' | 'bad' | 'neutral' =
-    trendPoint == null ? 'neutral'
-      : trendPoint.success_rate >= 97 ? 'ok'
-      : trendPoint.success_rate >= 90 ? 'neutral'
-      : 'bad'
-
   const windowLabel = eventWindowMs >= 60_000
     ? `±${Math.round(eventWindowMs / 60_000 / 2)}m`
     : `±${Math.round(eventWindowMs / 1000 / 2)}s`
 
   return html`
-    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-3 py-2 shadow-[var(--shadow-1)]" role="status" aria-live="polite" aria-label="커서 위치 메트릭 요약">
-      <div class="mb-1.5 flex items-center justify-between">
-        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent-fg font-semibold">cursor</span>
-        <span class="text-2xs font-mono text-text-strong">
-          ${new Date(cursor.ts).toLocaleTimeString()}
-        </span>
-      </div>
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1">
-        <${Row} label=${`이벤트 (${windowLabel})`} value=${totalEvents} />
-        <${Row}
-          label=${`도구 호출 (${windowLabel})`}
-          value=${toolFailures > 0 ? `${toolCalls} / ${toolFailures} 실패` : toolCalls}
-          tone=${toolFailures > 0 ? 'warn' : 'neutral'}
-        />
-        <${Row}
-          label="성공률 (최근 hour)"
-          value=${trendPoint != null ? `${trendPoint.success_rate.toFixed(1)}%` : '-'}
-          tone=${successRateTone}
-        />
-        <${Row}
-          label="최근 호출 건수"
-          value=${trendPoint != null ? trendPoint.calls : '-'}
-        />
-      </div>
+    <div class="ob-readout" role="status" aria-live="polite" aria-label="커서 위치 메트릭 요약">
+      <span class="ia-k">Cross-signal readout</span>
+      <span class="mono">
+        ${new Date(cursor.ts).toLocaleTimeString()}
+        · 이벤트 ${totalEvents} (${windowLabel})
+        · 도구 호출 ${toolCalls}${toolFailures > 0 ? ` / ${toolFailures} 실패` : ''}
+        · 성공률 ${trendPoint != null ? `${trendPoint.success_rate.toFixed(1)}%` : '—'}
+        · 최근 호출 ${trendPoint != null ? trendPoint.calls : '—'}
+      </span>
     </div>
   `
 }

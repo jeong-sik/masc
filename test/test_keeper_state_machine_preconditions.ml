@@ -85,7 +85,7 @@ let all_events : SM.event list =
   ; SM.Compaction_completed
   ; SM.Compaction_failed { reason = "probe" }
   ; SM.Handoff_started
-  ; SM.Handoff_completed { new_trace_id = "trace"; generation = 1 }
+  ; SM.Handoff_completed { new_trace_id = "trace" }
   ; SM.Handoff_failed { reason = "probe" }
   ; SM.Operator_pause
   ; SM.Operator_resume

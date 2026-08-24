@@ -71,17 +71,6 @@ let canonical_keeper_name raw_name =
       if Keeper_config.validate_name trimmed then Some trimmed
       else canonical_keeper_name_from_agent_name trimmed
 
-let explicit_keeper_name raw_name =
-  let trimmed = String.trim raw_name in
-  if trimmed = "" then None
-  else
-    match strip_keeper_prefix trimmed with
-    | Some candidate when Keeper_config.validate_name candidate ->
-      Some candidate
-    | Some _ -> None
-    | None ->
-      if Keeper_config.validate_name trimmed then Some trimmed else None
-
 (* RFC-0232 §3.4 — structural keeper identity.  [of_string] is the single
    parse boundary: it folds case, then runs the same canonicalizers the
    legacy token-set expansion used, with [canonical_keeper_name_from_agent_name]
@@ -168,12 +157,13 @@ let strip_nickname_once name =
     | _ -> name
   else name
 
-let keeper_prompt_path_for ~base_path keeper_name =
+(* The TOML declaration is the whole keeper setup, so its presence is what
+   makes a keeper real. The external prompt file this probed was the Persona
+   loader's (#19978); Persona was hard cut in #27048. *)
+let keeper_declaration_path_for ~base_path keeper_name =
   Filename.concat
-    (Filename.concat
-       (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
-       keeper_name)
-    "AGENT.md"
+    (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    (keeper_name ^ ".toml")
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
     ?(check_keeper = false) () :
@@ -188,7 +178,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
              {
                input = input_agent_name;
                resolved = trimmed;
-               searched = keeper_prompt_path_for ~base_path trimmed;
+               searched = keeper_declaration_path_for ~base_path trimmed;
              })
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
@@ -201,7 +191,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
         let keeper_check () =
           if not check_keeper then Ok ()
           else
-            let path = keeper_prompt_path_for ~base_path keeper_name in
+            let path = keeper_declaration_path_for ~base_path keeper_name in
             if Sys.file_exists path then Ok ()
             else
               Error
@@ -216,23 +206,3 @@ type parsed_identity = {
   trace_id : string option;
 }
 
-let parse_json_identity json =
-  let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-  let trace_id = Safe_ops.json_string_opt "trace_id" json in
-  let raw_keeper_name =
-    match Safe_ops.json_string_opt "keeper_name" json with
-    | Some v when String.trim v <> "" -> Some v
-    | _ -> Safe_ops.json_string_opt "name" json
-  in
-  let keeper_name =
-    match raw_keeper_name with
-    | Some value when String.trim value <> "" ->
-        (match explicit_keeper_name value with
-         | Some name -> name
-         | None -> String.trim value)
-    | _ ->
-        (match canonical_keeper_name_from_agent_name agent_name with
-         | Some name -> name
-         | None -> String.trim agent_name)
-  in
-  { keeper_name; agent_name; trace_id }

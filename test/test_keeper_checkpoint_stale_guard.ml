@@ -76,12 +76,6 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     working_context = None;
   }
 
-let with_generation generation (checkpoint : Agent_core.Checkpoint.t) =
-  let context = Agent_core.Context.copy ~eio:false checkpoint.context in
-  Agent_core.Context.set_scoped context Agent_core.Context.Session
-    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
-  { checkpoint with context }
-
 let save_ok ~session_dir ckpt label =
   match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ckpt with
   | Ok _ -> ()
@@ -110,7 +104,6 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       ~base_dir
       ~runtime_id:"unconfigured-test-runtime"
       ~shared_context
-      ~generation:7
       ()
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
@@ -122,14 +115,8 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       ~context:run_context.shared_context
       ()
   in
-  let checkpoint = Agent_core.Agent.checkpoint agent in
-  match
-    Agent_core.Context.get_scoped checkpoint.context Agent_core.Context.Session
-      Keeper_checkpoint_store.keeper_generation_context_key
-  with
-  | Some (`Int generation) ->
-    check int "AGENT_CORE checkpoint carries current keeper generation" 7 generation
-  | _ -> fail "AGENT_CORE checkpoint omitted the bound keeper generation"
+  let (_ : Agent_core.Checkpoint.t) = Agent_core.Agent.checkpoint agent in
+  ()
 
 let test_forward_equal_and_stale () =
   Eio_main.run @@ fun env ->
@@ -491,8 +478,7 @@ let with_exact_source_fixture ~session_id f =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
-       |> with_generation 3)
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source")
       "exact source seed save";
     let source_ref =
       match
@@ -509,8 +495,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-exact-cas" in
     save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
-       |> with_generation 3)
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source")
       "CAS seed save";
     let source_ref =
       match
@@ -530,8 +515,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
           Atomic.set observed_ref (Some installed_ref))
         ~session_dir
         ~expected_source_ref:source_ref
-        (make_checkpoint ~session_id ~turn_count:8 ~marker
-         |> with_generation 3)
+        (make_checkpoint ~session_id ~turn_count:8 ~marker)
     in
     let left =
       Domain.spawn (fun () -> "left", writer "left" left_observed left_ref)
@@ -591,8 +575,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-cas-watermark" in
     save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
-       |> with_generation 3)
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source")
       "CAS watermark seed save";
     let source_ref =
       match
@@ -619,8 +602,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
          ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
          ~session_dir
          ~expected_source_ref:source_ref
-         (make_checkpoint ~session_id ~turn_count:9 ~marker:"target"
-          |> with_generation 3)
+         (make_checkpoint ~session_id ~turn_count:9 ~marker:"target")
      with
      | Keeper_checkpoint_store.Installed installed ->
        check int "release-failure observer remains at-most-once" 1 !observer_count;
@@ -666,7 +648,6 @@ let test_post_rename_durability_unknown_is_installed () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let candidate =
       make_checkpoint ~session_id ~turn_count:9 ~marker:"post-rename"
-      |> with_generation 3
     in
     let durability_error =
       { Keeper_fs.renamed = true
@@ -730,7 +711,6 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let candidate =
       make_checkpoint ~session_id ~turn_count:9 ~marker:"pre-rename"
-      |> with_generation 3
     in
     let write_error =
       { Keeper_fs.renamed = false
@@ -792,8 +772,7 @@ let test_release_failure_preserves_not_installed_cause () =
         Keeper_checkpoint_store.save_agent_core_if_source
           ~session_dir
           ~expected_source_ref:source_ref
-          (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced"
-           |> with_generation 3)
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced")
       with
       | Keeper_checkpoint_store.Installed installed -> installed.installed_ref
       | Keeper_checkpoint_store.Not_installed _ ->
@@ -817,8 +796,7 @@ let test_release_failure_preserves_not_installed_cause () =
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
         ~expected_source_ref:source_ref
-        (make_checkpoint ~session_id ~turn_count:10 ~marker:"stale-source"
-         |> with_generation 3)
+        (make_checkpoint ~session_id ~turn_count:10 ~marker:"stale-source")
     with
     | Keeper_checkpoint_store.Installed _ ->
       fail "release failure changed a source mismatch into Installed"
@@ -861,8 +839,7 @@ let test_acquire_failure_prevents_lock_body () =
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
         ~expected_source_ref:source_ref
-        (make_checkpoint ~session_id ~turn_count:9 ~marker:"not-admitted"
-         |> with_generation 3)
+        (make_checkpoint ~session_id ~turn_count:9 ~marker:"not-admitted")
     with
     | Keeper_checkpoint_store.Installed _ ->
       fail "lock acquisition failure admitted the checkpoint body"
@@ -890,8 +867,7 @@ let test_commit_observer_failure_is_installed () =
             failwith "injected commit observer failure")
           ~session_dir
           ~expected_source_ref:source_ref
-          (make_checkpoint ~session_id ~turn_count:9 ~marker:"observer-failure"
-           |> with_generation 3))
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"observer-failure"))
     in
     match outcome with
     | Keeper_checkpoint_store.Not_installed _ ->
@@ -922,8 +898,7 @@ let test_post_commit_unwind_is_installed () =
           ~on_checkpoint_commit_observer:(fun _ -> ())
           ~session_dir
           ~expected_source_ref:source_ref
-          (make_checkpoint ~session_id ~turn_count:9 ~marker:"post-commit-unwind"
-           |> with_generation 3))
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"post-commit-unwind"))
     in
     match outcome with
     | Keeper_checkpoint_store.Not_installed _ ->
@@ -943,26 +918,12 @@ let test_post_commit_unwind_is_installed () =
       | _ -> fail "post-commit unwind was not preserved as auxiliary")
 ;;
 
-let test_checkpoint_ref_requires_generation () =
-  let session_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let session_id = "sess-ref-generation" in
-    save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:1 ~marker:"missing-generation")
-      "generation-less seed";
-    match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
-    | Error
-        (Keeper_checkpoint_store.Ref_identity_invalid
-           Keeper_checkpoint_store.Generation_missing) -> ()
-    | _ -> fail "generation-less checkpoint acquired an exact ref")
-
 let test_exact_snapshot_preserves_locked_canonical_bytes () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-exact-snapshot" in
     save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:4 ~marker:"exact"
-       |> with_generation 2)
+      (make_checkpoint ~session_id ~turn_count:4 ~marker:"exact")
       "exact snapshot seed";
     let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
     let expected_bytes =
@@ -1040,8 +1001,6 @@ let () =
             test_commit_observer_failure_is_installed;
           test_case "post-commit unwind stays installed" `Quick
             test_post_commit_unwind_is_installed;
-          test_case "checkpoint refs require keeper generation" `Quick
-            test_checkpoint_ref_requires_generation;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
         ] );

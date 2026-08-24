@@ -389,9 +389,9 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
 (* Neutral projection of one keeper chat line for the timeline. The chat
    store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
    and this tool module must not reference it (RFC-0194 §3 tool -> keeper
-   boundary). So a keeper-aware caller reads the store, drops tool rows and
-   rows without a timestamp, and passes the surviving user/assistant lines
-   in as [chat_line] values via [build_timeline]'s [load_chat]. This module
+   boundary). So a keeper-aware caller reads the store, drops tool rows, and
+   passes the surviving user/assistant lines in as [chat_line] values via
+   [build_timeline]'s [load_chat]. This module
    only maps that neutral data into timeline events. *)
 type chat_line = {
   cl_role : string;  (** "user" | "assistant" *)
@@ -656,10 +656,11 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
   =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
-    Tool_result.make_err
+    error_result_typed
       ~tool_name
-      ~class_:Tool_result.Workflow_rejection
       ~start_time
+      ~failure_class:Tool_result.Workflow_rejection
+      ~code:Validation_error
       "agent_name is required"
   else
     let since_hours = get_float args "since_hours" 24.0 in

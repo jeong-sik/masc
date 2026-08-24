@@ -144,16 +144,6 @@ let image_block_json ~url ~caption =
     ; ("alt_text", `String alt_text)
     ]
 
-(* Plain mrkdwn section for notices that have no URL (e.g. an attachment
-   whose stored metadata failed the typed decode — the surface must name it,
-   not drop it). Same redact/escape/truncate pipeline as the other builders. *)
-let section_block_json ~text =
-  let text = redact text |> escape_mrkdwn_text |> truncate_block_text in
-  `Assoc
-    [ ("type", `String "section")
-    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
-    ]
-
 let audio_block_json ~base_url ~token ~message_text =
   let url = public_voice_audio_url ?base_url token |> escape_mrkdwn_text in
   let message_text = redact message_text |> escape_mrkdwn_text in
@@ -548,6 +538,7 @@ let adapter_loop_with_transport
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let external_effect_cleanup_result = ref (Ok ()) in
   let activity_error_logged = ref false in
   let last_activity_status = ref None in
@@ -588,7 +579,12 @@ let adapter_loop_with_transport
       loop ~acc_text ~acc_blocks ~run_id_opt ~message_id ~last_edit_time
         ~last_edited_text
     in
-    match Keeper_chat_events.subscribe events with
+    let event = Keeper_chat_events.subscribe events in
+    (* Tool activity shows here as a transient "사용 중" line that the next one
+       overwrites; the trail keeps the same events so the delivered reply can
+       still name the work. See keeper_chat_tool_trail.mli. *)
+    Keeper_chat_tool_trail.on_event !tool_trail event;
+    match event with
     | Text_delta text ->
         let acc_text = acc_text ^ text in
         let patch_content = stream_content acc_text in
@@ -642,23 +638,28 @@ let adapter_loop_with_transport
         if !external_effect_completed
         then on_send_result !external_effect_cleanup_result
         else begin
+          let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
           let blocks =
-            final_message_blocks ~content:acc_text
+            final_message_blocks ~content:delivered_text
               ~event_blocks:(List.rev acc_blocks)
           in
-          if String.length acc_text > 0 || List.length blocks > 0
+          (* [delivered_text] is what goes out — the accumulated text plus the
+             tool trail. Asking about [acc_text] asked about a different value:
+             a tool-only turn has no assistant text but does have a trail, and
+             settled Error while the turn layer settled Delivered (#26406). *)
+          if String.length delivered_text > 0 || List.length blocks > 0
           then
             let result =
               match streaming_transport, message_id with
               | Some (_, _, edit_final, _), Some message_id ->
-                let final_content = final_stream_content acc_text in
+                let final_content = final_stream_content delivered_text in
                 if final_content = last_edited_text && blocks = []
                 then Ok ()
                 else begin
                   pace_edit last_edit_time;
-                  edit_final ~message_id ~content:acc_text ~blocks
+                  edit_final ~message_id ~content:delivered_text ~blocks
                 end
-              | _ -> send_blocks ~content:acc_text ~blocks
+              | _ -> send_blocks ~content:delivered_text ~blocks
             in
             on_send_result result
           else
@@ -688,6 +689,9 @@ let adapter_loop_with_transport
         ()
     | Run_started { run_id; thread_id = _ } ->
         update_activity "답변을 준비하고 있어요…";
+        (* A new run's work is its own; the previous run's trail went out with
+           the previous run's reply. *)
+        tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
           ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
     | Text_message_start { message_id = _; role = _ } ->
@@ -724,7 +728,14 @@ let adapter_loop_with_transport
     | Tool_call_start { tool_call_name; _ } ->
         update_activity (Printf.sprintf "🔧 %s 사용 중…" tool_call_name);
         continue ()
+    (* An approval prompt has no operator on a connector channel: nobody is
+       sitting there to answer y/n, and posting the question would ask a room
+       to decide something it cannot. Approval is offered on the operator's
+       own surface, so this never arrives here -- it is spelled out rather
+       than left to a catch-all so a future surface has to make the same
+       decision deliberately. *)
     | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Tool_approval_requested _ | Tool_approval_settled _
     | Tool_result_ready _ ->
         continue ()
     | Link_block { url; title; description; image = _ } ->

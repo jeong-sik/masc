@@ -37,74 +37,6 @@ let field_to_json (field : Agent_core.Log.field) : string * Yojson.Safe.t =
   | Agent_core.Log.Secret (k, _) -> (k, `String "[REDACTED]")
   | field -> Agent_core.Log.field_to_json field
 
-let details_of_fields (fields : Agent_core.Log.field list)
-    : (string * Yojson.Safe.t) list =
-  List.map field_to_json fields
-
-let json_stringish = function
-  | `String s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | `Int n -> Some (string_of_int n)
-  | `Float f when Float.is_finite f ->
-      Some
-        (if Float.equal f (Float.of_int (int_of_float f)) then
-           string_of_int (int_of_float f)
-         else
-           string_of_float f)
-  | `Bool b -> Some (string_of_bool b)
-  | _ -> None
-
-let first_detail_label details keys =
-  let rec find_key = function
-    | [] -> None
-    | key :: rest -> (
-        match List.assoc_opt key details with
-        | Some value -> (
-            match json_stringish value with
-            | Some _ as label -> label
-            | None -> find_key rest)
-        | None -> find_key rest)
-  in
-  find_key keys
-
-let replace_first_placeholder message value =
-  let len = String.length message in
-  let rec loop idx =
-    if idx + 1 >= len then
-      message
-    else if message.[idx] = '%'
-            && (message.[idx + 1] = 's' || message.[idx + 1] = 'd')
-    then
-      String.sub message 0 idx ^ value
-      ^ String.sub message (idx + 2) (len - idx - 2)
-    else
-      loop (idx + 1)
-  in
-  loop 0
-
-let interpolate_printf_message message details =
-  if not (String.contains message '%') then
-    message
-  else
-    let replacements =
-      [
-        first_detail_label details [ "tool_name"; "tool" ];
-        first_detail_label details [ "fixes" ];
-        first_detail_label details [ "count" ];
-        first_detail_label details [ "client_name" ];
-        first_detail_label details [ "phase" ];
-        first_detail_label details [ "request_id" ];
-        first_detail_label details [ "session_id" ];
-      ]
-      |> List.filter_map Fun.id
-    in
-    List.fold_left replace_first_placeholder message replacements
-
-let render_record_message (record : Agent_core.Log.record) : string =
-  let details = details_of_fields record.fields in
-  interpolate_printf_message record.message details
-
 let level_to_masc (level : Agent_core.Log.level) : Log.level =
   match level with
   | Debug -> Log.Debug
@@ -112,46 +44,80 @@ let level_to_masc (level : Agent_core.Log.level) : Log.level =
   | Warn -> Log.Warn
   | Error -> Log.Error
 
-let field_value_to_human (json : Yojson.Safe.t) : string option =
+(* Rendered-line budget.  Every field also rides in [details] as JSON, so
+   these caps only bound the human mirror; the record itself is never
+   trimmed. *)
+let max_rendered_value_bytes = 160
+let max_rendered_fields = 16
+
+(* Truncate on a UTF-8 character boundary and say so, so a cut value is
+   never mistaken for the whole value.  Continuation bytes are 0b10xxxxxx;
+   walking back off them keeps the prefix decodable. *)
+let truncate_value value =
+  let len = String.length value in
+  if len <= max_rendered_value_bytes then value
+  else begin
+    let cut = ref max_rendered_value_bytes in
+    while !cut > 0 && Char.code value.[!cut] land 0xC0 = 0x80 do
+      decr cut
+    done;
+    Printf.sprintf "%s...(%dB)" (String.sub value 0 !cut) len
+  end
+
+(* A field the producer attached is rendered whatever its value: a key with a
+   null value is a statement that the value is unset, and dropping it from the
+   line would be the same omission this renderer exists to stop. Total, so a
+   new [Agent_core.Log.field] arm has to be given a rendering here. *)
+let render_scalar (json : Yojson.Safe.t) : string =
   match json with
-  | `String value when String.trim value <> "" -> Some value
-  | `Int value -> Some (string_of_int value)
-  | `Intlit value -> Some value
-  | `Float value -> Some (Printf.sprintf "%.3f" value)
-  | `Bool value -> Some (string_of_bool value)
-  | _ -> None
+  | `Null -> "null"
+  | `String value -> value
+  | `Int value -> string_of_int value
+  | `Intlit value -> value
+  | `Float value -> Printf.sprintf "%.3f" value
+  | `Bool value -> string_of_bool value
+  | composite -> Yojson.Safe.to_string composite
 
-let preferred_summary_keys message =
-  match message with
-  | "turn completed" | "turn started" ->
-      [ "turn"; "turn_duration_sec"; "elapsed_run_sec"; "model"; "stop" ]
-  | "agent completed" | "agent started" ->
-      [ "agent_name"; "agent"; "task_id"; "elapsed_s"; "input_tokens"; "output_tokens" ]
-  | "tool completed" | "tool called" ->
-      [ "agent_name"; "agent"; "tool_name"; "turn" ]
-  | _ ->
-      [ "agent_name"; "agent"; "task_id"; "turn"; "tool_name"; "model"; "stop" ]
+(* Quote whenever the raw form would break the [key=value] reading a log
+   line invites: spaces, quotes, or an empty value. *)
+let render_pair (key, json) =
+  let value = truncate_value (render_scalar json) in
+  let needs_quoting =
+    String.equal value ""
+    || String.exists (fun c -> c = ' ' || c = '"' || c = '\n' || c = '\t') value
+  in
+  Printf.sprintf
+    "%s=%s"
+    key
+    (if needs_quoting then Printf.sprintf "%S" value else value)
 
-let summarize_fields ~message (fields : Agent_core.Log.field list) : string list =
-  let assoc = List.map field_to_json fields in
-  preferred_summary_keys message
-  |> List.filter_map (fun key ->
-       match List.assoc_opt key assoc with
-       | None -> None
-       | Some value -> (
-           match field_value_to_human value with
-           | Some rendered -> Some (Printf.sprintf "%s=%s" key rendered)
-           | None -> None))
+(* The human line renders every field the producer attached, in the order it
+   attached them.
 
-let render_message_with_summary (record : Agent_core.Log.record) =
-  let base_message = render_record_message record in
-  if not (String.equal base_message record.message) then
-    base_message
-  else
-    match summarize_fields ~message:record.message record.fields with
-    | [] -> base_message
-    | summary ->
-        Printf.sprintf "%s %s" base_message (String.concat " " summary)
+   The projection this replaced kept a per-message allowlist of keys and fell
+   back to a fixed guess for anything it did not recognise, which made the
+   line lie by omission: [turn checkpoint persisted] carries [stage], [turn]
+   and [messages] but only [turn] was in the fallback list, so the three
+   checkpoint stages of one turn rendered as three identical lines (1,289 of
+   them in the two hours to 2026-08-22T02:03Z); [pipeline stage failed]
+   carries [stage] and [error] and rendered with neither; [tool not found]
+   rendered without the tool name.  Selecting keys by matching on the message
+   text also meant every new producer message silently fell into the guess. *)
+let render_message (record : Agent_core.Log.record) : string =
+  let rendered =
+    List.filteri (fun index _ -> index < max_rendered_fields) record.fields
+    |> List.map field_to_json
+    |> List.map render_pair
+  in
+  let omitted = List.length record.fields - max_rendered_fields in
+  let parts =
+    if omitted > 0
+    then rendered @ [ Printf.sprintf "(+%d more in details)" omitted ]
+    else rendered
+  in
+  match parts with
+  | [] -> record.message
+  | parts -> Printf.sprintf "%s %s" record.message (String.concat " " parts)
 
 (** Build the sink function.  Prefix the module name with ["agent_core:"] so a
     record emitted by [Agent_core.Log.create ~module_name:"agent"] lands
@@ -159,7 +125,7 @@ let render_message_with_summary (record : Agent_core.Log.record) =
     masc module called "agent". *)
 let make_sink () : Agent_core.Log.sink =
  fun record ->
-  let message = render_message_with_summary record in
+  let message = render_message record in
   let details =
     match record.fields with
     | [] -> None

@@ -80,14 +80,27 @@ let format_fleet_messages
       message.fleet_content)
   |> String.concat "\n"
 
-let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : string =
-  turns
-  |> List.map (fun (turn : Keeper_own_recent_actions.turn) ->
-    turn.calls
+(* The argument object rides on a refusal and not on a success, for the reason
+   this module already gives for outputs: a call that landed is a fact, and
+   "the returned body is where the bytes are". The request body is the same
+   kind of bulk. What a keeper must not repeat is a refused call, and to
+   recognise that one it has to read what it sent.
+
+   The two are not the same size. Keeper [analyst], 2026-08-23: 1,312 calls
+   succeeded carrying 538,743 bytes of arguments, 20 were refused carrying
+   6,417. Replaying the successes put 120,951 bytes of this section into a
+   131,072-byte model input and the keeper refused every turn for eight hours.
+
+   This is a narrower section, not a truncated one -- no call disappears and
+   no argument is cut mid-string. A keeper that needs the arguments of a call
+   that succeeded is asking what it did, which is what the board, the task and
+   the goal sections answer. *)
+let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =
+  turn.calls
     |> List.map (fun (call : Keeper_own_recent_actions.call) ->
       match call.outcome with
       | Keeper_own_recent_actions.Ok_call ->
-        Printf.sprintf "- [turn %d] %s %s -> ok" turn.turn_id call.tool call.input
+        Printf.sprintf "- [turn %d] %s -> ok" turn.turn_id call.tool
       | Keeper_own_recent_actions.Failed_call None ->
         Printf.sprintf "- [turn %d] %s %s -> REJECTED" turn.turn_id call.tool call.input
       | Keeper_own_recent_actions.Failed_call (Some detail) ->
@@ -97,9 +110,9 @@ let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : st
           call.tool
           call.input
           detail)
-    |> String.concat "\n")
   |> String.concat "\n"
 ;;
+
 
 (** Format active goals into a prompt section. *)
 let format_goals (goal_ids : string list) : string =
@@ -136,25 +149,10 @@ let format_goal_summaries (summaries : goal_summary list) : string =
          | Some Goal_phase.Verifying ->
            base ^ " [증명 대기 중 — verifier가 proof를 검토 중]"
          | Some
-             ( Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
-             | Goal_phase.Completed | Goal_phase.Dropped )
+             ( Goal_phase.Executing | Goal_phase.Completed
+             | Goal_phase.Dropped )
          | None -> base)
        summaries)
-
-let format_goal_summaries_for_active_goals
-    ~(active_goal_ids : string list)
-    (summaries : goal_summary list) : string =
-  let summary_for goal_id =
-    match
-      List.find_opt
-        (fun (s : goal_summary) -> String.equal s.summary_goal_id goal_id)
-        summaries
-    with
-    | Some summary -> summary
-    | None ->
-      { summary_goal_id = goal_id; summary_title = ""; summary_phase = None }
-  in
-  format_goal_summaries (List.map summary_for active_goal_ids)
 
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
@@ -267,12 +265,10 @@ let board_event_kind_label = function
   | Keeper_world_observation.Board_post_created -> "post_created"
   | Keeper_world_observation.Board_comment_added -> "comment_added"
   | Keeper_world_observation.Board_reaction_changed _ -> "reaction_changed"
+  | Keeper_world_observation.Board_vote_cast _ -> "vote_cast"
   | Keeper_world_observation.Fusion_completed -> "fusion_completed"
   | Keeper_world_observation.Schedule_due _ -> "schedule_due"
   | Keeper_world_observation.External_attention _ -> "external_attention"
-  | Keeper_world_observation.Goal_assigned -> "goal_assigned"
-  | Keeper_world_observation.Goal_reconciliation_ready ->
-    "goal_reconciliation_ready"
   | Keeper_world_observation.Completion_authority_rejected _ ->
     "completion_authority_rejected"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
@@ -379,9 +375,23 @@ let board_reaction_fields
   ]
 ;;
 
+(* Who voted which way on what. [author] on the row is already the voter
+   (the signal's actor); [voter] is repeated here so the vote row reads on its
+   own, the way the reaction row carries [user]. *)
+let board_vote_fields (vote : Board_dispatch.board_vote_change) =
+  [ "vote", Board.vote_direction_to_string vote.direction
+  ; ( "target"
+    , match vote.target with
+      | Board_dispatch.Vote_on_post post_id -> "post:" ^ post_id
+      | Board_dispatch.Vote_on_comment comment_id -> "comment:" ^ comment_id )
+  ; "voter", vote.voter
+  ]
+;;
+
 let board_event_note_fields = function
   | Keeper_world_observation.Board_reaction_changed reaction ->
     board_reaction_fields reaction
+  | Keeper_world_observation.Board_vote_cast vote -> board_vote_fields vote
   | Keeper_world_observation.External_attention observation ->
     [ "external_origin"
     , Keeper_counterpart_observation.origin_to_string observation.origin
@@ -402,8 +412,6 @@ let board_event_note_fields = function
   | Keeper_world_observation.Board_comment_added
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
-  | Keeper_world_observation.Goal_assigned
-  | Keeper_world_observation.Goal_reconciliation_ready
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_cancelled _ -> []
 ;;
@@ -572,10 +580,9 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
-         | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _ -> ())
       events;
@@ -605,11 +612,10 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
-         | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Task_cancelled _ -> None)
       events
   in
@@ -657,11 +663,10 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Board_post_created
          | Keeper_world_observation.Board_comment_added
          | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Goal_assigned
-         | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Completion_authority_rejected _ -> None)
       events
   in
@@ -764,10 +769,8 @@ let format_own_board_post_text (post : Board.post) : string =
     ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
       (* What the Board did with it. The record carries these; the row dropped
          them, so a Keeper reading its own posts could not tell an answered one
-         from an ignored one. The prompt tells a Keeper that a vote or comment
-         is how agreement reaches whoever posted, and votes reach no wake path
-         at all — [Board_dispatch.vote] emits only the dashboard SSE event, not
-         a board signal — so this row is where the response becomes visible.
+         from an ignored one. A new vote also arrives as a [vote_cast] Board
+         Activity row the moment it lands; this row is the running total.
          Counts, not advice: the rows stay data. *)
     ; "replies", string_of_int post.reply_count
     ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down
@@ -846,115 +849,23 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
 ;;
 
-(* Titles and phases for the goals the world observation already narrowed to
-   the ones a keeper can still progress. [meta.active_goal_ids] records
-   assignment and is never cleared when a goal reaches a terminal phase, so
-   this resolves the same phase question the observation does — a keeper must
-   not be handed a Completed goal under a heading that calls it available. The
-   phase rides along so the Active Goals block can annotate a [Verifying] goal
-   (RFC-0387 stage 2: the gate must not make the goal read as ordinary open
-   work, nor disappear — review P0-1). *)
-let active_goal_summaries
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-  =
+(* Titles and phases for the Goals that are still open, read from the store
+   under the same phase predicate the world observation uses. The phase rides
+   along so the Active Goals block can annotate a [Verifying] goal (RFC-0387
+   stage 2: the gate must not make the goal read as ordinary open work, nor
+   disappear — review P0-1). *)
+let active_goal_summaries_of_store ~(config : Workspace.config) =
   List.filter_map
-    (fun goal_id ->
-       match Goal_store.get_goal config ~goal_id with
-       | Some { Goal_store.title; phase; _ } ->
-         if Goal_phase.admits_self_directed_progress phase
-         then
-           Some
-             { summary_goal_id = goal_id
-             ; summary_title = title
-             ; summary_phase = Some phase
-             }
-         else None
-       | None ->
+    (fun (goal : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress goal.phase
+       then
          Some
-           { summary_goal_id = goal_id
-           ; summary_title = ""
-           ; summary_phase = None
-           })
-    meta.active_goal_ids
-;;
-
-(* RFC-0362 §4.3 — the consumers of [goal.owner].
-
-   A Goal still executing with no Task linked to it is a fact somebody is
-   positioned to act on. Which somebody depends on [owner], and that is the only
-   thing the two callers below disagree about, so the walk is shared: same phase
-   filter, same task index, same empty case.
-
-   It is stated, not demanded: no gate, no cap, no required action, and no empty
-   case is named (#26901 — naming the empty branch is what produced the flood it
-   replaced).
-
-   The 0-of-10 measurement in RFC-0362 §1 is exactly this predicate over the
-   live store, so the RFC's acceptance criterion reads off these lists moving. *)
-let executing_goals_without_tasks ~(config : Workspace.config) ~owner_matches =
-  let goals =
-    List.filter
-      (fun (g : Goal_store.goal) -> owner_matches g.owner)
-      (Goal_store.list_goals config ())
-  in
-  match goals with
-  | [] -> []
-  | _ :: _ ->
-    let tasks = Workspace.get_tasks_raw config in
-    let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
-    List.filter
-      (fun (g : Goal_store.goal) ->
-         (* Deliberately [Executing] only, not [admits_self_directed_progress]:
-            that predicate also admits [Verifying] (RFC-0387 stage 2), but a
-            goal awaiting its proof verdict is not "work with no Task yet" —
-            nudging the keeper to start new tasks on it would race the gate. *)
-         (match g.phase with
-          | Goal_phase.Executing -> true
-          | Goal_phase.Blocked
-          | Goal_phase.Paused
-          | Goal_phase.Verifying
-          | Goal_phase.Completed
-          | Goal_phase.Dropped -> false)
-         &&
-         match Hashtbl.find_opt index g.id with
-         | Some (_ :: _) -> false
-         | None | Some [] -> true)
-      goals
-;;
-
-let owned_executing_goals_without_tasks
-      ~(config : Workspace.config)
-      ~(keeper_name : string)
-  =
-  executing_goals_without_tasks ~config ~owner_matches:(function
-    | Some owner -> String.equal owner keeper_name
-    | None -> false)
-  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title)
-;;
-
-(* RFC-0362 §6 Q2, which the RFC left open: "Should [phase = executing] with
-   [owner = None] be surfaced? It is the exact state of all ten live Goals and
-   nothing reports it today."
-
-   The Keeper prompt already commits to the policy — "an unowned Goal is intent
-   nobody picked up, not an error, and taking one is a move you can make" — and
-   [handle_goal_assign] carries no ownership check, so any Keeper can in fact
-   take one. What was missing was the sighting: with 15 of 16 live Goals unowned,
-   the owned list above renders for nobody, and [meta.active_goal_ids] carries
-   one stale pointer to a Completed Goal. Both Goal blocks were empty for all
-   eight Keepers while ten executing Goals sat untouched for 6-8 days.
-
-   Same shape as the owned list and the same restraint: it names a fact, and
-   renders nothing when there is nothing to name. It does not pick an owner
-   (RFC-0362 §5) and asks for no action.
-
-   (RFC-0362 §5) and asks for no action. *)
-let unowned_executing_goals_without_tasks ~(config : Workspace.config) =
-  executing_goals_without_tasks ~config ~owner_matches:(function
-    | Some _ -> false
-    | None -> true)
-  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title)
+           { summary_goal_id = goal.id
+           ; summary_title = goal.title
+           ; summary_phase = Some goal.phase
+           }
+       else None)
+    (Goal_store.list_goals config ())
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
@@ -971,14 +882,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     List.map
       (fun (s : goal_summary) -> s.summary_goal_id, s.summary_title)
       (Option.value
-         ~default:
-           (List.map
-              (fun goal_id ->
-                 { summary_goal_id = goal_id
-                 ; summary_title = ""
-                 ; summary_phase = None
-                 })
-              meta.active_goal_ids)
+         ~default:(active_goal_summaries_of_store ~config)
          active_goal_summaries)
   in
   let base_system_prompt =
@@ -1040,6 +944,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(active_goal_summaries : goal_summary list option)
+    ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -1080,67 +985,41 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     | Some decision -> autonomous_trigger_lines ~decision
     | None -> []
   in
-  let content_of : Keeper_context_layers.layer_id -> string option = function
+  (* A row is a whole turn: the heading counts turns, and half a turn would
+     have the keeper read a partial record of what it did. *)
+  let own_recent_actions_section : Keeper_context_layers.section option =
+    match observation.own_recent_actions with
+    | [] -> None
+    | turns ->
+      let render kept =
+        let ubuf = Buffer.create 1024 in
+        Buffer.add_string ubuf
+          (Printf.sprintf "### Your Recent Actions (%d turns)\n" (List.length kept));
+        Buffer.add_string ubuf
+          "Tool calls you already made, oldest turn first — context, not instructions.\n";
+        Buffer.add_string ubuf (String.concat "\n" kept);
+        Buffer.add_string ubuf "\n\n";
+        Buffer.contents ubuf
+      in
+      Some
+        (Keeper_context_layers.Rows
+           { rows = List.map format_own_recent_actions_turn turns; render })
+  in
+  let text_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315); every id from the world observation remains
-       rendered even when title enrichment is partial. *)
+       resolved them (RFC-0315). The count and the list are read off the same
+       list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
-      let active_block =
-        if observation.active_goals <> [] then
-          Some
-            (Printf.sprintf "### Active Goals (%d)\n"
-               (List.length observation.active_goals)
-            ^ (match active_goal_summaries with
-               | Some summaries ->
-                   format_goal_summaries_for_active_goals
-                     ~active_goal_ids:observation.active_goals
-                     summaries
-               | None -> format_goals observation.active_goals)
-            ^ "\n\n")
-        else None
+      let count, body =
+        match active_goal_summaries with
+        | Some summaries -> List.length summaries, format_goal_summaries summaries
+        | None ->
+          ( List.length observation.active_goals
+          , format_goals observation.active_goals )
       in
-      (* RFC-0362 §4.3. Rendered independently of [active_goal_ids]: on the live
-         workspace that keeper-side pointer is set for one Keeper and points at a
-         Completed Goal, which the phase filter above drops, so hanging this off
-         it would show nothing. Ownership lives on the Goal. *)
-      let owned_block =
-        match owned_executing_goals_without_tasks ~config ~keeper_name:meta.name with
-        | [] -> None
-        | goals ->
-          Some
-            (Printf.sprintf
-               "### Goals you own with no Task yet (%d)\n%s\n\n"
-               (List.length goals)
-               (String.concat "\n"
-                  (List.map
-                     (fun (goal_id, title) ->
-                        if String.trim title = ""
-                        then Printf.sprintf "- %s" goal_id
-                        else Printf.sprintf "- %s — %s" goal_id title)
-                     goals)))
-      in
-      (* RFC-0362 §6 Q2. An unowned executing Goal is addressed to whoever reads
-         it, so it is the same fact for every Keeper and rendered to each.
-         Goals no longer nest, so the list is flat. *)
-      let unowned_block =
-        match unowned_executing_goals_without_tasks ~config with
-        | [] -> None
-        | goals ->
-          let line (goal_id, title) =
-            if String.trim title = ""
-            then Printf.sprintf "- %s" goal_id
-            else Printf.sprintf "- %s — %s" goal_id title
-          in
-          Some
-            (Printf.sprintf
-               "### Unowned Goals, no Task yet — taking one is a move you can \
-                make (%d)\n%s\n\n"
-               (List.length goals)
-               (String.concat "\n" (List.map line goals)))
-      in
-      (match List.filter_map Fun.id [ active_block; owned_block; unowned_block ] with
-       | [] -> None
-       | blocks -> Some (String.concat "" blocks))
+      if count = 0
+      then None
+      else Some (Printf.sprintf "### Active Goals (%d)\n" count ^ body ^ "\n\n")
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
@@ -1193,7 +1072,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
            is the set the last turn described. A keeper that concluded "nothing
            actionable" reads "3 unclaimed" the same way whether those are the
            same three tasks or three different ones, so the conclusion outlives
-           whatever made it true. [taskmaster] -- whose instructions are to take
+           whatever made it true. A Keeper instructed to take
            unclaimed work on sight -- repeated one verbatim across every turn of
            a day while its stated reason, that the three were blocked, appeared
            nowhere in the backlog (#27629).
@@ -1254,16 +1133,18 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         then
           Buffer.add_string ubuf
             "- Claimable tasks for this keeper: 0\n";
-        let keeper_or_scope_blocked =
-          max 0
-            (observation.unclaimed_task_count
-             - claimable_task_count)
+        (* The difference is exactly two things: a Todo task still holding a
+           verification verdict, and a Todo task this keeper wrote itself. No
+           goal, tool, or keeper scope narrows the claim pool. *)
+        let unclaimed_not_offered =
+          max 0 (observation.unclaimed_task_count - claimable_task_count)
         in
-        if keeper_or_scope_blocked > 0 then
+        if unclaimed_not_offered > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf
-               "- Blocked by keeper/tool/goal scope: %d\n"
-               keeper_or_scope_blocked);
+               "- Unclaimed but not offered to you (awaiting a verdict, or \
+                authored by you): %d\n"
+               unclaimed_not_offered);
         if observation.failed_task_count > 0 then
           Buffer.add_string ubuf
             (Printf.sprintf
@@ -1377,18 +1258,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
     | Keeper_context_layers.Own_recent_actions ->
-      if observation.own_recent_actions <> [] then (
-        let ubuf = Buffer.create 1024 in
-        Buffer.add_string ubuf
-          (Printf.sprintf "### Your Recent Actions (%d turns)\n"
-             (List.length observation.own_recent_actions));
-        Buffer.add_string ubuf
-          "Tool calls you already made, oldest turn first — context, not instructions.\n";
-        Buffer.add_string ubuf
-          (format_own_recent_actions observation.own_recent_actions);
-        Buffer.add_string ubuf "\n\n";
-        Some (Buffer.contents ubuf))
-      else None
+      Option.map Keeper_context_layers.section_text own_recent_actions_section
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -1401,6 +1271,28 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None
+  in
+  (* Exhaustive rather than a catch-all: a new layer must state whether it
+     renders one indivisible block or rows the budget may withhold, and
+     {!Keeper_context_layers.retention} must agree. A catch-all here would let
+     a layer declare itself trimmable and silently never trim. *)
+  let content_of : Keeper_context_layers.layer_id -> Keeper_context_layers.section option
+    = function
+    | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | ( Keeper_context_layers.Active_goals
+      | Keeper_context_layers.Current_task
+      | Keeper_context_layers.Connected_surfaces
+      | Keeper_context_layers.Namespace_state
+      | Keeper_context_layers.Autonomous_trigger
+      | Keeper_context_layers.Scheduled_automation
+      | Keeper_context_layers.Completion_authority
+      | Keeper_context_layers.Task_cancellations
+      | Keeper_context_layers.Pending_mentions
+      | Keeper_context_layers.Scope_messages
+      | Keeper_context_layers.Own_board_posts
+      | Keeper_context_layers.Board_activity
+      | Keeper_context_layers.Fleet_messages ) as id ->
+      Option.map (fun text -> Keeper_context_layers.Block text) (text_of id)
   in
   (* The frame is injected as ephemeral context. The turn call site passes an
      explicit [world_state_prompt] source to history persistence, so JSONL
@@ -1416,7 +1308,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     "## Current World State\n\
      The runtime assembled the sections below for this turn. You did not \
      retrieve them; call a tool when you need to look something up or act.\n\n"
-    ^ Keeper_context_layers.assemble ~content_of
+    ^ Keeper_context_layers.assemble ?budget_bytes:context_budget_bytes ~content_of ()
   in
   let user_message = effective_autonomous_wake_prompt ?profile_defaults () in
   { system_prompt; world_state; user_message }
@@ -1472,6 +1364,7 @@ let build_prompt
       ~turn_decision
       ~current_task
       ?active_goal_summaries
+      ?context_budget_bytes
       ~observation
       ()
   =
@@ -1483,6 +1376,7 @@ let build_prompt
       ~turn_decision:(Some turn_decision)
       ~current_task
       ?active_goal_summaries
+      ?context_budget_bytes
       ~observation
       ()
   in

@@ -141,6 +141,7 @@ type finalization_evidence =
   }
 
 type supersession =
+  | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string
@@ -165,7 +166,6 @@ type t =
   ; keeper_name : string
   ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
@@ -209,17 +209,6 @@ let requires_admission_fence operation =
   | Cleanup_ready _
   | Reconciliation_required _
   | Blocked _ -> true
-;;
-
-let meta_disposition_to_string = function
-  | Retain_operator_pause -> "retain_operator_pause"
-  | Remove_meta -> "remove_meta"
-;;
-
-let meta_disposition_of_string = function
-  | "retain_operator_pause" -> Ok Retain_operator_pause
-  | "remove_meta" -> Ok Remove_meta
-  | value -> Error (Printf.sprintf "unknown Keeper shutdown meta disposition: %S" value)
 ;;
 
 let cleanup_reason_label = function
@@ -367,6 +356,15 @@ let validate operation =
          | Supervisor_cleanup
          | Dashboard_keeper_purge _ ) as cleanup_reason ->
          Error (Superseded_cleanup_reason_mismatch cleanup_reason))
+    | Superseded (Operator_blocked_purge_released _) ->
+      (* The mirror of the arm above: this release exists only for a purge, so
+         every other intent is as wrong here as a purge is there. *)
+      (match operation.cleanup_intent.reason with
+       | Dashboard_keeper_purge _ -> Ok ()
+       | ( Operator_stop_retain_meta
+         | Operator_stop_remove_meta
+         | Supervisor_cleanup ) as cleanup_reason ->
+         Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
     | Joining_lanes
     | Joined_idle
@@ -445,7 +443,7 @@ let cleanup_reason_equal left right =
 let dashboard_purge_artifact_plan ~keeper_name context =
   let agent_aliases =
     [ context.requested_name; keeper_name; context.agent_name ]
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in
   [ Keeper_metrics_store_artifact
@@ -489,7 +487,6 @@ let immutable_fields_equal left right =
   && String.equal left.keeper_name right.keeper_name
   && lane_ownership_equal left.lane_ownership right.lane_ownership
   && Keeper_id.Trace_id.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
   && String.equal left.actor right.actor
   && cleanup_intent_equal left.cleanup_intent right.cleanup_intent
   && turn_disposition_equal left.turn_disposition right.turn_disposition

@@ -70,6 +70,8 @@ vi.mock('./detail-pane', () => ({
 const cursorPosition = signal<number | null>(null)
 vi.mock('./cursor-store', () => ({
   cursorPosition,
+  setCursorFromEvent: vi.fn(),
+  clearCursor: vi.fn(),
 }))
 
 async function flushUi(): Promise<void> {
@@ -123,6 +125,11 @@ describe('Observatory', () => {
     expect(container.textContent).toContain('metric-track')
     expect(container.textContent).toContain('cross-signal-readout')
     expect(container.textContent).toContain('detail-pane')
+    // design vocabulary pins (keeper-v2 monitor-more)
+    expect(container.querySelector('.ob-ranges')).toBeTruthy()
+    expect(container.querySelector('.ob-ranges .ia-filter.on')).toBeTruthy()
+    expect(container.querySelector('.ob-panel')).toBeTruthy()
+    expect(container.querySelector('.ob-panel .ob-axis')).toBeTruthy()
   }, 30000)
 
   it('ignores view=live route param and renders timeline', async () => {

@@ -1,9 +1,7 @@
 (** Receipt-first [Resume_owner] transaction for a paused Keeper lane. *)
 
 type request =
-  { owner_nonce : int
-  ; operator_operation_id : string
-  }
+  { operator_operation_id : string }
 
 type projection_stage =
   | Durable_meta
@@ -18,18 +16,9 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_transcript_reset_required
   | Registry_owner_missing
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_identity_changed
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Projection_failed of
@@ -57,18 +46,6 @@ type success =
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome
   }
 
-(** What a latched transcript is still worth, decided from its messages alone. *)
-type transcript_recovery =
-  | Transcript_already_dispatchable
-      (** Validates as-is; the latch outlived the defect it recorded. *)
-  | Transcript_closed_open_tail of Agent_core.Types.message list
-      (** Only the deliberately preserved open ToolUse tail was missing; these
-          messages carry the appended typed closers. *)
-  | Transcript_unrecoverable
-      (** Fails to parse. The latch stays, per the [close_open_tail] contract. *)
-
-val classify_transcript : Agent_core.Types.message list -> transcript_recovery
-(** Pure decision behind the resume-time latch re-check. Exposed for tests. *)
 
 val error_to_string : error -> string
 

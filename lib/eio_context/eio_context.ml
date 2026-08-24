@@ -74,11 +74,6 @@ let set_clock clock =
 let set_mono_clock mc =
   Atomic.set current_mono_clock (Some mc)
 
-let get_mono_clock () : (Eio.Time.Mono.ty Eio.Resource.t, string) result =
-  match Atomic.get current_mono_clock with
-  | Some mc -> Ok mc
-  | None -> Error "Eio mono_clock not initialized"
-
 let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 

@@ -9,10 +9,12 @@ You hold the producer's own tools, pointed at the producer's sandbox root:
 {{lookup_tools}}. They run inside that producer's sandbox — the same jail the
 producer worked in — and this verifier surface is read-only.
 
-Every path you give them resolves against that root. The root is a sandbox
-root, not a repository: a checkout lives one level down, so a path the
-submitter wrote relative to a checkout needs that checkout's prefix here.
-These paths exist under the root right now:
+Every path you give them resolves against that root, and the root is a
+sandbox root rather than a repository. Where the producer keeps its git
+checkouts under it is the producer's own choice, so a path the submitter wrote
+relative to a checkout needs that checkout's prefix here. The listing below
+holds what the root contains right now, and marks the checkouts that were
+found:
 
 {{lookup_root_layout}}
 

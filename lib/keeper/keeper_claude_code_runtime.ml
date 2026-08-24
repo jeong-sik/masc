@@ -25,11 +25,6 @@ let bounded_probe_config ~fallback_timeout_s
   | None -> { config with timeout_s = Some fallback_timeout_s }
 ;;
 
-module For_testing = struct
-  let bounded_probe_config = bounded_probe_config
-  let host_stop_turn_identity = host_stop_turn_identity
-end
-
 let project_messages messages =
   let rec loop system history = function
     | [] -> Ok (List.rev system, List.rev history)
@@ -91,7 +86,7 @@ let model_input_projection_for_capacity
         | Ok projected -> Ok projected
         | Error error ->
           Error
-            (Runtime_model_input_tail_window.budget_error_to_string error))
+            (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* windowed = windowed in
   let () =
@@ -263,11 +258,68 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Unsupported_control_request _ ->
     Session_store.Protocol_failed
   | Runtime_claude_code.Subscription_required _
-  | Runtime_claude_code.Context_window_exceeded _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Quota_blocked _ ->
     Session_store.Provider_rejected
+  | Runtime_claude_code.Context_window_exceeded
+      { tool_effect_attempted; response_emitted; _ } ->
+    (* Same activity axis as [context_overflow_retry_safe] above: an
+       observation-free overflow exhausted the in-run shrink floor, any other
+       was fenced without a retry. Both prove the bootstrap input itself is
+       over capacity, so the recovery must not be auto-superseded next cycle
+       (RFC claude-code-context-overflow-bounded-restart §6). *)
+    Session_store.Input_rejected
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Effect_fenced
+       else Session_store.Bootstrap_floor_exceeded)
   | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
+;;
+
+module For_testing = struct
+  let bounded_probe_config = bounded_probe_config
+  let host_stop_turn_identity = host_stop_turn_identity
+  let recovery_failure_of_client_error = recovery_failure_of_client_error
+end
+
+(* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run shrink
+   retry is the one re-entry an input rejection admits. [on_shrink_retry]
+   fires only after the sequence verified every authority condition — a typed
+   observation-free overflow (the only shape mapped to [Api ContextOverflow]
+   in [claude_error_to_core_error]), a strictly smaller next capacity, and the
+   retry budget — so consuming the just-written [Input_rejected] recovery with
+   an explicit [Restart_fresh] resolution cannot bypass the fence: a
+   next-cycle replay never passes through that callback, and [Effect_fenced]
+   recoveries are never resolved here because an effect-observed overflow is
+   never retry-safe. A failed resolution is not retried here; the next
+   attempt's claim surfaces the refusal instead. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
+  =
+  match Session_store.load ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok
+      ( Some
+          ({ Session_store.phase = Recovery_required
+                           { failure = Input_rejected Bootstrap_floor_exceeded
+                           ; recovery_id
+                           ; _
+                           }
+             ; runtime_id = stored_runtime_id
+             ; _
+             } as expected ) )
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Session_store.resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~resolution:Session_store.Restart_fresh
+         ~resolved_by:"context-overflow-shrink-retry"
+         ~resolved_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error _ -> ())
+  | Ok _ -> ()
 ;;
 
 let run_without_lifecycle ~runtime_id ~keeper_name
@@ -368,7 +420,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       prepared.system_prompt :: system_messages
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
-      |> String_util.trim_to_option
+      |> String_util.trim_nonempty
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
@@ -392,6 +444,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -447,6 +503,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -536,7 +596,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        conversation is not held here and cannot be measured from this process.
        What this process does send every turn - the prompt, the system prompt
        and the tool declarations - is measurable, and a live refusal says that
-       part alone is the problem: analyst was told the request is ~2,226,104
+       part alone is the problem: a live Keeper was told the request is ~2,226,104
        tokens against a 1,000,000 limit while "this conversation is only
        ~1,094,432 tokens - the rest is system prompt, tool definitions, and
        attachment content" (#27427). Recording the half this process controls
@@ -870,6 +930,11 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
               ~capacity_bytes)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+            resolve_input_rejected_for_shrink_retry
+              ~base_path
+              ~keeper_name
+              ~runtime_id
+              ();
             Log.Keeper.warn
               ~keeper_name
               "Claude typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"

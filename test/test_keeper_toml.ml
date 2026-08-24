@@ -587,7 +587,6 @@ let test_profile_full () =
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime", "goal-masc"]
 max_context_override = 128001
 |} in
   match TL.parse_toml input with
@@ -599,9 +598,6 @@ max_context_override = 128001
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option (list string)) "active_goal_ids"
-        (Some [ "goal-runtime"; "goal-masc" ])
-        d.active_goal_ids;
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
 
@@ -827,7 +823,16 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
                   (KTP.keeper_toml_load_error_to_string e))
            | Ok _defaults -> ()))
 
-let test_bundled_issue_king_uses_local_sandbox () =
+let read_text_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let neutral_local_inherit_contract = "# test-contract: neutral-local-inherit"
+
+let test_bundled_profiles_include_local_sandbox () =
   let repo = repo_root () in
   Fun.protect
     ~finally:(fun () -> Config_dir_resolver.reset ())
@@ -835,17 +840,79 @@ let test_bundled_issue_king_uses_local_sandbox () =
       with_env_restore [ "MASC_CONFIG_DIR" ] (fun () ->
           Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
           Config_dir_resolver.reset ();
-          match KTP.load_keeper_profile_defaults_result "issue_king" with
-          | Error e ->
+          let keepers_dir = Filename.concat repo "config/keepers" in
+          let contract_profiles =
+            Sys.readdir keepers_dir
+            |> Array.to_list
+            |> List.filter (fun file -> Filename.check_suffix file ".toml")
+            |> List.filter (fun file ->
+              String_util.contains_substring
+                (read_text_file (Filename.concat keepers_dir file))
+                neutral_local_inherit_contract)
+          in
+          check int "one profile owns the neutral local/inherit contract" 1
+            (List.length contract_profiles);
+          let profile_name =
+            contract_profiles |> List.hd |> Filename.chop_extension
+          in
+          match KTP.load_keeper_profile_defaults_result profile_name with
+          | Error error ->
             fail
-              (Printf.sprintf
-                 "issue_king failed to resolve: %s"
-                 (KTP.keeper_toml_load_error_to_string e))
+              ("neutral local/inherit contract failed to load: "
+               ^ KTP.keeper_toml_load_error_to_string error)
           | Ok defaults ->
-            check (option string) "issue_king sandbox" (Some "local")
+            check (option string) "contract sandbox profile" (Some "local")
               (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-            check (option string) "issue_king network" (Some "inherit")
+            check (option string) "contract network mode" (Some "inherit")
               (Option.map KTP.network_mode_to_string defaults.network_mode)))
+
+let concrete_keeper_inventory_path repo =
+  Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
+;;
+
+let concrete_keeper_inventory repo =
+  read_text_file (concrete_keeper_inventory_path repo)
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "" && not (String.starts_with ~prefix:"#" line))
+;;
+
+let rec ocaml_source_files path =
+  if Sys.is_directory path
+  then
+    Sys.readdir path
+    |> Array.to_list
+    |> List.concat_map (fun name -> ocaml_source_files (Filename.concat path name))
+  else if Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli"
+  then [ path ]
+  else []
+;;
+
+let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
+  let repo = repo_root () in
+  let identities = concrete_keeper_inventory repo in
+  check bool "concrete Keeper inventory is declared" true (identities <> []);
+  let source_files =
+    [ "bin"; "lib"; "packages"; "test" ]
+    |> List.concat_map (fun root -> ocaml_source_files (Filename.concat repo root))
+  in
+  List.iter
+    (fun path ->
+       let source = read_text_file path |> String.lowercase_ascii in
+       List.iter
+         (fun identity ->
+            if
+              String_util.contains_substring
+                source
+                (String.lowercase_ascii identity)
+            then
+              failf
+                "concrete Keeper identity %S remains in OCaml source %s"
+                identity
+                path)
+         identities)
+    source_files
+;;
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -1096,90 +1163,6 @@ let test_absent_profile_is_legitimate_empty_defaults () =
     check (option string) "no manifest" None defaults.manifest_path;
     check (option string) "no instructions" None defaults.instructions
 
-let test_keeper_agent_prompt_loads_with_keeper_toml () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "analyst.toml" in
-  let agent_dir = Filename.concat keepers_dir "analyst" in
-  mkdir_p agent_dir;
-  let instructions_path = Filename.concat agent_dir "AGENT.md" in
-  write_file keeper_path "[keeper]\nautoboot_enabled = true\n";
-  write_file instructions_path "reason carefully";
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "analyst"
-  with
-  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  | Ok defaults ->
-    check (option string) "keeper instructions" (Some "reason carefully")
-      defaults.instructions;
-    check (option string) "keeper manifest" (Some keeper_path)
-      defaults.manifest_path
-
-let test_empty_keeper_agent_prompt_is_typed_profile_error () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let agent_dir = Filename.concat keepers_dir "reviewer" in
-  mkdir_p agent_dir;
-  let instructions_path = Filename.concat agent_dir "AGENT.md" in
-  write_file instructions_path "   \n";
-  let keeper_path = Filename.concat keepers_dir "reviewer.toml" in
-  write_file keeper_path "[keeper]\nautoboot_enabled = true\n";
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "reviewer"
-  with
-  | Ok _ -> fail "empty keeper instructions must fail before defaults projection"
-  | Error error ->
-    check bool "keeper prompt parse error kind" true (error.kind = KTP.Parse_error);
-    check string "keeper TOML retains dependency owner" keeper_path error.keeper_path;
-    check string "keeper instructions are the failing path" instructions_path error.failing_path;
-    check bool "error reports profile dependency" true
-      (String_util.contains_substring
-         (KTP.keeper_toml_load_error_to_string error)
-         "profile dependency")
-
-let test_keeper_agent_read_failure_is_typed_profile_error () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "analyst.toml" in
-  let agent_dir = Filename.concat keepers_dir "analyst" in
-  mkdir_p agent_dir;
-  let instructions_path = Filename.concat agent_dir "AGENT.md" in
-  write_file keeper_path "[keeper]\nautoboot_enabled = true\n";
-  Unix.mkdir instructions_path 0o755;
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "analyst"
-  with
-  | Ok _ -> fail "unreadable keeper instructions must fail before defaults projection"
-  | Error error ->
-    check bool "keeper prompt read error kind" true (error.kind = KTP.Read_error);
-    check string "keeper TOML owns load" keeper_path error.keeper_path;
-    check string "unreadable keeper prompt is the failing path" instructions_path error.failing_path
-
-let test_keeper_toml_inline_instructions_needs_no_agent_md () =
-  (* Every keeper TOML that predates the AGENT.md convention (all but one of
-     the operator's live keepers, checked directly against
-     ~/me/.masc/config/keepers/*.toml during the PR #27048 repair) sets
-     [keeper.instructions] inline and has no AGENT.md sibling at all. That
-     must still load: AGENT.md is a fallback for a keeper that leaves
-     instructions unset in TOML, not an additional file required on top of
-     an inline value. *)
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  let keeper_path = Filename.concat keepers_dir "legacy.toml" in
-  write_file keeper_path
-    "[keeper]\nautoboot_enabled = true\ninstructions = \"legacy inline instructions\"\n";
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "legacy"
-  with
-  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  | Ok defaults ->
-    check (option string) "inline TOML instructions are used directly"
-      (Some "legacy inline instructions") defaults.instructions
-
 let test_keeper_config_directory_probe_is_typed () =
   let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
   Fun.protect
@@ -1238,13 +1221,9 @@ let test_profile_defaults_materializable_for_name_uses_base_path () =
       let keepers_dir = Filename.concat config_dir "keepers" in
       mkdir_p keepers_dir;
       write_file (Filename.concat config_dir "runtime.toml") "";
-      mkdir_p (Filename.concat keepers_dir "runtime");
       write_file
         (Filename.concat keepers_dir "runtime.toml")
-        "[keeper]\nautoboot_enabled = true\n";
-      write_file
-        (Filename.concat keepers_dir "runtime/AGENT.md")
-        "runtime keeper";
+        "[keeper]\nautoboot_enabled = true\ninstructions = \"runtime keeper\"\n";
       check bool
         "explicit autoboot keeper is materializable"
         true
@@ -1260,7 +1239,6 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 [keeper]
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1680,14 +1658,6 @@ let () =
             test_default_source_snapshot_uses_explicit_base_path;
           test_case "absent profile is valid empty defaults" `Quick
             test_absent_profile_is_legitimate_empty_defaults;
-          test_case "keeper AGENT prompt loads with TOML" `Quick
-            test_keeper_agent_prompt_loads_with_keeper_toml;
-          test_case "empty keeper AGENT prompt is typed" `Quick
-            test_empty_keeper_agent_prompt_is_typed_profile_error;
-          test_case "keeper AGENT read failure is typed" `Quick
-            test_keeper_agent_read_failure_is_typed_profile_error;
-          test_case "inline TOML instructions need no AGENT.md" `Quick
-            test_keeper_toml_inline_instructions_needs_no_agent_md;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
         ] );
@@ -1704,7 +1674,9 @@ let () =
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick
             test_bundled_keeper_profiles_resolve_prompt_defaults;
-          test_case "bundled issue_king uses local sandbox" `Quick
-            test_bundled_issue_king_uses_local_sandbox;
+          test_case "bundled profiles include local sandbox" `Quick
+            test_bundled_profiles_include_local_sandbox;
+          test_case "OCaml sources exclude concrete Keeper identities" `Quick
+            test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );
     ]

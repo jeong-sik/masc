@@ -114,7 +114,6 @@ let publish_runtime_execution_built
     ~max_context
     ~effective_budget
     ~temperature
-    ~generation
   =
   let payload =
     `Assoc
@@ -123,7 +122,6 @@ let publish_runtime_execution_built
       ; ("max_context", `Int max_context)
       ; ("max_context_resolution", `String (string_of_int effective_budget))
       ; ("temperature", `Float temperature)
-      ; ("generation", `Int generation)
       ; ("timestamp", `Float (Time_compat.now ()))
       ]
   in

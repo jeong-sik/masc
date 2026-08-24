@@ -59,20 +59,9 @@ let with_surface f =
   | Ok surface -> f config surface
 ;;
 
-let with_forest producers f =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
-  Eio.Switch.run
-  @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace_core.default_config dir in
-  ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  List.iter (ensure_producer config) producers;
-  match VAT.create_forest ~config ~producers with
-  | Error reason -> Alcotest.failf "forest creation failed: %s" reason
-  | Ok forest -> f config forest
+let require_layout = function
+  | Ok layout -> layout
+  | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
 ;;
 
 (* Create the producer playground used to resolve relative tool paths. *)
@@ -270,93 +259,85 @@ let test_workspace_producer_gets_owned_read_surface () =
          (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
-let test_forest_requires_and_enforces_exact_producer () =
-  let producer_a = "producer-a" in
-  let producer_b = "producer-b" in
-  with_forest [ producer_a; producer_b ] (fun config forest ->
-    let file_name = "proof.txt" in
-    Out_channel.with_open_text
-      (Filename.concat (producer_playground config producer_a) file_name)
-      (fun channel -> output_string channel "proof from producer-a\n");
-    Out_channel.with_open_text
-      (Filename.concat (producer_playground config producer_b) file_name)
-      (fun channel -> output_string channel "proof from producer-b\n");
-    let schemas = VAT.forest_schemas forest in
-    Alcotest.(check (list string))
-      "forest surface"
-      [ "verification_read_file"; "verification_search_files"; "masc_web_fetch" ]
-      (List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas);
-    let read producer =
-      VAT.dispatch_forest
-        forest
-        ~name:"verification_read_file"
-        ~args:
-          (`Assoc
-            [ "producer", `String producer
-            ; "file_path", `String file_name
-            ])
-    in
-    (match read producer_b with
-     | Error detail -> Alcotest.failf "producer-b read failed: %s" detail
-     | Ok output ->
-       Alcotest.(check bool)
-         "the selected tree supplied the bytes"
-         true
-         (Astring.String.is_infix ~affix:"proof from producer-b" output));
-    (match read "producer-c" with
-     | Ok output -> Alcotest.failf "unadmitted producer read succeeded: %s" output
-     | Error detail ->
-       Alcotest.(check bool)
-         "refusal lists the closed set"
-         true
-         (Astring.String.is_infix ~affix:"producer-a, producer-b" detail));
-    match
-      VAT.dispatch_forest
-        forest
-        ~name:"verification_read_file"
-        ~args:(`Assoc [ "file_path", `String file_name ])
-    with
-    | Ok output -> Alcotest.failf "producer-free read succeeded: %s" output
-    | Error detail ->
-      Alcotest.(check bool)
-        "producer is mandatory"
-        true
-        (Astring.String.is_infix ~affix:"producer is required" detail))
+let make_checkout root relative =
+  let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+  let rec mkdir_p path =
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then mkdir_p parent;
+    mkdir path
+  in
+  let checkout = Filename.concat root relative in
+  mkdir_p checkout;
+  mkdir (Filename.concat checkout ".git")
 ;;
 
-(* The prompt states the exact tools attached to the review request. *)
-(* masc task-403 (vrf-8bac5f46, 2026-08-21): the prompt told the evaluator its
-   tools were "pointed at the producer's tree". They are pointed at the
-   producer's sandbox root, one level above any checkout, so an evaluator that
-   read that literally opened dune-project, .git, lib/, README.md, Makefile,
-   src and bin — 77 consecutive failed reads, no verdict, and a producer that
-   never learned why. The root's real shape is a fact available at review
-   time; these pin that it is stated instead of guessed. *)
-let test_root_layout_lists_the_root_the_tools_resolve_against () =
+let test_root_layout_fails_closed_when_discovery_is_unavailable () =
+  with_surface (fun _config surface ->
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "missing producer root was presented as a usable layout: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "unavailable discovery remains an error"
+        true
+        (Astring.String.is_infix ~affix:"workspace root" detail
+         || Astring.String.is_infix ~affix:"verification root" detail))
+;;
+
+let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "checkout-%02d" index)
+    done;
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "partial checkout discovery was presented as complete: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "partial discovery names its limit"
+        true
+        (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_root_layout_reports_entries_and_discovered_checkouts () =
   with_surface (fun config surface ->
     let root = producer_playground config producer in
     let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
-    mkdir (Filename.concat root "repos");
-    mkdir (Filename.concat root "repos/masc");
+    make_checkout root "repos/masc";
+    (* A checkout the conventional prefix would miss entirely. *)
+    make_checkout root "scratch-tree";
     mkdir (Filename.concat root "artifacts");
-    (* An empty directory is the verifier's own failure mode, so it has to be
-       distinguishable from a directory that could not be read at all. *)
-    mkdir (Filename.concat root "mind");
-    let layout = VAT.root_layout surface in
+    let layout = VAT.root_layout surface |> require_layout in
     let holds affix =
       List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
     in
-    Alcotest.(check bool) "names the checkout one level down" true (holds "repos/masc");
-    Alcotest.(check bool) "names a sibling top-level entry" true (holds "artifacts");
-    Alcotest.(check bool) "marks a directory with no children" true (holds "(empty)"))
+    Alcotest.(check bool)
+      "reports a checkout under the keeper's own repos/ convention"
+      true
+      (holds "repos/masc");
+    Alcotest.(check bool)
+      "reports a checkout that convention would have missed"
+      true
+      (holds "scratch-tree");
+    Alcotest.(check bool)
+      "a checkout is marked as one, so a path prefix is identifiable"
+      true
+      (holds "git checkout");
+    Alcotest.(check bool)
+      "still names the root's own entries, which need no prefix"
+      true
+      (holds "artifacts"))
 ;;
 
 let test_prompt_states_the_root_and_not_a_repository () =
   with_surface (fun config surface ->
     let root = producer_playground config producer in
-    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
-    mkdir (Filename.concat root "repos");
-    mkdir (Filename.concat root "repos/masc");
+    make_checkout root "repos/masc";
     let request : AR.review_request =
       { agent_name = producer
       ; task_title = "t"
@@ -373,8 +354,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
             (AR.Lookup_tools
                { schemas = VAT.schemas surface
                ; dispatch = VAT.dispatch surface
-               ; scope = AR.Producer_tree
-               ; root_layout = VAT.root_layout surface
+               ; root_layout = VAT.root_layout surface |> require_layout
                })
           request
       with
@@ -396,7 +376,8 @@ let test_prompt_states_the_root_and_not_a_repository () =
 ;;
 
 let test_prompt_states_the_available_surface () =
-  with_surface (fun _config surface ->
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
     let request : AR.review_request =
       { agent_name = producer
       ; task_title = "t"
@@ -417,8 +398,7 @@ let test_prompt_states_the_available_surface () =
         (AR.Lookup_tools
            { schemas = VAT.schemas surface
            ; dispatch = VAT.dispatch surface
-           ; scope = AR.Producer_tree
-           ; root_layout = VAT.root_layout surface
+           ; root_layout = VAT.root_layout surface |> require_layout
            })
     in
     Alcotest.(check bool)
@@ -515,10 +495,6 @@ let () =
             `Quick test_search_refuses_a_call_without_its_required_pattern
         ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
             test_workspace_producer_gets_owned_read_surface
-        ; Alcotest.test_case
-            "forest requires and enforces exact producer"
-            `Quick
-            test_forest_requires_and_enforces_exact_producer
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
@@ -532,9 +508,17 @@ let () =
       , [ Alcotest.test_case "prompt states the available surface" `Quick
             test_prompt_states_the_available_surface
         ; Alcotest.test_case
-            "root_layout lists the root the tools resolve against"
+            "root_layout reports entries and discovered checkouts"
             `Quick
-            test_root_layout_lists_the_root_the_tools_resolve_against
+            test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root_layout fails closed when discovery is unavailable"
+            `Quick
+            test_root_layout_fails_closed_when_discovery_is_unavailable
+        ; Alcotest.test_case
+            "root_layout fails closed when checkout discovery is partial"
+            `Quick
+            test_root_layout_fails_closed_when_checkout_discovery_is_partial
         ; Alcotest.test_case
             "prompt states the root instead of implying a repository"
             `Quick

@@ -74,12 +74,6 @@ val merge_execution_links
   -> unit
   -> Masc_domain.task_execution_links
 
-val merge_envelope_into_payload
-  :  ?correlation_id:string
-  -> ?run_id:string
-  -> Yojson.Safe.t
-  -> Yojson.Safe.t
-
 val task_status_to_string : Masc_domain.task_status -> string
 val task_assignee_of_status : Masc_domain.task_status -> string option
 
@@ -122,8 +116,6 @@ val observe_task_transition
 type transition_event_type =
   | Task_transition
   | Task_cancelled
-
-val transition_event_type_to_string : transition_event_type -> string
 
 val transition_log_event
   :  event_type:transition_event_type

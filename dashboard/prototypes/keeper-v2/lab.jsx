@@ -12,7 +12,7 @@ const { useState: useStateLab, useEffect: useEffectLab, useRef: useRefLab } = Re
 
 const LAB_SECS = [
   ['tools', '도구'], ['harness', '세이프티 하네스'], ['performance', '성능'],
-  ['memory', '키퍼 메모리 상태'], ['audit', '감사 무결성'],
+  ['memory', '키퍼 메모리 상태'],
 ];
 
 /* ── 도구 ─────────────────────────────────────────────────────────────── */
@@ -21,7 +21,7 @@ const LAB_CONFIG_RES = [
   { k: 'workspace root marker', v: '.masc/root-state.json', src: '단일 마커' },
   { k: 'model catalog', v: 'OAS embedded + oas-models-overlay.toml', src: 'OAS_MODEL_CATALOG' },
   { k: 'stream idle timeout', v: '600s (floor)', src: '미설정 시 기본 · boot log 가 출처 명시' },
-  { k: 'tool_policy.toml', v: 'config-root 마커 · 런타임 미소비', src: 'legacy' },
+  { k: 'tool_policy.toml', v: 'config-root 마커 · 런타임 masc-improver비', src: 'legacy' },
 ];
 const LAB_AUTOMATION = [
   { id: 'sch-daily-digest', state: 'Scheduled', next: '내일 09:00', payload: 'keeper.wake · masc-improver' },
@@ -436,7 +436,6 @@ function LabSurface() {
       {sec === 'harness' && <LabHarness />}
       {sec === 'performance' && <LabPerf />}
       {sec === 'memory' && <LabMemoryHealth />}
-      {sec === 'audit' && window.AuditIntegrityPanel && <window.AuditIntegrityPanel />}
     </div>
   );
 }

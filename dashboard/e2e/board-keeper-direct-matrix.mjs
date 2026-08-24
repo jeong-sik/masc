@@ -190,7 +190,6 @@ async function boardDetail(id, credential, requestTimeoutMs = timeoutMs) {
   const query = new URLSearchParams({
     format: 'flat',
     voter: credential.agent,
-    blind_votes: 'true',
   })
   const result = await readJson(`/api/v1/board/${id}?${query}`, {
     ...credential,
@@ -246,7 +245,7 @@ try {
     author: 'anonymous',
   })
   const listResult = await eventually(
-    remainingMs => readJson('/api/v1/board?limit=150&sort=recent&blind_votes=true', {
+    remainingMs => readJson('/api/v1/board?limit=150&sort=recent', {
       timeoutMs: remainingMs,
     }),
     result => result.ok && result.json?.posts?.some(post => post.title === title),
@@ -361,7 +360,7 @@ try {
   let cleanupError
   if (!postId) {
     try {
-      const candidates = await readJson('/api/v1/board?limit=150&sort=recent&blind_votes=true')
+      const candidates = await readJson('/api/v1/board?limit=150&sort=recent')
       const orphan = candidates.json?.posts?.find(candidate => candidate.title === title)
       if (orphan) {
         postId = orphan.id

@@ -30,6 +30,7 @@ import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import {
   keeperResolvedApprovalDecisionClass,
+  keeperResolvedApprovalDecisionTone,
   keeperResolvedApprovalDecisionLabel,
   type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
@@ -83,8 +84,12 @@ function ApprovalAuditWriteFailureAlert() {
 }
 
 type ApprovalsView = 'queue' | 'history'
-type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision
+type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | GateDecisionSource
 
+// Design pill order (keeper-v2 approvals.jsx AP_HIST_FILTERS): decision pills
+// first, then decider pills. The design's 보류 pill is omitted — the live
+// decision model is the closed {approve, reject} set (see file header); the
+// decider pills are backed by the live decision_source field.
 const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   id: ApprovalHistoryFilter
   label: string
@@ -93,6 +98,9 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   { id: 'all', label: '전체', predicate: () => true },
   { id: 'approve', label: '승인', predicate: item => item.decision === 'approve' },
   { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
+  { id: 'human_operator', label: 'HITL 수동', predicate: item => item.decision_source === 'human_operator' },
+  { id: 'auto_judge', label: 'Auto Judge', predicate: item => item.decision_source === 'auto_judge' },
+  { id: 'always_allowed', label: 'Always', predicate: item => item.decision_source === 'always_allowed' },
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
@@ -151,44 +159,61 @@ function decisionSourceLabel(source: GateDecisionSource | null | undefined): str
 
 function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
   const decision = keeperResolvedApprovalDecisionLabel(item.decision)
+  const tone = keeperResolvedApprovalDecisionTone(item.decision)
   const judgeSummary =
     item.summary_status?.status === 'available' ? item.summary_status.summary : null
   const judgeSlot =
     item.exact_attempt?.state === 'bound' ? item.exact_attempt.slot_id : null
+  const automated = item.decision_source !== 'human_operator'
   return html`
     <li
-      class="ap-history-item"
+      class=${`ap-hist-row dec-${tone}`}
       data-testid="approval-history-item"
       data-approval-id=${item.id}
     >
-      <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>${decision}</span>
-      <span class="ap-history-tool mono">${item.tool_name}</span>
-      <span class="ap-history-keeper">${item.keeper_name}</span>
-      <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
-      <span class="ap-history-actor">${item.actor ?? 'unattributed'}</span>
-      <span class="ap-history-id mono">${item.id}</span>
-      ${judgeSlot
-        ? html`<span class="ap-history-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
-        : null}
-      ${item.resolved_at
-        ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
-        : null}
-      ${judgeSummary
-        ? html`
-            <details class="ap-history-judge" data-testid="approval-history-judge">
-              <summary>판정 근거</summary>
-              <p class="ap-summary-text">${judgeSummary.context_summary}</p>
-              ${judgeSummary.key_questions.length
-                ? html`<ul class="ap-summary-questions">
-                    ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
-                  </ul>`
-                : null}
-              ${judgeSummary.rationale.trim()
-                ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
-                : null}
-            </details>
-          `
-        : null}
+      <span class="ap-hist-at mono">
+        ${item.resolved_at ? formatDateTimeKo(item.resolved_at) : '해결 시각 없음'}
+      </span>
+      <span class=${`ap-hist-dec ${tone}`}>${decision}</span>
+      <div class="ap-hist-body">
+        <div class="ap-hist-top">
+          <span class="ap-hist-id mono">${item.id}</span>
+          <span class="ap-hist-keeper mono">${item.keeper_name}</span>
+          <span class="ap-hist-tool mono">${item.tool_name}</span>
+          ${judgeSlot
+            ? html`<span class="ap-hist-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
+            : null}
+        </div>
+        ${/* The design's .ap-hist-reason slot, fed by the audit record's own
+             decision_reason — rendered only when the server recorded one
+             (mark, don't fake). */''}
+        ${item.decision_reason
+          ? html`<div class="ap-hist-reason" data-testid="approval-history-reason">${item.decision_reason}</div>`
+          : null}
+        ${judgeSummary
+          ? html`
+              <details class="ap-hist-judge" data-testid="approval-history-judge">
+                <summary>판정 근거</summary>
+                <p class="ap-summary-text">${judgeSummary.context_summary}</p>
+                ${judgeSummary.key_questions.length
+                  ? html`<ul class="ap-summary-questions">
+                      ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
+                    </ul>`
+                  : null}
+                ${judgeSummary.rationale.trim()
+                  ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
+                  : null}
+              </details>
+            `
+          : null}
+      </div>
+      <span
+        class=${`ap-hist-by ${automated ? 'auto' : ''}`}
+        title=${decisionSourceLabel(item.decision_source)}
+      >
+        ${item.actor ?? 'unattributed'}
+        <span class="ap-hist-src">${decisionSourceLabel(item.decision_source)}</span>
+      </span>
     </li>
   `
 }
@@ -260,6 +285,7 @@ function ApHistory({
   const counts = useMemo(() => ({
     approve: sorted.filter(item => item.decision === 'approve').length,
     reject: sorted.filter(item => item.decision === 'reject').length,
+    autoJudge: sorted.filter(item => item.decision_source === 'auto_judge').length,
     keepers: new Set(sorted.map(item => item.keeper_name)).size,
   }), [sorted])
 
@@ -269,6 +295,10 @@ function ApHistory({
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.autoJudge}</b> Auto Judge</div>
+        ${/* Design's 4th stat is median decision latency; the audit record has
+             no latency field, so the slot carries the live-only keeper count
+             instead of a fabricated number. */''}
         <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
       </div>
       <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">
@@ -284,7 +314,7 @@ function ApHistory({
       </div>
       ${shown.length > 0
         ? html`
-            <ul class="ap-history-list ap-hist-list">
+            <ul class="ap-hist-list">
               ${shown.map(item => html`<${ResolvedApprovalItem} key=${item.id} item=${item} />`)}
             </ul>
           `
@@ -677,17 +707,17 @@ function ApAside({
               Gate 모드
               <b>${GATE_MODES.find(option => option.mode === gateMode?.mode)?.label ?? '확인 필요'}</b>
             </span>
-            <div class="ap-viewseg" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
+            <div class="wka-mode wka-mode-3" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
               ${GATE_MODES.map(option => html`
                 <button
                   key=${option.mode}
                   type="button"
-                  class=${`ap-viewbtn ${gateMode?.mode === option.mode ? 'on' : ''}`}
+                  class=${`wka-mode-b ${gateMode?.mode === option.mode ? 'on' : ''}`}
                   role="radio"
                   aria-checked=${gateMode?.mode === option.mode}
                   onClick=${() => void setKeeperGateMode(option.mode)}
                   disabled=${modeDisabled}
-                >${option.label}</button>
+                ><b>${option.label}</b></button>
               `)}
             </div>
           </div>
@@ -721,6 +751,9 @@ function ApAside({
           <h3>Always Rules</h3>
           <span class="mono">${rules.length}</span>
         </div>
+        ${rulesState.state === 'ready'
+          ? html`<div class="wka-hint mono">정확일치 규칙 — keeper · tool · request fingerprint</div>`
+          : null}
         ${rulesState.state === 'unavailable'
           ? html`<div class="ap-env-warn" role="alert" data-testid="approval-rules-unavailable">${rulesState.error}</div>`
           : rules.length > 0
@@ -743,7 +776,7 @@ function ApAside({
               <ul class="ap-recent-list">
                 ${recent.map(item => html`
                   <li class="ap-recent-row" key=${item.id}>
-                    <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
+                    <span class=${`ap-recent-dec ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
                       ${keeperResolvedApprovalDecisionLabel(item.decision)}
                     </span>
                     <span class="ap-recent-body">
@@ -804,7 +837,7 @@ export function ApprovalsSurface() {
   }, [items])
 
   return html`
-    <main class="ov ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
+    <main class="ov ov-flush ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>

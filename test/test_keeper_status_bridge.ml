@@ -88,6 +88,49 @@ let test_shutdown_phase_names_are_pinned () =
   check "joined_idle" Keeper_shutdown_types.Joined_idle
 ;;
 
+(* [quiet_reason] and [next_action_path] cross into the dashboard as bare
+   strings. There the union is checked by membership: an unlisted
+   [next_action_path] makes normalizeKeeperDiagnostic drop the whole
+   diagnostic, and an unlisted [quiet_reason] silently erases the reason. The
+   compiler cannot see a TypeScript union, so the match below pins each
+   constructor's wire form — adding one is a compile error here, and the list
+   it must be added to is the same list dashboard/src/types/core.ts mirrors. *)
+let quiet_reason_wire =
+  let open Keeper_status_runtime in
+  [ Proactive_disabled; Keepalive_not_running; Starting_up; Never_started ]
+  |> List.map (fun reason ->
+       ( match reason with
+         | Proactive_disabled -> "disabled"
+         | Keepalive_not_running -> "not_running"
+         | Starting_up -> "startup"
+         | Never_started -> "never_started" )
+       , keeper_quiet_reason_to_string reason )
+;;
+
+let next_action_path_wire =
+  let open Keeper_status_runtime in
+  [ Auto_restart; Recover; Probe; Direct_message ]
+  |> List.map (fun path ->
+       ( match path with
+         | Auto_restart -> "auto_restart"
+         | Recover -> "recover"
+         | Probe -> "probe"
+         | Direct_message -> "direct_message" )
+       , keeper_next_action_path_to_string path )
+;;
+
+let test_quiet_reason_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    quiet_reason_wire
+;;
+
+let test_next_action_path_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    next_action_path_wire
+;;
+
 let shutdown_operation_with_phase phase =
   let trace_id =
     match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
@@ -101,7 +144,6 @@ let shutdown_operation_with_phase phase =
   ; keeper_name = "verifier"
   ; lane_ownership = Keeper_shutdown_types.Dormant_meta
   ; trace_id
-  ; generation = 1
   ; actor = "test"
   ; cleanup_intent =
       { Keeper_shutdown_types.reason =
@@ -154,38 +196,6 @@ let test_nonempty_live_meta_still_reports_profile_override () =
     "non-empty live prompt fields still surface as overrides"
     [ "prompt.instructions"; "workspace.mention_targets" ]
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
-;;
-
-(* SSOT: last_compaction_decision null-guard policy (issue #25323). Extracted to
-   Keeper_meta_contract.compaction_decision_json_or_null and reused by
-   keeper_status.ml / dashboard_http_keeper.ml. Pin the policy so the guard can't
-   silently diverge across projection sites again. Counterfactual: dropping the
-   [String.trim = ""] guard turns the empty/whitespace cases red. *)
-let test_compaction_decision_empty_is_null () =
-  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "" in
-  Alcotest.(check bool)
-    "empty decision serializes to `Null"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
-;;
-
-let test_compaction_decision_whitespace_is_null () =
-  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "   " in
-  Alcotest.(check bool)
-    "whitespace-only decision serializes to `Null"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
-;;
-
-let test_compaction_decision_value_is_string () =
-  let d =
-    Keeper_meta_contract.compaction_runtime_decision_of_string "provider_overflow"
-  in
-  Alcotest.(check bool)
-    "non-empty decision serializes to `String"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d
-     = `String "provider_overflow")
 ;;
 
 let test_age_seconds_preserves_missing_timestamp () =
@@ -251,7 +261,6 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-tool-audit-cache"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
@@ -295,7 +304,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-recreated-keeper"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
@@ -333,22 +341,7 @@ let () =
   Alcotest.run
     "keeper_status_bridge"
     [
-      ( "last_compaction_decision null-guard SSOT",
-        [
-          Alcotest.test_case
-            "empty decision -> `Null"
-            `Quick
-            test_compaction_decision_empty_is_null;
-          Alcotest.test_case
-            "whitespace decision -> `Null"
-            `Quick
-            test_compaction_decision_whitespace_is_null;
-          Alcotest.test_case
-            "value decision -> `String"
-            `Quick
-            test_compaction_decision_value_is_string;
-        ] );
-      ( "timestamp age sentinel SSOT",
+( "timestamp age sentinel SSOT",
         [ Alcotest.test_case
             "missing timestamps do not become zero age"
             `Quick
@@ -385,6 +378,17 @@ let () =
             "admission fence is any-record, not latest"
             `Quick
             test_admission_fence_is_any_not_latest;
+        ] );
+      ( "keeper diagnostic wire vocabulary",
+        [
+          Alcotest.test_case
+            "quiet_reason strings are pinned for the dashboard union"
+            `Quick
+            test_quiet_reason_wire_strings_are_pinned;
+          Alcotest.test_case
+            "next_action_path strings are pinned for the dashboard union"
+            `Quick
+            test_next_action_path_wire_strings_are_pinned;
         ] );
     ]
 ;;

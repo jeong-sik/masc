@@ -51,13 +51,16 @@ let reaction_raw_auth_request header value =
     `GET
     "/api/v1/board/reactions"
 
-(* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts.
-   Kept in sync with that file — see module doc. *)
+(* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts, plus the
+   goal lifecycle and schedule cancel routes the TUI consumes (#29684). Kept
+   in sync with those consumers — see module doc. *)
 let dashboard_board_tool_routes =
   [ "/api/v1/tools/masc_board_vote"
   ; "/api/v1/tools/masc_board_post"
   ; "/api/v1/tools/masc_board_comment"
   ; "/api/v1/tools/masc_board_comment_vote"
+  ; "/api/v1/tools/masc_goal_transition"
+  ; "/api/v1/tools/masc_schedule_cancel"
   ]
 
 let dashboard_board_reaction_routes =

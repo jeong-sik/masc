@@ -15,13 +15,26 @@ SELF_TEST=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFLIGHT_HELPER="${MASC_DEPLOYMENT_PREFLIGHT_HELPER:-}"
+# Build commit the resolved helper reports for itself; empty until resolved.
+PREFLIGHT_HELPER_COMMIT=""
+# The gate's own keeper-meta verdict prefix. The self-test asserts this exact
+# literal, so the gate and its test cannot drift apart.
+KEEPER_META_REJECTED='current keeper meta is invalid'
 
 usage() {
   sed -n '2,/^$/p' "$0"
 }
 
+# Every verdict names the helper that produced it: the fallback below can pick
+# an older installed helper, and a verdict from the wrong binary is worthless.
+helper_identity() {
+  if [[ -n "$PREFLIGHT_HELPER_COMMIT" ]]; then
+    printf ' helper=%s helper_commit=%s' "$PREFLIGHT_HELPER" "$PREFLIGHT_HELPER_COMMIT"
+  fi
+}
+
 fail() {
-  printf '[runtime-deployment-preflight] FAIL: %s\n' "$*" >&2
+  printf '[runtime-deployment-preflight] FAIL: %s%s\n' "$*" "$(helper_identity)" >&2
   exit 1
 }
 
@@ -82,6 +95,24 @@ if [[ -z "$PREFLIGHT_HELPER" ]]; then
   fi
 fi
 [[ -x "$PREFLIGHT_HELPER" ]] || fail "typed deployment preflight helper is not executable: $PREFLIGHT_HELPER"
+PREFLIGHT_HELPER_COMMIT="$("$PREFLIGHT_HELPER" build-commit)" \
+  || fail "typed deployment preflight helper did not report its build commit: $PREFLIGHT_HELPER"
+[[ -n "$PREFLIGHT_HELPER_COMMIT" ]] \
+  || fail "typed deployment preflight helper reported an empty build commit: $PREFLIGHT_HELPER"
+
+# The durable filenames belong to the OCaml side. Spelling them out here once
+# left the fixtures on event-queue-v16.json after the writer moved to v17, and
+# the self-test failed on a version skew this gate exists to catch.
+QUEUE_SNAPSHOT_FILENAME=""
+QUEUE_WAL_FILENAME=""
+while IFS='=' read -r key value; do
+  case "$key" in
+    snapshot) QUEUE_SNAPSHOT_FILENAME="$value" ;;
+    wal) QUEUE_WAL_FILENAME="$value" ;;
+  esac
+done < <("$PREFLIGHT_HELPER" durable-filenames)
+[[ -n "$QUEUE_SNAPSHOT_FILENAME" && -n "$QUEUE_WAL_FILENAME" ]] \
+  || fail "preflight helper did not report both durable event-queue filenames"
 
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
@@ -95,6 +126,7 @@ run_gate() {
   local signal_path
   local rows_in_file
   local current_owner_count=0
+  local keeper_meta_count=0
   local queue_path
   local keeper_name
   local in_progress_count_total=0
@@ -120,6 +152,25 @@ run_gate() {
     [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
+    # Keeper meta is a closed current schema. A field the incoming binary
+    # stopped writing (2026-08-23 hard cuts) makes the file undecodable on
+    # boot: the runtime reads it as absent and re-materialises the keeper from
+    # its declaration, and the accumulated counters and the task binding are
+    # gone (#29610). This gate runs between the stop of the previous runtime
+    # and the start of the next one (scripts/deploy.sh stops prod in step 3
+    # and runs this under the deployment lease in step 4; the runbook needs
+    # the writer lease free), so a rejection here leaves the plane down until
+    # the operator repairs the file and redeploys. That downtime is the price
+    # of keeping the counters the boot-time fail-open would lose. The helper
+    # verdict printed above the FAIL line names the class and the fix.
+    while IFS= read -r -d '' meta_path; do
+      [[ -f "$meta_path" && ! -L "$meta_path" ]] \
+        || fail "keeper meta is not an exact regular file: $meta_path"
+      "$PREFLIGHT_HELPER" validate-current-meta "$meta_path" \
+        || fail "$KEEPER_META_REJECTED (the helper verdict above names the class and the fix): $meta_path"
+      keeper_meta_count=$((keeper_meta_count + 1))
+    done < <(find "$keepers_root" -mindepth 1 -maxdepth 1 -name '*.json' -print0)
+
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current queue snapshot is not an exact regular file: $queue_path"
@@ -130,13 +181,13 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "current queue snapshot or transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-v15.json' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_SNAPSHOT_FILENAME" -print0)
 
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current transition WAL is not an exact regular file: $queue_path"
-      if [[ -e "$(dirname "$queue_path")/event-queue-v15.json" \
-            || -L "$(dirname "$queue_path")/event-queue-v15.json" ]]; then
+      if [[ -e "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" \
+            || -L "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" ]]; then
         continue
       fi
       keeper_name="${queue_path%/*}"
@@ -146,7 +197,7 @@ run_gate() {
         --keeper-name "$keeper_name" \
         || fail "current transition WAL is invalid: $queue_path"
       current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name 'event-queue-transitions-v6.jsonl' -print0)
+    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_WAL_FILENAME" -print0)
   fi
 
   for schedules_path in \
@@ -210,9 +261,10 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$current_owner_count" "$in_progress_count_total"
+    "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
+    "$in_progress_count_total" "$(helper_identity)"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -260,11 +312,74 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local queue_dir="$target_root/.masc/keepers/fixture"
     mkdir -p "$queue_dir"
     jq -n '
-      {schema: "keeper.event_queue.state.v15", revision: 1,
+      {schema: "keeper.event_queue.state.v16", revision: 1,
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}
-    ' >"$queue_dir/event-queue-v15.json"
+    ' >"$queue_dir/${QUEUE_SNAPSHOT_FILENAME}"
+  }
+
+  # The full closed current keeper-meta field set. The retired-field variant
+  # reproduces the 2026-08-23 incident shape: a hard cut removed fields the
+  # on-disk snapshot still carried.
+  keeper_meta_fixture='{
+    schema: "masc.keeper_meta.v1", name: "fixture",
+    agent_name: "keeper-fixture-agent",
+    instructions: "self-test fixture", autonomous_instructions: null,
+    trace_id: "trace-fixture", multimodal_policy: "inherit",
+    trace_history: [], last_handoff_ts: 0.0,
+    created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",
+    total_turns: 0, total_input_tokens: 0, total_output_tokens: 0,
+    total_tokens: 0, total_cost_usd: 0.0, last_turn_ts: 0.0,
+    last_input_tokens: 0, last_output_tokens: 0, last_total_tokens: 0,
+    last_latency_ms: 0, compaction_count: 0, last_compaction_ts: 0.0,
+    last_compaction_before_tokens: 0, last_compaction_after_tokens: 0,
+    proactive_count_total: 0, last_proactive_ts: 0.0,
+    proactive_visible_count_total: 0, last_visible_proactive_ts: 0.0,
+    last_proactive_outcome: "never_started", last_proactive_reason: "",
+    last_proactive_preview: "", consecutive_noop_count: 0,
+    last_autonomous_action_at: "", autonomous_action_count: 0,
+    autonomous_turn_count: 0, autonomous_text_turn_count: 0,
+    autonomous_tool_turn_count: 0, board_reactive_turn_count: 0,
+    mention_reactive_turn_count: 0, noop_turn_count: 0,
+    message_scope_ack_id: null, last_runtime_attempt: null, paused: false,
+    latched_reason: null, current_task_id: null, keeper_id: null,
+    agent_core_env: {}
+  }'
+
+  write_keeper_meta() {
+    local target_root="$1"
+    local variant="$2"
+    mkdir -p "$target_root/.masc/keepers"
+    case "$variant" in
+      current)
+        jq -n "$keeper_meta_fixture" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      retired-field)
+        jq -n "$keeper_meta_fixture + {generation: 1}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      missing-field)
+        jq -n "$keeper_meta_fixture | del(.paused)" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      non-canonical-enum)
+        # The issue #28844 shape: an enumerated field with a canonical
+        # default holds a value no variant spells. The runtime repairs it in
+        # place on read, so the gate passes it.
+        jq -n "$keeper_meta_fixture + {last_proactive_outcome: \"not-an-outcome\"}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+      truncated-json)
+        # Cut without a pipe: under pipefail, jq dying of SIGPIPE behind a
+        # head would abort the self-test instead of producing the fixture.
+        local full_meta
+        full_meta="$(jq -n "$keeper_meta_fixture")"
+        printf '%s' "${full_meta:0:64}" \
+          >"$target_root/.masc/keepers/fixture.json"
+        ;;
+    esac
   }
 
   expect_failure() {
@@ -278,13 +393,16 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains() {
     local case_name="$1"
     local target_root="$2"
-    local expected_text="$3"
+    shift 2
+    local expected_text
     local output
     if output="$("$0" --base-path "$target_root" 2>&1)"; then
       fail "self-test expected failure: $case_name"
     fi
-    [[ "$output" == *"$expected_text"* ]] \
-      || fail "self-test failure omitted expected detail for $case_name: $expected_text"
+    for expected_text in "$@"; do
+      [[ "$output" == *"$expected_text"* ]] \
+        || fail "self-test failure omitted expected detail for $case_name: $expected_text"
+    done
   }
 
   safe_root="$fixture_root/safe"
@@ -293,6 +411,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   cp "$safe_root/.masc/schedules.json" \
     "$safe_root/.masc/schedules.json.last-good"
   write_current_queue "$safe_root"
+  write_keeper_meta "$safe_root" current
   "$0" --base-path "$safe_root" >/dev/null
 
   # Expansion belongs to the nested shell.
@@ -377,27 +496,80 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   # The two malformed-wal cases below prepare it the same way.
   mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_current_root/.masc/keepers/fixture/event-queue-v15.json"
+    >"$malformed_current_root/.masc/keepers/fixture/${QUEUE_SNAPSHOT_FILENAME}"
   expect_failure malformed_current_queue "$malformed_current_root"
 
   malformed_current_wal_root="$fixture_root/malformed-current-wal"
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
-    >"$malformed_current_wal_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+    >"$malformed_current_wal_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   expect_failure malformed_current_wal "$malformed_current_wal_root"
+
+  # Each keeper-meta rejection asserts the gate's own verdict prefix (printed
+  # by this script, never re-wrapped) plus single tokens from the helper's
+  # verdict: cmdliner wraps the helper's error text at the terminal margin, so
+  # a multi-word phrase from it can be split across lines.
+  retired_meta_field_root="$fixture_root/retired-meta-field"
+  write_schedules "$retired_meta_field_root" running
+  write_current_queue "$retired_meta_field_root"
+  write_keeper_meta "$retired_meta_field_root" retired-field
+  expect_failure_contains \
+    retired_keeper_meta_field \
+    "$retired_meta_field_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=not_current_schema" \
+    "generation"
+
+  missing_meta_field_root="$fixture_root/missing-meta-field"
+  write_schedules "$missing_meta_field_root" running
+  write_current_queue "$missing_meta_field_root"
+  write_keeper_meta "$missing_meta_field_root" missing-field
+  expect_failure_contains \
+    missing_keeper_meta_field \
+    "$missing_meta_field_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=not_current_schema" \
+    "paused"
+
+  # Not JSON at all: the boot path refuses the keeper rather than reading the
+  # file as absent, so the helper names the other class.
+  truncated_meta_root="$fixture_root/truncated-meta"
+  write_schedules "$truncated_meta_root" running
+  write_current_queue "$truncated_meta_root"
+  write_keeper_meta "$truncated_meta_root" truncated-json
+  expect_failure_contains \
+    truncated_keeper_meta \
+    "$truncated_meta_root" \
+    "$KEEPER_META_REJECTED" \
+    "class=unreadable_json"
+
+  # A non-canonical enumerated value is what the runtime repairs in place on
+  # read, so the gate passes it — and, being read-only, leaves the file
+  # byte-identical for the runtime to repair.
+  repairable_meta_root="$fixture_root/repairable-meta"
+  write_schedules "$repairable_meta_root" running
+  write_current_queue "$repairable_meta_root"
+  write_keeper_meta "$repairable_meta_root" non-canonical-enum
+  cp "$repairable_meta_root/.masc/keepers/fixture.json" \
+    "$repairable_meta_root/fixture.json.before"
+  "$0" --base-path "$repairable_meta_root" >/dev/null \
+    || fail "self-test expected success: repairable_keeper_meta_enum"
+  cmp -s "$repairable_meta_root/fixture.json.before" \
+    "$repairable_meta_root/.masc/keepers/fixture.json" \
+    || fail "self-test gate rewrote a keeper meta it only had to read: repairable_keeper_meta_enum"
 
   wal_only_root="$fixture_root/wal-only"
   write_schedules "$wal_only_root" running
   mkdir -p "$wal_only_root/.masc/keepers/fixture"
-  : >"$wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+  : >"$wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   "$0" --base-path "$wal_only_root" >/dev/null
 
   malformed_wal_only_root="$fixture_root/malformed-wal-only"
   write_schedules "$malformed_wal_only_root" running
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
-    >"$malformed_wal_only_root/.masc/keepers/fixture/event-queue-transitions-v6.jsonl"
+    >"$malformed_wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
   expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
 
   malformed_root="$fixture_root/malformed"

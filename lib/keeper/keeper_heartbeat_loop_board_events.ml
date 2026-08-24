@@ -84,7 +84,6 @@ let snapshot_for ~base_path ~keeper_name =
 let failure_snapshot_to_json ~now snapshot =
   `Assoc
     [ "keeper_name", `String snapshot.snapshot_keeper_name
-    ; "last_error_at_unix", `Float snapshot.snapshot_failed_at
     ; ( "last_error_age_sec"
       , `Int (int_of_float (max 0.0 (now -. snapshot.snapshot_failed_at))) )
     ; "last_error_message", `String snapshot.snapshot_message
@@ -114,7 +113,6 @@ let fleet_health_json ~base_path ~keeper_names =
     ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
-    ; "failed_keeper_count", `Int (List.length failures)
     ; "failure_count", `Int (List.length failures)
     ; "failures", `List (List.map (failure_snapshot_to_json ~now) failures)
     ]

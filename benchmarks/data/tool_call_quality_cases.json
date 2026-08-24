@@ -6,7 +6,7 @@
       "id": "read_search_prompt_fingerprint",
       "prompt": "Search for `prompt_fingerprint`, then read the keeper tool-call log implementation file and report exactly two concrete file touch points where prompt fingerprints are recorded. Do not use bash for this case.",
       "category": "tool_use",
-      "keeper_profiles": ["bench-analyst", "bench-executor"],
+      "keeper_profiles": ["bench-delta", "bench-executor"],
       "forbidden_tools": ["tool_execute"],
       "forbidden_selectors": [
         { "type": "descriptor_id", "value": "agent.execute" }
@@ -41,7 +41,7 @@
       "id": "text_only_triage",
       "prompt": "Do not call any tools. Decide whether the sentence `No lookup is needed here.` requires tools, and respond in text only.",
       "category": "tool_forbidden",
-      "keeper_profiles": ["bench-analyst"],
+      "keeper_profiles": ["bench-delta"],
       "forbidden_tools": [],
       "max_tool_calls": 0,
       "success_checks": [

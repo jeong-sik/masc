@@ -8,10 +8,12 @@ import { ringFocusClasses } from '../common/ring'
 import { ATTACHMENT_INPUT_ACCEPT, collectAttachments } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
+import { buildChatContextScope, ChatContextScopeRow, ChatSpeakerHandle } from './message-context-scope'
+import type { ChatContextScope } from './message-context-scope'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ArrowRight, ExternalLink, Mic, ShieldCheck, Square } from 'lucide-preact'
-import { prettyJson } from '../tool-call-shared'
+import { normalizeToolName, prettyJson, toolSubject } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -35,6 +37,7 @@ import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
 import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { fusionDecisionSpec } from '../v2/fusion-constants'
 import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
 /** Keeper identity used by SigilBadge. */
@@ -268,28 +271,10 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
         }
       }
       break
-    case 'dashboard':
-      return {
-        url: '#',
-        label: 'Dashboard',
-        icon: '💻',
-        title: compactKeyValues([
-          ['surface', 'dashboard'],
-          ['session_id', surface.session_id],
-        ]),
-      }
-    case 'agent':
-      // Names the surface, not the author. The agent surface used to carry
-      // only the viewed keeper's own traffic, so '(Self)' held; keeper
-      // broadcasts are now projected into every other keeper's transcript
-      // with the same surface, and there '(Self)' names the wrong keeper.
-      // The speaker chip beside this badge already identifies the author.
-      return {
-        url: '#',
-        label: 'Agent',
-        icon: '🤖',
-        title: 'surface=agent',
-      }
+    // dashboard / agent / broadcast / webhook rows carry no link or
+    // coordinates beyond what the origin badge (sourceBadgeInfo) already
+    // shows, so they render no meta chip — the chip lane is for surfaces
+    // with a destination (deep link) or an address to inspect.
     case 'gate':
       {
         const label = surface.label || 'connector'
@@ -460,20 +445,62 @@ function avatarMonogram(entry: KeeperConversationEntry): string {
   return label.slice(0, 2).toUpperCase()
 }
 
-// C2: badge non-obvious message provenance. The standalone's .src-badge marks
-// external CHANNELS (discord/slack/imessage) which the live keeper transport
-// does not have — its `source` is a *semantic* origin instead. So we badge the
-// origins that are easy to mistake for a plain user/assistant turn
-// (world-state injection, internal prompt, tool result, system) and leave the
-// two ordinary cases (direct_user / direct_assistant) unbadged.
-const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cls: string }>> = {
+// C2: badge message provenance (#29461). Two axes feed one badge slot:
+// 1. Semantic origins that are easy to mistake for a plain turn keep
+//    their badge (world-state injection, internal prompt, tool result,
+//    system) — they win because the surface says where a row travelled,
+//    not what it is.
+// 2. Every other row derives its badge from the typed origin the wire
+//    already carries: entry.surface.kind × the row's speaker fields.
+//    Dashboard rows are the operator's own input (live stores carry
+//    owner authority on every dashboard user row), agent rows name the
+//    sending keeper, broadcast rows mark workspace fleet fanout, and
+//    connector rows name the connector. No surface, no badge — origin
+//    is never guessed from content.
+interface SourceBadgeInfo {
+  label: string
+  cls: string
+  title?: string
+}
+const SEMANTIC_SOURCE_BADGE: Partial<Record<KeeperConversationSource, SourceBadgeInfo>> = {
   world_state_prompt: { label: '월드', cls: 'world' },
   internal_assistant: { label: '내부', cls: 'internal' },
   tool_result: { label: '도구', cls: 'tool' },
   system: { label: '시스템', cls: 'system' },
 }
-function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: string } | null {
-  return SOURCE_BADGE[entry.source] ?? null
+function surfaceBadgeTitle(entry: KeeperConversationEntry): string {
+  return compactKeyValues([
+    ['surface', entry.surface?.kind],
+    ['speaker_name', entry.speakerName],
+    ['speaker_id', entry.speakerId],
+    ['speaker_authority', entry.speakerAuthority],
+    ['external_message_id', entry.externalMessageId],
+  ])
+}
+function sourceBadgeInfo(entry: KeeperConversationEntry): SourceBadgeInfo | null {
+  const semantic = SEMANTIC_SOURCE_BADGE[entry.source]
+  if (semantic) return semantic
+  const surface = entry.surface
+  if (!surface) return null
+  const title = surfaceBadgeTitle(entry)
+  switch (surface.kind) {
+    case 'dashboard':
+      return { label: '사람', cls: 'origin-dashboard', title }
+    case 'broadcast':
+      return { label: '브로드캐스트', cls: 'origin-broadcast', title }
+    case 'discord':
+      return { label: 'Discord', cls: 'origin-discord', title }
+    case 'slack':
+      return { label: 'Slack', cls: 'origin-slack', title }
+    case 'agent': {
+      const speaker = entry.speakerName?.trim() || entry.speakerId?.trim() || ''
+      return { label: speaker || 'keeper', cls: 'origin-agent', title }
+    }
+    case 'webhook':
+      return { label: surface.source?.trim() || 'Webhook', cls: 'origin-webhook', title }
+    case 'gate':
+      return { label: surface.label?.trim() || 'Gate', cls: 'origin-gate', title }
+  }
 }
 
 type StreamContractBadgeInfo = {
@@ -1247,7 +1274,7 @@ function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
       <span class="chat-block-suggestions-label" id=${labelId}>${CHAT_SUGGESTIONS_LABEL}</span>
-      <div class="chat-block-suggestions-row" role="group" aria-labelledby=${labelId}>
+      <div class="chat-block-suggestions-row suggest-row" role="group" aria-labelledby=${labelId}>
         ${items.map((it, i) => html`
           <${ChatSuggestionChip}
             key=${i}
@@ -1422,14 +1449,17 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
+  // Keeper-v2 messages.jsx image block: figure.img-out > .img-frame > img | .img-ph.
+  // chat-block-media-frame stays alongside img-frame — it owns the dashboard-only
+  // extras the design never had to solve (placeholder min-height, img max-height cap).
   return html`
-    <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
+    <figure class="img-out" data-chat-block="image">
+      <div class="chat-block-media-frame img-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
         ${safeSrc
           ? html`<img src=${safeSrc} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
-          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
+          : html`<div class="chat-block-media-ph img-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open && safeSrc
         ? html`
             <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
@@ -1448,14 +1478,15 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const clean = useMemo(() => sanitizeHtml(svg), [svg])
+  // Keeper-v2 messages.jsx svg block: figure.svg-out > .svg-frame (sanitized inline svg).
   return html`
-    <figure class="chat-block-media" data-chat-block="svg">
+    <figure class="svg-out" data-chat-block="svg">
       <div
-        class="chat-block-media-frame cursor-zoom-in"
+        class="chat-block-media-frame svg-frame cursor-zoom-in"
         onClick=${() => setOpen(true)}
         dangerouslySetInnerHTML=${{ __html: clean }}
       />
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open
         ? html`
             <${ChatPreviewModal} title=${cap || 'SVG'} onClose=${() => setOpen(false)}>
@@ -1666,6 +1697,9 @@ function ChatTraceStep({
   }
 
   const statusUi = traceToolStatusUi(step.status)
+  // The name alone repeats: six `Execute` rows read identically. The subject is
+  // the argument that tells them apart, and it is already on the step.
+  const subject = toolSubject(step.args)
 
   return html`
     <div
@@ -1686,6 +1720,9 @@ function ChatTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${step.name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${statusUi.className}"
             title=${statusUi.title}
@@ -1773,22 +1810,26 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   }
   const safeUrl = isSafeUrl(b.url) ? b.url : '#'
   const unsafe = safeUrl === '#'
+  // Keeper-v2 messages.jsx LinkCard vocabulary (linkcard / -fav / -body / -title /
+  // -desc / -meta mono / -go); skin is vendored in keeper-v2/v2.css. The
+  // chat-block-linkcard-unsafe hook is dashboard-only: the design has no unsafe-URL
+  // state, and the live renderer refuses javascript:/data: hrefs.
   return html`
     <a
-      class="chat-block-linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
+      class="linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
       href=${safeUrl}
       target="_blank"
       rel=${unsafe ? undefined : 'noopener noreferrer'}
       data-chat-block="link"
       onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
     >
-      <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
-      <span class="chat-block-linkcard-body">
-        <span class="chat-block-linkcard-title">${b.title}</span>
-        ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
-        <span class="chat-block-linkcard-meta">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
+      <span class="linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
+      <span class="linkcard-body">
+        <span class="linkcard-title">${b.title}</span>
+        ${b.desc ? html`<span class="linkcard-desc">${b.desc}</span>` : null}
+        <span class="linkcard-meta mono">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
       </span>
-      <span class="chat-block-linkcard-go">↗</span>
+      <span class="linkcard-go">↗</span>
     </a>
   `
 }
@@ -1975,39 +2016,40 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
     return () => { alive = false }
   }, [expanded, boardPostId])
 
-  const runLabel = runId ? ` · ${runId.slice(0, 12)}` : ''
   const answeredCount = state.panel.filter((p) => p.status === 'answered').length
   const usageLabel =
     state.totalOutputTokens !== undefined ? ` · ${state.totalOutputTokens.toLocaleString()} tok` : ''
+  // Keeper-v2 messages.jsx fusion block: .msg-fusion > .msg-fusion-h (tag · run ·
+  // decision badge) + .msg-fusion-ans + .msg-fusion-foot (panel count · run link).
+  // Skin is vendored in keeper-v2/fusion.css. The decision badge/answer only render
+  // once the board post is lazy-fetched on expand — before that the live signal
+  // does not exist locally and nothing is fabricated for them.
+  const decSpec = state.status === 'loaded' && state.judge?.decision
+    ? fusionDecisionSpec(state.judge.decision)
+    : null
   return html`
-    <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
+    <div class=${`msg-fusion${decSpec?.cls ? ` dec-${decSpec.cls}` : ''}`} data-fusion-card>
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${CHAT_FOCUS_RING}"
+        class="msg-fusion-h w-full text-left ${CHAT_FOCUS_RING}"
         aria-expanded=${expanded}
         onClick=${() => setExpanded((v) => !v)}
       >
         <span aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-        <span class="font-medium">Fusion 심의</span>
+        <span class="msg-fusion-tag">◈ Fusion 심의</span>
         <span class="text-[var(--color-fg-secondary,#9da7b3)]">
           ${state.status === 'loaded'
-            ? `패널 ${answeredCount}/${state.panel.length} 합의${runLabel}${usageLabel}`
-            : `패널 합의 상세${runLabel}`}
+            ? `패널 ${answeredCount}/${state.panel.length} 합의${usageLabel}`
+            : '패널 합의 상세'}
         </span>
+        ${runId ? html`<span class="msg-fusion-run mono">${runId.slice(0, 12)}</span>` : null}
+        ${decSpec
+          ? html`<span class=${`fus-dec-badge ${decSpec.cls}`}>${decSpec.glyph} ${decSpec.lbl}</span>`
+          : null}
       </button>
-      <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
-        ${runId
-          ? html`
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-[var(--r-0,4px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-bg-surface,#111827)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-secondary,#9da7b3)] hover:text-[var(--color-fg-primary,#f3f4f6)] ${CHAT_FOCUS_RING}"
-              onClick=${() => navigate('fusion', { run_id: runId })}
-              data-testid="fusion-chat-open-run"
-            >
-              <${ExternalLink} size=${12} aria-hidden="true" />
-              <span>Fusion</span>
-            </button>
-          `
+      <div class="msg-fusion-foot">
+        ${state.status === 'loaded'
+          ? html`<span>패널 ${state.panel.length}개 · 심판 종합</span>`
           : null}
         <button
           type="button"
@@ -2018,6 +2060,16 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
           <${ExternalLink} size=${12} aria-hidden="true" />
           <span>Board</span>
         </button>
+        ${runId
+          ? html`
+            <button
+              type="button"
+              class="msg-fusion-link"
+              onClick=${() => navigate('fusion', { run_id: runId })}
+              data-testid="fusion-chat-open-run"
+            >전체 패널·심판 보기 →</button>
+          `
+          : null}
       </div>
       ${expanded
         ? html`
@@ -2042,11 +2094,11 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
                         judge · ${state.judge.status}${state.judge.decision ? html` · ${state.judge.decision}` : null}
                       </div>
                       ${state.judge.synthesis
-                        ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
+                        ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
                         : state.judge.resolvedAnswer
-                          ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
+                          ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
                           : state.judge.error
-                            ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.error} /></div>`
+                            ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.error} /></div>`
                             : null}
                     </div>
                   `
@@ -2625,12 +2677,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  // Keeper-v2 CtxFrom strip, precomputed by ChatTranscript from the transcript's
+  // own channel rows (null for non-connector entries). Precomputed upstream so
+  // this memo's shallow compare sees a stable object across unrelated re-renders.
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   if (
@@ -2728,6 +2785,11 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const speakerInfo = speakerMeta(entry)
   const routeInfo = routeMeta(entry)
 
+  // Keeper-v2 messages.jsx Message row vocabulary: the operator avatar is
+  // `.msg-av.op` (keeper rows draw the sigil badge in the design, so msg-av
+  // goes on user rows only); msg-col/msg-hd mark the content column and the
+  // header row. The row keeps the dashboard's chat-bubble chrome — delivery,
+  // stream-contract and meta chips are live signals the design has no slot for.
   return html`
     <article
       ref=${bubbleRef}
@@ -2767,24 +2829,28 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone}${entry.role === 'user' ? ' msg-av op' : ''} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
             ${avatarMonogram(entry)}
           </div>
-          <div class="min-w-0 flex-1">
+          <div class="msg-col min-w-0 flex-1">
             ${isMessenger
               ? html`
-                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div class="msg-hd flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
                       ${avatarLabel(entry)}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${timestamp
                       ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
                     ${sourceBadge
-                      ? html`<span class=${`kw-src-badge ${sourceBadge.cls}`}>${sourceBadge.label}</span>`
+                      ? html`<span
+                          class=${`kw-src-badge ${sourceBadge.cls}`}
+                          title=${sourceBadge.title || undefined}
+                        >${sourceBadge.label}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
@@ -2803,12 +2869,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   </div>
                 `
               : html`
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <div class="msg-hd flex flex-wrap items-center gap-1.5">
                     <span
                       class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
@@ -2883,6 +2950,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             `
           : null}
       </div>
+
+      ${contextScope ? html`<${ChatContextScopeRow} scope=${contextScope} />` : null}
 
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
@@ -2997,12 +3066,14 @@ function ChatMessageSurface({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   return chatControlStatus(entry)
@@ -3013,6 +3084,7 @@ function ChatMessageSurface({
           showMetadata=${showMetadata}
           variant=${variant}
           showSourceBadge=${showSourceBadge}
+          contextScope=${contextScope}
           action=${action}
         />
       `
@@ -3064,6 +3136,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const toolCallId = toolCallIdFromToolEntryId(entry.id)
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
@@ -3113,6 +3187,9 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
         <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        ${subject
+          ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+          : null}
         <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
@@ -3255,6 +3332,8 @@ function ToolTraceStep({
   const callId = toolTraceCallId(entry, traceStep)
   const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
   const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep)
   const sourceBadge = structuralSummary
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
@@ -3308,6 +3387,9 @@ function ToolTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${status}"
             title=${TOOL_STATUS_TITLE[status]}
@@ -3694,6 +3776,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
   toolOutputHydrationContract,
+  contextScope = null,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -3704,6 +3787,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
   toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
@@ -3726,6 +3810,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${contextScope}
         action=${action}
       />
     </div>
@@ -3739,6 +3824,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
   && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
   && prev.toolOutputHydrationContract === next.toolOutputHydrationContract
+  && prev.contextScope === next.contextScope
   && prev.action === next.action
 )
 
@@ -3746,6 +3832,44 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
 // new content keeps auto-scrolling. Scrolling further up unpins so the
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
+
+const AUTONOMOUS_SUMMARY_MAX_GROUPS = 4
+// A run can hold hundreds of turns; the header is a glance, not an audit. The
+// scan stops here and says so with a trailing ellipsis rather than paying for
+// the whole run on every render.
+const AUTONOMOUS_SUMMARY_SCAN_LIMIT = 2000
+
+/** Which tools a collapsed run of autonomous turns ran, in the order it ran
+ *  them, consecutive repeats folded into a count. A header reading only
+ *  "자율턴 145개" says how many times the keeper woke, not what any wake did,
+ *  so the run stays closed and the reader still cannot tell a fetch from a
+ *  rewrite. Returns null for a run that called no tools. */
+export function autonomousToolSummary(entries: KeeperConversationEntry[]): string | null {
+  const groups: { name: string; count: number }[] = []
+  let scanned = 0
+  let truncated = false
+  for (const entry of entries) {
+    for (const step of entry.traceSteps ?? []) {
+      if (step.kind !== 'tool') continue
+      if (scanned >= AUTONOMOUS_SUMMARY_SCAN_LIMIT) {
+        truncated = true
+        break
+      }
+      scanned++
+      const name = normalizeToolName(step.name)
+      const last = groups[groups.length - 1]
+      if (last && last.name === name) last.count++
+      else groups.push({ name, count: 1 })
+    }
+    if (truncated) break
+  }
+  if (groups.length === 0) return null
+  const shown = groups.slice(0, AUTONOMOUS_SUMMARY_MAX_GROUPS)
+  const text = shown.map((g) => (g.count > 1 ? `${g.name}×${g.count}` : g.name)).join(' ')
+  const rest = groups.length - shown.length
+  const more = rest > 0 ? ` +${rest}` : ''
+  return truncated ? `${text}${more}…` : `${text}${more}`
+}
 
 /** One autonomous turn, collapsed into a single row. Starts closed: the turn is
  *  the keeper working on its own, and the transcript's subject is the
@@ -3772,6 +3896,7 @@ function AutonomousTurnGroup({
 }) {
   const [open, setOpen] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
+  const toolSummary = useMemo(() => autonomousToolSummary([entry]), [entry])
   return html`
     <div class="chat-block-trace ${open ? 'open' : ''}">
       <button
@@ -3783,6 +3908,9 @@ function AutonomousTurnGroup({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">1개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
         ${timestamp ? html`<span class="chat-block-trace-meta">${timestamp}</span>` : null}
       </button>
       ${open
@@ -3874,6 +4002,7 @@ function AutonomousTurnRun({
   // Both ends or neither: a half range would read as a single point in time.
   const range = first && last ? (first === last ? first : `${first} ~ ${last}`) : null
   const drawn = autonomousRunWindow(entries.length, headCount)
+  const toolSummary = useMemo(() => autonomousToolSummary(entries), [entries])
   const turn = (entry: KeeperConversationEntry) => html`<${AutonomousTurnGroup}
     key=${entry.id}
     entry=${entry}
@@ -3896,6 +4025,9 @@ function AutonomousTurnRun({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">${entries.length}개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
         ${range ? html`<span class="chat-block-trace-meta">${range}</span>` : null}
       </button>
       ${open
@@ -4233,6 +4365,7 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${unit.entry.surface ? buildChatContextScope(unit.entry, entries) : null}
         action=${action}
       />`)
     }
@@ -4350,7 +4483,7 @@ export function ChatTranscript({
       snap()
       requestAnimationFrame(snap)
       // Bottom-pinned with new content arriving means the operator is watching
-      // it live — advance the cursor so the divider/card do not resurrect it.
+      // it live — advance the cursor so the divider does not resurrect it.
       onSeenBottomRef.current?.()
     } else {
       setUnread(true)

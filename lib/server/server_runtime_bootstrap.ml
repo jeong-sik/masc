@@ -345,10 +345,8 @@ let configure_exact_output_registry ?config_root () =
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
        warn_rejected_exact_output_slots registry;
-       let generation = Runtime_exact_output_registry.generation registry in
        Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
-         generation
+         "exact_output: immutable resolver-and-lane registry published%s"
          catalog_description;
        warn_optional_exact_output_lane
          registry
@@ -764,7 +762,8 @@ let initialize_owner_state_blocking
   Fs_compat.set_fs fs;
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let fusion_registry =
-    Filename.concat masc_dir "fusion-runs.jsonl" |> Fusion_run_registry.replay
+    Filename.concat masc_dir Fusion_run_registry.storage_filename
+    |> Fusion_run_registry.replay
   in
   (match Fusion_run_registry.install_global fusion_registry with
    | Ok () -> ()
@@ -773,7 +772,7 @@ let initialize_owner_state_blocking
        (Owner_initialization_failed
           (Run_registry_already_installed `Fusion)));
   let verification_registry =
-    Filename.concat masc_dir "verification-runs.jsonl"
+    Filename.concat masc_dir Verification_run_registry.storage_filename
     |> Verification_run_registry.replay
   in
   (match Verification_run_registry.install_global verification_registry with
@@ -1066,47 +1065,72 @@ let initialize_owner_state_blocking
 
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
-let max_logged_prompt_sync_entries = 10
+let max_logged_asset_sync_entries = 10
 
-let sync_prompt_assets_from_binary () =
+let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   let sync =
-    Prompt_defaults.sync_prompt_assets
+    Managed_asset_sync.sync
+      ~domain
       ~read:Embedded_config.read
       ~files:Embedded_config.file_list
-      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ~dest_dir
       ()
   in
   (match
-     sync.Prompt_defaults.copied,
-     sync.Prompt_defaults.overwritten,
-     sync.Prompt_defaults.removed
+     sync.Managed_asset_sync.copied,
+     sync.Managed_asset_sync.overwritten,
+     sync.Managed_asset_sync.removed
    with
    | [], [], [] -> ()
    | copied, overwritten, removed ->
        let names = copied @ overwritten @ removed in
        let shown =
-         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
+         List.filteri (fun i _ -> i < max_logged_asset_sync_entries) names
        in
        Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         "%s assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         label
          (List.length copied)
          (List.length overwritten)
          (List.length removed)
          (String.concat ", " shown)
-         (if List.length names > max_logged_prompt_sync_entries then ", …"
+         (if List.length names > max_logged_asset_sync_entries then ", …"
           else ""));
   List.iter
-    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
-    sync.Prompt_defaults.failed
+    (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
+    sync.Managed_asset_sync.failed
+
+(* Tool definitions ship embedded in the binary and are read once at boot
+   (RFC prompts-and-tool-definitions-outside-ocaml §6). A definition that
+   does not decode refuses the boot here, before readiness, instead of
+   publishing a partial tool surface. *)
+let validate_embedded_tool_definitions () =
+  match
+    Tool_definition_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
-  (* Converge runtime prompt markdown onto the binary-embedded assets
-     before the registry scans the directory (#20929: merged prompt edits
-     never reached the runtime dir otherwise). *)
-  sync_prompt_assets_from_binary ();
+  (* Converge the runtime prompt markdown and tool definition dirs onto the
+     binary-embedded assets before anything scans them (#20929: merged
+     prompt edits never reached the runtime dir otherwise). *)
+  sync_managed_assets_from_binary
+    ~label:"prompt"
+    ~domain:Managed_asset_sync.Prompts
+    ~dest_dir:(Config_dir_resolver.prompts_dir ())
+    ();
+  sync_managed_assets_from_binary
+    ~label:"tool"
+    ~domain:Managed_asset_sync.Tools
+    ~dest_dir:(Config_dir_resolver.tools_dir ())
+    ();
+  validate_embedded_tool_definitions ();
   (* Load the registry and replay operator overrides. The resolved directory is
      not inspected afterwards: three checks used to stand here and none of them
      gated. One compared a value against the call that produced it. One
@@ -1235,11 +1259,8 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
    same post-readiness lane as the task completion authority — the stage-2
    gate is illegal to merge without it (a gate no one calls wedges every goal
    that enters [Verifying]). *)
-let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
-  Goal_verification_agent.start
-    ~sw
-    ~clock
-    ~config:(Mcp_server.workspace_config state)
+let start_goal_verifier ~sw (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
 
 let start_post_ready_owner_lanes
       ~sw
@@ -1251,7 +1272,7 @@ let start_post_ready_owner_lanes
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
   start_completion_authority ~sw ~clock state;
-  start_goal_verifier ~sw ~clock state;
+  start_goal_verifier ~sw state;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =

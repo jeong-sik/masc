@@ -11,7 +11,6 @@ module Ansi = struct
   let bold = "\027[1m"
   let dim = "\027[2m"
 
-  let _black = "\027[30m"
   let red = "\027[31m"
   let green = "\027[32m"
   let yellow = "\027[33m"
@@ -19,14 +18,17 @@ module Ansi = struct
   let magenta = "\027[35m"
   let cyan = "\027[36m"
   let white = "\027[37m"
+
+  (* SGR 39 restores the terminal's own text colour. [white] is a colour like
+     any other -- on a light background it is the background -- so a fallback
+     that means "nothing special about this value" has to say default, not
+     white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
+     an emphasised run without flattening it. *)
+  let default_fg = "\027[39m"
   let gray = "\027[90m"
 
-  let _bg_black = "\027[40m"
-  let _bg_blue = "\027[44m"
-  let bg_white = "\027[47m"
-
   (* Cursor movement *)
-  let _move_to row col = Printf.sprintf "\027[%d;%dH" row col
+  let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 
   (* Reverse video for selection highlight *)
   let reverse = "\027[7m"
@@ -38,15 +40,30 @@ module Ansi = struct
   let box_tr = "\xe2\x94\x90" (* top-right corner *)
   let box_bl = "\xe2\x94\x94" (* bottom-left corner *)
   let box_br = "\xe2\x94\x98" (* bottom-right corner *)
-  let _box_t = "\xe2\x94\xac"  (* top tee *)
-  let _box_b = "\xe2\x94\xb4"  (* bottom tee *)
   let box_l = "\xe2\x94\x9c"  (* left tee *)
   let box_r = "\xe2\x94\xa4"  (* right tee *)
-  let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
 
-(** Get terminal size (fallback to 80x24) *)
-let get_terminal_size () =
+(** A screen title.
+
+    Emphasis belongs to the words that name the screen, not to the whole header
+    line. Headers interpolate coloured badges, and the reset that closes a badge
+    also closes any style wrapped around the line, so styling the line bolded a
+    different amount of text on every screen -- as far as its first badge, which
+    sits in a different place each time. Eight screens wrapped the line and eight
+    drew it plain, and the four styles that came out of that were not a
+    decision. *)
+let screen_title text = Ansi.bold ^ text ^ Ansi.reset
+
+(** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
+    an idle TUI does not spawn [tput] twice per frame. *)
+let terminal_size_cache =
+  Masc_tui_render_schedule.Terminal_size_cache.create ~fallback:(24, 80)
+
+let invalidate_terminal_size () =
+  Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
+
+let probe_terminal_size () =
   let read_tput arg =
     try
       let line, status =
@@ -59,33 +76,34 @@ let get_terminal_size () =
     with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
   in
   match read_tput "cols", read_tput "lines" with
-  | Some cols, Some rows -> (rows, cols)
-  | _ -> (24, 80)
+  | Some cols, Some rows -> Some (rows, cols)
+  | _ -> None
+
+(** Get terminal size (fallback to 80x24). *)
+let get_terminal_size () =
+  Masc_tui_render_schedule.Terminal_size_cache.get terminal_size_cache
+    ~probe:probe_terminal_size
 
 (** Draw horizontal line *)
 let draw_hline width =
   String.concat "" (List.init width (fun _ -> Ansi.box_h))
 
-(** Pad or truncate string to width *)
-let fit_width s width =
-  let len = String.length s in
-  if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
-  else s ^ String.make (width - len) ' '
+(** Pad or truncate plain text without counting ANSI style bytes. *)
+let fit_width = Masc_tui_message_layout.fit_width
 
-let is_keeper name =
-  String.length name >= 7 && String.sub name 0 7 = "keeper-"
+(** External values become one printable logical row before renderer-owned ANSI
+    styling or width calculation is applied. *)
+module Terminal_text = struct
+  let single_line text = Masc.Tui_decode.sanitize_terminal_text text
+  let optional_single_line = Option.map single_line
 
-(** Agent icon — deterministic by name hash, vendor-agnostic *)
-let agent_icon name =
-  let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
-  else icons.(Hashtbl.hash name mod Array.length icons)
+  let single_line_or ~default value =
+    Option.value ~default (optional_single_line value)
 
-(** Agent color — deterministic by name hash, vendor-agnostic *)
-let agent_color name =
-  let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if is_keeper name then Ansi.white
-  else colors.(Hashtbl.hash name mod Array.length colors)
+  let single_lines values = List.map single_line values
+  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
+end
 
 (** Status color *)
 let status_color status =
@@ -94,15 +112,17 @@ let status_color status =
   | "idle" | "online" -> Ansi.green
   | "offline" -> Ansi.gray
   | "error" -> Ansi.red
-  | _ -> Ansi.white
+  | _ -> Ansi.default_fg
 
 (** Task status icon *)
 let task_status_icon status =
   match status with
-  | "done" | "completed" -> "\xe2\x97\x8f"  (* filled circle *)
-  | "in_progress" | "claimed" -> "\xe2\x97\x90"  (* half circle *)
-  | "pending" | "todo" -> "\xe2\x97\x8b"  (* empty circle *)
-  | _ -> "\xe2\x97\x8b"
+  | Masc_domain.Done _ -> "\xe2\x97\x8f"  (* filled circle *)
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> "\xe2\x97\x90"  (* half circle *)
+  | Masc_domain.Todo -> "\xe2\x97\x8b"  (* empty circle *)
+  | Masc_domain.Cancelled _ -> "\xc3\x97"
 
 (** Priority indicator *)
 let priority_indicator p =
@@ -110,36 +130,6 @@ let priority_indicator p =
   else if p <= 2 then Ansi.red ^ "!!" ^ Ansi.reset
   else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
   else ""
-
-(** Soul profile color *)
-let soul_color profile =
-  match profile with
-  | "relationship" -> Ansi.magenta
-  | "delivery" -> Ansi.green
-  | "balanced" -> Ansi.cyan
-  | "creative" -> Ansi.yellow
-  | _ -> Ansi.white
-
-(** Shorten model string for display *)
-let short_model s =
-  (* Extract the part after the last colon, or last slash, keeping it short *)
-  let s = match String.index_opt s ':' with
-    | Some i -> String.sub s (i + 1) (String.length s - i - 1)
-    | None -> s
-  in
-  if String.length s > 24 then String.sub s 0 21 ^ "..."
-  else s
-
-(** Format a boolean as on/off indicator *)
-let bool_indicator b =
-  if b then Ansi.green ^ "on" ^ Ansi.reset
-  else Ansi.gray ^ "off" ^ Ansi.reset
-
-(** Format a timestamp for display (show date portion or relative) *)
-let short_ts s =
-  if String.length s > 19 then String.sub s 0 19
-  else if String.length s = 0 then "(never)"
-  else s
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =
@@ -149,6 +139,7 @@ let ctx_color ratio =
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =
+  let width = Masc_tui_render_schedule.nonnegative_width width in
   let filled = int_of_float (ratio *. float_of_int width) in
   let filled = max 0 (min width filled) in
   let empty = width - filled in
@@ -158,16 +149,6 @@ let ctx_bar ratio width =
     (String.make filled '#')
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
-
-(** Format channel name with color *)
-let channel_color ch =
-  match ch with
-  | "heartbeat" -> Ansi.dim ^ "hb" ^ Ansi.reset
-  | "turn" -> Ansi.cyan ^ "turn" ^ Ansi.reset
-  | "compaction" -> Ansi.yellow ^ "comp" ^ Ansi.reset
-  | "handoff" -> Ansi.magenta ^ "hand" ^ Ansi.reset
-  | "initiative" -> Ansi.blue ^ "init" ^ Ansi.reset
-  | s -> s
 
 (** Shared helper: draw box top border *)
 let box_top buf cols =
@@ -191,6 +172,15 @@ let box_line buf cols content =
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
+
+(** Fit plain content first, then add style bytes so ANSI escapes never count
+    toward the terminal width. *)
+let box_line_styled buf cols ~style content =
+  let inner = cols - 4 in
+  let content = fit_width content inner in
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
+       Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
 (** Shared helper: empty line inside a box *)
 let box_empty buf cols =

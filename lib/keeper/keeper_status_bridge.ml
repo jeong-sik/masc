@@ -107,11 +107,10 @@ include Keeper_status_bridge_blocker
 
 
 let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper_meta) =
-  match meta.runtime.last_blocker with
-  | Some info ->
-    Some (runtime_blocker_surface_of_typed_class ~summary:info.detail info.klass)
-  | None ->
-    (match runtime_registry_entry config meta.name with
+  (* The registry is the only writer of a runtime blocker; the meta field that
+     used to shadow it was written on one failure path and cleared on the next
+     success, so it reported a past instant as a present state. *)
+  (match runtime_registry_entry config meta.name with
      | Some entry ->
        (match entry.last_failure_reason with
         | Some reason -> runtime_blocker_surface_of_failure_reason reason

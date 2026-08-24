@@ -236,8 +236,7 @@ let seed_keeper_config base_path agent_name =
   mkdir_p agent_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (agent_name ^ ".toml"))
-    "[keeper]\nautoboot_enabled = true\n";
-  Fs_compat.save_file (Filename.concat agent_dir "AGENT.md") "Run the tool matrix.\n";
+    "[keeper]\nautoboot_enabled = true\ninstructions = \"Run the tool matrix.\"\n";
   Config_dir_resolver.reset ()
 
 let run_cmd_exn argv =

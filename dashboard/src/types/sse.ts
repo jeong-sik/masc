@@ -28,7 +28,6 @@ export type SSEEventType =
   | 'keeper_chat_appended'
   | 'keeper_chat_operation_event'
   | 'keeper_waiting_inventory_changed'
-  | 'keeper_compaction_snapshots_changed'
   | 'agent_core_telemetry_sample'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
@@ -70,7 +69,6 @@ export type SSEEventType =
   | `agent_core:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'project_snapshot'
-  | 'namespace_truth_snapshot'
   | 'execution_snapshot'
   | 'operator_snapshot'
   | 'operator_digest'

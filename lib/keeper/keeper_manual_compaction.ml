@@ -59,7 +59,6 @@ type admitted_operation =
 let checkpoint_ref_to_json (reference : Keeper_checkpoint_ref.t) =
   `Assoc
     [ "trace_id", `String (Keeper_id.Trace_id.to_string reference.trace_id)
-    ; "generation", `Int reference.generation
     ; "turn_count", `Int reference.turn_count
     ; "sha256", `String reference.sha256
     ]
@@ -155,7 +154,6 @@ let append_manifest
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
     ; manifest_trace_id = trace_id
-    ; manifest_generation = Some recovery.turn_generation
     ; manifest_keeper_turn_id = Some recovery.checkpoint.turn_count
     }
   in

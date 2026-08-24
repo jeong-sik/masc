@@ -114,7 +114,7 @@ let row_is_task_claim json =
    [filter_rows_for_keeper] rings a busy keeper down to its last
    [claim_rows_per_keeper] rows, which usually trims the older claim away and
    leaves the newer one to be found by accident; a quiet keeper keeps both and
-   reports the superseded task. Measured live: keeper [analyst] (46 rows in
+   reports the superseded task. Measured on one live Keeper (46 rows in
    window, nothing trimmed) reported task-305 while it had claimed task-306.
    See #28437.
 
@@ -442,10 +442,10 @@ let composite_runtime_attention ~snapshot ~execution =
     then None
     else
       (match json_string "operator_disposition_reason" execution with
-       | Some value -> String_util.trim_to_option value
+       | Some value -> String_util.trim_nonempty value
        | _ ->
          (match json_string "terminal_reason_code" execution with
-          | Some value -> String_util.trim_to_option value
+          | Some value -> String_util.trim_nonempty value
           | _ when needs_attention && composite_execution_config_drift execution ->
             Some "keeper_runtime_override_drift"
           | _ -> Some "runtime_blocked"))

@@ -42,6 +42,17 @@ let feature_health_cache_ttl_s = 60.0
 (** Shared dashboard projection cache TTL — 120 seconds. *)
 let dashboard_projection_cache_ttl_s = 120.0
 
+(* Every cached projection of the board store. A board write drops all of
+   them so the SSE-triggered refetch reads the write instead of the
+   previous projection for the rest of the TTL. *)
+let board_projection_cache_prefixes =
+  [ "board:memory:"; "board:list:"; "board:hearths:" ]
+;;
+
+let invalidate_board_projections () =
+  List.iter Dashboard_cache.invalidate_prefix board_projection_cache_prefixes
+;;
+
 (** Track whether shell cache has been populated at least once.
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)
@@ -79,15 +90,18 @@ let with_dashboard_timeout ~clock compute =
       ]
 ;;
 
-let cache_partition_segment (_config : Workspace.config) = "default"
+(* The directory the cached state actually lives in. This was a constant
+   "default", so a key told two clusters sharing a base path apart by nothing
+   and a scope switch could serve the previous workspace's projection
+   (#24504). [masc_root_dir] already owns the "" | "default" normalization and
+   the clusters/<name> layout, so reading it here keeps the cache partitioned
+   exactly like the store it caches. *)
+let cache_partition_segment (config : Workspace.config) =
+  Workspace_utils.masc_root_dir config
+;;
 
 let dashboard_cache_key (config : Workspace.config) prefix suffix =
-  Printf.sprintf
-    "%s:%s:%s:%s"
-    prefix
-    config.base_path
-    (cache_partition_segment config)
-    suffix
+  Printf.sprintf "%s:%s:%s" prefix (cache_partition_segment config) suffix
 ;;
 
 let dashboard_query_cache_segment = function
@@ -140,12 +154,4 @@ let with_projection_diagnostics ~surface ~started_at ~extra json =
   attach_projection_diagnostics
     json
     (projection_diagnostics_json ~surface ~started_at ~extra json)
-;;
-
-let initialized_json_opt = function
-  | `Assoc fields as json ->
-    (match List.assoc_opt "status" fields with
-     | Some (`String "initializing") -> None
-     | _ -> Some json)
-  | _ -> None
 ;;

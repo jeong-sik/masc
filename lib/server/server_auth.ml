@@ -8,13 +8,6 @@ let trim_opt = Env_config_core.trim_opt
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-      let octets = Ipaddr.V4.to_octets addr in
-      String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr ->
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-
 let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
@@ -38,9 +31,6 @@ let http_auth_strict_enabled () =
   Env_config.Transport.http_auth_strict_env_enabled ()
   || not (is_loopback_host (configured_bind_host ()))
   || base_url_has_non_loopback_host ()
-
-let http_auth_bind_host () =
-  configured_bind_host ()
 
 let http_auth_bind_is_loopback () =
   is_loopback_host (configured_bind_host ())
@@ -143,10 +133,6 @@ let observer_sse_query_credential_from_request request =
             | Some token -> Parsed_credential token
             | None -> Malformed_credential raw))
   | _ -> Absent_credential
-
-let observer_sse_query_token_from_request request =
-  observer_sse_query_credential_from_request request
-  |> token_of_request_auth_credential
 
 let observer_sse_auth_credential_from_request request =
   match request_auth_credential_from_request request with
@@ -622,15 +608,6 @@ let classify_request_origin ~request_authority request =
   | _ -> Multiple_origins
 ;;
 
-let browser_origin_matches_request_authority ~request_authority origin =
-  match Server_request_authority.parse_serialized_origin origin with
-  | Error `Malformed -> false
-  | Ok parsed ->
-    (match admission_of_serialized_origin ~request_authority parsed with
-     | Same_origin | Allowed_dev_origin -> true
-     | Rejected -> false)
-;;
-
 let ascii_is_whitespace = function
   | ' ' | '\t' | '\r' | '\n' -> true
   | _ -> false
@@ -856,10 +833,6 @@ let public_read_cors_headers request =
      | None -> [ ("vary", "Origin") ])
   | _ -> raise Invalid_origin_header
 
-let respond_public_read_json ?(status = `OK) request reqd body =
-  Http_server_eio.Response.json ~status
-    ~request ~extra_headers:(public_read_cors_headers request) body reqd
-
 let respond_public_read_json_value ?(status = `OK) request reqd value =
   Http_server_eio.Response.json_value ~status
     ~request ~extra_headers:(public_read_cors_headers request) value reqd
@@ -883,14 +856,31 @@ let auth_error_headers ~(status : Httpun.Status.t) ~cors =
   | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
   | _ -> cors
 
+(* One CORS answer for an auth error, whichever protocol asked.
+
+   H1 used to reflect [get_origin], which answers "*" when the request carries
+   no Origin and raises on a malformed one; H2 has always run the origin
+   through admission and emitted only [vary: Origin] when nothing was admitted.
+   Same 401, same typed code, same bearer challenge, different CORS headers
+   (#28166). Admission is the answer that holds: a 401 is not the place to hand
+   an unadmitted origin permission to read the response, and a malformed Origin
+   header should not raise out of the error responder. *)
+let auth_error_cors_headers request =
+  match Server_request_authority.current () with
+  | None -> [ "vary", "Origin" ]
+  | Some request_authority ->
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ "vary", "Origin" ])
+;;
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
-  let origin = get_origin request in
   let body = auth_error_json err in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: auth_error_headers ~status ~cors:(cors_headers origin))
+       :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body
@@ -1146,28 +1136,6 @@ let rec with_public_read handler request reqd =
     match current_server_state () with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
-
-and with_observer_sse_read_auth handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    match current_server_state () with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state ->
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match verify_mcp_observer_stream_auth ~base_path request with
-       | Ok _ ->
-         (match check_agent_rate_limit request reqd with
-          | Ok () -> handler state request reqd
-          | Error () -> ())
-       | Error err ->
-         Http_server_eio.Response.json
-           ~status:`Unauthorized
-           ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
-           (auth_error_json err)
-           reqd)
-  else
-    with_public_read handler request reqd
 
 and with_read_auth handler request reqd =
   match current_server_state () with

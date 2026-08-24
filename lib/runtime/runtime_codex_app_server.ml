@@ -619,7 +619,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
    official-client session into Recovery_required and made every later turn for
    that keeper fail closed on `official_client_session.claim` until an operator
    resolved it by hand. Three such chunks accounted for 3,236 rejected turns
-   across sangsu, kidsnote and taskmaster in one retained log window (#27967). *)
+   across three Keepers in one retained log window (#27967). *)
 let item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
   let* notification_thread_id = required_string method_ "threadId" fields in
@@ -1227,7 +1227,18 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
     | Error _ as error -> error
     | Ok protocol_cwd ->
-      Log.Runtime_agent.info "Codex app-server subscription turn starting";
+      (* Eight keepers starting a turn in the same second produced eight
+         identical lines with nothing to tell them apart (2026-08-22
+         01:36:25Z, seven within one second). The thread is the only identity
+         this entry point holds before [on_thread_ready] fires. *)
+      Log.Runtime_agent.info
+        "Codex app-server subscription turn starting thread=%s model=%s"
+        (match thread_mode with
+         | Start -> "new"
+         | Resume { thread_id } -> thread_id)
+        (match config.model with
+         | Some model -> model
+         | None -> "-");
       (match
          (try
             run_spawned

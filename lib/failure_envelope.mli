@@ -4,7 +4,6 @@ type severity =
   | Critical
 
 type recoverability =
-  | Retryable
   | Operator_action_required
   | Fatal
 
@@ -27,7 +26,6 @@ type t = {
 val tool_host_log_module_name : string
 val severity_to_string : severity -> string
 val to_severity : severity -> Severity.t
-val recoverability_to_string : recoverability -> string
 val tool_host_cause_code : tool_host_cause -> string
 val tool_host_cause_of_code : string -> (tool_host_cause, string) result
 val to_yojson : t -> Yojson.Safe.t

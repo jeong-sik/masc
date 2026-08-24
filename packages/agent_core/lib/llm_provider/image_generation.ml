@@ -332,11 +332,12 @@ let generate
          ()
      with
      | Error _ as error -> error
-     | Ok (code, response_body) when code >= 200 && code < 300 ->
+     | Ok { status; body = response_body; _ } when status >= 200 && status < 300 ->
        parse_response ~protocol response_body
-     | Ok (code, response_body) ->
+     | Ok { status; body = response_body; retry_after_header; _ } ->
        Error
-         (Http_client.HttpError { code; body = response_body; retry_after_header = None }))
+         (Http_client.HttpError
+            { code = status; body = response_body; retry_after_header }))
 ;;
 
 let test_caps task = { Capabilities.default_capabilities with task }

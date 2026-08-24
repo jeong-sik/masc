@@ -444,7 +444,6 @@ let current_selection_registry_summary = function
 let exact_input_payload (inp : Keeper_librarian.input) =
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
-    ; "generation", `Int inp.generation
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
     ; ( "rendered_prompt_variables"
@@ -507,14 +506,12 @@ let run_best_effort
           registry
           ~run_id
           ~lane:Exact_lane_run_registry.Librarian
-          ~subject_id:trace_id
           ~actor:keeper_id
           ~started_at
           ~input:
             (Exact_lane_run_registry.Exact_input
                (`Assoc
                   [ "actual_input", exact_input_payload prompt_input
-                  ; "generation", `Int prompt_input.generation
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
                   ; ( "max_recall_fact_bytes"
@@ -565,7 +562,6 @@ let run_best_effort
                ~source:
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
-                 ; generation = inp.generation
                  }
                ~facts:selection.facts
                ()

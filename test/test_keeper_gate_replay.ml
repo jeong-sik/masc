@@ -43,7 +43,7 @@ let projected_model_text ~base_path
      | Ok [ _canonical; projected ] ->
        Agent_core.Types.text_of_content projected.content
      | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
-     | Error detail -> Alcotest.fail detail)
+     | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
 ;;
 
 (* Reconstruction carries the approved payload fields back to the write
@@ -549,7 +549,7 @@ let test_multimodal_goal_projects_replay_reference () =
            evidence
            [ canonical_message ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; projected ] ->
          (match original.content, projected.content with
           | ( Agent_core.Types.Image _ :: Agent_core.Types.Text _ :: []
@@ -600,7 +600,7 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
            evidence
            [ Agent_core.Types.user_msg "reference was dropped" ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; recovered ] ->
          Alcotest.check
            Alcotest.string
@@ -810,23 +810,24 @@ let test_connector_post_replay_retains_terminal_target () =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let test_connector_post_replay_defaults_legacy_mentions () =
-  let open Masc.Keeper_tool_in_process_runtime in
+let test_connector_post_replay_requires_mention_user_ids () =
   let input =
     `Assoc
       [ "connector", `String "discord"
-      ; "channel_id", `String "D-before-mentions"
-      ; "content", `String "already approved"
+      ; "channel_id", `String "D-no-mentions-field"
+      ; "content", `String "approved without the list"
       ]
   in
-  match connector_post_replay_of_gate_input input with
-  | Ok (Replay_discord_post { mention_user_ids; input = decoded_input; _ }) ->
-    Alcotest.check (Alcotest.list Alcotest.string)
-      "missing legacy field means no mentions" [] mention_user_ids;
-    Alcotest.check json "durable input is not rewritten" input decoded_input
-  | Ok (Replay_slack_post _) ->
-    Alcotest.fail "Discord request decoded as Slack"
-  | Error detail -> Alcotest.fail detail
+  match
+    Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input input
+  with
+  | Error detail ->
+    Alcotest.check
+      Alcotest.bool
+      "names the missing field"
+      true
+      (String_util.contains_substring detail "missing mention_user_ids")
+  | Ok _ -> Alcotest.fail "a request without mention_user_ids became replayable"
 ;;
 
 let test_connector_post_rejects_heuristic_or_truncated_input () =
@@ -844,6 +845,7 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         [ "connector", `String "slack"
         ; "channel_id", `String "C-exact"
         ; "content", `String "missing exact blocks"
+        ; "mention_user_ids", `List []
         ]
     ; `Assoc
         [ "connector", `String "discord"
@@ -855,6 +857,7 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         [ "connector", `String "discord"
         ; "channel_id", `String "D-exact"
         ; "content", `String "exact"
+        ; "mention_user_ids", `List []
         ; "truncated", `Bool true
         ]
     ; `Assoc
@@ -863,6 +866,7 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         ; "thread_ts", `String "   "
         ; "content", `String "blank thread coordinate"
         ; "blocks", `List []
+        ; "mention_user_ids", `List []
         ]
     ; `Assoc
         [ "connector", `String "slack"
@@ -870,6 +874,7 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         ; "thread_ts", `Int 1700000000
         ; "content", `String "non-string thread coordinate"
         ; "blocks", `List []
+        ; "mention_user_ids", `List []
         ]
     ]
 ;;
@@ -1005,9 +1010,9 @@ let () =
             `Quick
             test_connector_post_replay_retains_terminal_target
         ; Alcotest.test_case
-            "legacy connector replay defaults missing mentions"
+            "connector replay requires mention_user_ids"
             `Quick
-            test_connector_post_replay_defaults_legacy_mentions
+            test_connector_post_replay_requires_mention_user_ids
         ; Alcotest.test_case
             "memory write replay keeps exact input"
             `Quick

@@ -3150,6 +3150,75 @@ def autonomous_turn_history_interaction() -> Interaction:
     return interact
 
 
+def message_origin_history_fixture() -> HttpResponse:
+    return (
+        200,
+        [
+            {
+                "id": "origin-user",
+                "role": "user",
+                "content": "operator-body-neutral",
+                "ts": 1787348490.3,
+                "speaker_name": "vincent",
+                "surface": {"kind": "dashboard"},
+            },
+            {
+                "id": "origin-keeper",
+                "role": "assistant",
+                "content": "keeper-body-neutral",
+                "ts": 1787348491.3,
+            },
+        ],
+    )
+
+
+def message_origin_badge_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    pane_start = len(output)
+    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"keeper-body-neutral",
+        start=pane_start,
+        timeout=5.0,
+    )
+    frame = frame_containing(bytes(output[pane_start:]), b"keeper-body-neutral")
+    for needle, description in (
+        (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
+        (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
+        (b"\x1b[0m  operator-body-neutral", "neutral operator body"),
+        (b"\x1b[0m  keeper-body-neutral", "neutral Keeper body"),
+    ):
+        if needle not in frame:
+            raise AssertionError(f"chat frame omitted {description}: {frame!r}")
+    for forbidden, description in (
+        (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
+        (b"\x1b[34m  keeper-body-neutral", "Keeper body blue wash"),
+        (b"\x1b[32m  keeper-body-neutral", "Keeper body green wash"),
+    ):
+        if forbidden in frame:
+            raise AssertionError(f"chat frame retained {description}: {frame!r}")
+
+    draft_start = len(output)
+    send_and_wait(process, master_fd, output, b"draft-neutral", b"draft-neutral")
+    draft_frame = frame_containing(bytes(output[draft_start:]), b"draft-neutral")
+    if b"\x1b[36m  > \x1b[0mdraft-neutral" not in draft_frame:
+        raise AssertionError(
+            f"chat composer did not limit accent to its prompt: {draft_frame!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    os.write(master_fd, b"q")
+
+
 def keeper_calls_fixture() -> HttpResponse:
     return (
         200,
@@ -3580,6 +3649,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=autonomous_turn_history_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper message origin badges",
+        interact=message_origin_badge_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
         },
     )
     run_terminal_scenario(

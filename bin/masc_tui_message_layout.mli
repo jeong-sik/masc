@@ -14,8 +14,24 @@ type entry = {
   body : string;
 }
 
+type metadata =
+  | Origin of {
+      timestamp : string;
+      role_label : string;
+      request_label : string;
+    }
+  | Continued_at of { timestamp : string }
+(** A new origin carries every field the renderer needs for its badge. A later
+    row from the same origin carries only its new timestamp, so callers never
+    have to parse display text to decide what should be highlighted. *)
+
+type row_kind =
+  | Metadata of metadata
+  | Body
+
 type row = {
   style : style;
+  kind : row_kind;
   text : string;
 }
 
@@ -75,7 +91,7 @@ val chat_input_prompt_cells : int
 
 val align_role_label : string -> string
 (** Pad (or ellipsis-truncate) a metadata role label to one fixed cell column,
-    so [timestamp] speaker request rows align down the pane. *)
+    so [timestamp] [From] origin badges align down the pane. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool

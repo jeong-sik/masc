@@ -490,15 +490,15 @@ let test_one_speaker_keeps_one_heading () =
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "the same second is the same message"
-    [ "[12:34:56] keeper.one tui-..dddddddd"; "  first"; "  second" ]
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"; "  first"; "  second" ]
     (rows
        [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
        ; entry Layout.Keeper "keeper.one" "tui-..dddddddd" "second"
        ]);
   check (list string) "a later second keeps its own row, without the name"
-    [ "[12:34:56] keeper.one tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
     ; "  first"
-    ; "[12:35:01]           "
+    ; "[12:35:01]"
     ; "  second"
     ]
     (rows
@@ -507,9 +507,9 @@ let test_one_speaker_keeps_one_heading () =
            "tui-..dddddddd" "second"
        ]);
   check (list string) "a different speaker starts again"
-    [ "[12:34:56] keeper.one tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
     ; "  first"
-    ; "[12:34:56] you tui-..dddddddd"
+    ; "[12:34:56] From [you] tui-..dddddddd"
     ; "  second"
     ]
     (rows
@@ -517,15 +517,43 @@ let test_one_speaker_keeps_one_heading () =
        ; entry Layout.User "you" "tui-..dddddddd" "second"
        ]);
   check (list string) "a new turn starts again even from the same speaker"
-    [ "[12:34:56] keeper.one tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
     ; "  first"
-    ; "[12:34:56] keeper.one tui-..eeeeeeee"
+    ; "[12:34:56] From [keeper.one] tui-..eeeeeeee"
     ; "  second"
     ]
     (rows
        [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
        ; entry Layout.Keeper "keeper.one" "tui-..eeeeeeee" "second"
        ])
+;;
+
+let test_metadata_keeps_a_typed_origin () =
+  let rows =
+    Layout.visible_rows ~inner_width:80 ~height:10
+      [ entry Layout.User "you" "tui-..aaaaaaaa" "hello"
+      ; entry ~timestamp:"12:35:01" Layout.User "you" "tui-..aaaaaaaa"
+          "again"
+      ]
+  in
+  match rows with
+  | { Layout.kind =
+        Layout.Metadata
+          (Layout.Origin { timestamp; role_label; request_label });
+      _
+    }
+    :: { Layout.kind = Layout.Body; _ }
+    :: { Layout.kind =
+           Layout.Metadata (Layout.Continued_at { timestamp = continued_at });
+         _
+       }
+    :: { Layout.kind = Layout.Body; _ }
+    :: [] ->
+      check string "origin timestamp" "12:34:56" timestamp;
+      check string "origin label" "you" role_label;
+      check string "origin request" "tui-..aaaaaaaa" request_label;
+      check string "continuation timestamp" "12:35:01" continued_at
+  | _ -> fail "message rows lost their typed origin/body structure"
 ;;
 
 (* Scrollback. Ten one-line entries render to twenty rows -- a metadata row and
@@ -686,6 +714,8 @@ let () =
     ; ( "scrollback"
       , [ test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading
+        ; test_case "metadata keeps a typed origin" `Quick
+            test_metadata_keeps_a_typed_origin
         ; test_case "total rows counts metadata and body" `Quick
             test_total_rows_counts_metadata_and_body
         ; test_case "unscrolled matches the existing window" `Quick

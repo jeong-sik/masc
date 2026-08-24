@@ -22,22 +22,67 @@ let schema name =
   | None -> failf "%s is absent from the canonical registry" name
 ;;
 
-let serialized name = Yojson.Safe.to_string (schema name).input_schema
+(* Compared as parsed JSON with object keys sorted, not as serialized bytes.
+
+   A JSON object is an unordered set of members (RFC 8259 §4), and no reader of
+   these schemas behaves differently for a different key order. What the order
+   does reach is the prompt cache: tool definitions sit in the system prompt
+   layer and the match is exact, so moving a key costs one uncached turn after
+   deployment — the same one-time cost Claude Code pays whenever an upgrade
+   changes its own tool definitions.
+
+   Byte identity was the right pin while the OCaml literals were the source: it
+   catches a migration that drops a default or reorders properties. It stops
+   being the right pin here, because the three schemas below put their
+   structural keys in three different places — [contract] last,
+   [tasks] after maxItems, [handoff_context] after description — and TOML
+   cannot express any of them: a sub-table may only follow every scalar key of
+   its parent. Holding the bytes would mean keeping three hand-written orders
+   forever and leaving these tools in OCaml.
+
+   Everything the order does not carry is still pinned exactly: every
+   description, type, required list, default, enum, pattern, and the nesting
+   itself. *)
+let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (key, value) -> key, sorted value)
+       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  | `List items -> `List (List.map sorted items)
+  | other -> other
+;;
+
+let serialized name = Yojson.Safe.to_string (sorted (schema name).input_schema)
 
 let expected_task_history =
-  {|{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to filter (e.g., 'task-001')"},"limit":{"type":"integer","description":"Max events to return (default: 50)","default":50}},"required":["task_id"]}|}
+  {|{"properties":{"limit":{"default":50,"description":"Max events to return (default: 50)","type":"integer"},"task_id":{"description":"Task ID to filter (e.g., 'task-001')","type":"string"}},"required":["task_id"],"type":"object"}|}
 ;;
 
 let expected_tasks =
-  {|{"type":"object","properties":{"status":{"type":"string","description":"Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled"},"include_done":{"type":"boolean","description":"Include done tasks (default: false)","default":false},"include_cancelled":{"type":"boolean","description":"Include cancelled tasks (default: false)","default":false}}}|}
+  {|{"properties":{"include_cancelled":{"default":false,"description":"Include cancelled tasks (default: false)","type":"boolean"},"include_done":{"default":false,"description":"Include done tasks (default: false)","type":"boolean"},"status":{"description":"Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled","type":"string"}},"type":"object"}|}
 ;;
 
 let expected_update_priority =
-  {|{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to update"},"priority":{"type":"integer","description":"New priority (1=highest, 5=lowest)","minimum":1,"maximum":5}},"required":["task_id","priority"]}|}
+  {|{"properties":{"priority":{"description":"New priority (1=highest, 5=lowest)","maximum":5,"minimum":1,"type":"integer"},"task_id":{"description":"Task ID to update","type":"string"}},"required":["task_id","priority"],"type":"object"}|}
 ;;
 
 let expected_task_set_goal =
-  {|{"type":"object","properties":{"task_id":{"type":"string","description":"ID of the task to assign"},"goal_id":{"type":"string","description":"ID of the goal to assign the task to"}},"required":["task_id","goal_id"]}|}
+  {|{"properties":{"goal_id":{"description":"ID of the goal to assign the task to","type":"string"},"task_id":{"description":"ID of the task to assign","type":"string"}},"required":["task_id","goal_id"],"type":"object"}|}
+;;
+
+
+let expected_add_task =
+  {|{"properties":{"contract":{"additionalProperties":false,"description":"What counts as done for this task, and what evidence shows it. Recorded at creation and never rewritten. Omit it and the task carries no criteria.","properties":{"completion_contract":{"items":{"type":"string"},"type":"array"},"inspect_gate_evidence":{"items":{"type":"string"},"type":"array"},"required_evidence":{"items":{"type":"string"},"type":"array"},"strict":{"type":"boolean"},"verify_gate_evidence":{"items":{"type":"string"},"type":"array"}},"type":"object"},"description":{"description":"Task description","type":"string"},"goal_id":{"description":"Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.","type":"string"},"predecessor_task_id":{"description":"Optional re-run provenance link (RFC-0323): the terminal (done/cancelled) task this one re-runs. Rejected if the id is unknown or the predecessor is not terminal. To re-run completed work, create a new task with this link instead of re-claiming the old one.","type":"string"},"priority":{"default":3,"description":"Priority 1-5 (1=highest)","type":"integer"},"title":{"description":"Task title","type":"string"}},"required":["title"],"type":"object"}|}
+;;
+
+let expected_transition =
+  {|{"properties":{"action":{"description":"Which transition to apply. claim takes an unclaimed Task; start moves your claim into progress; release hands it back with a required handoff_context.summary; cancel ends it with a reason. Completion goes through submit_for_verification with evidence in notes — done is refused from every working status and cannot complete a Task here.","enum":["claim","start","done","cancel","release","submit_for_verification"],"type":"string"},"agent_name":{"description":"Your agent name","type":"string"},"expected_version":{"description":"Optional CAS guard (current backlog.version). Transition fails if mismatched","type":"integer"},"handoff_context":{"description":"Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class actions (submit_for_verification / done / release / cancel). On action='submit_for_verification', every 'evidence_refs' entry must use 'artifact:<producer-root-relative-path>' for a bounded file snapshot or 'note:<text>' for narrative evidence. A public URL inside a note (a PR, a CI run) can be fetched live by the verifier itself; materialize volatile contents as an artifact when they must be pinned at submit time. Commits and traces are not fetched. Bare relative paths and absolute host paths are persisted as typed invalid references. The list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}.","properties":{"evidence_refs":{"description":"Typed verifier evidence. Use artifact:<producer-root-relative-path> for files or note:<text> for narrative, commit, trace, receipt, or URL evidence. Bare and absolute paths are invalid.","items":{"minLength":1,"type":"string"},"type":"array"},"failure_mode":{"description":"If released due to failure, describe the failure mode.","type":"string"},"next_step":{"description":"What the next owner should do first.","type":"string"},"reason":{"description":"Why the task is being released (blocker, handoff, pause).","type":"string"},"reclaim_policy":{"description":"Explicit reclaim policy. Omit or use allow_reclaim for normal handoff. Use block_reclaim only for deterministic terminal mismatches that must require operator review.","enum":["allow_reclaim","block_reclaim"],"type":"string"},"summary":{"description":"REQUIRED. Non-empty one-line summary of current state at release time. Example: 'tests green, PR #123 pending review'.","minLength":1,"type":"string"}},"required":["summary"],"type":"object"},"notes":{"description":"Evidence summary for submit_for_verification, or completion notes for done","type":"string"},"reason":{"description":"Cancellation reason (used with action='cancel')","type":"string"},"task_id":{"description":"Task ID (e.g., 'task-001')","type":"string"}},"required":["agent_name","task_id","action"],"type":"object"}|}
+;;
+
+let expected_batch_add_tasks =
+  {|{"properties":{"tasks":{"description":"List of tasks to add","items":{"properties":{"contract":{"additionalProperties":false,"properties":{"completion_contract":{"items":{"type":"string"},"type":"array"},"inspect_gate_evidence":{"items":{"type":"string"},"type":"array"},"required_evidence":{"items":{"type":"string"},"type":"array"},"strict":{"type":"boolean"},"verify_gate_evidence":{"items":{"type":"string"},"type":"array"}},"type":"object"},"description":{"description":"Task description","type":"string"},"goal_id":{"description":"Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.","type":"string"},"priority":{"default":3,"description":"Priority 1-5 (1=highest)","type":"integer"},"title":{"description":"Task title","type":"string"}},"required":["title"],"type":"object"},"maxItems":20,"type":"array"}},"required":["tasks"],"type":"object"}|}
 ;;
 
 let test_input_schemas_are_byte_identical () =
@@ -47,6 +92,9 @@ let test_input_schemas_are_byte_identical () =
     ; "masc_tasks", expected_tasks
     ; "masc_update_priority", expected_update_priority
     ; "masc_task_set_goal", expected_task_set_goal
+    ; "masc_add_task", expected_add_task
+    ; "masc_transition", expected_transition
+    ; "masc_batch_add_tasks", expected_batch_add_tasks
     ]
 ;;
 

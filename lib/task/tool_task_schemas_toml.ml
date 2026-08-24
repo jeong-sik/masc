@@ -7,12 +7,12 @@
     declaration that does not decode refuses the boot instead of advertising a
     partial task surface.
 
-    Three siblings — [masc_add_task], [masc_batch_add_tasks] and
-    [masc_transition] — are still OCaml literals in [tool_task_schemas.ml].
-    Their shapes exceed what the loader accepts today: a top-level object
-    parameter with its own [properties] ([contract], [handoff_context]) and an
-    array with [maxItems] whose items carry [required]. Moving them is a loader
-    change, so it is a separate step rather than a wider version of this one. *)
+    [masc_add_task], [masc_batch_add_tasks] and [masc_transition] declare
+    nested shapes — an object parameter with its own params ([contract],
+    [handoff_context]) and an array whose object items declare required
+    children. The loader parsed those two shapes with separate key sets that
+    did not admit each other, so they could not move at all; it now writes the
+    parameter grammar once and recurses. *)
 
 let schema_of_name name : Masc_domain.tool_schema =
   let rel = "tools/" ^ name ^ ".toml" in
@@ -28,3 +28,6 @@ let task_history = schema_of_name "masc_task_history"
 let tasks = schema_of_name "masc_tasks"
 let update_priority = schema_of_name "masc_update_priority"
 let task_set_goal = schema_of_name "masc_task_set_goal"
+let add_task = schema_of_name "masc_add_task"
+let batch_add_tasks = schema_of_name "masc_batch_add_tasks"
+let transition = schema_of_name "masc_transition"

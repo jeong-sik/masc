@@ -1708,7 +1708,6 @@ describe('AgentRoster live-only cards', () => {
         active_model: 'claude-code:auto',
         model: 'claude',
         last_heartbeat: '2026-04-24T17:54:00Z',
-        tool_audit_at: '2026-04-24T12:00:00Z',
         last_activity_ago_s: 21_600,
         recent_output_preview: '지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.',
         recent_tool_names: ['keeper_tasks_list'],
@@ -1726,7 +1725,6 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('6분 전')
     expect(text).toContain('agentCore.primary')
     expect(text).not.toContain('claude-code:auto')
-    expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')
   })
 

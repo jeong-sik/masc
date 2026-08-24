@@ -376,11 +376,17 @@ let control_plane_status_of_string_opt s =
   | "paused" -> Some Cp_paused
   | _ -> Option.map (fun surface -> Cp_surface surface) (surface_status_of_string_opt s)
 
+(* Health as the diagnostic reports it. An unreadable diagnostic falls to
+   KH_offline with a warning rather than to a healthy-looking word, the same
+   way every other reader of this field resolves it. *)
+let keeper_diagnostic_health ~(diagnostic : Yojson.Safe.t) ~source =
+  json_string_opt "health_state" diagnostic
+  |> Option.value ~default:"offline"
+  |> keeper_health_or_offline ~source
+
 let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
   let health_state =
-    json_string_opt "health_state" diagnostic
-    |> Option.value ~default:"offline"
-    |> keeper_health_or_offline ~source:"keeper_surface_status"
+    keeper_diagnostic_health ~diagnostic ~source:"keeper_surface_status"
   in
   let surface =
     match health_state with

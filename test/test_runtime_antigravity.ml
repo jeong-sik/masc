@@ -289,6 +289,37 @@ let test_resume_identity_mismatch_fails_closed () =
        | Ok _ -> fail "resume admitted a different conversation")
 ;;
 
+(* The official client can leave the terminal result identity blank even
+   after its init event established the conversation. The init identity is
+   the durable one returned by [run_turn]; a blank redundant copy must not
+   discard an otherwise complete turn. *)
+let test_blank_result_identity_uses_init_identity () =
+  with_fixture
+    [ init (); result ~conversation_id:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "init identity" "conversation-1" turn.conversation_id)
+;;
+
+let test_blank_resume_result_identity_uses_init_identity () =
+  with_fixture
+    ~require_resume:true
+    [ init (); result ~conversation_id:"" ~num_turns:2 () ]
+    (fun path ->
+       match
+         run_fixture
+           ~conversation_mode:
+             (Runtime_antigravity.Resume { conversation_id = "conversation-1" })
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "resumed init identity" "conversation-1" turn.conversation_id;
+         check bool "resumed" true turn.resumed)
+;;
+
 let test_conversation_callback_precedes_terminal_result () =
   let observed = ref None in
   with_fixture
@@ -677,6 +708,14 @@ let () =
             "resume mismatch"
             `Quick
             test_resume_identity_mismatch_fails_closed
+        ; test_case
+            "blank result identity uses init identity"
+            `Quick
+            test_blank_result_identity_uses_init_identity
+        ; test_case
+            "blank resume result identity uses init identity"
+            `Quick
+            test_blank_resume_result_identity_uses_init_identity
         ; test_case
             "child environment allowlist"
             `Quick

@@ -220,7 +220,7 @@ type wire_event =
       ; step_type : step_type
       }
   | Result of
-      { conversation_id : string
+      { conversation_id : string option
       ; status : result_status
       ; response : string
       ; error : string option
@@ -348,7 +348,17 @@ let parse_result fields =
   let stage = "result event" in
   let* result_json = required_member stage "result" fields in
   let* result_fields = assoc_at stage result_json in
-  let* conversation_id = required_string stage "conversation_id" result_fields in
+  let* raw_conversation_id =
+    required_string ~nonempty:false stage "conversation_id" result_fields
+  in
+  (* The init event owns the conversation identity. Live Antigravity results
+     can carry an empty redundant copy; preserve a non-empty copy for the
+     mismatch check below, and otherwise keep using the init identity. *)
+  let conversation_id =
+    match String.trim raw_conversation_id with
+    | "" -> None
+    | value -> Some value
+  in
   let* status_string = required_string stage "status" result_fields in
   let* status = parse_result_status stage status_string in
   let* response = required_string ~nonempty:false stage "response" result_fields in
@@ -631,7 +641,11 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
     (match state.init with
      | None -> protocol_error stage "received result before init"
      | Some (expected, _, _) ->
-       let* () = verify_identity ~stage ~expected:(Some expected) conversation_id in
+       let* () =
+         match conversation_id with
+         | Some actual -> verify_identity ~stage ~expected:(Some expected) actual
+         | None -> Ok ()
+       in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
        else (

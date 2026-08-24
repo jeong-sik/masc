@@ -19,3 +19,13 @@ required = true
 description = """
 Body. Required, must be non-empty. For decisions, lead with the decision \
 then **Why** and **How to apply** lines."""
+
+[help]
+short_description = "Persist a durable keeper memory claim."
+when_to_use = "Use when something from this turn must outlive it: every write is a durable claim later turns read back."
+key_constraints = [
+  "There is no kind argument; sending one is rejected.",
+  "Do not use for transient scratch notes.",
+]
+details_markdown = "Writes a bounded durable claim into the Memory OS fact store that recall renders into later turns."
+examples = ["title='verification wrapper retired' content='Use keeper_task_done evidence_refs; do not call separate submit evidence wrappers.'"]

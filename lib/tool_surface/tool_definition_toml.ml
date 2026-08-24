@@ -518,10 +518,89 @@ and items_json ~context pairs =
 
 (* ── Tool definition ──────────────────────────────────────────────────── *)
 
+type help =
+  { short_description : string option
+  ; when_to_use : string option
+  ; key_constraints : string list
+  ; details_markdown : string option
+  ; doc_refs : string list
+  ; prompt_hints : string list
+  ; examples : string list
+  ; alternatives : string list
+  }
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
+  ; help : help option
   }
+
+let help_of_pairs pairs =
+  let optional_string key =
+    match List.assoc_opt key pairs with
+    | None -> Ok None
+    | Some value ->
+      let* text = as_non_empty_string ~context:("help." ^ key) value in
+      Ok (Some text)
+  in
+  let string_list key =
+    match List.assoc_opt key pairs with
+    | None -> Ok []
+    | Some value -> as_string_list ~context:("help." ^ key) value
+  in
+  let* short_description = optional_string "short_description" in
+  let* when_to_use = optional_string "when_to_use" in
+  let* details_markdown = optional_string "details_markdown" in
+  let* key_constraints = string_list "key_constraints" in
+  let* doc_refs = string_list "doc_refs" in
+  let* prompt_hints = string_list "prompt_hints" in
+  let* examples = string_list "examples" in
+  let* alternatives = string_list "alternatives" in
+  let* () =
+    let known key =
+      List.exists
+        (String.equal key)
+        [ "short_description"
+        ; "when_to_use"
+        ; "details_markdown"
+        ; "key_constraints"
+        ; "doc_refs"
+        ; "prompt_hints"
+        ; "examples"
+        ; "alternatives"
+        ]
+    in
+    let rec walk = function
+      | [] -> Ok ()
+      | (key, (_ : Otoml.t)) :: rest ->
+        if known key then walk rest else Error (sprintf "unknown key \"help.%s\"" key)
+    in
+    walk pairs
+  in
+  let declares_nothing =
+    short_description = None
+    && when_to_use = None
+    && details_markdown = None
+    && key_constraints = []
+    && doc_refs = []
+    && prompt_hints = []
+    && examples = []
+    && alternatives = []
+  in
+  if declares_nothing
+  then Error "help table declares nothing"
+  else
+    Ok
+      { short_description
+      ; when_to_use
+      ; key_constraints
+      ; details_markdown
+      ; doc_refs
+      ; prompt_hints
+      ; examples
+      ; alternatives
+      }
+;;
 
 (* One admitted call shape: these fields present, those absent. [forbidden]
    says "none of these", which JSON Schema writes two ways -- [not: {required:
@@ -701,6 +780,14 @@ let tool_of_pairs ~name pairs =
       in
       Ok (Some projection)
   in
+  let* help =
+    match List.assoc_opt "help" pairs with
+    | None -> Ok None
+    | Some value ->
+      let* help_pairs = as_table_pairs ~context:"help" value in
+      let* help = help_of_pairs help_pairs in
+      Ok (Some help)
+  in
   let* () =
     let known key =
       List.exists
@@ -711,6 +798,7 @@ let tool_of_pairs ~name pairs =
         ; "params"
         ; "one_of"
         ; "keeper_projection"
+        ; "help"
         ]
     in
     let rec walk = function
@@ -728,6 +816,7 @@ let tool_of_pairs ~name pairs =
             assemble_input_schema ~params ~additional_properties ~alternatives
         }
     ; keeper_projection
+    ; help
     }
 ;;
 

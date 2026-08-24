@@ -2,7 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
+  schedule:
+    # main is checked on a timer, not once per merge. Merges land every 5.7
+    # minutes (254 commits in the 24h to 2026-08-24T01:00Z) and a run takes
+    # 22-34 minutes, so per-commit main runs need 4.4 runs in flight at all
+    # times -- 53 job slots -- to keep up, and they never did. Keying them by
+    # github.sha stopped the collapsing that produced 148 cancellations and
+    # zero verdicts, and replaced it with a queue: at 2026-08-24T01:20Z there
+    # were 50 CI runs waiting, 26 of them main pushes for commits already in
+    # main, sitting ahead of the 24 pull_request runs that are the actual
+    # merge gate. A verdict on a commit that is already merged blocks nothing,
+    # so it is the one that gives up its slot.
+    #
+    # The group below pins scheduled runs to one shared key with
+    # cancel-in-progress false, so GitHub keeps at most one running and one
+    # pending: the timer cannot outrun the build no matter how often it fires.
+    - cron: '*/30 * * * *'
   pull_request:
     # No base filter. The filter matches the *base* branch, so a stacked PR --
     # one opened against another PR's branch rather than main -- did not start
@@ -26,21 +42,19 @@ concurrency:
   # Branch/PR runs verify the current branch state: a newer push supersedes the
   # older run, so the older one cancels.
   #
-  # Main pushes are keyed by commit instead, because a shared main group cannot
-  # produce verdicts at this merge rate. Build and Test budgets 73 minutes of
-  # focused groups under a 90-minute timeout, while merges land every 5.5
-  # minutes on average and arrive 9 seconds apart in bursts. One slot for that
-  # stream means a run needs 90 quiet minutes to finish, and there are none:
-  # turning cancel-in-progress off does not help, because a main run sits
-  # pending and is collapsed by the next merge before it dispatches a single
-  # job. Measured 2026-08-16: main's last completed verdict of any kind was
-  # 2026-08-13T14:07:47Z, and the 150 runs after it produced 148 cancellations
-  # and zero verdicts; across 05:45-07:36 that day, 20 runs dispatched 0 jobs
-  # between them. Keying on github.sha gives each commit its own group, so
-  # nothing collapses. This is the scoping TLA+ Main Verification already uses.
+  # Scheduled main runs share one key with cancel-in-progress false, so GitHub
+  # holds at most one running and one pending. The timer fires every 30 minutes
+  # and a run takes 22-34, so a firing that lands on a busy pool is dropped
+  # rather than queued behind the one already working. That is the cap the
+  # per-commit trigger never had.
+  #
+  # workflow_dispatch on main keys by commit: a dispatch is asked for by hand
+  # about one specific sha, so it gets its own group and is not collapsed into
+  # whatever the timer happens to be doing.
   group: >-
     ${{ github.workflow }}-${{ github.event_name }}-${{
       github.event.pull_request.number
+      || (github.event_name == 'schedule' && 'main-timer')
       || (github.ref == 'refs/heads/main' && github.sha)
       || github.ref_name
       || github.run_id
@@ -139,10 +153,10 @@ jobs:
           fi
 
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
-            # This workflow only listens to branch pushes for main/develop
-            # (`on.push.branches` above) plus workflow_dispatch. Tag pushes do
-            # not start this workflow, so NON_PR here cannot force Build and
-            # Test for tags.
+            # This workflow only listens to develop pushes (`on.push.branches`
+            # above), the main timer, and workflow_dispatch. Tag pushes do not
+            # start this workflow, so NON_PR here cannot force Build and Test
+            # for tags.
             echo "run_heavy=true" >> "$GITHUB_OUTPUT"
             echo "live_is_draft=false" >> "$GITHUB_OUTPUT"
             echo "live_state=NON_PR" >> "$GITHUB_OUTPUT"
@@ -768,10 +782,10 @@ jobs:
     # prints its timeout diagnostics before GitHub ends the job.
     timeout-minutes: 110
     needs: [pr-live-gate, changes]
-    # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
-    # (branch push to main/develop, workflow_dispatch) always run Build and Test
-    # so a lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
-    # merge) is detected on the next main push instead of persisting silently
+    # Main safety-net (mirrors `dashboard` job below). Non-PR events (develop
+    # push, the main timer, workflow_dispatch) always run Build and Test so a
+    # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
+    # merge) is detected on the next timer run instead of persisting silently
     # behind a green "CI Gate" — ci-gate check() treats a skipped required job as
     # PASS. Tag pushes do not start this workflow because `on.push.branches`
     # excludes tags. PR events keep the build-scope gate (cost saving)
@@ -1647,12 +1661,12 @@ jobs:
     # PR mode: stay path-scoped (dashboard=true when dashboard/ changes, or
     # when a lib-side SSE wire-surface file changes — see the wire-surface
     # census block in the `changes` job; #28925 audit defect (a)).
-    # Non-PR events (push to main/develop, schedule, workflow_dispatch):
+    # Non-PR events (develop push, the main timer, workflow_dispatch):
     # ignore path scope and always run, so a dashboard test regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
     # or a dashboard-touching PR merged via admin fast-track while
-    # the dashboard job was red) is detected on the next main/develop push
-    # rather than persisting silently. Same main-push safety-net pattern as
+    # the dashboard job was red) is detected on the next timer run
+    # rather than persisting silently. Same main safety-net pattern as
     # tla-main.yml; root cause:
     # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
     # after #14252/#14380 because no main-push run re-checked them.

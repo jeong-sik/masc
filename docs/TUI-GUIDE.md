@@ -162,6 +162,20 @@ reading. `g` returns to the newest row and clears the count; `G` goes to the
 oldest held. The TUI holds the last 1,000 events; `dropped N` says how many
 fell off the end while it ran.
 
+### The composer and /task
+
+The input row at the bottom of every surface sends text to the keeper it
+names. A line that starts with `/` is a command for the TUI instead:
+
+- `/task <title>` — followed by any further lines as the body — creates a
+  task over the server's `masc_add_task` tool and then messages the keeper
+  the operator's own words with the new id in front: `[task-512] <title>`.
+  The keeper claims that exact task. The events row records the creation;
+  a failure puts the typed text back into the input, unsent.
+- Any other `/word` is reported as unknown and sent nowhere - a mistyped
+  command must not become an instruction the keeper acts on. Text that
+  merely contains a slash later in the line is a message.
+
 ### Keepers
 
 Every keeper under `.masc/keepers/`, sorted by name.

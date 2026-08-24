@@ -374,15 +374,62 @@ type surface =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
+  needs_fleet_safety : bool;
+  needs_board : bool;
+  needs_planning : bool;
+  needs_system_logs : bool;
 }
 
+let nothing =
+  { needs_transport = false;
+    needs_keeper_roster = false;
+    needs_fleet_safety = false;
+    needs_board = false;
+    needs_planning = false;
+    needs_system_logs = false;
+  }
+
+(* Each datum is read by the one surface that draws it, so a refresh spends a
+   request and a decode on it only while that surface is open. The planning and
+   system-log payloads are tens of kilobytes each, and fetching them behind
+   every other surface cost that on every tick for rows nobody was looking at. *)
 let surface_needs : surface -> surface_needs = function
-  | Overview -> { needs_transport = true; needs_keeper_roster = false }
-  | Acting -> { needs_transport = false; needs_keeper_roster = false }
-  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Schedules | Verification | Harness
-  | Repositories | Connectors | Tools | Autonomy | System_logs ->
-      { needs_transport = false; needs_keeper_roster = false }
+  | Overview -> { nothing with needs_transport = true }
+  (* Its rows come from the acting store and the keeper list, neither of which
+     is fetched here. *)
+  | Acting -> nothing
+  | Keepers _ ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Board -> { nothing with needs_board = true }
+  | Planning -> { nothing with needs_planning = true }
+  | System_logs -> { nothing with needs_system_logs = true }
+  | Approvals | Schedules | Verification | Harness | Repositories | Connectors
+  | Tools | Autonomy ->
+      nothing
+
+(** How far a surface's list can scroll, given the terminal's height.
+
+    A bound belongs where the move happens, and the move is a keypress. The
+    drawing used to work it out mid-frame and write the clamped value back
+    into the state -- the same four lines copied once per surface -- so
+    drawing a frame corrected the state it was drawing from. Declared here,
+    the key handler and the drawing read one answer and the drawing only
+    reads.
+
+    [None] is a surface whose rows the state cannot count: its row count is
+    built by the drawing, out of text the drawing formats. Those report the
+    value they used as a {!clamped_scroll} beside the frame instead, so the
+    drawing still does not write. *)
+type scrolled = {
+  sc_count : int;  (** rows of content the surface has *)
+  sc_chrome : int;  (** rows it spends on its own frame *)
+}
+
+(* These six draw the same frame: a title, a column row, three dividers, the
+   scroll line and the footer -- and two more rows when a load error is on
+   screen. The number is the drawing's; a surface whose chrome moves has to
+   move it here in the same change. *)
+let listing_chrome ~error = if Option.is_some error then 9 else 7
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.
@@ -814,6 +861,75 @@ let composer_extra_rows (state : state) =
       (Buffer.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
+
+(** A scroll a frame had to hold inside what it could show.
+
+    {!scrolled_surface} answers this before the frame is built, for the
+    surfaces whose rows the state can count. The rest count rows the drawing
+    formats -- lines of a task's notes, of a board post, of a keeper's detail
+    -- so the bound is not knowable until the frame exists. Those frames say
+    which value they used and the loop stores it, which is not the same as the
+    drawing reaching back into the state it is drawing from: the drawing is a
+    function of the state again, and every write lives on one side of it. *)
+type clamped_scroll =
+  | Overview_events of int
+  | Task_detail of int
+  | Board_read of int
+  | Keeper_detail of int
+  | Keeper_calls of int
+  | Autonomy of int
+  | Acting of int
+
+let apply_clamped_scroll (state : state) = function
+  | Overview_events value -> state.overview_event_scroll <- value
+  | Task_detail value -> state.task_detail_scroll <- value
+  | Board_read value -> state.board_scroll <- value
+  | Keeper_detail value -> state.detail_scroll <- value
+  | Keeper_calls value -> state.keeper_calls_scroll <- value
+  | Autonomy value -> state.autonomy_scroll <- value
+  | Acting value -> state.acting_scroll <- value
+
+let scrolled_surface (state : state) : surface -> scrolled option =
+  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  function
+  | System_logs ->
+      listing ~error:state.system_logs_error
+        (match state.system_logs with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.sys_entries)
+  | Verification ->
+      listing ~error:state.verification_error
+        (match state.verification with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.vs_requests)
+  | Harness ->
+      listing ~error:state.harness_error
+        (match state.harness with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.hs_verdicts)
+  | Repositories ->
+      listing ~error:state.repositories_error
+        (match state.repositories with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Connectors ->
+      listing ~error:state.connectors_error
+        (match state.connectors with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Tools ->
+      listing ~error:state.tools_error
+        (match state.tools_inventory with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.ts_tools)
+  (* Autonomy and Acting count rows the drawing builds out of formatted text,
+     not rows the state holds; counting them here would be a second copy of
+     the formatting, so they report a [clamped_scroll] instead. Overview,
+     Keepers, Board, Planning and Schedules move a cursor or a detail pane
+     rather than a plain list. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Autonomy ->
+      None
 
 let keeper_message_status_rows (state : state) =
   let unavailable_target =

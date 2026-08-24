@@ -181,9 +181,20 @@ type tool_entry = {
   tl_direct_call : bool;
 }
 
+type inventory_freshness =
+  | Warming
+      (** The server answered with its warming placeholder: it has not built
+          the inventory yet, so the empty list beside this is not an answer
+          about how many tools exist. *)
+  | Settled
+      (** The server answered from a built inventory. An empty list here does
+          mean no tools. *)
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
+  ts_freshness : inventory_freshness;
+      (** Whether the count above is an answer. *)
 }
 
 (** A connector the gate can deliver through. *)

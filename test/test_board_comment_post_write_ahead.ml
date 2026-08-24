@@ -211,6 +211,48 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
      | Error e -> Alcotest.fail (Board.show_board_error e))
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+(* Adding a comment bumps the post's [updated_at] in memory and marks it
+   dirty; only [flush_dirty] carries that to the posts file. That flush
+   cleared the dirty flags before writing, so a failed write dropped the bump
+   from the file and from the queue at once -- nothing would retry, and a
+   keeper cursor already past the old [updated_at] would not rescan the post
+   (#26168). The flags now survive the failure. *)
+let test_flush_failure_keeps_the_post_bump_scheduled () =
+  let post = create_post_exn ~author:"flush-retry-author" ~content:"flush retry body" in
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let working_base = Sys.getenv "MASC_BASE_PATH" in
+  flush ();
+  Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
+  (match
+     Board_dispatch.add_comment
+       ~post_id:(Board.Post_id.to_string post.Board.id)
+       ~author:"flush-retry-commenter"
+       ~content:"a reply that bumps updated_at"
+       ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail ("comment must succeed: " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "the comment marked the post dirty"
+    true
+    store.Board.dirty_posts;
+  let before = Board.persist_error_count () in
+  ignore (block_board_masc_dir_with_file ());
+  flush ();
+  Alcotest.(check bool)
+    "the failed flush was counted"
+    true
+    (Board.persist_error_count () > before);
+  Alcotest.(check bool)
+    "the bump is still scheduled after the write failed"
+    true
+    store.Board.dirty_posts;
+  Unix.putenv "MASC_BASE_PATH" working_base
+;;
+
 let () =
   Alcotest.run "board_comment_post_write_ahead"
     [
@@ -228,5 +270,8 @@ let () =
           Alcotest.test_case "restart derives reply_count from comment WAL"
             `Quick
             (with_eio test_restart_recomputes_reply_count_from_comment_wal);
+          Alcotest.test_case "a failed flush keeps the post bump scheduled"
+            `Quick
+            (with_eio test_flush_failure_keeps_the_post_bump_scheduled);
         ] );
     ]

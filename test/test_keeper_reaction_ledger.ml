@@ -1191,6 +1191,30 @@ let test_event_id_digest_is_sha256 () =
     (String.length actual)
 ;;
 
+(* The fleet summary emitted four statuses from a closed type and a fifth,
+   "unavailable", as a bare string beside it, so nothing in the code said the
+   vocabulary was five wide (#27560). These read the field the HTTP route
+   serves and check it against the exported list. *)
+let test_fleet_summary_status_vocabulary_is_closed () =
+  let status json =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String value) -> value
+       | _ -> Alcotest.fail "fleet summary carried no status string")
+    | _ -> Alcotest.fail "fleet summary is not an object"
+  in
+  let unavailable = status (Masc.Keeper_reaction_ledger.unavailable_fleet_summary_json ()) in
+  Alcotest.(check bool)
+    (Printf.sprintf "%S is in the declared vocabulary" unavailable)
+    true
+    (List.mem unavailable Masc.Keeper_reaction_ledger.fleet_summary_status_strings);
+  Alcotest.(check (list string))
+    "the vocabulary is exactly these five"
+    [ "empty"; "ok"; "degraded"; "unknown"; "unavailable" ]
+    Masc.Keeper_reaction_ledger.fleet_summary_status_strings
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1287,6 +1311,10 @@ let () =
             "event id digest is SHA-256"
             `Quick
             test_event_id_digest_is_sha256
+        ; test_case
+            "fleet summary status vocabulary is closed"
+            `Quick
+            test_fleet_summary_status_vocabulary_is_closed
         ] )
     ]
 ;;

@@ -170,6 +170,11 @@ val fleet_summary_json :
   Yojson.Safe.t
 (** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
 
+val fleet_summary_status_strings : string list
+(** Every value the fleet summary's ["status"] field can carry. A reader that
+    has to enumerate them was previously reading four from a type and a fifth
+    from a string literal elsewhere in the same file (#27560). *)
+
 val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
 (** Canonical empty fleet projection used when server state is unavailable.
     Kept here so schema and field ownership remain single-source. *)

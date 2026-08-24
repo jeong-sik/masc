@@ -224,6 +224,7 @@ let prepare_agent_setup
     ; prompt_blocks = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None
+    ; assistant_turn_texts = []
     }
   in
   let

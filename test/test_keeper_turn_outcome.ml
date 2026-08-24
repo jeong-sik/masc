@@ -72,6 +72,11 @@ let test_of_stop_reason () =
           ; tool_name = "keeper_tasks_list"
           ; repeated_count = 3
           }));
+  check outcome "repeated assistant text yield -> checkpoint"
+    TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_after_repeated_assistant_text
+          { turns_used = 2; repeated_count = 3 }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
@@ -269,6 +274,7 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
          | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
          | Runtime_agent.Operation_queued -> "operation_queued"
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
+         | Runtime_agent.Repeated_assistant_text _ -> "repeated_assistant_text"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
     | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
@@ -422,6 +428,27 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~output:(Some "a") "Execute"
        ])
 
+let test_repeated_assistant_text_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
+  in
+  (* The sangsu shape: one plan sentence, byte-identical on consecutive model
+     turns, while every turn's tool batch kept changing and reporting ok. The
+     list is newest-first, one entry per provider turn. *)
+  let plan = "I will now inspect the queue and then drain the backlog." in
+  check (option int) "three identical texts yield" (Some 3)
+    (detect [ plan; plan; plan ]);
+  check (option int) "a changed latest text is progress" None
+    (detect [ "done: queue drained"; plan; plan ]);
+  check (option int) "two identical repeats stay below the threshold" None
+    (detect [ plan; plan; "an earlier different reply" ]);
+  check (option int) "blank texts never count" None
+    (detect [ " \n"; " \n"; " \n" ]);
+  check (option int) "a textless turn breaks the streak" None
+    (detect [ plan; ""; plan; plan ]);
+  check (option int) "a longer streak reports its full length" (Some 4)
+    (detect [ plan; plan; plan; plan ])
+
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
   let chat : Masc.Keeper_agent_run.autonomous_yield_request =
@@ -442,6 +469,7 @@ let test_autonomous_yield_boundary_contract () =
     | Runtime_agent.Durable_stimulus_waiting
     | Runtime_agent.External_effect_deferred
     | Runtime_agent.Repeated_tool_call _
+   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
@@ -449,6 +477,7 @@ let test_autonomous_yield_boundary_contract () =
     | Runtime_agent.Operation_queued
     | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
+   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
   check bool "repeated exact call yield preserves its evidence" true
@@ -469,6 +498,24 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
+     | Runtime_agent.InputRequired _ ->
+       false);
+  check bool "repeated assistant text yield preserves its evidence" true
+    (match
+       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
+         ~turns_used:8
+         (Runtime_agent.Repeated_assistant_text { repeated_count = 3 })
+     with
+     | Runtime_agent.Yielded_after_repeated_assistant_text
+         { turns_used = 8; repeated_count = 3 } ->
+       true
+     | Runtime_agent.Completed
+     | Runtime_agent.Yielded_to_operation_queued _
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Awaiting_external_effect _
+     | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
        false);
   check bool "terminal tool yield settles as completion" true
@@ -482,6 +529,7 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
 
 let test_terminal_externalization_failure_contract () =
@@ -856,6 +904,8 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated assistant text boundary" `Quick
+            test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
           test_case "terminal externalization failure contract" `Quick

@@ -117,7 +117,8 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Turn_checkpointed meta
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;

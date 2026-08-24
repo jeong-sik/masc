@@ -682,6 +682,7 @@ jobs:
           bash scripts/ci/check-tla-harness-coverage.sh
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
+          bash scripts/ci/check-tui-render-purity.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
           bash scripts/ci/check-keeper-instructions-placeholders.sh

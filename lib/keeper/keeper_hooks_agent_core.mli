@@ -160,6 +160,7 @@ val make_hooks :
   trace_id:string ->
   keeper_turn_id:int ->
   on_after_turn_ordinal:(int -> unit) ->
+  ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
@@ -171,7 +172,9 @@ val make_hooks :
   unit -> Agent_core.Hooks.hooks
 (** Build the [Agent_core.Hooks.hooks] record used by the keeper turn loop:
     passive pre-tool timing, post-tool accounting, idle detection, and
-    trajectory hooks wired together. [on_tool_result_ready] runs only after
+    trajectory hooks wired together. [on_after_turn_response] observes each
+    provider turn's assistant response right after the turn ordinal is
+    recorded. [on_tool_result_ready] runs only after
     the exact tool-call log row is synchronously committed. Cost remains part of post-turn
     observation. *)
 

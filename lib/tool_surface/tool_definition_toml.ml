@@ -164,93 +164,15 @@ let ordered_fields ~field pairs =
   walk [] pairs
 ;;
 
-(* ── Object items nested params (sources[]-style, name/type/description) ── *)
-
-let nested_param_of_pairs ~context pairs =
-  let* name =
-    match List.assoc_opt "name" pairs with
-    | None -> Error (sprintf "%s is missing the required key \"name\"" context)
-    | Some value -> as_non_empty_string ~context:(sprintf "%s.name" context) value
-  in
-  let context = sprintf "%s (%s)" context name in
-  let* declared = find_param_type ~context pairs in
-  let field key value =
-    let key_context = sprintf "%s.%s" context key in
-    match key with
-    | "name" -> Ok None
-    | "type" -> Ok (Some ("type", `String (param_type_to_string declared)))
-    | "description" ->
-      let* text = as_non_empty_string ~context:key_context value in
-      Ok (Some ("description", `String text))
-    | other -> Error (sprintf "%s: unknown key %S" context other)
-  in
-  let* fields = ordered_fields ~field pairs in
-  Ok (name, `Assoc fields)
-;;
-
-let items_params ~context value =
-  let element index item =
-    let element_context = sprintf "%s[%d]" context index in
-    let* pairs = as_table_pairs ~context:element_context item in
-    nested_param_of_pairs ~context:element_context pairs
-  in
-  match value with
-  | Otoml.TomlTableArray tables ->
-    let rec collect index acc = function
-      | [] -> Ok (List.rev acc)
-      | table :: rest ->
-        let* parsed = element index table in
-        collect (index + 1) (parsed :: acc) rest
-    in
-    let* parsed = collect 0 [] tables in
-    let* () = ensure_unique_names ~context (List.map fst parsed) in
-    Ok parsed
-  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
-    | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ) as other
-    -> Error (sprintf "%s must be an array of tables, got %s" context (toml_shape other))
-;;
-
-let items_json ~context pairs =
-  let* declared = find_param_type ~context pairs in
-  let* () =
-    match declared with
-    | Ptype_string | Ptype_object -> Ok ()
-    | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_array ->
-      Error
-        (sprintf
-           "%s.type %s is not supported for items"
-           context
-           (param_type_to_string declared))
-  in
-  let field key value =
-    let key_context = sprintf "%s.%s" context key in
-    match key with
-    | "type" -> Ok (Some ("type", `String (param_type_to_string declared)))
-    | "params" ->
-      (match declared with
-       | Ptype_object ->
-         let* parsed = items_params ~context:key_context value in
-         Ok (Some ("properties", `Assoc parsed))
-       | Ptype_string | Ptype_integer | Ptype_number | Ptype_boolean
-       | Ptype_array ->
-         Error (sprintf "%s is only valid when the items type is object" key_context))
-    | other -> Error (sprintf "%s: unknown key %S" context other)
-  in
-  let* fields = ordered_fields ~field pairs in
-  let* () =
-    match declared, List.assoc_opt "params" pairs with
-    | Ptype_object, None ->
-      Error (sprintf "%s of type object must declare params" context)
-    | Ptype_object, Some _ -> Ok ()
-    | ( (Ptype_string | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_array)
-      , (None | Some _) ) -> Ok ()
-  in
-  Ok (`Assoc fields : Yojson.Safe.t)
-;;
-
-(* ── Params ───────────────────────────────────────────────────────────── *)
+(* ── One parameter grammar, used at every depth ──────────────────────────
+   A parameter can be an object with its own [params], and one of those can be
+   an array whose [items] are objects with [params] again. The two shapes were
+   separate functions with separate key sets, so a schema nested one level
+   deeper than the writer anticipated was rejected as an unknown key rather
+   than parsed. masc_add_task.contract, masc_transition.handoff_context and
+   masc_batch_add_tasks.tasks are all that shape and could not move to TOML at
+   all. The grammar is written once here and recurses; a level that JSON Schema
+   allows is a level this reads. *)
 
 type parsed_param =
   { param_name : string
@@ -258,7 +180,7 @@ type parsed_param =
   ; param_json : Yojson.Safe.t
   }
 
-let param_of_pairs ~context pairs =
+let rec param_of_pairs ~context pairs =
   let* name =
     match List.assoc_opt "name" pairs with
     | None -> Error (sprintf "%s is missing the required key \"name\"" context)
@@ -310,10 +232,26 @@ let param_of_pairs ~context pairs =
       let* () = only_for ~context:key_context ~declared Ptype_string in
       let* v = as_int ~context:key_context value in
       Ok (Some ("maxLength", `Int v))
+    | "min_length" ->
+      let* () = only_for ~context:key_context ~declared Ptype_string in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("minLength", `Int v))
     | "pattern" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
       let* v = as_non_empty_string ~context:key_context value in
       Ok (Some ("pattern", `String v))
+    | "max_items" ->
+      let* () = only_for ~context:key_context ~declared Ptype_array in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("maxItems", `Int v))
+    | "additional_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_bool ~context:key_context value in
+      Ok (Some ("additionalProperties", `Bool v))
+    | "params" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* parsed = params_of_value ~context:key_context value in
+      Ok (Some ("properties", `Assoc (List.map (fun p -> p.param_name, p.param_json) parsed)))
     | "items" ->
       let* () = only_for ~context:key_context ~declared Ptype_array in
       let* item_pairs = as_table_pairs ~context:key_context value in
@@ -322,10 +260,27 @@ let param_of_pairs ~context pairs =
     | other -> Error (sprintf "%s: unknown key %S" context other)
   in
   let* fields = ordered_fields ~field pairs in
+  (* A nested object carries its children's [required] as a sibling list, the
+     same way the top level does. The child's own [required = true] is read
+     here rather than emitted into the child, so the list sits where JSON
+     Schema puts it. *)
+  let* fields =
+    match declared, List.assoc_opt "params" pairs with
+    | Ptype_object, Some value ->
+      let* parsed = params_of_value ~context value in
+      (match List.filter (fun p -> p.param_required) parsed with
+       | [] -> Ok fields
+       | needed ->
+         Ok
+           (fields
+            @ [ ( "required"
+                , `List (List.map (fun p -> `String p.param_name) needed) )
+              ]))
+    | _ -> Ok fields
+  in
   Ok { param_name = name; param_required = required; param_json = `Assoc fields }
-;;
 
-let params_of_value ~context value =
+and params_of_value ~context value =
   match value with
   | Otoml.TomlTableArray tables ->
     let element index table =
@@ -340,9 +295,7 @@ let params_of_value ~context value =
         collect (index + 1) (parsed :: acc) rest
     in
     let* parsed = collect 0 [] tables in
-    let* () =
-      ensure_unique_names ~context (List.map (fun p -> p.param_name) parsed)
-    in
+    let* () = ensure_unique_names ~context (List.map (fun p -> p.param_name) parsed) in
     Ok parsed
   | Otoml.TomlArray [] ->
     Error (sprintf "%s must not be an empty array; omit the key instead" context)
@@ -352,6 +305,78 @@ let params_of_value ~context value =
     | Otoml.TomlArray (_ :: _)
     | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ) as other ->
     Error (sprintf "%s must be an array of tables, got %s" context (toml_shape other))
+
+and items_json ~context pairs =
+  let* declared = find_param_type ~context pairs in
+  let* () =
+    match declared with
+    | Ptype_string | Ptype_object -> Ok ()
+    | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_array ->
+      Error
+        (sprintf
+           "%s.type %s is not supported for items"
+           context
+           (param_type_to_string declared))
+  in
+  let field key value =
+    let key_context = sprintf "%s.%s" context key in
+    match key with
+    | "type" -> Ok (Some ("type", `String (param_type_to_string declared)))
+    (* An element carries the same constraints a parameter of that type does.
+       The two key sets used to differ, so a string element could not say how
+       short it may be even though a string parameter could. *)
+    | "description" ->
+      let* text = as_non_empty_string ~context:key_context value in
+      Ok (Some ("description", `String text))
+    | "min_length" ->
+      let* () = only_for ~context:key_context ~declared Ptype_string in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("minLength", `Int v))
+    | "max_length" ->
+      let* () = only_for ~context:key_context ~declared Ptype_string in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("maxLength", `Int v))
+    | "pattern" ->
+      let* () = only_for ~context:key_context ~declared Ptype_string in
+      let* v = as_non_empty_string ~context:key_context value in
+      Ok (Some ("pattern", `String v))
+    | "additional_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_bool ~context:key_context value in
+      Ok (Some ("additionalProperties", `Bool v))
+    | "params" ->
+      (match declared with
+       | Ptype_object ->
+         let* parsed = params_of_value ~context:key_context value in
+         Ok
+           (Some
+              ("properties", `Assoc (List.map (fun p -> p.param_name, p.param_json) parsed)))
+       | Ptype_string | Ptype_integer | Ptype_number | Ptype_boolean
+       | Ptype_array ->
+         Error (sprintf "%s is only valid when the items type is object" key_context))
+    | other -> Error (sprintf "%s: unknown key %S" context other)
+  in
+  let* fields = ordered_fields ~field pairs in
+  (* Array items of type object declare their fields or declare nothing: an
+     items table with no [params] is a shape no caller can satisfy. A
+     top-level object parameter is not held to this — the fixture's [meta]
+     is an open bag by design. *)
+  let* params =
+    match declared, List.assoc_opt "params" pairs with
+    | Ptype_object, None ->
+      Error (sprintf "%s of type object must declare params" context)
+    | Ptype_object, Some value -> params_of_value ~context value
+    | _ -> Ok []
+  in
+  (* Same rule as a nested object: the item's required children are listed on
+     the item, not marked on each child. *)
+  let fields =
+    match List.filter (fun p -> p.param_required) params with
+    | [] -> fields
+    | needed ->
+      fields @ [ "required", `List (List.map (fun p -> `String p.param_name) needed) ]
+  in
+  Ok (`Assoc fields)
 ;;
 
 (* ── Tool definition ──────────────────────────────────────────────────── *)

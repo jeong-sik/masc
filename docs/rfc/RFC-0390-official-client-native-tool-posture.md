@@ -8,7 +8,7 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0389"]
-implementation_prs: []
+implementation_prs: ["30119"]
 ---
 
 # RFC-0390: Official client 네이티브 도구를 keeper 별로 켜고 끈다
@@ -52,17 +52,19 @@ native = "read"   # "none" | "read" | "full"
 
 | 단계 | 뜻 | Claude Code | Codex | Antigravity |
 |---|---|---|---|---|
-| `none` | 읽기·효과 전부 masc 도구로만 | `--tools ""` (현행) | **선언 불가** — TOML 로드 에러 | **선언 불가** — TOML 로드 에러 |
-| `read` | 네이티브 읽기 허용, 효과는 masc 도구로만 | `--tools "Read,Glob,Grep"` (정확한 이름은 구현에서 확정) | `:read-only` (현행) | `--mode plan` + `--sandbox` (현행) |
+| `none` | 읽기·효과 전부 masc 도구로만 | `--tools ""` (현행) | **선언 불가** — admission 에서 typed 거부 | **선언 불가** — admission 에서 typed 거부 |
+| `read` | 네이티브 읽기 허용, 효과는 masc 도구로만 | `--tools "Read,Glob,Grep"` | `:read-only` (현행) | `--mode plan` + `--sandbox` (현행) |
 | `full` | 네이티브 효과까지 허용 | `--tools "default"` | `workspace-write` | `--mode accept-edits` + `--sandbox` 유지 |
 
 - 키가 없으면 **각 런타임의 현행 자세 유지** (Claude Code = `none`,
   Codex = `read`, Antigravity = `read`). 기본값을 하나로 통일하면
   어느 레인의 동작이 조용히 바뀐다 — 그 방식은 택하지 않는다.
-- 알 수 없는 값, 그리고 그 런타임이 실현할 수 없는 값(`none` on
-  Codex/Antigravity — 두 CLI 는 내장 도구를 끄는 스위치가 없다)은
-  근사하지 않고 TOML 로드를 실패시킨다. RFC-0389 의 값 검증과 같은
-  결이다.
+- 알 수 없는 값은 TOML 로드를 실패시킨다 (RFC-0389 의 값 검증과 같은
+  결). 그 런타임이 실현할 수 없는 값(`none` on Codex/Antigravity — 두
+  CLI 는 내장 도구를 끄는 스위치가 없다)은 근사하지 않고 lane
+  admission 시점에 typed error 로 거부한다 — keeper↔runtime 배정은
+  runtime.toml 소관이라 profile 로드 시점에는 어떤 런타임인지 알 수
+  없다.
 - Codex `danger-full-access` 와 Antigravity `--sandbox` 해제는 이
   RFC 범위 밖. sandbox 는 도구 가용성과 별개의 안전 바닥으로 남긴다.
 
@@ -107,7 +109,8 @@ official client 세션 재개는 `tool_surface_sha256` 으로 표면 일치를
 
 ## 검증
 
-- 파서 테스트: 3값 왕복, unknown 값 거부, 실현 불가 조합 거부.
+- 파서 테스트: 3값 왕복, unknown 값 거부. admission 테스트: 실현 불가
+  조합의 typed 거부.
 - admission 테스트: `Auto` keeper + `full` 레인 = typed 거부,
   `Yolo` + `full` = 통과.
 - 효과 측정: `tool_call_quality_benchmark` 로 같은 과제를

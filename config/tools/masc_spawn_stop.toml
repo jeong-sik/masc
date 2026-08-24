@@ -1,0 +1,9 @@
+name = "masc_spawn_stop"
+description = "Signal a spawned process to end. Stopping one that has already ended is not an error, so there is no need to check first."
+additional_properties = false
+
+[[params]]
+name = "handle"
+type = "string"
+required = true
+description = "Handle returned by masc_spawn."

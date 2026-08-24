@@ -9,6 +9,7 @@
   masc
   masc.dashboard
   masc.masc_tool_surface
+  masc.embedded_config
   masc.auth
   yojson
   otoml

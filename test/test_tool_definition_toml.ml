@@ -734,6 +734,26 @@ let test_min_items_is_rejected_off_an_array () =
    keeper_surface_post takes Slack Block Kit blocks that way: the set of block
    types belongs to Slack, so the schema admits any object and the executor
    checks the shape. *)
+(* A string element enumerates its own values. masc_check's assertions array
+   admits exactly two, and before this the items grammar had no enum at all --
+   the same gap the min_length note above describes. *)
+let test_string_items_carry_an_enum () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"assertions\"\ntype = \"array\"\n\
+            items = { type = \"string\", enum = [\"a\", \"b\"] }\n")
+  in
+  let items =
+    match member (property schema [ "assertions" ]) "items" with
+    | Some items -> items
+    | None -> failf "assertions lost its items"
+  in
+  check bool "the element enumerates its values" true
+    (member items "enum" = Some (`List [ `String "a"; `String "b" ]))
+;;
+
 let test_object_items_may_stay_open () =
   let schema =
     load_ok ~name:"t"
@@ -844,6 +864,10 @@ let () =
             "min_items is rejected off an array"
             `Quick
             test_min_items_is_rejected_off_an_array
+        ; test_case
+            "string items carry an enum"
+            `Quick
+            test_string_items_carry_an_enum
         ; test_case
             "object items may stay open"
             `Quick

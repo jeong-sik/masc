@@ -527,6 +527,23 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
     min requested (max 0 (count 0 (List.rev entries) - height))
   end
 
+let last_page_start ~height row_costs =
+  let costs = Array.of_list row_costs in
+  let count = Array.length costs in
+  if count = 0 then 0
+  else begin
+    let height = max 1 height in
+    let rec walk index used =
+      if index < 0 then 0
+      else
+        (* A row is the least an item can cost; a zero would let the walk
+           claim the whole list fits in any height. *)
+        let cost = max 1 costs.(index) in
+        if used + cost > height then index + 1 else walk (index - 1) (used + cost)
+    in
+    min (count - 1) (walk (count - 1) 0)
+  end
+
 let age_text ~now ~since =
   let seconds = now -. since in
   if seconds < 0. then None

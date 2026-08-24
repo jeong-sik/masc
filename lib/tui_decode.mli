@@ -141,6 +141,10 @@ type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;
   kc_input : string;  (** the call's argument text as served, may be truncated *)
+  kc_output : string option;
+      (** what the call answered, as served and already bounded by the server.
+          [None] means the row carried no result, which is not the same as a
+          call that returned an empty one. *)
   kc_success : bool;
   kc_duration_ms : float option;
   kc_turn : int option;

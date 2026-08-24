@@ -950,10 +950,14 @@ let pp_validation_error ppf = function
        | `Depth_limit -> "it nests too deeply"
        | `Token_limit_50k -> "it is too long")
   | Script_outside_the_subset reason ->
+    (* The tail used to be "Say it with argv or pipeline instead" for every
+       construct, and it is wrong for most of them: a heredoc is stdin, a loop
+       is a file, a background job is a different tool. One answer for
+       fourteen constructs leaves [sh -c] as the only move the caller can
+       work out, which is the escape this tool exists to remove. *)
     Format.fprintf
       ppf
-      "script uses %s, which this tool does not run. Say it with argv or \
-       pipeline instead."
+      "script uses %s, which this tool does not run. %s."
       (match reason with
        | `Heredoc -> "a heredoc"
        | `Here_string -> "a here-string"
@@ -969,6 +973,9 @@ let pp_validation_error ppf = function
        | `Command_separator -> "a ; between commands"
        | `Redirect -> "a redirection"
        | `Unknown_construct name -> name)
+      (Keeper_tooling.Subset_rewrite.to_string
+         (Keeper_tooling.Subset_rewrite.of_reason
+            (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct reason)))
   | Script_nested_pipeline ->
     Format.fprintf
       ppf

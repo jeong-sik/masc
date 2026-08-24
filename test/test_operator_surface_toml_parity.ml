@@ -25,8 +25,39 @@ let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
   | other -> other
 ;;
 
+(* Each pair binds a name to the value the module exposes under it, so a value
+   repointed at another declaration -- or two values swapped -- fails here. A
+   lookup that went to the file, or to the name the loaded schema carries,
+   would pass in both cases: the file still says the expected thing, and a swap
+   leaves both names present. *)
+let bindings : (string * Masc_domain.tool_schema) list =
+  let open Tool_schemas_operator_surface in
+  [ "masc_broadcast", broadcast
+  ; "masc_config", config
+  ; "masc_dashboard", dashboard
+  ; "masc_deliver", deliver
+  ; "masc_gc", gc
+  ; "masc_keeper_waiting_inventory", keeper_waiting_inventory
+  ; "masc_messages", messages
+  ; "masc_note_add", note_add
+  ; "masc_pause", pause
+  ; "masc_pause_status", pause_status
+  ; "masc_plan_clear_task", plan_clear_task
+  ; "masc_plan_get", plan_get
+  ; "masc_plan_get_task", plan_get_task
+  ; "masc_plan_init", plan_init
+  ; "masc_plan_set_task", plan_set_task
+  ; "masc_plan_update", plan_update
+  ; "masc_resume", resume
+  ; "masc_start", start
+  ; "masc_tool_help", tool_help
+  ]
+;;
+
 let loaded name : Masc_domain.tool_schema =
-  Tool_schemas_operator_surface.schema_of_name name
+  match List.assoc_opt name bindings with
+  | Some schema -> schema
+  | None -> failwith (name ^ " is not bound in Tool_schemas_operator_surface")
 ;;
 
 (* name, description, input_schema (keys sorted) *)
@@ -78,7 +109,8 @@ let test_input_schemas_match_with_keys_sorted () =
 ;;
 
 let test_every_tool_the_generator_owned_is_declared () =
-  check int "19 tools moved" 19 (List.length expected)
+  check int "19 tools pinned here" 19 (List.length expected);
+  check int "19 tools bound in the module" 19 (List.length bindings)
 ;;
 
 (* Three checks that lived in test_tool_descriptors_gen and have nothing to do

@@ -662,6 +662,30 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
+    exactly the fields the operator left in $EDITOR; a field absent from the
+    body is absent from the patch, so the editor round-trip cannot blank a
+    setting it never showed. Validation is the route's (it re-uses
+    masc_keeper_up's arg parsing), not duplicated here. *)
+let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(patch_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/config"
+         (percent_encode_path_segment keeper_name))
+    ~body:patch_json
+
+(** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
+    contract. The keeper name in the path is the row the operator launched
+    from; the body carries the rest of the declaration. *)
+let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(declaration_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/up"
+         (percent_encode_path_segment keeper_name))
+    ~body:declaration_json
+
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
 let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :

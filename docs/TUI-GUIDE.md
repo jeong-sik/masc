@@ -500,6 +500,8 @@ Per surface:
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
+| `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
+| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
 | `Ctrl-U` | Message | Clear the input line |

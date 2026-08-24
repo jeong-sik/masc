@@ -379,6 +379,12 @@
  (libraries masc_tui_render_schedule unix))
 
 (library
+ (name masc_tui_editor)
+ (wrapped false)
+ (modules masc_tui_editor)
+ (libraries unix))
+
+(library
  (name masc_tui_credential)
  (modules masc_tui_credential))
 
@@ -427,6 +433,7 @@
   masc_tui_render_schedule
   masc_tui_tool_tree
   masc_tui_terminal_write_repair
+  masc_tui_editor
   masc.dashboard
   masc.server
   masc.config

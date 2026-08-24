@@ -758,7 +758,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          "Prompt is too long" that did not reach the overflow path was
          indistinguishable from one where the sentence never appeared: both
          printed the same line, and the field that separates them was not in
-         it (rondo, 2026-08-24). Naming it costs one field and answers the
+         it (one keeper, 2026-08-24). Naming it costs one field and answers the
          question the next reader will have. *)
       Printf.sprintf
         "terminal subtype=%s api_status=%s reason=%s%s"

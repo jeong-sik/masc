@@ -120,6 +120,12 @@ const EXECUTION_RECEIPT_NON_ATTENTION_REASONS: ReadonlySet<string> = new Set([
   'phase_skipped',
   'input_required',
   'capacity_backpressure',
+  // Same pairing as capacity_backpressure: Disp_fail_open_next_runtime, which
+  // Keeper_operator_disposition_display renders as "Pass", so
+  // display_disposition_requires_attention never promotes it. The provider was
+  // healthy and the keeper carries on; the Korean label lives in
+  // fsm-hub-types' operator-disposition-reason table instead.
+  'accept_rejected',
 ])
 
 describe('keeper attention vocabulary drift guard', () => {

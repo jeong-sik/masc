@@ -23,7 +23,7 @@
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
     [extract_keeper_name] / [lookup_neo4j_profile] /
-    [is_keeper_offline] / [is_health_at_risk] / [option_or_else] /
+    [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)

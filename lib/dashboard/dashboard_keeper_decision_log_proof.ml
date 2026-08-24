@@ -300,7 +300,7 @@ let has_persistent_turn_span_for ~required_span_hours ~now stat =
     && latest <= now
     && hours_between first latest >= required_span_hours
     && latest_age_hours ~now latest <= recent_turn_max_age_hours
-  | _ -> false
+  | Some _, None | None, Some _ | None, None -> false
 
 let has_persistent_turn_span ~now stat =
   has_persistent_turn_span_for
@@ -308,6 +308,31 @@ let has_persistent_turn_span ~now stat =
     ~now
     stat
 ;;
+
+(* What the reader could establish about a required span. The predicates above
+   answer one question - was the span proven - and answer it correctly: an
+   unread history proves nothing. They cannot answer the second question a
+   report needs, which is whether [false] came from the keeper or from the
+   reader. A head scan that ran out of budget leaves the earliest turn row
+   unseen, so the span is unknown rather than short, and a report holding only
+   the boolean has to file that keeper under "did not do it". *)
+type span_reading =
+  | Span_met
+  | Span_not_met
+  | Span_undetermined
+
+let persistent_turn_span_reading ~required_span_hours ~now stat =
+  match stat.first_ts_origin with
+  | History_scan_exhausted _ -> Span_undetermined
+  | History_head _ | No_turn_row_in_history ->
+    if has_persistent_turn_span_for ~required_span_hours ~now stat
+    then Span_met
+    else Span_not_met
+
+let span_reading_to_string = function
+  | Span_met -> "met"
+  | Span_not_met -> "not_met"
+  | Span_undetermined -> "undetermined"
 
 let turn_span_evidence_json ~now keeper_name stat =
   `Assoc [
@@ -321,6 +346,11 @@ let turn_span_evidence_json ~now keeper_name stat =
     ("latest_ts_iso", unix_opt_to_iso_json stat.latest_ts);
     ("span_hours", turn_span_hours_json stat);
     ("latest_age_hours", latest_age_hours_json ~now stat);
-    ( "meets_24h_persistence",
-      `Bool (has_persistent_turn_span ~now stat) );
+    ( "persistence_24h",
+      `String
+        (span_reading_to_string
+           (persistent_turn_span_reading
+              ~required_span_hours:persistent_turn_window_hours
+              ~now
+              stat)) );
   ]

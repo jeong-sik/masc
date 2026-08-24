@@ -559,7 +559,7 @@ module KeeperKeepalive = struct
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)
-  let body_timeout_sec_override =
+  let body_timeout_sec_override_live () =
     match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
     | Some raw ->
       (match Float.of_string_opt (String.trim raw) with
@@ -567,6 +567,8 @@ module KeeperKeepalive = struct
        | None -> None)
     | None -> None
   ;;
+
+  let body_timeout_sec_override = body_timeout_sec_override_live ()
 
   (** Total wall-clock deadline for a single provider call attempt (whole
       operation, independent of streaming progress) — distinct from
@@ -597,7 +599,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
-  let provider_call_deadline_sec_override =
+  let provider_call_deadline_sec_override_live () =
     match
       Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
     with
@@ -606,6 +608,10 @@ module KeeperKeepalive = struct
        | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
        | None -> None)
     | None -> None
+  ;;
+
+  let provider_call_deadline_sec_override =
+    provider_call_deadline_sec_override_live ()
   ;;
 
 end

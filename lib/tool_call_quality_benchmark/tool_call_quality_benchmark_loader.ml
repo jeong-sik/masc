@@ -158,9 +158,14 @@ let benchmark_case_of_yojson json =
     recovery_policy;
   }
 
+(* [tool_name] is what selectors match against, so an absent one does not
+   produce a call that matches nothing — it produces a row nobody can reason
+   about. The empty-string default made that indistinguishable from a tool
+   actually named "" (#29396 A5). *)
 let tool_call_of_yojson json =
-  {
-    tool_name = Json_util.get_string_with_default json ~key:"tool_name" ~default:"";
+  let* tool_name = required_string_field json "tool_name" in
+  Ok {
+    tool_name;
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;
@@ -174,6 +179,7 @@ let evidence_run_of_yojson json =
   let* model = required_string_field json "model" in
   let* keeper_profile = required_string_field json "keeper_profile" in
   let* tool_call_items = list_field json "tool_calls" in
+  let* tool_calls = map_m tool_call_of_yojson tool_call_items in
   Ok {
     case_id;
     provider;
@@ -192,7 +198,7 @@ let evidence_run_of_yojson json =
     status =
       Json_util.get_string json "status" |> Option.value ~default:"ok"
       |> run_status_of_string;
-    tool_calls = List.map tool_call_of_yojson tool_call_items;
+    tool_calls;
   }
 
 let load_cases_from_file path =

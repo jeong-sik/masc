@@ -11,7 +11,7 @@
  (public_name masc.sse_event)
  (flags
   (:standard -w +4 -w +33))
- (libraries yojson atdgen-runtime))
+ (libraries yojson atdgen-runtime digestif))
 
 (rule
  (targets sse_event_t.ml sse_event_t.mli)

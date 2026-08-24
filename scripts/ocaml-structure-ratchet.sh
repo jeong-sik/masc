@@ -10,8 +10,12 @@
 #   - godsplit_count    : occurrences of `;; godsplit` markers in lib/dune
 #     (god-file decomposition stubs left as comments — should converge to 0
 #     by sub-library extraction)
-#   - lib_dune_lines    : raw line count of lib/dune (proxy for the
-#     monolithic-library debt; sub-library splits should reduce this)
+#   - masc_lib_modules  : modules compiled into the single `masc` library
+#     (lib/*.ml). This is the monolithic-library debt itself, not the length
+#     of the file that declares it: lib/dune has no (modules ...) list, so
+#     every lib/*.ml is a member, and extracting a sub-library is what moves
+#     the number. The metric used to be `wc -l lib/dune`, which a comment or
+#     a blank line moved just as far as a real module did.
 #   - inferred_dump_headers: count of .mli files in lib/ carrying an
 #     auto-generated `(** X inferred mli **)` self-incriminating header.
 #     Each such header signals a never-curated interface dump; the .mli
@@ -64,8 +68,10 @@ count_godsplit() {
   rg -c '^\s*;;\s*godsplit' "${REPO_ROOT}/lib/dune" 2>/dev/null || echo 0
 }
 
-count_lib_dune_lines() {
-  wc -l < "${REPO_ROOT}/lib/dune" | tr -d ' '
+count_masc_lib_modules() {
+  # lib/dune declares (library (name masc)) with no (modules ...), so the
+  # library is exactly the .ml files sitting next to it.
+  find "${REPO_ROOT}/lib" -maxdepth 1 -name '*.ml' -type f | wc -l | tr -d ' '
 }
 
 count_inferred_dump_headers() {
@@ -141,7 +147,7 @@ METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
   "workspace_mli_missing|Add .mli for the new lib/workspace/*.ml file."
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
-  "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/agent_core/dune, lib/dashboard/dune)."
+  "masc_lib_modules|The single 'masc' library is growing — extract modules into a sub-library (lib/keeper/dune, lib/agent_core/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
   "lib_other_mli_missing|Add .mli for the new public lib/*/*.ml file, or mark implementation-only modules private in the local dune stanza."
 )
@@ -151,7 +157,7 @@ current_value() {
     keeper_mli_missing)     count_mli_missing "lib/keeper" "keeper_*" ;;
     workspace_mli_missing)      count_mli_missing "lib/workspace"  "*" ;;
     godsplit_count)         count_godsplit ;;
-    lib_dune_lines)         count_lib_dune_lines ;;
+    masc_lib_modules)       count_masc_lib_modules ;;
     inferred_dump_headers)  count_inferred_dump_headers ;;
     lib_other_mli_missing)  count_lib_other_mli_missing ;;
     *) echo "unknown metric: $1" >&2; exit 1 ;;

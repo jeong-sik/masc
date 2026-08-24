@@ -93,8 +93,9 @@ val display_status :
     cannot answer what a keeper's live status is. *)
 
 val status_label : reading -> string
-(** Terminal label for {!display_status}, or ["unknown"] when the roster was
-    not observed. *)
+(** Terminal label for {!display_status}, or ["unread"] when the roster was
+    not observed: the roster has not been read for this keeper, which is a
+    fact about the reading, not a status the keeper is in. *)
 
 (** A lifecycle action the operator can take on one keeper.
 

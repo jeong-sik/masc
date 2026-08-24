@@ -9,9 +9,11 @@
 ; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing
 ; about dune files, but `dune fmt` formats every language it knows — so it
 ; rewrote 18 dune files nobody checks, and the one blank line it added to
-; lib/dune pushed lib_dune_lines past its ratchet baseline. The repo's own
-; formatter broke the repo's own gate (#29253). Scoping formatting to the
-; language CI enforces makes `dune fmt` agree with it.
+; lib/dune pushed the structure ratchet's then line-count metric past its
+; baseline. The repo's own formatter broke the repo's own gate (#29253).
+; That metric now counts library modules rather than file lines, but scoping
+; formatting to the language CI enforces is still what makes `dune fmt`
+; agree with it.
 (formatting
  (enabled_for ocaml))
 

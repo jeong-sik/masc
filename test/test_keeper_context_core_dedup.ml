@@ -120,6 +120,57 @@ let test_roundtrip_text_preserved () =
   Alcotest.(check string) "text preserved"
     (text_of original) (text_of reparsed)
 
+(* [message_to_json] calls the provider-wire projection for every block, and
+   that projection drops the ToolResult fields a history reader needs: the
+   typed [json] payload is not emitted at all, and [outcome] is flattened to
+   [is_error], so Tool_failed provenance cannot come back. This file says
+   content_blocks is the write-side source of truth; for ToolResult it is a
+   wire copy (#25109). *)
+let test_roundtrip_preserves_tool_result_payload_and_provenance () =
+  let original : T.message =
+    {
+      T.role = T.Tool;
+      content =
+        [
+          T.ToolResult
+            {
+              tool_use_id = "toolu_roundtrip";
+              content = "2 rows matched";
+              outcome =
+                T.Tool_failed
+                  {
+                    failure_kind = T.Validation_error;
+                    error_class = None;
+                  };
+              json = Some (`Assoc [ ("rows", `Int 2) ]);
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = Some "toolu_roundtrip";
+      metadata = [];
+    }
+  in
+  let reparsed = C.message_of_json (C.message_to_json original) in
+  match reparsed.content with
+  | [ T.ToolResult { json; outcome; _ } ] ->
+      Alcotest.(check string)
+        "typed json payload survives the round-trip"
+        {|{"rows":2}|}
+        (match json with
+         | Some value -> Yojson.Safe.to_string value
+         | None -> "<none>");
+      Alcotest.(check string)
+        "the exact failure kind survives the round-trip"
+        "Types.Validation_error"
+        (match outcome with
+         | T.Tool_failed { failure_kind; _ } ->
+             T.show_tool_failure_kind failure_kind
+         | T.Tool_succeeded -> "<succeeded>")
+  | blocks ->
+      Alcotest.failf "expected one ToolResult block, got %d" (List.length blocks)
+;;
+
 let test_roundtrip_preserves_thinking_signature () =
   let original : T.message =
     {
@@ -491,6 +542,8 @@ let () =
             test_roundtrip_text_preserved;
           Alcotest.test_case "round-trip thinking signature preserved" `Quick
             test_roundtrip_preserves_thinking_signature;
+          Alcotest.test_case "round-trip tool_result payload preserved" `Quick
+            test_roundtrip_preserves_tool_result_payload_and_provenance;
           Alcotest.test_case "thinking block JSON uses AGENT_CORE signature" `Quick
             test_thinking_block_json_uses_agent_core_signature;
           Alcotest.test_case "legacy thinking_type is not promoted" `Quick

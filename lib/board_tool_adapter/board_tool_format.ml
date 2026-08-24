@@ -148,12 +148,20 @@ let format_comment ?(indent = 0) (c : Board.comment) =
     then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
     else ""
   in
+  (* The id is what [masc_board_comment_vote] and a threaded
+     [masc_board_comment] take, and this listing is where the rejection tells a
+     caller to look for it ("the id masc_board_post_get and masc_board_comment
+     return"). It was not in the line. Live tool-call logs carry the cost:
+     [masc_board_comment_vote] failed 160 times out of 239, and the ids sent
+     were c-placeholder, c-b1, c-???, and in 28 calls the comment's own text in
+     place of an id. *)
   Printf.sprintf
-    "%s%s%s: %s [%s%s]"
+    "%s%s%s: %s [%s, %s%s]"
     prefix
     tree_prefix
     (Board.Agent_id.to_string c.author)
     c.content
+    (Board.Comment_id.to_string c.id)
     time_str
     vote_str
 ;;

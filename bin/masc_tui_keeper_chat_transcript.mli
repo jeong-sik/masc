@@ -99,6 +99,14 @@ val completed_tool_rows : (string * string) list -> string list
 
 val tool_rows : t -> string list
 
+(** One line per tool call, in stream order, the way the pane draws them: a
+    marker for how far the call got, the tool's name, and the argument it is
+    known by.
+
+    The same strings are used for the live rows and for the row block kept in
+    the transcript once the turn ends, so what an operator watched and what
+    they scroll back to are not formatted by two different functions. *)
+
 (** How a tool step recorded in an autonomous turn's trace ended. The server
     writes one of [ok], [err], [pending]; a step with no status at all is the
     fourth case, kept apart from [pending] because "the trace closed with the
@@ -118,16 +126,10 @@ val persisted_tool_rows :
     Formatted by the same function {!tool_rows} uses, so a turn the keeper
     ran on its own reads like one watched live: the finished glyph for a call
     that returned, a distinct one for a call that returned an error, and the
-    open glyph for a call the trace never saw finish. The duration, when the
-    server recorded one, follows the subject. *)
-(** One line per tool call, in stream order, the way the pane draws them: a
-    marker for how far the call got, the tool's name, and the argument it is
-    known by.
-
-    The same strings are used for the live rows and for the row block kept in
-    the transcript once the turn ends, so what an operator watched and what
-    they scroll back to are not formatted by two different functions. *)
-
+    open glyph for a call the trace never saw finish, and [?] for a step
+    whose outcome the trace did not record. The duration follows the subject
+    only when the server recorded one, which it does for a call that
+    finished. *)
 (** How a status row reads. *)
 type status_kind =
   | Progress  (** How the turn is going. *)

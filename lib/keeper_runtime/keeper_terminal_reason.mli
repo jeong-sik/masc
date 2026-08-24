@@ -9,10 +9,16 @@
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
       [Agent_core.Error.t]. Its [of_wire] returns [None] for the
       agent-core error codes ([api_error_*], agent observation wires, [internal_error]) because
-      they are all collapsed into its [Agent_core_error of string] blob — the
-      sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Agent_core_error s]
-      would force the substring re-parse back into the open, so it cannot
-      be the consumer's parse target.
+      they are all collapsed into its [Agent_core_error of string] blob.
+      Splitting that blob is designed in RFC-0371 §6.1(3), which carries a
+      typed observation beside the byte-identical wire and requires all four
+      types on the chain to be threaded in one batch. (Earlier revisions of
+      this comment attributed the deferral to "RFC-0042 §5.2". That section
+      argues the opposite — it accepts the variant count as the price of the
+      guarantee — and RFC-0042 was withdrawn in #24332 and removed from the
+      tree in #27624, so the citation pointed at nothing.) Matching on
+      [Agent_core_error s] would force the substring re-parse back into the
+      open, so it cannot be the consumer's parse target.
     - [Keeper_turn_disposition] is the operator-facing layer;
       its [of_termination_code] routes through the same producer collapse
       and produces a different output type.
@@ -25,14 +31,17 @@
 
     {1 Partition discipline}
 
-    [of_wire] is a {e priority-ranked partition}: it tests the buckets in
-    the same order the old [operator_disposition] [if/else] chain tested
-    its string predicates, plus exact canonical policy buckets for
-    [Capacity_backpressure] and [Provider_attempt_effect_fenced], and returns
-    the first match.
-    Only canonical producer wire forms select specialized buckets. The order
-    remains load-bearing for canonical overlaps; see the [.ml] for the ranked
-    list.
+    [of_wire] runs in two stages. First it asks
+    {!Keeper_internal_error.wire_kind_of_string} whether the code is one the
+    keeper's own error envelope emits, and classifies from that type — so a
+    new envelope constructor is a compile error here rather than a wire
+    string nobody recognises. Whatever the enumeration does not claim falls
+    to the prefix tests for the agent-core and provider families, a
+    {e priority-ranked partition} that tests buckets in the same order the
+    old [operator_disposition] [if/else] chain tested its string predicates
+    and returns the first match. The order remains load-bearing there; see
+    the [.ml] for the ranked list. Only canonical producer wire forms select
+    specialized buckets.
 
     The escape arm [Unknown] is a {e named} typed escape for unmatched or
     non-canonical codes. Callers route it explicitly to the generic path.
@@ -83,9 +92,31 @@ type t =
       disposition matches {!Provider_attempt_effect_fenced}, only the label
       differs so a lost correction is countable apart from ordinary fenced
       provider failures. *)
+  | Accept_rejected of string
+  (** {!Keeper_internal_error.Wire_accept_rejected}. The provider answered and
+      the response was well formed; MASC's own accept contract found nothing
+      usable in it — no text, no tool call — and refused the turn. Nothing
+      failed on the provider side and nothing failed inside MASC, so this is
+      neither a provider error nor an internal one. The operator action it
+      points at is a lane's output budget, which is why it does not share a
+      label with either. *)
+  | Terminal_effect_failed of string
+  (** {!Keeper_internal_error.Wire_terminal_effect_failed}. The tool that ends
+      the turn by producing an external artifact reported failure, or returned
+      no typed receipt for what it did. Whether the artifact reached the
+      outside world is unknown, so the turn is never replayed and the
+      stimulus behind it is retired rather than requeued — an operator has to
+      decide what happened. Keeps the alert; only the label changes, from
+      "unmapped runtime state" to what actually occurred. *)
   | Internal_error of string
-  (** Exact wire ["internal_error"]. Payload is the original
-          string, carried only for [to_wire] round-trip fidelity. *)
+  (** Exact wire ["internal_error"], plus the three envelope spellings
+      {!Keeper_internal_error.Wire_internal_unhandled_exception},
+      [Wire_internal_bridge_exception] and [Wire_internal_contract_rejected].
+      All four take the same route — [Internal_opaque] /
+      [Exhausted_visible_alive] — and the receipt keeps the wire string
+      verbatim, so they stay countable apart without separate variants.
+      Payload is the original string, carried for [to_wire] round-trip
+      fidelity. *)
   | Pre_dispatch_success of string
   (** Exact wire ["pre_dispatch_success"]: a turn that
           completed without dispatching to a provider. Payload is the

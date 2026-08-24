@@ -8,13 +8,15 @@ module Decode = Masc.Tui_decode
 
 let runtime ?(keepalive_running = true) ?(status = Status.Surface_active)
     ?(autoboot_enabled = true) ?(proactive_enabled = true)
-    ?(runtime_id = "anthropic.claude-opus-5") name : Decode.keeper_runtime =
+    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = "running") name :
+    Decode.keeper_runtime =
   { kr_name = name
   ; kr_status = status
   ; kr_keepalive_running = keepalive_running
   ; kr_autoboot_enabled = autoboot_enabled
   ; kr_proactive_enabled = proactive_enabled
   ; kr_runtime_id = runtime_id
+  ; kr_phase = phase
   }
 
 let complete rows = Control.Roster_complete rows
@@ -40,7 +42,7 @@ let test_unobserved_offers_nothing () =
   check_actions "no action without a roster" [] (Control.available r);
   Alcotest.(check (option action_testable))
     "no primary without a roster" None (Control.primary r);
-  Alcotest.(check string) "status is unknown" "unknown" (Control.status_label r)
+  Alcotest.(check string) "status is unread" "unread" (Control.status_label r)
 
 let test_absent_offers_boot () =
   let r = reading ~liveness:Control.Absent "analyst" in
@@ -306,12 +308,12 @@ let test_short_roster_is_partial () =
       Alcotest.fail "a roster short of its own total is not complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"
 
-let test_short_roster_reads_unknown_not_offline () =
+let test_short_roster_reads_unread_not_offline () =
   let roster = Control.roster_of_reading ~rows:[] ~truncated:false ~total:10 in
   let r = { Control.name = "analyst"; paused = false
           ; liveness = Control.liveness_of_roster roster "analyst" }
   in
-  Alcotest.(check string) "unknown, not offline" "unknown"
+  Alcotest.(check string) "unread, not offline" "unread"
     (Control.status_label r);
   check_actions "no action on an unread keeper" [] (Control.available r)
 
@@ -327,11 +329,18 @@ let test_refusal_distinguishes_absent_from_rejected () =
     Control.roster_failure_message ~credential_sent:true
       Control.Roster_unauthorized
   in
-  Alcotest.(check bool) "no bearer asks for one" true (has "need an operator token" absent);
-  Alcotest.(check bool) "no bearer is not called rejected" false (has "rejected" absent);
-  Alcotest.(check bool) "a sent bearer is reported rejected" true (has "rejected" rejected);
-  Alcotest.(check bool) "a sent bearer is not asked for again" false
-    (has "need an operator token" rejected);
+  Alcotest.(check bool) "no bearer is named absent" true
+    (has "holds no operator token" absent);
+  Alcotest.(check bool) "no bearer is not called refused" false
+    (has "was refused" absent);
+  Alcotest.(check bool) "a sent bearer is named refused" true
+    (has "was refused" rejected);
+  Alcotest.(check bool) "a sent bearer is not called absent" false
+    (has "holds no operator token" rejected);
+  Alcotest.(check bool) "both name the command that mints one" true
+    (has "masc login" absent && has "masc login" rejected);
+  Alcotest.(check bool) "both keep the surface's own subject" true
+    (has "live keeper status" absent && has "live keeper status" rejected);
   (* The other failures say nothing about credentials either way. *)
   List.iter
     (fun credential_sent ->
@@ -462,13 +471,13 @@ let test_empty_error_body_names_the_status () =
 
 (* {1 Roster decode} *)
 
-let gate_row ?(status = "active") name =
+let gate_row ?(status = "active") ?(phase = "running") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
-       "status":%S,"keepalive_running":true,"autoboot_enabled":true,
+       "status":%S,"phase":%S,"keepalive_running":true,"autoboot_enabled":true,
        "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
-    name name status
+    name name status phase
 
 let test_roster_decode_reads_rows () =
   let json =
@@ -563,8 +572,8 @@ let () =
     ; ( "roster completeness"
       , [ Alcotest.test_case "a roster short of its total is partial" `Quick
             test_short_roster_is_partial
-        ; Alcotest.test_case "a missing row reads unknown, not offline" `Quick
-            test_short_roster_reads_unknown_not_offline
+        ; Alcotest.test_case "a missing row reads unread, not offline" `Quick
+            test_short_roster_reads_unread_not_offline
         ; Alcotest.test_case "a clamped roster is partial" `Quick
             test_truncated_roster_is_partial
         ; Alcotest.test_case "a partial roster still confirms its rows" `Quick

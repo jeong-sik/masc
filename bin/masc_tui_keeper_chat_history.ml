@@ -28,7 +28,7 @@ type kind =
       ; surface : Surface.t option
       }
   | Said_by_keeper
-  | Delivery_failed
+  | Delivery_failed of { origin_request_id : string option }
   | Tool_calls of string list
   | Reasoning of string list
 
@@ -237,11 +237,13 @@ let trace_summary_of fields =
 let plural count noun =
   Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
 
-(* The rows an assistant row's blocks become, in the order the turn ran:
-   what it reasoned, what it called, then what it said. A withheld count
-   rides the reasoning block and an omitted count the last block, so a
-   turn whose steps were scrubbed or dropped still says how many there
-   were. *)
+(* The rows an assistant row's blocks become: one reasoning block, one
+   tool block, then what the turn said. The trace interleaves think and
+   tool steps; they are gathered into one block each, the way the live pane
+   draws a turn, rather than drawn as one row per step. A withheld count
+   rides the reasoning block and an omitted count the tool block -- omitted
+   steps are steps the turn took, so a block that has nothing but that count
+   is still a block of steps. *)
 let rows_of_trace at summary =
   let omitted_note =
     if summary.omitted = 0 then []
@@ -261,9 +263,9 @@ let rows_of_trace at summary =
   match summary.reasoning @ withheld_note, tool_rows with
   | [], [] ->
       (* No reasoning and no calls: the omitted count, if any, is the only
-         thing the block said. *)
+         thing the block said, and it counts steps. *)
       List.map
-        (fun line -> Utterance { at; kind = Reasoning [ line ]; text = "" })
+        (fun line -> Utterance { at; kind = Tool_calls [ line ]; text = "" })
         omitted_note
   | reasoning, [] ->
       [ Utterance { at; kind = Reasoning (reasoning @ omitted_note); text = "" } ]
@@ -304,7 +306,22 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
       | Some "assistant" -> (
           match string_field fields "kind" with
           | Some "transport_failure" ->
-              [ Utterance { at; kind = Delivery_failed; text = content } ]
+              (* The server already sends the append-once identity it stored
+                 the row under. Only an operation key names a turn this client
+                 dispatched; the other producers get [None] rather than a
+                 borrowed id. *)
+              let origin_request_id =
+                match List.assoc_opt "delivery_key" fields with
+                | Some (`Assoc key_fields) -> (
+                    match string_field key_fields "kind" with
+                    | Some "operation" -> string_field key_fields "operation_id"
+                    | Some _ | None -> None)
+                | Some _ | None -> None
+              in
+              [ Utterance
+                  { at; kind = Delivery_failed { origin_request_id }
+                  ; text = content }
+              ]
           | Some _ | None ->
               (* An autonomous turn persists what it did as a trace block and
                  often says nothing in [content]: on one live keeper 32 of
@@ -312,8 +329,18 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                  timestamp over an empty line. The trace rows come first
                  because the turn ran them first; the text, when there is
                  any, is what it said afterwards. A row with neither keeps
-                 its empty line -- that is what the server holds for it. *)
-              let trace_rows = rows_of_trace at (trace_summary_of fields) in
+                 its empty line -- that is what the server holds for it.
+
+                 Only a row the server marks [autonomous_turn] is read this
+                 way. A direct-conversation turn can carry a trace block too
+                 -- the server joins the raw trace onto rows with a turn ref
+                 -- but its calls are already in the transcript as
+                 [role: "tool"] rows, and reading both drew every call twice. *)
+              let trace_rows =
+                match List.assoc_opt "autonomous_turn" fields with
+                | Some (`Assoc _) -> rows_of_trace at (trace_summary_of fields)
+                | Some _ | None -> []
+              in
               let said =
                 if String.equal content "" && trace_rows <> [] then []
                 else [ Utterance { at; kind = Said_by_keeper; text = content } ]

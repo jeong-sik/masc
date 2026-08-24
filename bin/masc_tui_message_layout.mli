@@ -51,10 +51,6 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
-val input_cursor_row :
-  terminal_rows:int -> history_height:int -> status_rows:int -> int
-(** One-based input row clamped to the terminal viewport. *)
-
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane
@@ -118,6 +114,18 @@ val scrolled_rows :
     newest entry holds its metadata row and loses body lines instead. Scrolled
     back, every row is already whole, and the window is a plain slice. *)
 
+val clamp_scroll :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  int ->
+  entry list ->
+  int
+(** [clamp_scroll ~height requested entries] is [requested] held within what
+    the transcript can scroll, the same answer as [min requested (max_scroll
+    ...)]. It reads only as far back as the answer depends on, so a pane that
+    is not scrolled does not pay for the whole conversation on every frame. *)
+
 val max_scroll :
   ?markdown:(width:int -> string -> string list) ->
   inner_width:int ->
@@ -139,3 +147,12 @@ val composer_lines : max_rows:int -> string -> string list
     before the width is applied, and a count that moved with the width would
     disagree with the drawing. A line wider than the pane is fitted by
     {!input_viewport}, the way the single-line composer already was. *)
+
+val age_text : now:float -> since:float -> string option
+(** How long something has been outstanding, as [12s] or [3m07s].
+
+    An age, not a countdown: it says how long a thing has been going so a
+    reader can tell slow from stuck. Rendered from a clock the caller passes
+    rather than one read here, so a test can state the instant and two rows in
+    one frame can share a single read. A clock that moved backwards says
+    nothing rather than a negative age. *)

@@ -8,8 +8,8 @@
 
     This is a ratchet, not a golden. Shrinking passes and reports the slack, so
     a PR that trims a description is never asked to edit a number to stay green
-    — that failure mode is why [audit-ci-test-targets.sh] stopped failing on its
-    own improvement. Growth past the ceiling fails and has to be argued for in
+    — a ratchet that fails on its own improvement takes main red for the
+    duration. Growth past the ceiling fails and has to be argued for in
     the PR that causes it.
 
     What is measured is what the model receives: [model_visible_schemas]
@@ -80,8 +80,8 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
 
 (* A ceiling nobody is near stops measuring anything. This fails when the slack
    grows past a third of the ceiling, which is the signal to lower it and bank
-   the reduction — the same direction audit-ci-test-targets.sh reports when its
-   unwired count drops below baseline. *)
+   the reduction: a baseline that has drifted far from what it measures is
+   reporting on nothing. *)
 let test_the_ceiling_still_tracks_the_surface () =
   let _, bytes = measured () in
   let slack = ceiling_bytes - bytes in

@@ -26,6 +26,8 @@ let capacity_backpressure_kind = "capacity_backpressure"
 let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
 let provider_attempt_effect_fenced_kind = "provider_attempt_effect_fenced"
 let tool_correction_lost_kind = "tool_correction_lost"
+let accept_rejected_kind = "accept_rejected"
+let terminal_effect_failed_kind = "terminal_effect_failed"
 
 type provider_rejection = {
   provider_label : string;
@@ -664,12 +666,12 @@ let wire_kind_to_string = function
   | Wire_runtime_exhausted -> "runtime_exhausted"
   | Wire_capacity_backpressure -> capacity_backpressure_kind
   | Wire_resumable_cli_session -> "resumable_cli_session"
-  | Wire_accept_rejected -> "accept_rejected"
+  | Wire_accept_rejected -> accept_rejected_kind
   | Wire_internal_unhandled_exception -> "internal_unhandled_exception"
   | Wire_internal_bridge_exception -> "internal_bridge_exception"
   | Wire_internal_contract_rejected -> "internal_contract_rejected"
   | Wire_incomplete_tool_transcript -> incomplete_tool_transcript_kind
-  | Wire_terminal_effect_failed -> "terminal_effect_failed"
+  | Wire_terminal_effect_failed -> terminal_effect_failed_kind
   | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
   | Wire_tool_correction_lost -> tool_correction_lost_kind
   | Wire_receipt_persistence_failed -> "receipt_persistence_failed"

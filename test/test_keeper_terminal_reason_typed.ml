@@ -128,7 +128,7 @@ let roundtrip_corpus =
        across 189 receipt files and every August log — so there is no trace
        to classify them from. [of_wire] names them explicitly and answers
        [Unknown], so the open question is visible in the match instead of
-       being an absent arm. #29930 tracks tracing them. *)
+       being an absent arm. #29945 tracks tracing them. *)
   ; "resumable_cli_session"
   ; "receipt_persistence_failed"
   ; "gate_replay_repair_required"

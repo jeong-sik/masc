@@ -18,6 +18,13 @@ val provider_attempt_effect_fenced_kind : string
     {!provider_attempt_effect_fenced_kind}; only the label differs. *)
 val tool_correction_lost_kind : string
 
+(** Canonical wire kind for a response MASC's own accept contract refused. *)
+val accept_rejected_kind : string
+
+(** Canonical wire kind for a failed turn-closing tool effect, or one that
+    returned no typed receipt for what it did. *)
+val terminal_effect_failed_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -206,7 +213,6 @@ type wire_kind =
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
 
-val wire_kind_of_masc_internal_error : masc_internal_error -> wire_kind
 val wire_kind_to_string : wire_kind -> string
 
 (** [None] for any string this module does not emit, including the agent-core

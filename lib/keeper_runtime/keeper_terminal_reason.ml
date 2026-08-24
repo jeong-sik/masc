@@ -65,20 +65,6 @@ let is_config_or_auth_wire wire =
     || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
 ;;
 
-(* Two stages. The keeper's own internal-error kinds are looked up in the
-   producer's enumeration first; whatever that does not claim falls to the
-   prefix tests for the agent-core and provider wire families, which are
-   priority-ranked and return the FIRST match, replicating the [if/else]
-   order of the pre-typing [operator_disposition] string predicates.
-
-   Putting the exact lookup first is not a reordering: no internal-error kind
-   equals or prefixes any config/auth or provider wire, so both stages see
-   the same inputs they saw before. Casing variants of a kind still miss the
-   lookup and stay opaque rather than inheriting its policy. The original
-   [wire] is carried in every payload-bearing variant so [to_wire] reproduces
-   it byte-for-byte; classification reads a canonical byte sequence only.
-   Spellings neither stage claims stay typed [Unknown] and take the generic
-   disposition route. *)
 (* The keeper's own internal-error family, classified from the producer's
    typed enumeration instead of from its printed form. Previously five of
    these thirteen were recognised by [String.equal] against four exported
@@ -92,7 +78,7 @@ let is_config_or_auth_wire wire =
    the constructor name alone would be a guess dressed as a decision. They
    stay [Unknown], which is what they do today; the difference is that the
    match now names them, so the next author sees the open question instead of
-   an absent arm. *)
+   an absent arm. #29945 tracks tracing them. *)
 let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted wire
   | Keeper_internal_error.Wire_capacity_backpressure -> Capacity_backpressure wire
@@ -116,6 +102,20 @@ let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_gate_replay_repair_required -> Unknown wire
 ;;
 
+(* Two stages. The keeper's own internal-error kinds are looked up in the
+   producer's enumeration first; whatever that does not claim falls to the
+   prefix tests for the agent-core and provider wire families, which are
+   priority-ranked and return the FIRST match, replicating the [if/else]
+   order of the pre-typing [operator_disposition] string predicates.
+
+   Putting the exact lookup first is not a reordering: no internal-error kind
+   equals or prefixes any config/auth or provider wire, so both stages see
+   the same inputs they saw before. Casing variants of a kind still miss the
+   lookup and stay opaque rather than inheriting its policy. The original
+   [wire] is carried in every payload-bearing variant so [to_wire] reproduces
+   it byte-for-byte; classification reads a canonical byte sequence only.
+   Spellings neither stage claims stay typed [Unknown] and take the generic
+   disposition route. *)
 let of_wire wire =
   match Keeper_internal_error.wire_kind_of_string wire with
   | Some kind -> of_masc_internal_kind wire kind

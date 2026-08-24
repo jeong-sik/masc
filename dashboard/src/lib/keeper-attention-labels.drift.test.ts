@@ -106,7 +106,17 @@ function executionReceiptAttentionReasons(): string[] {
     ).toBeDefined()
     return value as string
   })
-  return [...literalReasons, ...sharedConstantReasons]
+  const extracted = [...literalReasons, ...sharedConstantReasons]
+  // Both patterns above read one arm shape each. An arm written any other way
+  // — say `-> Keeper_internal_error.(f Ctor)` — matches neither, and the guard
+  // then checks a smaller vocabulary than the backend emits while still
+  // reporting green. Count the arms and require every one to have been read.
+  const armCount = [...body.matchAll(/\|\s*Reason_[A-Za-z_]+\s*->/g)].length
+  expect(
+    extracted.length,
+    `operator_disposition_reason_to_string has ${armCount} arms but only ${extracted.length} were extracted — an arm is written in a shape neither pattern reads`,
+  ).toBe(armCount)
+  return extracted
 }
 
 // keeper_runtime_trust_snapshot.ml only promotes receipt disposition reasons to
@@ -120,6 +130,12 @@ const EXECUTION_RECEIPT_NON_ATTENTION_REASONS: ReadonlySet<string> = new Set([
   'phase_skipped',
   'input_required',
   'capacity_backpressure',
+  // Same pairing as capacity_backpressure: Disp_fail_open_next_runtime, which
+  // Keeper_operator_disposition_display renders as "Pass", so
+  // display_disposition_requires_attention never promotes it. The provider was
+  // healthy and the keeper carries on; the Korean label lives in
+  // fsm-hub-types' operator-disposition-reason table instead.
+  'accept_rejected',
 ])
 
 describe('keeper attention vocabulary drift guard', () => {

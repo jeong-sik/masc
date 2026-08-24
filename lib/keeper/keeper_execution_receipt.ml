@@ -115,10 +115,8 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_attempt_effect_fenced ->
     Keeper_internal_error.provider_attempt_effect_fenced_kind
   | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
-  | Reason_accept_rejected ->
-    Keeper_internal_error.(wire_kind_to_string Wire_accept_rejected)
-  | Reason_terminal_effect_failed ->
-    Keeper_internal_error.(wire_kind_to_string Wire_terminal_effect_failed)
+  | Reason_accept_rejected -> Keeper_internal_error.accept_rejected_kind
+  | Reason_terminal_effect_failed -> Keeper_internal_error.terminal_effect_failed_kind
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 

@@ -52,6 +52,19 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val dress_bare_links :
+  open_style:string -> close_style:string -> string -> string
+(** Style every bare [http://]/[https://] run in [text].
+
+    For the URL pasted as plain text — a markdown link already carries its
+    own spans. The URL token ends at whitespace, a control byte (so a
+    styling escape already in the row is never swallowed), or a closing
+    quote/bracket, which is how prose most often ends one. Rows are styled
+    after wrapping, so a URL split across rows gets each fragment dressed.
+    [close_style] is the caller's row-restoring sequence, not a bare reset:
+    a reset alone would strip the row's own dress from everything after the
+    link. *)
+
 val fit_width : string -> int -> string
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
     or renderer-owned ANSI CSI sequence. Short text is padded to the budget. *)
@@ -102,6 +115,21 @@ val message_viewport_supported :
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
+
+val wrap_body :
+  ?markdown:(width:int -> string -> string list) ->
+  max_cells:int ->
+  sanitize:(string -> string) ->
+  string ->
+  string list
+(** Wrap a multi-line body, applying [sanitize] to each line rather than to the
+    whole text. A sanitiser that escapes control bytes escapes a newline too,
+    so sanitising a document whole collapses it into one run with the escape
+    printed at every break. Blank lines are kept as blank rows: a paragraph
+    break is not an absence. [sanitize] is the caller's so this module keeps no
+    terminal vocabulary of its own, and so is [markdown]: given one, it renders
+    the escaped text and owns the wrapping, because fenced code keeps breaks a
+    word wrap would ruin. *)
 
 val visible_rows :
   ?markdown:(width:int -> string -> string list) ->

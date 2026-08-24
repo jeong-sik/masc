@@ -188,6 +188,16 @@ type keeper_next_action_path =
   | Probe
   | Direct_message
 
+(* Strict inverse of {!keeper_next_action_path_to_string}. [None] outside the
+   published vocabulary: a reader that cannot spell an action must say so
+   rather than resolve it to whichever action happens to be first. *)
+let keeper_next_action_path_of_string_opt = function
+  | "auto_restart" -> Some Auto_restart
+  | "recover" -> Some Recover
+  | "probe" -> Some Probe
+  | "direct_message" -> Some Direct_message
+  | _ -> None
+
 let keeper_next_action_path_to_string = function
   | Auto_restart -> "auto_restart"
   | Recover -> "recover"

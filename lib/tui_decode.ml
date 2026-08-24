@@ -39,11 +39,21 @@ type keeper = {
 type keeper_phase = Keeper_state_machine.phase
 
 let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+
+type keeper_health = Keeper_types.keeper_health
+let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
+let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
+
+let keeper_next_action_of_string =
+  Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
@@ -93,6 +103,76 @@ type keeper_lanes_snapshot = {
   kls_generated_at : float;
   kls_count : int;
   kls_lanes : keeper_lane list;
+}
+
+type fusion_run_status =
+  | Fusion_running
+  | Fusion_completed
+  | Fusion_failed of {
+      frs_failure_code : string;
+      frs_error : string;
+    }
+
+type fusion_run = {
+  fur_run_id : string;
+  fur_keeper : string;
+  fur_preset : string;
+  fur_topology : Fusion_types.fusion_topology;
+  fur_started_at : float;
+  fur_status : fusion_run_status;
+}
+
+type fusion_snapshot = {
+  fus_generated_at : string;
+  fus_runs : fusion_run list;
+}
+
+type fusion_panel_answer = {
+  fpa_model : string;
+  fpa_answer : string;
+  fpa_input_tokens : int;
+  fpa_output_tokens : int;
+}
+
+type fusion_panel_failure = {
+  fpf_model : string;
+  fpf_reason_code : string;
+  fpf_reason_detail : string;
+}
+
+type fusion_panel_result =
+  | Fusion_panel_answered of fusion_panel_answer
+  | Fusion_panel_failed of fusion_panel_failure
+
+type fusion_judge =
+  | Fusion_judge_synthesized of {
+      fj_decision : string;
+      fj_resolved_answer : string;
+      fj_reason : string;
+    }
+  | Fusion_judge_failed of {
+      fj_failure_code : string;
+      fj_error : string;
+    }
+
+type fusion_evidence = {
+  fe_post_id : string;
+  fe_title : string;
+  fe_question : string;
+  fe_panel : fusion_panel_result list;
+  fe_judge : fusion_judge;
+}
+
+type fusion_evidence_status =
+  | Fusion_evidence_recorded
+  | Fusion_evidence_pending
+  | Fusion_evidence_absent
+
+type fusion_detail = {
+  fud_generated_at : string;
+  fud_run : fusion_run;
+  fud_evidence_status : fusion_evidence_status;
+  fud_evidence : fusion_evidence option;
 }
 
 type goal_proof =
@@ -1539,6 +1619,29 @@ let decode_keeper_runtime json =
           (Printf.sprintf "keeper %S has unknown runtime status %S" kr_name
              raw_status)
   in
+  let* raw_health = required_string_field json "health" in
+  let* kr_health =
+    match keeper_health_of_string raw_health with
+    | Some health -> Ok health
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown health %S" kr_name raw_health)
+  in
+  let* kr_paused = required_bool_field json "paused" in
+  (* An absent action is absent, not a default one: the server publishes null
+     when the diagnostic named none, and a keeper with nothing to do is a
+     different reading from a keeper whose action this build cannot spell. *)
+  let* kr_next_action =
+    match member "next_action" json with
+    | `Null -> Ok None
+    | `String raw -> (
+      match keeper_next_action_of_string raw with
+      | Some action -> Ok (Some action)
+      | None ->
+          Error
+            (Printf.sprintf "keeper %S has unknown next action %S" kr_name raw))
+    | bad -> field_type_error "next_action" "a string or null" bad
+  in
   let* kr_keepalive_running = required_bool_field json "keepalive_running" in
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
@@ -1555,6 +1658,9 @@ let decode_keeper_runtime json =
   Ok
     { kr_name
     ; kr_status
+    ; kr_health
+    ; kr_paused
+    ; kr_next_action
     ; kr_keepalive_running
     ; kr_autoboot_enabled
     ; kr_proactive_enabled
@@ -1682,6 +1788,171 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let fusion_run_status_to_string = function
+  | Fusion_running -> "running"
+  | Fusion_completed -> "completed"
+  | Fusion_failed _ -> "failed"
+
+let decode_fusion_run json =
+  let* fur_run_id = required_string_field json "run_id" in
+  let* fur_keeper = required_string_field json "keeper" in
+  let* fur_preset = required_string_field json "preset" in
+  let* topology = required_string_field json "topology" in
+  let* fur_topology =
+    match Fusion_types.fusion_topology_of_string topology with
+    | Some topology -> Ok topology
+    | None -> Error (Printf.sprintf "unknown fusion topology %S" topology)
+  in
+  let* fur_started_at = require_float_field json "started_at" in
+  let* status = required_string_field json "status" in
+  let* fur_status =
+    match status with
+    | "running" -> Ok Fusion_running
+    | "completed" -> Ok Fusion_completed
+    | "failed" ->
+        let* frs_failure_code = required_string_field json "failure_code" in
+        let* frs_error = required_string_field json "error" in
+        Ok (Fusion_failed { frs_failure_code; frs_error })
+    | other -> Error (Printf.sprintf "unknown fusion run status %S" other)
+  in
+  Ok
+    { fur_run_id
+    ; fur_keeper
+    ; fur_preset
+    ; fur_topology
+    ; fur_started_at
+    ; fur_status
+    }
+
+let decode_fusion_snapshot json =
+  let* fus_generated_at = required_string_field json "generated_at" in
+  let* count = required_int_field json "count" in
+  let* runs_json = required_list_field json "runs" in
+  let* fus_runs = decode_list "runs" decode_fusion_run runs_json in
+  if count <> List.length fus_runs then
+    Error
+      (Printf.sprintf "fusion run count is %d but runs contains %d rows" count
+         (List.length fus_runs))
+  else Ok { fus_generated_at; fus_runs }
+
+let decode_fusion_panel_result json =
+  let* model = required_string_field json "model" in
+  let* status = required_string_field json "status" in
+  match status with
+  | "answered" ->
+      let* fpa_answer = required_string_field json "answer" in
+      let* fpa_input_tokens = required_int_field json "input_tokens" in
+      let* fpa_output_tokens = required_int_field json "output_tokens" in
+      Ok
+        (Fusion_panel_answered
+           { fpa_model = model
+           ; fpa_answer
+           ; fpa_input_tokens
+           ; fpa_output_tokens
+           })
+  | "failed" ->
+      let* fpf_reason_code = required_string_field json "reason_code" in
+      let* fpf_reason_detail = required_string_field json "reason_detail" in
+      Ok
+        (Fusion_panel_failed
+           { fpf_model = model; fpf_reason_code; fpf_reason_detail })
+  | other -> Error (Printf.sprintf "unknown fusion panel status %S" other)
+
+let decode_fusion_judge json =
+  let* status = required_string_field json "status" in
+  match status with
+  | "synthesized" ->
+      let* fj_decision = required_string_field json "decision" in
+      let* fj_resolved_answer = required_string_field json "resolved_answer" in
+      let* fj_reason = required_string_field json "synthesis" in
+      Ok
+        (Fusion_judge_synthesized
+           { fj_decision; fj_resolved_answer; fj_reason })
+  | "failed" ->
+      let* fj_failure_code = required_string_field json "failure_code" in
+      let* fj_error = required_string_field json "error" in
+      Ok (Fusion_judge_failed { fj_failure_code; fj_error })
+  | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
+
+let decode_fusion_evidence ~run_id json =
+  let* fe_post_id = required_string_field json "id" in
+  let* fe_title = required_string_field json "title" in
+  let* origin = required_object_field json "origin" in
+  let* source = required_string_field origin "source" in
+  let* origin_run_id = required_string_field origin "fusion_run_id" in
+  let* () =
+    if String.equal source "fusion" then Ok ()
+    else
+      Error
+        (Printf.sprintf "fusion evidence origin.source is %S, expected \"fusion\""
+           source)
+  in
+  let* () =
+    if String.equal origin_run_id run_id then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "fusion evidence origin run id is %S, expected %S" origin_run_id
+           run_id)
+  in
+  let* meta = required_object_field json "meta" in
+  let* fe_question = required_string_field meta "question" in
+  let* panel_json = required_list_field meta "panel" in
+  let* fe_panel = decode_list "panel" decode_fusion_panel_result panel_json in
+  let* judge_json = required_object_field meta "judge" in
+  let* fe_judge = decode_fusion_judge judge_json in
+  Ok { fe_post_id; fe_title; fe_question; fe_panel; fe_judge }
+
+let decode_fusion_detail json =
+  let* fud_generated_at = required_string_field json "generated_at" in
+  let* run_json = required_object_field json "run" in
+  let* fud_run = decode_fusion_run run_json in
+  let* evidence = required_object_field json "evidence" in
+  let* status = required_string_field evidence "status" in
+  let* post =
+    match Json_util.assoc_member_opt "post" evidence with
+    | None -> missing_field "post"
+    | Some post -> Ok post
+  in
+  match status, post with
+  | "recorded", (`Assoc _ as post_json) ->
+      let* fud_evidence =
+        decode_fusion_evidence ~run_id:fud_run.fur_run_id post_json
+      in
+      Ok
+        { fud_generated_at
+        ; fud_run
+        ; fud_evidence_status = Fusion_evidence_recorded
+        ; fud_evidence = Some fud_evidence
+        }
+  | "recorded", bad ->
+      field_type_error "evidence.post" "an object when status is recorded" bad
+  | "pending", `Null ->
+      (match fud_run.fur_status with
+       | Fusion_running ->
+           Ok
+             { fud_generated_at
+             ; fud_run
+             ; fud_evidence_status = Fusion_evidence_pending
+             ; fud_evidence = None
+             }
+       | Fusion_completed | Fusion_failed _ ->
+           Error "only a running fusion run may have pending evidence")
+  | "pending", _ -> Error "pending fusion evidence must carry post:null"
+  | "absent", `Null ->
+      (match fud_run.fur_status with
+       | Fusion_running ->
+           Error "a running fusion run cannot have absent evidence"
+       | Fusion_completed | Fusion_failed _ ->
+           Ok
+             { fud_generated_at
+             ; fud_run
+             ; fud_evidence_status = Fusion_evidence_absent
+             ; fud_evidence = None
+             })
+  | "absent", _ -> Error "absent fusion evidence must carry post:null"
+  | other, _ -> Error (Printf.sprintf "unknown fusion evidence status %S" other)
+
 (* The counts are read with a default rather than required: the server adds
    fields to this section over time, and a TUI that refuses the whole reading
    because one counter is new would hide the fleet exactly when it changed.
@@ -1706,6 +1977,20 @@ let decode_keeper_tool_approval json =
     ; kta_timeout_sec
     }
 
+(* GET /api/v1/keepers/tool-approval-mode: the keepers moved off the default
+   stance. Decoded to (keeper, mode) pairs; the caller decides what a mode
+   means — this module carries the wire vocabulary only. *)
+let decode_tool_approval_mode_overrides json =
+  let* items = required_list_field json "overrides" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* keeper = required_string_field item "keeper" in
+        let* mode = required_string_field item "mode" in
+        loop ((keeper, mode) :: acc) rest
+  in
+  loop [] items
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function
@@ -1715,6 +2000,65 @@ let decode_keeper_tool_approvals json =
         loop (decoded :: acc) rest
   in
   loop [] items
+
+(* GET /api/v1/runtime/resolved, the slice the runtime picker draws: every
+   runtime a keeper can be pointed at, and where each keeper points today. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_is_default : bool;
+}
+
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;  (* "default" | "explicit" *)
+  ra_runtime_id : string option;
+}
+
+let decode_runtime_option json =
+  let* ro_id = required_string_field json "id" in
+  let* ro_provider = required_string_field json "provider" in
+  let* ro_model = required_string_field json "model" in
+  let* ro_dispatchable =
+    match member "keeper_dispatchable" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "keeper_dispatchable" "a bool or null" bad
+  in
+  let* ro_is_default =
+    match member "is_default" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "is_default" "a bool or null" bad
+  in
+  Ok { ro_id; ro_provider; ro_model; ro_dispatchable; ro_is_default }
+
+let decode_runtime_assignment json =
+  let* ra_keeper = required_string_field json "keeper" in
+  let* ra_source = required_string_field json "assignment_source" in
+  let* ra_runtime_id =
+    match member "resolved" json with
+    | `Null -> Ok None
+    | resolved ->
+        let* id = required_string_field resolved "id" in
+        Ok (Some id)
+  in
+  Ok { ra_keeper; ra_source; ra_runtime_id }
+
+let decode_runtime_resolved json =
+  let* runtime_items = required_list_field json "runtimes" in
+  let* assignment_items = required_list_field json "assignments" in
+  let rec map_all decode acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode item in
+        map_all decode (decoded :: acc) rest
+  in
+  let* runtimes = map_all decode_runtime_option [] runtime_items in
+  let* assignments = map_all decode_runtime_assignment [] assignment_items in
+  Ok (runtimes, assignments)
 
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in

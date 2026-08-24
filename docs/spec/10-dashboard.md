@@ -73,6 +73,15 @@ Fusion is asynchronous. The UI shows every panel result/failure followed by the
 Judge result. It never treats minimum answer count, majority, cost, or timeout
 as semantic authority.
 
+The Fusion run registry owns lifecycle observation. Exact detail is a read-only
+join between one retained registry run and the Board typed-origin index. A Board
+post is evidence only when `origin.source` is exactly `fusion` and
+`origin.fusion_run_id` exactly matches the run. The projection reports Board
+evidence as `recorded`, `pending`, or `absent`; only a running registry row may
+be `pending`. Clients must not recover this join by searching post titles,
+bodies, or `meta_json`. `absent` means no current Board projection; it does not
+claim whether a post never existed or expired after its retention window.
+
 ## 6. Transport isolation
 
 HTTP snapshots use cursor-based reads. SSE/WebSocket events carry typed event

@@ -429,6 +429,10 @@ let get_post ~post_id =
   match backend () with
   | Jsonl store -> Board.get_post store ~post_id
 
+let find_post_by_run_id ~run_id =
+  match backend () with
+  | Jsonl store -> Board.find_post_by_run_id store ~run_id
+
 let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
     ?post_kind_filter
     ?(sort_by = Hot) ?(exclude_system = false) ?(exclude_automation = false)

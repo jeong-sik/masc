@@ -118,6 +118,15 @@ let render_chat_row buf cols (row : Message_layout.row) =
          block's own colour, so where one block ends and the next begins
          reads at a glance instead of from the headings alone. *)
       let text = row.text in
+      let dress rest =
+        (* A pasted URL reads as a link, not prose. Closed by restoring the
+           row's own style — a bare reset would strip it from everything
+           after the link. *)
+        Masc_tui_message_layout.dress_bare_links
+          ~open_style:(Ansi.underline ^ Ansi.blue)
+          ~close_style:(Ansi.reset ^ chat_body_style row.style)
+          rest
+      in
       if
         String.length text >= 2 && Char.equal text.[0] ' '
         && Char.equal text.[1] ' '
@@ -126,8 +135,10 @@ let render_chat_row buf cols (row : Message_layout.row) =
         box_line buf cols
           (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
              (chat_origin_style row.style) Ansi.reset
-             (chat_body_style row.style) rest Ansi.reset))
-      else box_line_styled buf cols ~style:(chat_body_style row.style) text
+             (chat_body_style row.style) (dress rest) Ansi.reset))
+      else
+        box_line_styled buf cols ~style:(chat_body_style row.style)
+          (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
         (Printf.sprintf "[%s]" timestamp)
@@ -190,8 +201,8 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
-            | Schedules | Verification | Harness | Repositories | Connectors
-            | Tools | System_logs ->
+            | Schedules | Verification | Harness | Fusion | Repositories
+            | Connectors | Tools | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -1151,9 +1162,18 @@ let render_board_read (state : state) (list_post : board_post) =
 
   (* Body lines *)
   let text_width = cols - 8 in
+  (* Sanitised a line at a time. A newline is a control byte, so sanitising the
+     body whole escaped every break and the post arrived as one unbroken run
+     with "\x0A" printed through it. *)
+  (* Board posts are written in markdown -- headings, fences, rules -- and were
+     drawn as the source they were typed as. The chat pane has rendered them
+     for a while; this surface reads the same kind of document. *)
   let body_lines =
-    Message_layout.wrap_words ~max_cells:text_width
-      (Terminal_text.single_line post.bp_body)
+    Message_layout.wrap_body
+      ~markdown:chat_markdown
+      ~max_cells:text_width
+      ~sanitize:Terminal_text.single_line
+      post.bp_body
   in
   let total_lines = List.length body_lines in
   let detail_lines =
@@ -1649,27 +1669,44 @@ let render_schedules (state : state) =
    nothing observed -- and the word next to it is the exact published status,
    so the column stays legible at four shapes instead of needing a distinct
    glyph per label. *)
-let keeper_status_glyph (status : Status.control_plane_status option) =
-  match status with
-  | None -> (Ansi.dim, "-")
-  | Some Status.Cp_paused -> (Ansi.yellow, "\xe2\x97\x8b")
-  | Some (Status.Cp_surface surface) -> (
-      match surface with
-      | Status.Surface_active -> (Ansi.green, "\xe2\x97\x8f")
-      | Status.Surface_busy -> (Ansi.cyan, "\xe2\x97\x8f")
-      | Status.Surface_listening -> (Ansi.blue, "\xe2\x97\x8f")
-      | Status.Surface_idle -> (Ansi.gray, "\xe2\x97\x8f")
-      | Status.Surface_inactive -> (Ansi.yellow, "\xe2\x97\x90")
-      | Status.Surface_offline -> (Ansi.gray, "\xc3\x97"))
+(* One keeper is described by four separate readings, and the status cell draws
+   three of them in three separate channels rather than folding them into one
+   word:
 
-(* [None] is a roster that was not read, not a status the roster could not
+     colour  what to do about it   from next_action, which the runtime derives
+     glyph   whether it is paused  a person's decision, not a health reading
+     word    how it is reporting   from health
+
+   The lifecycle cell is the fourth and has its own column. The cell used to
+   show a single word from [surface_status], which restates health with stale,
+   degraded and zombie folded together and hides health entirely while a keeper
+   is paused. *)
+let keeper_action_color
+    (action : Status.keeper_next_action_path option) =
+  match action with
+  | None -> Ansi.dim
+  | Some Status.Auto_restart -> Ansi.red
+  | Some Status.Recover -> Ansi.yellow
+  | Some Status.Probe -> Ansi.cyan
+  | Some Status.Direct_message -> Ansi.green
+
+let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
+  match health with
+  | None -> "-"
+  | Some _ when paused -> "\xe2\x97\x8b"
+  | Some value -> (
+      match Tui_decode.keeper_health_to_string value with
+      | "offline" -> "\xc3\x97"
+      | _ -> "\xe2\x97\x8f")
+
+(* [None] is a roster that was not read, not a health the roster could not
    name: the word says so, and it is the word the header's tally uses for
    the same keepers, so a column of ten of them and "10 unread" above it
    are one fact drawn twice rather than two. *)
-let keeper_status_word (status : Status.control_plane_status option) =
-  match status with
+let keeper_health_word (health : Tui_decode.keeper_health option) =
+  match health with
   | None -> "unread"
-  | Some value -> Status.control_plane_status_to_string value
+  | Some value -> Tui_decode.keeper_health_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
    model half often enough that printing both costs the column its width. The
@@ -1701,18 +1738,20 @@ let keeper_message_identity state keeper_name =
       Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset
   | Some keeper ->
       let reading = keeper_reading state keeper in
-      let status = Keeper_control.display_status reading in
+      let health = Keeper_control.health reading in
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
         | Keeper_control.Absent | Keeper_control.Unobserved -> None
       in
-      let status_color, glyph = keeper_status_glyph status in
+      let status_color =
+        keeper_action_color (Keeper_control.next_action reading)
+      in
       String.concat ""
         [ status_color
-        ; glyph
+        ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
         ; " "
-        ; keeper_status_word status
+        ; keeper_health_word health
         ; Ansi.reset
         ; Ansi.dim
         ; " \xc2\xb7 "
@@ -1757,8 +1796,9 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
-    ~status ~keeper ~runtime =
-  let status_color, glyph = keeper_status_glyph status in
+    ~yolo ~paused ~health ~next_action ~keeper ~runtime =
+  let status_color = keeper_action_color next_action in
+  let glyph = keeper_state_glyph ~paused ~health in
   (* Same gutter marker the Approvals, Board and Planning lists draw. A
      selection cursor that changes shape when the operator switches surface
      reads as a different control, not the same one. *)
@@ -1777,11 +1817,17 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
     ; marker
     ; " "
     ; status_color ^ glyph ^ " "
-      ^ fit_width (keeper_status_word status)
+      ^ fit_width (keeper_health_word health)
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
-    ; (if selected then Ansi.bold ^ name ^ Ansi.reset else name)
+    ; (let dressed =
+         (* A keeper whose gate runs every call unasked wears its name in
+            red: the stance has no column of its own, and the name is what
+            the eye finds first. *)
+         if yolo then Ansi.red ^ name ^ Ansi.reset else name
+       in
+       if selected then Ansi.bold ^ dressed ^ Ansi.reset else dressed)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
         keeper.k_total_turns Ansi.reset
@@ -1844,6 +1890,8 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
+          ; Ansi.red ^ "g" ^ Ansi.reset ^ " yolo"
+          ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
@@ -1857,16 +1905,20 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
+(* Tally words come from [Keeper_control.health_label], so this paints the
+   health vocabulary. [unread] is the roster not answering, which is dim rather
+   than any health colour. *)
 let keeper_roster_status_color = function
-  | "running" | "active" | "busy" | "listening" -> Ansi.green
-  | "inactive" | "paused" -> Ansi.yellow
+  | "healthy" -> Ansi.green
+  | "stale" | "degraded" -> Ansi.yellow
+  | "zombie" -> Ansi.red
   | "offline" | "idle" -> Ansi.gray
   | _ -> Ansi.dim
 
 (* The tally is [Keeper_control.status_tally], so every word here is a word the
    status column shows for the same keeper. This function only paints it. *)
 let keeper_roster_summary readings =
-  Keeper_control.status_tally readings
+  Keeper_control.health_tally readings
   |> List.map (fun (label, count) ->
          Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
            label Ansi.reset)
@@ -2044,7 +2096,11 @@ let render_keeper_list (state : state) =
           box_line buf cols
             (keeper_row_content ~columns
                ~selected:(position = state.keeper_cursor)
-               ~status:(Keeper_control.display_status reading) ~keeper ~runtime)
+               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
+               ~paused:reading.Keeper_control.paused
+               ~health:(Keeper_control.health reading)
+               ~next_action:(Keeper_control.next_action reading)
+               ~keeper ~runtime)
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 
@@ -2639,8 +2695,14 @@ let render_keeper_message (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* Message history *)
-    let history_height = max 0 (rows - 10 - status_rows) in
+    (* Message history. The fixed chrome is 7 rows — box top, header, its
+       divider, the input divider, the composer's first line, box bottom and
+       the footer — and every variable row (status, sending, queue, errors,
+       composer growth) is in [status_rows]. The old constant 10 reserved
+       three rows nothing drew, so the pane stopped three short of the
+       terminal's bottom edge. [message_viewport_supported] already states
+       the same chrome as [8 + status_rows]: 7 plus one history row. *)
+    let history_height = max 0 (rows - 7 - status_rows) in
     let messages = chat_rows_for state keeper_name in
     let layout_entries =
       List.map
@@ -2811,12 +2873,19 @@ let render_keeper_message (state : state) =
      | Some live ->
          List.iter
            (fun (kind, text) ->
-             let style =
-               match kind with
-               | Keeper_chat_transcript.Progress -> Ansi.dim
-               | Keeper_chat_transcript.Attention -> Ansi.yellow
+             (* The streaming turn is the row the eye waits on: drawn in the
+                accent rather than dimmed, behind a spinner stepped from the
+                clock so consecutive frames visibly move. *)
+             let spinner =
+               let glyphs = [| "\xe2\xa0\x8b"; "\xe2\xa0\x99"; "\xe2\xa0\xb8"; "\xe2\xa0\xb4" |] in
+               glyphs.(int_of_float (Unix.gettimeofday ()) mod 4)
              in
-             box_line_styled buf cols ~style ("  " ^ text))
+             (match kind with
+              | Keeper_chat_transcript.Progress ->
+                  box_line_styled buf cols ~style:Ansi.cyan
+                    ("  " ^ spinner ^ " " ^ text)
+              | Keeper_chat_transcript.Attention ->
+                  box_line_styled buf cols ~style:Ansi.yellow ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
     if not target_registered then begin
@@ -3259,6 +3328,262 @@ let render_harness (state : state) =
     (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
+
+let fusion_run_status_color = function
+  | Fusion_running -> Ansi.cyan
+  | Fusion_completed -> Ansi.green
+  | Fusion_failed _ -> Ansi.red
+
+let fusion_run_clock run =
+  Terminal_text.clock_timestamp
+    (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
+
+let render_fusion_list (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let runs =
+    match state.fusion_runs with
+    | None -> []
+    | Some snapshot -> snapshot.fus_runs
+  in
+  let shown = List.length runs in
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+      now.Unix.tm_sec
+  in
+  let header =
+    match state.fusion_runs with
+    | None ->
+        Printf.sprintf "%s  (not loaded)  %s  %s"
+          (screen_title " MASC Fusion") timestamp
+          (connection_badge state.connection_status)
+    | Some _ ->
+        Printf.sprintf "%s (%d runs)  %s  %s"
+          (screen_title " MASC Fusion") shown timestamp
+          (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %-8s %-9s %-16s %-10s %-10s %s" "TIME" "STATUS"
+       "KEEPER" "PRESET" "TOPOLOGY" "RUN");
+  box_divider buf cols;
+  (match state.fusion_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows = listing_chrome ~error:state.fusion_error in
+  let content_height = max 1 (rows - chrome_rows) in
+  let scroll =
+    if state.fusion_cursor >= content_height then
+      state.fusion_cursor - content_height + 1
+    else 0
+  in
+  if shown = 0 then begin
+    let empty =
+      match
+        empty_page_of ~snapshot:state.fusion_runs ~error:state.fusion_error
+      with
+      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_unread -> "  (not loaded yet)"
+      | Page_empty -> "  (no retained Fusion runs)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for index = 0 to content_height - 1 do
+      let row_index = index + scroll in
+      match List.nth_opt runs row_index with
+      | None -> box_empty buf cols
+      | Some run ->
+          let status = fusion_run_status_to_string run.fur_status in
+          let line =
+            Printf.sprintf "%-8s %s%-9s%s %-16s %-10s %-10s %s"
+              (fusion_run_clock run)
+              (fusion_run_status_color run.fur_status)
+              status Ansi.reset
+              (fit_width (Terminal_text.single_line run.fur_keeper) 16)
+              (fit_width (Terminal_text.single_line run.fur_preset) 10)
+              (fit_width
+                 (Fusion_types.fusion_topology_to_string run.fur_topology)
+                 10)
+              (Terminal_text.single_line run.fur_run_id)
+          in
+          if row_index = state.fusion_cursor then
+            box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
+          else box_line buf cols ("  " ^ line)
+    done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: %d%s\n"
+       Ansi.dim state.port Ansi.reset);
+  finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
+
+let fusion_wrapped_block ~width ~indent text =
+  let body_width = max 1 (width - Message_layout.display_width indent) in
+  String.split_on_char '\n' text
+  |> List.concat_map (fun raw ->
+         let safe = Terminal_text.single_line raw in
+         if String.equal safe "" then [ indent ^ "(empty)" ]
+         else
+           Message_layout.wrap_words ~max_cells:body_width safe
+           |> List.map (fun line -> indent ^ line))
+  |> List.map (fun line -> Ansi.reset, line)
+
+let fusion_labeled_block ~width ~label text =
+  (Ansi.bold, "  " ^ label)
+  :: fusion_wrapped_block ~width ~indent:"    " text
+
+let fusion_detail_lines ~width (detail : fusion_detail) =
+  let run = detail.fud_run in
+  let status = fusion_run_status_to_string run.fur_status in
+  let run_lines =
+    [ fusion_run_status_color run.fur_status, "  Status: " ^ status
+    ; Ansi.reset, "  Keeper: " ^ Terminal_text.single_line run.fur_keeper
+    ; Ansi.reset, "  Preset: " ^ Terminal_text.single_line run.fur_preset
+    ; ( Ansi.reset
+    , "  Topology: "
+      ^ Fusion_types.fusion_topology_to_string run.fur_topology )
+    ; Ansi.dim, "  Started: " ^ fusion_run_clock run
+    ]
+    @
+    match run.fur_status with
+    | Fusion_running | Fusion_completed -> []
+    | Fusion_failed failure ->
+        [ Ansi.red
+        , Printf.sprintf "  Registry failure [%s]: %s"
+            (Terminal_text.single_line failure.frs_failure_code)
+            (Terminal_text.single_line failure.frs_error)
+        ]
+  in
+  let evidence_lines =
+    match detail.fud_evidence_status, detail.fud_evidence with
+    | Fusion_evidence_pending, None ->
+        [ Ansi.yellow, "  Evidence: pending (run is still running)" ]
+    | Fusion_evidence_absent, None ->
+        [ Ansi.yellow
+        , "  Evidence: absent (no current Board projection for this retained run)"
+        ]
+    | Fusion_evidence_recorded, Some evidence ->
+        let panel_lines =
+          evidence.fe_panel
+          |> List.mapi (fun index result ->
+                 match result with
+                 | Fusion_panel_answered answer ->
+                     [ ( Ansi.green
+                       , Printf.sprintf
+                           "  Panel %d [answered] %s  (%d in / %d out)"
+                           (index + 1)
+                           (Terminal_text.single_line answer.fpa_model)
+                           answer.fpa_input_tokens answer.fpa_output_tokens )
+                     ]
+                     @ fusion_wrapped_block ~width ~indent:"    "
+                         answer.fpa_answer
+                 | Fusion_panel_failed failure ->
+                     [ ( Ansi.red
+                       , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                           (index + 1)
+                           (Terminal_text.single_line failure.fpf_model)
+                           (Terminal_text.single_line failure.fpf_reason_code) )
+                     ]
+                     @ fusion_wrapped_block ~width ~indent:"    "
+                         failure.fpf_reason_detail)
+          |> List.concat
+        in
+        let judge_lines =
+          match evidence.fe_judge with
+          | Fusion_judge_synthesized judge ->
+              [ ( Ansi.magenta
+                , "  Judge [synthesized] "
+                  ^ Terminal_text.single_line judge.fj_decision )
+              ]
+              @ fusion_labeled_block ~width ~label:"Resolved"
+                  judge.fj_resolved_answer
+              @ fusion_labeled_block ~width ~label:"Reason" judge.fj_reason
+          | Fusion_judge_failed failure ->
+              [ ( Ansi.red
+                , "  Judge [failed] ["
+                  ^ Terminal_text.single_line failure.fj_failure_code
+                  ^ "]" )
+              ]
+              @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
+        in
+        [ Ansi.green, "  Evidence: recorded"
+        ; Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
+        ]
+        @ fusion_labeled_block ~width ~label:"Question" evidence.fe_question
+        @ [ Ansi.dim, "" ]
+        @ panel_lines @ [ Ansi.dim, "" ] @ judge_lines
+    | Fusion_evidence_recorded, None
+    | Fusion_evidence_pending, Some _
+    | Fusion_evidence_absent, Some _ ->
+        (* The strict decoder makes these states unreachable. Keeping the row
+           explicit protects locally-constructed test state from looking like
+           a legitimate empty reading. *)
+        [ Ansi.red, "  Fusion evidence invariant violated" ]
+  in
+  run_lines @ [ Ansi.dim, "" ] @ evidence_lines
+
+let render_fusion_detail (state : state) run_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 8192 in
+  let detail =
+    match state.fusion_detail with
+    | Some detail when String.equal detail.fud_run.fur_run_id run_id ->
+        Some detail
+    | Some _ | None -> None
+  in
+  let header =
+    Printf.sprintf "%s  %s  %s" (screen_title " MASC Fusion")
+      (fit_width (Terminal_text.single_line run_id) 38)
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (match state.fusion_detail_error with
+   | None -> ()
+   | Some error ->
+       box_line_styled buf cols ~style:Ansi.red
+         ("  " ^ Keeper_chat.terminal_safe_text error);
+       box_divider buf cols);
+  let chrome_rows =
+    if Option.is_some state.fusion_detail_error then 7 else 5
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let lines =
+    match detail, state.fusion_detail_error with
+    | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
+    | None, Some _ ->
+        [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+    | Some detail, (Some _ | None) ->
+        fusion_detail_lines ~width:(max 1 (cols - 8)) detail
+  in
+  let total = List.length lines in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.fusion_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (index + scroll) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  j/k:scroll (%d/%d)  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
+       Ansi.dim scroll max_scroll state.port Ansi.reset);
+  finish_surface state ~clamped:(Fusion_detail_scroll scroll)
+    ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 
 (* The repositories a keeper can work in.
 
@@ -3943,6 +4268,90 @@ let render_acting (state : state) =
        Ansi.dim state.port Ansi.reset);
   finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
+(** Render the runtime picker: the dispatchable catalogue, with the keeper it
+    is choosing for and where that keeper points today in the header. *)
+let render_runtime_pick (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let keeper_name =
+    Terminal_text.single_line_or ~default:"?" state.runtime_pick_keeper
+  in
+  let current =
+    match
+      List.find_opt
+        (fun (a : Tui_decode.runtime_assignment) ->
+          match state.runtime_pick_keeper with
+          | Some keeper -> String.equal a.ra_keeper keeper
+          | None -> false)
+        state.runtime_assignments
+    with
+    | Some a ->
+        Printf.sprintf "%s (%s)"
+          (Terminal_text.single_line_or ~default:"-" a.ra_runtime_id)
+          (Terminal_text.single_line a.ra_source)
+    | None -> "-"
+  in
+  (* Only what a keeper can actually be pointed at. The catalogue also lists
+     rows the dispatcher refuses; offering one would end in the server's
+     rejection, so the picker does not draw them. *)
+  let options =
+    List.filter
+      (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
+      state.runtime_catalog
+  in
+  let count = List.length options in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %scurrent: %s%s"
+       (screen_title (Printf.sprintf " Runtime for %s" keeper_name))
+       Ansi.dim current Ansi.reset);
+  box_divider buf cols;
+  (match Terminal_text.optional_single_line state.runtime_catalog_error with
+   | Some err ->
+       box_line buf cols
+         (Ansi.red ^ "  (catalogue unreliable: "
+         ^ fit_width err (max 8 (cols - 28))
+         ^ ")" ^ Ansi.reset)
+   | None ->
+       if count = 0 then
+         box_line buf cols
+           (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset));
+  let content_height = max 0 (rows - 7) in
+  let scroll_offset =
+    if content_height > 0 && state.runtime_pick_cursor >= content_height then
+      state.runtime_pick_cursor - content_height + 1
+    else 0
+  in
+  for i = 0 to content_height - 1 do
+    let idx = i + scroll_offset in
+    match List.nth_opt options idx with
+    | Some option ->
+        let is_selected = idx = state.runtime_pick_cursor in
+        let line =
+          Printf.sprintf "  %s  %s%s"
+            (fit_width (Terminal_text.single_line option.ro_id) 44)
+            (fit_width
+               (Terminal_text.single_line
+                  (option.ro_provider ^ " / " ^ option.ro_model))
+               (max 8 (cols - 56)))
+            (if option.ro_is_default then " [default]" else "")
+        in
+        box_line buf cols
+          (if is_selected then Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+           else "  " ^ line)
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "  %sj/k%s move  %senter%s assign  %sd%s back to default  %sesc%s \
+        cancel\n"
+       Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.cyan Ansi.reset Ansi.dim
+       Ansi.reset);
+  finish_surface state ~surface_key:"runtime-pick" ~rows:terminal_rows ~cols
+    buf
+
 let render_surface (state : state) =
   match state.view with
   | Overview ->
@@ -3963,6 +4372,7 @@ let render_surface (state : state) =
   | Keepers Keeper_logs -> render_keeper_logs state
   | Keepers Keeper_calls -> render_keeper_calls state
   | Keepers Keeper_message -> render_keeper_message state
+  | Keepers Keeper_runtime_pick -> render_runtime_pick state
   | Lanes -> render_lanes state
   | Board ->
       (match state.board_mode with
@@ -3985,6 +4395,10 @@ let render_surface (state : state) =
   | Approvals -> render_approvals state
   | Verification -> render_verification state
   | Harness -> render_harness state
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_list -> render_fusion_list state
+       | Fusion_detail run_id -> render_fusion_detail state run_id)
   | Repositories -> render_repositories state
   | Connectors -> render_connectors state
   | Tools -> render_tools state

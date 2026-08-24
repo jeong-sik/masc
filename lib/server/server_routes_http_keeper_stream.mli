@@ -136,6 +136,20 @@ val handle_keeper_tool_approvals_list :
     answer a call whose owning stream watcher is gone; without it such a
     call can only time out (masc#30034). *)
 
+val handle_keeper_tool_approval_mode_get :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/tool-approval-mode]: the keepers moved off
+    the default stance, as [{overrides: [{keeper, mode}], default:"auto"}].
+    A keeper absent from the list is [auto]. *)
+
+val handle_keeper_tool_approval_mode_set :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
+    [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
+    keeper is registered, and sets the in-memory stance the approval gate
+    consults per call. The stance does not survive a restart — deliberately:
+    [yolo] runs every tool call unasked. *)
+
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].

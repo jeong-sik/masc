@@ -257,10 +257,13 @@ let resolve_target ~surface ~channel_id ?continuation_channel
     | Some (Keeper_continuation_channel.Slack { channel_id; thread_ts; _ })
       when String.equal surface slack_label ->
       Some channel_id, None, thread_ts
+    (* A Keeper route carries no connector coordinates, so it contributes
+       none here, same as Dashboard. *)
     | Some
         ( Keeper_continuation_channel.Dashboard _
         | Keeper_continuation_channel.Discord _
         | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Keeper _
         | Keeper_continuation_channel.Unrouted _ )
     | None ->
       None, None, None
@@ -392,10 +395,13 @@ let matches_continuation_route target channel =
     (* Dashboard posts are currently keeper-global ([session_id=None]), so
        they cannot prove delivery to one exact continuation thread. *)
     false
+  (* A Keeper continuation is answered on the target Keeper's own queue, not
+     by a surface post, so no post proves its delivery. *)
   | ( To_dashboard | To_discord _ | To_slack _ )
     , ( Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _
       | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Keeper _
       | Keeper_continuation_channel.Unrouted _ ) ->
     false
 

@@ -298,6 +298,38 @@ let fit_width text width =
       prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
     else text ^ String.make (width - cells) ' '
 
+let dress_bare_links ~open_style ~close_style text =
+  let is_url_end ch =
+    match ch with
+    | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
+    | _ -> Char.code ch < 0x20
+  in
+  let length = String.length text in
+  let buffer = Buffer.create (length + 16) in
+  let starts_at index prefix =
+    let plen = String.length prefix in
+    index + plen <= length && String.equal (String.sub text index plen) prefix
+  in
+  let rec loop index =
+    if index >= length then ()
+    else if starts_at index "http://" || starts_at index "https://" then begin
+      let rec url_end i =
+        if i < length && not (is_url_end text.[i]) then url_end (i + 1) else i
+      in
+      let stop = url_end index in
+      Buffer.add_string buffer open_style;
+      Buffer.add_string buffer (String.sub text index (stop - index));
+      Buffer.add_string buffer close_style;
+      loop stop
+    end
+    else begin
+      Buffer.add_char buffer text.[index];
+      loop (index + 1)
+    end
+  in
+  loop 0;
+  Buffer.contents buffer
+
 let composer_max_rows = 5
 
 let composer_lines ~max_rows input =
@@ -485,6 +517,30 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
     Some { style = entry.style; kind = Metadata metadata; text = fitted }
+
+(* A body is a document, not a row. [sanitize] is applied to each line rather
+   than to the whole, because escaping a newline the way a terminal escape is
+   escaped turns the document into one unbroken run with the escape printed
+   where each break belonged. Per line the escape still covers what it is there
+   for -- a line cannot carry a control sequence into the terminal -- and the
+   breaks the author wrote survive. A line that wraps to nothing is a blank
+   line: a paragraph break, not an absence. The caller supplies [sanitize] so
+   this module keeps no terminal vocabulary of its own. *)
+let wrap_body ?markdown ~max_cells ~sanitize text =
+  let safe_lines = text |> String.split_on_char '\n' |> List.map sanitize in
+  match markdown with
+  | Some render ->
+    (* Rendering happens after the escaping, not before: markdown is written in
+       printable ASCII, so escaping a control byte first takes nothing the
+       renderer reads, and the renderer never sees a byte that could reach the
+       terminal as a sequence. It owns the wrapping from there -- fenced code
+       keeps its own breaks, which a word wrap would ruin. *)
+    render ~width:max_cells (String.concat "\n" safe_lines)
+  | None ->
+    List.concat_map
+      (fun line ->
+         match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
+      safe_lines
 
 let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in

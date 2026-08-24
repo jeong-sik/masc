@@ -105,7 +105,8 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Hitl_resolved _
     | Event_queue.Manual_compaction_requested
     | Event_queue.Completion_authority_rejected _
-    | Event_queue.Workspace_message _ -> None)
+    | Event_queue.Workspace_message _
+    | Event_queue.Delegate_completed _ -> None)
 ;;
 
 let test_cross_keeper_cancellation_is_delivered () =

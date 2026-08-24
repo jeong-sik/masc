@@ -272,6 +272,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Completion_authority_rejected _ ->
     "completion_authority_rejected"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
+  | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
 ;;
 
 let quote_prompt_field value =
@@ -413,7 +414,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
-  | Keeper_world_observation.Task_cancelled _ -> []
+  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Delegate_completed -> []
 ;;
 
 let board_event_fields
@@ -584,7 +586,8 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
-         | Keeper_world_observation.Task_cancelled _ -> ())
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed -> ())
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
@@ -616,7 +619,8 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Task_cancelled _ -> None)
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed -> None)
       events
   in
   match rows with
@@ -667,7 +671,8 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Completion_authority_rejected _ -> None)
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Delegate_completed -> None)
       events
   in
   match rows with

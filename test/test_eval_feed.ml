@@ -131,6 +131,38 @@ let test_parse_missing_schema_version () =
   | Ok _ -> fail "expected error for missing schema_version"
   | Error _ -> ()
 
+(* An explicitly empty layer list stays valid; only an absent field is an
+   error. Folding the two together is what let a damaged report read as a
+   passing verdict with nothing to check (#29355). *)
+let test_parse_missing_required_field () =
+  List.iter
+    (fun (name, body) ->
+      match Eval_feed.read_verdict_json (Yojson.Safe.from_string body) with
+      | Ok _ -> fail ("expected error for a report without " ^ name)
+      | Error msg ->
+          check bool
+            ("error names " ^ name)
+            true
+            (try
+               ignore (Str.search_forward (Str.regexp_string name) msg 0);
+               true
+             with Not_found -> false))
+    [ ("all_passed", {|{"schema_version": 1, "coverage": 0.5, "layer_results": []}|})
+    ; ("coverage", {|{"schema_version": 1, "all_passed": true, "layer_results": []}|})
+    ; ( "layer_results"
+      , {|{"schema_version": 1, "all_passed": true, "coverage": 0.5}|} )
+    ]
+
+let test_parse_wrong_typed_required_field () =
+  List.iter
+    (fun (name, body) ->
+      match Eval_feed.read_verdict_json (Yojson.Safe.from_string body) with
+      | Ok _ -> fail ("expected error for a non-conforming " ^ name)
+      | Error _ -> ())
+    [ ("all_passed", {|{"schema_version": 1, "all_passed": "yes", "coverage": 0.5, "layer_results": []}|})
+    ; ("layer_results", {|{"schema_version": 1, "all_passed": true, "coverage": 0.5, "layer_results": {}}|})
+    ]
+
 let test_parse_empty_layer_results () =
   let json =
     Yojson.Safe.from_string
@@ -335,6 +367,10 @@ let () =
             test_parse_missing_schema_version;
           test_case "empty layer_results" `Quick
             test_parse_empty_layer_results;
+          test_case "missing required field" `Quick
+            test_parse_missing_required_field;
+          test_case "wrong-typed required field" `Quick
+            test_parse_wrong_typed_required_field;
           test_case "layer missing name" `Quick test_parse_layer_missing_name;
         ] );
       ( "read_latest",

@@ -56,6 +56,26 @@ let test_every_command_has_a_help_line () =
            Command.help_lines))
     [ "task"; "keeper"; "interrupt"; "thinking"; "help" ]
 
+let test_keeper_names_resolve_by_unique_prefix () =
+  let names = [ "sangsu"; "sang"; "taskmaster"; "rondo" ] in
+  let describe_match = function
+    | Command.Keeper_found name -> "found:" ^ name
+    | Command.Keeper_ambiguous candidates ->
+        "ambiguous:" ^ String.concat "," candidates
+    | Command.Keeper_unknown -> "unknown"
+  in
+  check (list string)
+    "exact wins over prefix, unique prefix resolves, ambiguity is reported"
+    [ "found:sang" (* exact, though it prefixes sangsu *)
+    ; "found:taskmaster"
+    ; "found:rondo" (* unique prefix *)
+    ; "ambiguous:sangsu,sang" (* san- prefixes two *)
+    ; "unknown"
+    ]
+    (List.map
+       (fun typed -> describe_match (Command.resolve_keeper_name ~names typed))
+       [ "sang"; "taskmaster"; "ro"; "san"; "zzz" ])
+
 let test_an_unknown_command_is_named_not_sent () =
   check (list string) "the word after the slash, nothing else"
     [ "unknown:tsak"; "unknown:wake"; "unknown:" ]
@@ -147,6 +167,8 @@ let () =
   run "tui command"
     [ ( "composer"
       , [ test_case "plain text is a message" `Quick test_plain_text_is_a_message
+        ; test_case "keeper names resolve by unique prefix" `Quick
+            test_keeper_names_resolve_by_unique_prefix
         ; test_case "pane commands parse by word" `Quick
             test_pane_commands_parse_by_word
         ; test_case "every command has a help line" `Quick

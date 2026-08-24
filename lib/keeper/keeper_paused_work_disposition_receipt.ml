@@ -74,7 +74,9 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _ ->
+  | Keeper_event_queue.Workspace_message _
+  (* The answer arriving is the reply; it names no further destination. *)
+  | Keeper_event_queue.Delegate_completed _ ->
     No_channel
 ;;
 

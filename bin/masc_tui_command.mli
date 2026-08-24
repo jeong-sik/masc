@@ -33,6 +33,19 @@ val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a
     new command cannot ship without its line. *)
 
+(** How [/keeper <name>] resolved against the roster. *)
+type keeper_match =
+  | Keeper_found of string
+  | Keeper_ambiguous of string list
+      (** More than one roster name starts with what was typed; the
+          candidates are reported rather than guessed between. *)
+  | Keeper_unknown
+
+val resolve_keeper_name : names:string list -> string -> keeper_match
+(** Exact name first — a keeper whose full name prefixes another's stays
+    reachable — then a unique prefix. Command words stay closed; only the
+    name argument matches by prefix. *)
+
 val parse : string -> t
 (** Read the composer's text. Leading blanks are not stripped before the
     slash is looked for: an operator who types a space first meant text. *)

@@ -224,8 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Repositories | Connectors | Tools | System_logs ->
-        None
+    | Verification | Harness | Fusion | Repositories | Connectors | Tools
+    | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -253,7 +253,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
              Keeper_selection.Message_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_list | None ->
+    | Some Keeper_list
+    (* The picker rides the list cursor: its own cursor points into the
+       runtime catalogue, not the roster. *)
+    | Some Keeper_runtime_pick
+    | None ->
         Keeper_selection.List_cursor state.keeper_cursor
   in
 
@@ -261,7 +265,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls) ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
+                   | Keeper_runtime_pick) ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
@@ -288,7 +293,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
             state.detail_scroll <- 0;
             state.log_scroll <- 0;
             state.keeper_calls_scroll <- 0
-        | Some Keeper_list | None -> ())
+        (* The picker rides the list cursor, so a reconciled cursor is not a
+           lost focus: it stays open across refreshes. *)
+        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_detail
@@ -548,12 +555,28 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
+(** Load the runtime catalogue and keeper assignments for the picker. *)
+let load_runtime_resolved ~(host : string) ~(port : int) :
+    ( Tui_decode.runtime_option list * Tui_decode.runtime_assignment list,
+      string )
+    result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err -> Error ("runtime catalogue load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_runtime_resolved json
+
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Tui_decode.keeper_tool_approval list, string) result =
   match fetch_keeper_tool_approvals ~host ~port with
   | Error err -> Error ("tool approvals load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_tool_approvals json
+
+(** Load the keepers whose approval gate is moved off [auto]. *)
+let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    ((string * string) list, string) result =
+  match fetch_keeper_tool_approval_modes ~host ~port with
+  | Error err -> Error ("tool approval modes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json
 
 (** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
 let load_transport_health ~(host : string) ~(port : int) :
@@ -679,6 +702,20 @@ let load_harness ~(host : string) ~(port : int) :
   match fetch_harness_health ~host ~port with
   | Error err -> Error ("harness load failed: " ^ err)
   | Ok json -> Tui_decode.decode_harness_snapshot json
+
+(** Load the retained Fusion registry list. *)
+let load_fusion_runs ~(host : string) ~(port : int) :
+    (Tui_decode.fusion_snapshot, string) result =
+  match fetch_fusion_runs ~host ~port with
+  | Error err -> Error ("fusion runs load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_snapshot json
+
+(** Load one exact Fusion run/evidence projection. *)
+let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Tui_decode.fusion_detail, string) result =
+  match fetch_fusion_detail ~host ~port ~run_id with
+  | Error err -> Error ("fusion detail load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_detail json
 
 (** Load the verification queue from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int) :

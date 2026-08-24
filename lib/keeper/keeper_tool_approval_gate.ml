@@ -1,5 +1,6 @@
 module Policy = Keeper_tool_approval_policy
 module Registry = Keeper_tool_approval_registry
+module Mode = Keeper_tool_approval_mode
 
 type t =
   { pre_tool_use : Agent_core.Hooks.hook
@@ -10,11 +11,17 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
   let pre_tool_use (event : Agent_core.Hooks.hook_event) =
     match event with
     | Agent_core.Hooks.PreToolUse { tool_name; input; _ } -> (
-        match Policy.verdict_for ~tool_name ~input with
-        | Policy.Run _ -> Agent_core.Hooks.Continue
-        | Policy.Ask _ ->
-            Agent_core.Hooks.ElicitToolApproval
-              { question = Policy.question_for ~tool_name ~input })
+        (* Consulted per call, not captured at gate construction: the stance
+           is an operator's live control, and a gate built at boot would pin
+           the stance the keeper booted with. *)
+        match Mode.resolve (Mode.shared ()) ~keeper_name with
+        | Mode.Yolo -> Agent_core.Hooks.Continue
+        | Mode.Auto -> (
+            match Policy.verdict_for ~tool_name ~input with
+            | Policy.Run _ -> Agent_core.Hooks.Continue
+            | Policy.Ask _ ->
+                Agent_core.Hooks.ElicitToolApproval
+                  { question = Policy.question_for ~tool_name ~input }))
     (* This hook is installed at pre_tool_use only, so no other stage reaches
        it. Named rather than left to a catch-all: a stage added later should
        stop the build here and be decided on. *)

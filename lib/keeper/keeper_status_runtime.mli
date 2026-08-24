@@ -20,6 +20,15 @@ type keeper_next_action_path =
   | Direct_message
 
 val keeper_next_action_path_to_string : keeper_next_action_path -> string
+
+val keeper_next_action_path_of_string_opt :
+  string -> keeper_next_action_path option
+(** Strict inverse of {!keeper_next_action_path_to_string}.
+
+    [None] outside the published vocabulary: a reader that cannot spell an
+    action says so rather than resolving it to whichever action happens to be
+    first, which would paint an operator's screen for work that was never
+    asked for. *)
 (** Wire form of the keeper diagnostic's [next_action_path]. The dashboard's
     [KeeperNextActionPath] union must list exactly these strings; an unlisted
     one makes it reject the whole diagnostic. *)
@@ -109,6 +118,11 @@ val control_plane_status_to_string : control_plane_status -> string
 val control_plane_status_of_string_opt : string -> control_plane_status option
 
 val keeper_health_to_string : keeper_health -> string
+
+val keeper_health_of_string_opt : string -> keeper_health option
+(** Strict inverse of {!keeper_health_to_string}; [None] outside the published
+    vocabulary. Callers that must resolve a value anyway go through
+    {!keeper_diagnostic_health}, which falls to [KH_offline] with a warning. *)
 (** Wire spelling of a health reading. *)
 
 val keeper_diagnostic_health :

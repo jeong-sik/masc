@@ -92,17 +92,35 @@ val display_status :
     status. [None] when the roster was not observed, because durable metadata
     cannot answer what a keeper's live status is. *)
 
+val health : reading -> Masc.Tui_decode.keeper_health option
+(** How the keeper is reporting, or [None] when the roster was not read.
+
+    Separate from {!status_label}, which answers with the surface vocabulary
+    and lets an operator pause hide the health underneath it: a keeper a
+    person stopped and a keeper whose fiber died read the same word there. *)
+
+val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path option
+(** What the runtime derived to do about this keeper, or [None] when the
+    roster was not read or named no action.
+
+    A surface colours a row from this rather than from the status word, so
+    every surface shows the same severity for the same keeper instead of each
+    inventing a mapping from the word. *)
+
+val health_label : reading -> string
+(** Terminal label for {!health}, or ["unread"]. *)
+
 val status_label : reading -> string
 (** Terminal label for {!display_status}, or ["unread"] when the roster was
     not observed: the roster has not been read for this keeper, which is a
     fact about the reading, not a status the keeper is in. *)
 
-val status_tally : reading list -> (string * int) list
-(** How many readings carry each {!status_label}, in first-seen order.
+val health_tally : reading list -> (string * int) list
+(** How many readings carry each {!health_label}, in first-seen order.
 
-    Counted through {!status_label} on purpose: the roster header and the
+    Counted through {!health_label} on purpose: the roster header and the
     status column are one reading drawn twice, and a tally that groups the
-    labels itself cannot report a word the column does not show. *)
+    column's own labels cannot report a word the column does not show. *)
 
 (** A lifecycle action the operator can take on one keeper.
 

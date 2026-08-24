@@ -7,8 +7,8 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
-Board, Planning, Schedules, Verification, Harness, Repositories, Connectors,
-Tools, System Logs.
+Board, Planning, Schedules, Verification, Harness, Fusion, Repositories,
+Connectors, Tools, System Logs.
 
 ## Quick Start
 
@@ -51,6 +51,7 @@ decides whether launching one is worth it.
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
 | Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation` |
+| Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -454,6 +455,34 @@ local guess from the status column. The payload target column names who the
 wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
+### Fusion
+
+The retained Fusion run registry is the list. It shows only facts that list
+actually owns: start time, lifecycle status, keeper, preset, topology, and run
+id. The cursor follows run id across refreshes, so a newly sorted row cannot
+silently change what `Enter` opens.
+
+```
+ MASC Fusion (19 runs)  18:31:04  [connected]
+   TIME     STATUS    KEEPER           PRESET     TOPOLOGY   RUN
+ > 16:42:11 completed rw-e0-r9         trio       simple     kmsg-386bed...
+   16:40:07 failed    analyst          trio       simple     kmsg-942ab1...
+  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
+```
+
+The detail is a separate exact read. Lifecycle remains the Registry fact;
+evidence comes only from a Board post whose typed origin is
+`source=fusion` with the same `fusion_run_id`. `recorded` draws every panel
+answer or failure in server order, followed by the judge decision, resolved
+answer, and reason. It does not calculate a majority, minimum answer count,
+timeout verdict, cost verdict, or any other local conclusion.
+
+`pending` is legal only while the Registry row is running. `absent` means the
+retained completed/failed run has no current Board projection; it does not
+claim the post was never written, that the sink failed, or that retention
+expired. A failed refresh leaves the prior reading visible under an explicit
+error instead of redrawing it as an empty result.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.
@@ -494,12 +523,13 @@ Per surface:
 | Key | Surface | Action |
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
-| `j` / `k` | Keepers, Approvals, Board, Planning, Schedules | Move cursor |
+| `j` / `k` | Keepers, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Lanes, System Logs | Scroll the page |
-| `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
+| `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
 | `Enter` | Planning | Open goal detail |
+| `Enter` | Fusion | Open exact run evidence detail |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
@@ -518,7 +548,7 @@ Per surface:
 Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
-           -> Schedules -> Verification -> Harness -> Repositories
+           -> Schedules -> Verification -> Harness -> Fusion -> Repositories
            -> Connectors -> Tools -> System Logs -> Overview
 
 Within a surface:
@@ -531,10 +561,11 @@ Within a surface:
 
   Board     --Enter-->  Board read
   Planning  --Enter-->  Goal detail
+  Fusion    --Enter-->  Run evidence detail
 ```
 
 `2` reaches Keepers from any surface. `Esc` returns one level within Keepers,
-Board, and Planning.
+Board, Planning, and Fusion.
 
 ## Requirements
 
@@ -560,7 +591,7 @@ a clipped frame, and message editing is suppressed until the terminal grows.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,
-Planning, and messaging do not. Check the port with `--port`.
+Planning, Fusion, and messaging do not. Check the port with `--port`.
 
 **Keepers list is empty but the runtime is running.** The base path is probably
 wrong. The list reads `.masc/keepers/` below `--base-path`, with no server

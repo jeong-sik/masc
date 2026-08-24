@@ -630,11 +630,6 @@ let json_list_opt key json =
   | `List l -> Some l
   | _ -> None
 
-let json_assoc key json =
-  match safe_member key json with
-  | `Assoc a -> a
-  | _ -> []
-
 let json_member_opt key json =
   match safe_member key json with
   | `Null -> None

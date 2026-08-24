@@ -81,6 +81,53 @@ let test_every_tool_the_generator_owned_is_declared () =
   check int "19 tools moved" 19 (List.length expected)
 ;;
 
+(* Three checks that lived in test_tool_descriptors_gen and have nothing to do
+   with code generation. Deleting the generator's regression suite would have
+   taken them with it. *)
+
+let has_schema name schemas =
+  List.exists (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) schemas
+;;
+
+(* The masc_config category enum is a literal in the TOML now, so nothing
+   derives it from its owner. This is what fails when a category is added to
+   one side only. *)
+let test_config_category_enum_matches_its_owner () =
+  check
+    (list string)
+    "the enum matches Env_config_snapshot.valid_config_category_strings"
+    Env_config_snapshot.valid_config_category_strings
+    Tool_schemas_specs_types.config_category_enum_strings
+;;
+
+let test_masc_spawn_is_not_published () =
+  check
+    bool
+    "masc_spawn absent from the misc schema set"
+    false
+    (has_schema "masc_spawn" Tool_schemas_misc.schemas)
+;;
+
+(* pause / resume / pause_status are Operator_only: reached through
+   control_schema, never through the list a Keeper model reads. *)
+let test_control_operations_stay_off_the_published_list () =
+  check
+    (list string)
+    "the typed control projection is exhaustive"
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
+    (List.map
+       (fun operation -> (Tool_schemas_misc.control_schema operation).name)
+       Tool_schemas_misc.control_operations);
+  List.iter
+    (fun name ->
+       check
+         bool
+         (name ^ " absent from the published misc schemas")
+         false
+         (has_schema name Tool_schemas_misc.schemas))
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
+;;
+
 let () =
   run
     "operator_surface_toml_parity"
@@ -94,6 +141,17 @@ let () =
             "every tool the generator owned is declared"
             `Quick
             test_every_tool_the_generator_owned_is_declared
+        ] )
+    ; ( "invariants_the_codegen_suite_carried"
+      , [ test_case
+            "the config category enum matches its owner"
+            `Quick
+            test_config_category_enum_matches_its_owner
+        ; test_case "masc_spawn is not published" `Quick test_masc_spawn_is_not_published
+        ; test_case
+            "control operations stay off the published list"
+            `Quick
+            test_control_operations_stay_off_the_published_list
         ] )
     ]
 ;;

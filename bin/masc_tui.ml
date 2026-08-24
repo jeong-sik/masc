@@ -2671,12 +2671,14 @@ let main () =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
-  (* A surface that is fetched only while it is open has nothing to draw the
-     moment it opens, and waiting out the refresh interval would read as "there
-     is nothing here". Watching the surface from the loop catches every way it
-     can change, rather than asking each of the places that change it to
-     remember. *)
-  let drawn_surface = ref state.view in
+  (* A datum that is fetched only while its surface is open has nothing to draw
+     the moment that surface opens, and waiting out the refresh interval would
+     read as "there is nothing here". What is watched is the set of data the
+     open surface needs rather than the surface itself, so moving between two
+     surfaces that read the same things -- a keeper list and a keeper's detail --
+     costs no request. Watching from the loop catches every way the surface can
+     change, rather than asking each of the places that change it to remember. *)
+  let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
   let run_loop () =
     while true do
@@ -3346,12 +3348,13 @@ let main () =
             -> ())
       | _ -> ());
 
-      (* A refresh already running was asked for the surface that was open when
-         it started, so it brings nothing for this one. The surface is recorded
-         as fetched only once a request for it has actually gone out; until
-         then the next pass through the loop tries again. *)
-      if state.view <> !drawn_surface && not !http_refresh_inflight then begin
-        drawn_surface := state.view;
+      (* A refresh already running was asked for what the surface open when it
+         started needed, so it brings nothing for this one. The need is recorded
+         as fetched only once a request has actually gone out; until then the
+         next pass through the loop tries again. *)
+      let needed = Masc_tui_types.surface_needs state.view in
+      if needed <> !drawn_needs && not !http_refresh_inflight then begin
+        drawn_needs := needed;
         start_http_refresh state ~host:(Env_config_core.masc_host ())
           ~port:state.port ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages

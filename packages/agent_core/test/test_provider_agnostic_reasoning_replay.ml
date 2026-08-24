@@ -644,6 +644,48 @@ let test_openai_chat_request_uses_whole_history_projection () =
     Yojson.Safe.Util.(assistant |> member "content" |> to_string = "answer")
 ;;
 
+(* Ollama's OpenAI-compat layer reads incoming assistant [reasoning] into the
+   template's thinking slot and ignores unknown members, so replay emitted as
+   a fixed "reasoning_content" never reached the model there. The request-side
+   field must mirror the dialect's declared streaming field. *)
+let test_openai_chat_replay_field_mirrors_streaming_field () =
+  let capabilities =
+    { preserving_capabilities with
+      reasoning_streaming_format = Capabilities.Delta_reasoning_field "reasoning"
+    }
+  in
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:capabilities
+      ()
+  in
+  let source = source_for_config config in
+  let body =
+    Backend_openai.build_request
+      ~config
+      ~messages:
+        [ with_source
+            source
+            Assistant
+            [ Thinking { content = "replayed"; signature = None }; Text "answer" ]
+        ]
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let assistant = Yojson.Safe.Util.(body |> member "messages" |> to_list |> List.hd) in
+  check_bool
+    "reasoning replays into the dialect's own field"
+    true
+    Yojson.Safe.Util.(assistant |> member "reasoning" |> to_string = "replayed");
+  check_bool
+    "the fixed field name is not emitted alongside"
+    true
+    Yojson.Safe.Util.(assistant |> member "reasoning_content" = `Null)
+;;
+
 let test_ollama_request_replays_native_thinking_field () =
   let capabilities =
     { preserving_capabilities with thinking_control_format = Ollama_think }
@@ -1234,6 +1276,10 @@ let () =
             "OpenAI chat boundary"
             `Quick
             test_openai_chat_request_uses_whole_history_projection
+        ; Alcotest.test_case
+            "replay field mirrors the streaming field"
+            `Quick
+            test_openai_chat_replay_field_mirrors_streaming_field
         ; Alcotest.test_case
             "Ollama native boundary"
             `Quick

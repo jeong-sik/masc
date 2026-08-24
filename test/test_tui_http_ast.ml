@@ -123,9 +123,15 @@ let test_keeper_chat_uses_current_async_contract () =
        longer writes a cursor escape inline. It hands the position to
        [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
        presenter emits the move when it paints. Asserting the old escape here
-       would pin the pre-differential-frame renderer. *)
+       would pin the pre-differential-frame renderer.
+
+       [Message_layout.input_cursor_row] is gone for a related reason: it
+       predicted the caret's row by repeating the pane's layout arithmetic,
+       which only stayed true while every row the pane drew was also counted
+       in the row budget. The renderer now reads the rows it has already put
+       in the frame, so [frame_lines] is what this list pins instead. *)
     [ "Message_layout.input_viewport"
-    ; "Message_layout.input_cursor_row"
+    ; "frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
     ; "finish_frame"

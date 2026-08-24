@@ -218,11 +218,6 @@ let test_input_cursor_uses_visible_terminal_cells () =
   check string "short role label pads with spaces"
     ("you" ^ String.make 13 ' ')
     (Layout.align_role_label "you");
-  let row terminal_rows history_height status_rows =
-    Layout.input_cursor_row ~terminal_rows ~history_height ~status_rows
-  in
-  check int "normal input row" 25 (row 30 15 5);
-  check int "excess status rows clamp to the terminal" 30 (row 30 20 20);
   let supported rows cols status_rows =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
       ~status_rows
@@ -268,6 +263,43 @@ let test_history_wraps_by_cells_without_losing_bytes () =
     [ "한한"; "한" ] wrapped;
   check string "word splitting preserves bytes" unbroken
     (String.concat "" wrapped)
+
+(* An escape that never got its final byte swallows whatever follows it,
+   including a space. So a row is not the sum of its words: " word" measured
+   on its own and measured as part of the row can disagree. Wrapping therefore
+   segments the whole text once and reads the row widths off that, and this
+   pins the input that rules the cheaper adding-up out. *)
+let test_an_unterminated_escape_absorbs_the_space_after_it () =
+  check int "an unterminated escape ends at the letter after the space" 4
+    (Layout.display_width "\x1B[ words");
+  check int "the same bytes measured apart keep the space" 7
+    (Layout.display_width "\x1B[" + Layout.display_width " words");
+  check int "a terminated escape leaves the space alone" 6
+    (Layout.display_width "\x1B[0m words")
+
+(* Rows carrying an escape are measured whole rather than word by word, so
+   they get their own case. The two texts below differ only in whether the
+   escape was finished, and that alone moves where the rows break -- which is
+   what the whole-row measurement is there to get right. *)
+let test_a_row_carrying_an_escape_wraps_by_its_real_width () =
+  let unfinished = "\x1B[ ab cd ef" in
+  let finished = "\x1B[0m ab cd ef" in
+  check int "an unfinished escape eats the space and the letter after it" 7
+    (Layout.display_width unfinished);
+  check int "a finished escape leaves all nine cells" 9
+    (Layout.display_width finished);
+  check (list string) "seven cells hold the unfinished text whole"
+    [ "\x1B[ ab cd ef" ]
+    (Layout.wrap_words ~max_cells:7 unfinished);
+  check (list string) "the same seven cells break the finished text"
+    [ "\x1B[0m ab cd"; "ef" ]
+    (Layout.wrap_words ~max_cells:7 finished);
+  check (list string) "five cells break the unfinished text late"
+    [ "\x1B[ ab cd"; "ef" ]
+    (Layout.wrap_words ~max_cells:5 unfinished);
+  check (list string) "and break the finished text one word earlier"
+    [ "\x1B[0m ab"; "cd ef" ]
+    (Layout.wrap_words ~max_cells:5 finished)
 
 let test_history_never_splits_grapheme_clusters () =
   let body = "A👍🏽🇰🇷❤️B" in
@@ -409,6 +441,10 @@ let () =
             test_history_wraps_by_cells_without_losing_bytes
         ; test_case "history never splits grapheme clusters" `Quick
             test_history_never_splits_grapheme_clusters
+        ; test_case "an unterminated escape absorbs the space after it" `Quick
+            test_an_unterminated_escape_absorbs_the_space_after_it
+        ; test_case "a row carrying an escape wraps by its real width" `Quick
+            test_a_row_carrying_an_escape_wraps_by_its_real_width
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

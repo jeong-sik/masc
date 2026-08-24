@@ -243,6 +243,12 @@
  (libraries masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_observer)
+ (wrapped false)
+ (modules masc_tui_observer)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
  (name masc_tui_keeper_chat_queue)
  (wrapped false)
  (modules masc_tui_keeper_chat_queue)
@@ -361,6 +367,7 @@
  (libraries
   masc
   masc.auth
+  masc.runtime
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity
@@ -368,6 +375,7 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
+  masc_tui_observer
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control

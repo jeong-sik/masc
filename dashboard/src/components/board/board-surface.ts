@@ -13,7 +13,8 @@ import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
-import { votePost } from '../../api/board'
+import { fetchBoardReactionsBatch, votePost } from '../../api/board'
+import type { BoardReactionSummary } from '../../types'
 import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
@@ -255,7 +256,12 @@ function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
 }
 
 // ── Post card (v2 list item) ───────────────────────────────────────
-function PostCard({ post }: { post: BoardPost }) {
+function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false }: {
+  post: BoardPost
+  reactions?: BoardReactionSummary[]
+  supportedEmojis?: readonly string[]
+  reactionsArriving?: boolean
+}) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = dedupeLeadingHeading(post.title, post.body)
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
@@ -374,8 +380,9 @@ function PostCard({ post }: { post: BoardPost }) {
             targetType="post"
             targetId=${post.id}
             compact
-            initialSummaries=${post.reactions ?? []}
-            supportedEmojis=${post.supported_reaction_emojis}
+            initialSummaries=${reactions ?? post.reactions ?? []}
+            supportedEmojis=${supportedEmojis ?? post.supported_reaction_emojis}
+            summariesArriving=${reactionsArriving}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
@@ -1209,6 +1216,33 @@ function UnifiedBoardFeed({
   visibleLimit: number
   onVisibleLimitChange: (limit: number) => void
 }) {
+  // One request answers every row this feed draws. The board list is a public,
+  // cached projection and reaction state is per viewer, so it cannot ride in
+  // that response -- and asking per row made twenty of the twenty-three
+  // requests that opening the board sent.
+  const drawnIds = posts.slice(0, visibleLimit).map(post => post.id).join(',')
+  const [batchedReactions, setBatchedReactions] = useState<{
+    byTargetId: Map<string, BoardReactionSummary[]>
+    supportedEmojis: readonly string[]
+  } | null>(null)
+  useEffect(() => {
+    const ids = drawnIds === '' ? [] : drawnIds.split(',')
+    if (ids.length === 0) {
+      setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      return
+    }
+    let cancelled = false
+    setBatchedReactions(null)
+    void fetchBoardReactionsBatch('post', ids)
+      .then(next => { if (!cancelled) setBatchedReactions(next) })
+      .catch(err => {
+        // Each bar falls back to fetching its own, which is what it did before.
+        console.warn('[board] reaction batch failed', err instanceof Error ? err.message : err)
+        if (!cancelled) setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      })
+    return () => { cancelled = true }
+  }, [drawnIds])
+
   const hasMoreLocal = posts.length > visibleLimit
   const hasMoreRemote = boardHasMore.value
   const hasMore = hasMoreLocal || hasMoreRemote
@@ -1230,7 +1264,14 @@ function UnifiedBoardFeed({
 
   return html`
     <div class="flex flex-col gap-2" data-testid="bd-unified-feed">
-      ${posts.slice(0, visibleLimit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+      ${posts.slice(0, visibleLimit).map(post => html`<${PostCard}
+        key=${post.id}
+        post=${post}
+        reactions=${batchedReactions?.byTargetId.get(post.id)}
+        supportedEmojis=${batchedReactions && batchedReactions.supportedEmojis.length > 0
+          ? batchedReactions.supportedEmojis
+          : undefined}
+        reactionsArriving=${batchedReactions === null} />`)}
     </div>
     ${hasMore ? html`
       <${ScrollMarker} onVisible=${expand} />

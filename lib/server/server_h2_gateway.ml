@@ -1232,6 +1232,22 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
 
+      | `GET, "/api/v1/board/reactions/batch" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanReadState
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               let result =
+                 Server_board_reaction_http.targets_of_strings
+                   ~target_type:
+                     (Server_utils.query_param httpun_request "target_type")
+                   ~target_ids:
+                     (Server_utils.query_param httpun_request "target_ids")
+                 |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
       | `GET, "/api/v1/board/reactions" ->
           with_h2_token_permission_auth
             h2_reqd

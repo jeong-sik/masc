@@ -23,7 +23,29 @@ from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpResponse = tuple[int, object]
-HttpFixture = HttpResponse | Callable[[], HttpResponse]
+
+
+class RawHttpResponse:
+    """A response the fixture sends byte for byte: its own content type and
+    headers, no JSON encoding. The MCP transport answers ``initialize`` with
+    the session id in a header, and the observer feed is an SSE body, so
+    neither fits the JSON tuple."""
+
+    def __init__(
+        self,
+        status: int,
+        body: bytes,
+        *,
+        content_type: str,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        self.status = status
+        self.body = body
+        self.content_type = content_type
+        self.headers = headers
+
+
+HttpFixture = HttpResponse | RawHttpResponse | Callable[[], HttpResponse]
 HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
 WorkspaceSetup = Callable[[str], None]
@@ -74,10 +96,21 @@ def test_http_endpoint(
                 self.path,
                 (503, {"error": "fixture endpoint unavailable"}),
             )
-            status, payload = fixture() if callable(fixture) else fixture
-            body = json.dumps(payload).encode()
+            resolved = fixture() if callable(fixture) else fixture
+            extra_headers: tuple[tuple[str, str], ...] = ()
+            if isinstance(resolved, RawHttpResponse):
+                status = resolved.status
+                body = resolved.body
+                content_type = resolved.content_type
+                extra_headers = resolved.headers
+            else:
+                status, payload = resolved
+                body = json.dumps(payload).encode()
+                content_type = "application/json"
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
+            for name, value in extra_headers:
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Connection", "close")
             self.end_headers()
@@ -746,11 +779,18 @@ PLANNING_PATH = "/api/v1/dashboard/planning"
 
 
 def planning_goal(goal_id: str, title: str) -> dict[str, object]:
+    # The verification block is not optional on the wire. The server writes a
+    # default completion record for a goal with no ledger row precisely so an
+    # absent state cannot be read as "not verified yet", and the TUI marks a
+    # goal whose block is missing rather than guessing. A fixture that leaves
+    # it out is not a smaller server response, it is one the server never
+    # sends -- and it puts a warning mark on every row here.
     return {
         "id": goal_id,
         "title": title,
         "phase": "executing",
         "priority": 1,
+        "verification": {"completion": {"state": "idle"}},
     }
 
 
@@ -2795,6 +2835,8 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "content": "",
                 "ts": 1787348490.3,
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
+                # The server writes null, not "", when the turn said nothing.
+                # (content is set above; the marker is what the decoder keys on.)
                 "blocks": [
                     {
                         "t": "trace",
@@ -2811,7 +2853,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                                 "kind": "tool",
                                 "name": "tool_execute",
                                 "status": "err",
-                                "dur": "1.2s",
+                                "dur": "1200ms",
                             },
                         ],
                     }
@@ -2849,13 +2891,77 @@ def autonomous_turn_history_interaction() -> Interaction:
         for needle, what in (
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
-            ("\u2717 tool_execute \u00b7 1.2s".encode(), "the failed call"),
+            ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
         ):
             if needle not in pane:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+OBSERVER_TOOL_CALLED_FRAME = (
+    b"id: 1\n"
+    b"event: message\n"
+    b'data: {"type":"agent_core:tool_called","event_type":"tool_called",'
+    b'"event_id":"evt-1","ts_unix":1787505641.28,"correlation_id":"trace-1",'
+    b'"run_id":"wr-1","parent_event_id":null,"agent_name":"alpha",'
+    b'"task_id":"task-1","tool_name":"read_file","payload":{"agent_name":"alpha",'
+    b'"tool_name":"read_file","tool_use_id":"tu-1","turn":7}}\n\n'
+)
+
+
+def observer_http_fixtures() -> HttpFixtures:
+    """The MCP session handshake and a one-frame observer stream."""
+
+    return {
+        # The feed opens only after a refresh reaches the server, and the
+        # connection reading counts the overview, board, planning, and
+        # approval loads - so one of those must answer.
+        "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+        "/api/v1/board": (200, {"posts": []}),
+        "/mcp": RawHttpResponse(
+            200,
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),
+            content_type="application/json",
+            headers=(("Mcp-Session-Id", "mcp_fixture_session"),),
+        ),
+        "/mcp?sse_kind=observer": RawHttpResponse(
+            200,
+            OBSERVER_TOOL_CALLED_FRAME,
+            content_type="text/event-stream",
+        ),
+    }
+
+
+def observer_feed_interaction(requests: HttpRequests) -> Interaction:
+    """The TUI opens an MCP session after its first refresh reaches the
+    server, subscribes to the observer feed with that session, and counts
+    the frames it receives on the Overview row."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The fixture closes the stream right after its one frame, so the
+        # row the test can rely on is the closed one; it keeps the count.
+        wait_for_output(
+            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+        )
+        initialize = [body for path, body in requests if path == "/mcp"]
+        if len(initialize) != 1:
+            raise AssertionError(
+                f"expected one MCP initialize, saw {len(initialize)}: {requests!r}"
+            )
+        payload = json.loads(initialize[0])
+        if payload.get("method") != "initialize":
+            raise AssertionError(f"MCP POST was not an initialize: {payload!r}")
         os.write(master_fd, b"q")
 
     return interact
@@ -2946,6 +3052,14 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
         },
+    )
+    observer_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Observer feed subscription",
+        interact=observer_feed_interaction(observer_requests),
+        http_fixtures=observer_http_fixtures(),
+        http_requests=observer_requests,
     )
     composer_requests: HttpRequests = []
     run_terminal_scenario(

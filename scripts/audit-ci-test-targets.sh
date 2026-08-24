@@ -124,23 +124,27 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-# 509 -> 160: wired 349 declared-but-unrun suites, each built and run before
-# being listed. The 160 left are not "the ones that fail": the wired list is
-# the alphabetical head of the set and stops at test_safe_ops. Measured on
-# the rest: 121 of the 125 after test_safe_ops pass and are follow-up wiring,
-# 4 fail; of the 35 before it, 17 fail, 5 are not runnable tests (4 e2e
-# stanzas gated on MASC_E2E_TESTS, 1 plain executable), test_fusion_wake
-# times out in CI (#29064), and the remainder is unmeasured. The declared
-# count also includes those 5 non-test aliases.
+# 509 -> 160 wired 349 declared-but-unrun suites, each built and run before
+# being listed; #29797 then wired the 121 follow-ups that measurement had
+# already cleared, leaving 39, and main has since wired four more.
 #
-# 39 -> 33: six suites that #29880/#29883/#29887 repaired. Each had rotted
-# behind a hard cut that made a field required while CI never ran the suite,
-# so only the fixture stayed in the old shape. They were fixed and left
-# unwired, which is the same as not fixed -- nothing runs them. Verified
-# against merged main before listing: voice_runtime_overlay, wake_telemetry,
+# What is left is not "the ones that fail". Of the remainder: 17 fail, 5 are
+# not runnable tests (4 e2e stanzas gated on MASC_E2E_TESTS, 1 plain
+# executable), test_fusion_wake times out in CI (#29064), 4 of the
+# post-test_safe_ops set fail, and the rest is unmeasured. The declared count
+# also includes those 5 non-test aliases.
+#
+# This branch wires the six suites that #29880/#29883/#29887 repaired. Each
+# had rotted behind a hard cut that made a field required while CI never ran
+# the suite, so only the fixture stayed in the old shape. Fixed and left
+# unwired is the same as not fixed -- nothing runs them. Verified against
+# merged main before listing: voice_runtime_overlay, wake_telemetry,
 # lifecycle_hooks, lane_mentions and north_star_task_lifecycle report Test
 # Successful, sandbox_read_backend reports 49 tests successful.
-UNWIRED_BASELINE=33
+#
+# The two sets do not overlap. The baseline below is what the script counted
+# on the merged tree, not arithmetic on two numbers each measured elsewhere.
+UNWIRED_BASELINE=32
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

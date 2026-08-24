@@ -455,7 +455,10 @@ let property_description prop =
   | _ -> Error "property must be a JSON object"
 ;;
 
-let json_schema_to_params_result schema =
+(* Params of a schema that has already cleared [input_schema_of_json]. Kept
+   private so no caller can reach the conversion without the key check;
+   the two used to disagree on a repeated key (#27841). *)
+let json_schema_to_params_of_checked_schema schema =
   let ( let* ) = Result.bind in
   let* required_list = required_list_of_schema schema in
   match schema with
@@ -552,6 +555,18 @@ let input_schema_of_json (json : Yojson.Safe.t)
      | Error _ as error -> error)
   | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) as other ->
     Error (Input_schema_not_an_object (json_shape_of_json other))
+;;
+
+(** Tool params of [schema], refusing a schema that no reader can agree on.
+
+    This is the same gate {!input_schema_of_json} applies before a schema is
+    stored. Without it, Yojson keeps every pair of a repeated key and
+    [List.assoc] silently answers with the first, so the same document
+    produced one set of params here and a rejection on the storage path. *)
+let json_schema_to_params_result schema =
+  match input_schema_of_json schema with
+  | Error error -> Error (input_schema_error_to_string error)
+  | Ok checked -> json_schema_to_params_of_checked_schema checked
 ;;
 
 let rec schema_definitely_excludes_objects = function

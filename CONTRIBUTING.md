@@ -49,9 +49,12 @@ opam exec -- ocamlformat -i <changed .ml/.mli files>   # just what you touched
 
 `dune-project` scopes formatting to `ocaml`, so `dune fmt` leaves `dune` files
 alone. Without that scope it rewrote 18 of them from a clean tree, and the
-blank line it added to `lib/dune` put the file one over its `lib_dune_lines`
-baseline and failed the OCaml Structure Ratchet — the repo's own formatter
-breaking the repo's own gate. See #29253.
+blank line it added to `lib/dune` put the file one over the line-count metric
+the OCaml Structure Ratchet used then — the repo's own formatter breaking the
+repo's own gate (#29253). That metric now counts the modules in the `masc`
+library instead of the lines in the file that declares it, so a blank line
+cannot trip it; the formatting scope stays because CI enforces ocamlformat
+over `.ml`/`.mli` only.
 
 ### Project Structure
 

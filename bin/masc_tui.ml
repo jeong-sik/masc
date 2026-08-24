@@ -460,6 +460,9 @@ type async_msg =
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
+  | Observer_opened of string
+  | Observer_received of Masc_tui_observer.decoded list
+  | Observer_closed of string
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -1818,6 +1821,67 @@ let apply_http_surfaces state results =
         |> Result.map_error (fun _ -> ());
       ] @ approval_status)
 
+(* Open the runtime event feed on a daemon fiber: one MCP initialize for the
+   session id, then the stream, read until it ends. Every step reports back
+   through the mailbox; the render fiber owns all state. The fiber ends with
+   the stream, and whether to open another is the main loop's decision. *)
+let launch_observer state ~host ~port ~mailbox =
+  state.observer <- Observer_opening;
+  let session = state.mcp_session in
+  let run () =
+    let result =
+      try
+        match
+          match session with
+          | Some session_id -> Ok session_id
+          | None ->
+              Masc_tui_http.open_mcp_session ~host ~port
+                ~client_version:Runtime_build_version.current
+        with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            enqueue_async mailbox (Observer_opened session_id);
+            match Eio_context.get_clock_opt () with
+            | None -> Error "Eio clock is unavailable"
+            | Some clock ->
+                let reader = Masc_tui_observer.create () in
+                let on_chunk chunk =
+                  match Masc_tui_observer.feed reader chunk with
+                  | [] -> ()
+                  | decoded -> enqueue_async mailbox (Observer_received decoded)
+                in
+                Masc_tui_http.observe_runtime_events ~clock ~host ~port
+                  ~session_id ~on_chunk)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Observer_closed
+         (match result with
+          | Ok () -> "the server closed the stream"
+          | Error detail -> detail))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (Observer_closed "Eio switch is unavailable")
+
+(* The feed is opened only after a refresh has reached the server: opening
+   it blind would report a closed feed every cycle while the TUI runs without
+   one, and that row is meant to say the stream dropped, not that there was
+   never a server. Once closed it is reopened on the next refresh that
+   reaches the server, which is the cadence the operator already chose. *)
+let open_observer_if_due state ~host ~port ~mailbox =
+  match (state.connection_status, state.observer) with
+  | (Connected | Degraded), (Observer_off | Observer_closed _) ->
+      launch_observer state ~host ~port ~mailbox
+  | (Connected | Degraded), (Observer_opening | Observer_live _)
+  | (Disconnected | Connecting | Reconnecting), _ ->
+      ()
+
 let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
   if not !refresh_inflight then begin
     refresh_inflight := true;
@@ -2494,7 +2558,52 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   function
   | Http_refresh_done results ->
       http_refresh_inflight := false;
-      apply_http_surfaces state results
+      apply_http_surfaces state results;
+      open_observer_if_due state ~host:(Env_config_core.masc_host ())
+        ~port:state.port ~mailbox
+  | Observer_opened session_id ->
+      state.mcp_session <- Some session_id;
+      state.observer <-
+        Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
+      add_event state "observer" "runtime event feed open"
+  | Observer_received decoded ->
+      let received = Unix.gettimeofday () in
+      List.iter
+        (fun item ->
+          match item with
+          | Masc_tui_observer.Event event ->
+              (match state.observer with
+               | Observer_live live ->
+                   state.observer <-
+                     Observer_live { live with events = live.events + 1 }
+               | Observer_off | Observer_opening | Observer_closed _ -> ());
+              state.acting <-
+                { ae_at = received; ae_event = event } :: state.acting
+          | Masc_tui_observer.Undecodable _ ->
+              state.acting_undecodable <- state.acting_undecodable + 1)
+        decoded;
+      let kept = List.length state.acting in
+      if kept > Masc_tui_types.acting_retained_entries then begin
+        state.acting <-
+          List.filteri
+            (fun index _ -> index < Masc_tui_types.acting_retained_entries)
+            state.acting;
+        state.acting_dropped <-
+          state.acting_dropped + (kept - Masc_tui_types.acting_retained_entries)
+      end
+  | Observer_closed reason ->
+      let events =
+        match state.observer with
+        | Observer_live live -> live.events
+        | Observer_off | Observer_opening | Observer_closed _ -> 0
+      in
+      state.observer <-
+        Observer_closed { reason; at = Unix.gettimeofday (); events };
+      (* A stream the server refused outright delivered nothing. The session
+         it was asked under is dropped so the next attempt opens a fresh one;
+         a stream that ran and ended keeps the session for the next. *)
+      if events = 0 then state.mcp_session <- None;
+      add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_generation) ->
       http_refresh_inflight := false;
       Option.iter
@@ -3018,12 +3127,12 @@ let main () =
      holds one the operator sees the cause ahead of the symptom: a tokenless
      process cannot dispatch, and cannot reconcile a dispatch an authenticated
      predecessor left behind. *)
-  Masc_tui_http.install_operator_token ~base_path;
-  if not (Masc_tui_http.operator_token_present ()) then
-    add_event state "error"
-      "No operator token: neither MASC_TOKEN nor this workspace holds one, so \
-       sends and approvals are refused and a recovered dispatch cannot be \
-       reconciled. Run: masc login --agent masc-tui --client-env MASC_TOKEN";
+  (match
+     Masc_tui_credential.outcome_notice
+       (Masc_tui_http.install_operator_token ~base_path ~host ~port)
+   with
+   | Some notice -> add_event state "error" notice
+   | None -> ());
   (match Keeper_chat_recovery.load_pending ~base_path with
    | Ok None -> ()
    | Error detail ->

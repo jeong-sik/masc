@@ -1,9 +1,12 @@
 open Alcotest
 
 module Layout = Masc_tui_message_layout
+module Markdown_cache = Masc_tui_markdown_render_cache
 
-let entry ?(timestamp = "12:34:56") style role request_label body : Layout.entry =
-  { style; timestamp; role_label = role; request_label; body }
+let entry ?(timestamp = "12:34:56")
+    ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
+    Layout.entry =
+  { style; timestamp; role_label = role; request_label; body; markdown_source }
 
 let test_keeps_latest_reply () =
   let entries =
@@ -357,7 +360,80 @@ let transcript count =
             "turn %d closed and wrote a line long enough that it wraps more \
              than once at the widths this test uses"
             index;
+        markdown_source = Layout.Markdown_streaming;
       })
+
+let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
+  let rendered = ref [] in
+  let equal_identity
+      (left_keeper, left_request, left_at, left_index)
+      (right_keeper, right_request, right_at, right_index) =
+    String.equal left_keeper right_keeper
+    && String.equal left_request right_request
+    && Float.equal left_at right_at
+    && left_index = right_index
+  in
+  let cache_capacity = 2 in
+  let cache =
+    Markdown_cache.create ~capacity:cache_capacity ~equal:equal_identity
+  in
+  let markdown ~(entry : Layout.entry) ~width =
+    let source =
+      match entry.markdown_source with
+      | Layout.Markdown_stable
+          { keeper_name; request_id; observed_at; entry_index } ->
+          Markdown_cache.Stable_source
+            { identity = keeper_name, request_id, observed_at, entry_index;
+              text = entry.body;
+            }
+      | Layout.Markdown_streaming ->
+          Markdown_cache.Streaming_source entry.body
+    in
+    Markdown_cache.render cache ~theme_revision:1 ~palette_generation:0 ~width
+      ~renderer:(fun ~width text ->
+        rendered := entry.request_label :: !rendered;
+        Layout.wrap_words ~max_cells:width text)
+      ~source
+  in
+  let stable index =
+    entry
+      ~timestamp:(Printf.sprintf "12:34:%02d" index)
+      ~markdown_source:
+        (Layout.Markdown_stable
+           { keeper_name = "keeper.one";
+             request_id = Printf.sprintf "turn-%d" index;
+             observed_at = float_of_int index;
+             entry_index = index;
+           })
+      Layout.Keeper "keeper.one" (Printf.sprintf "turn-%d" index)
+      (Printf.sprintf "completed markdown message %d wraps here" index)
+  in
+  let entries = List.init (cache_capacity + 1) stable in
+  let inner_width = 24 in
+  let height = 4 in
+  let requested = 100 in
+  let uncached_markdown ~(entry : Layout.entry) ~width =
+    Layout.wrap_words ~max_cells:width entry.body
+  in
+  let expected_scroll =
+    Layout.clamp_scroll ~markdown:uncached_markdown ~inner_width ~height requested
+      entries
+  in
+  let expected_rows =
+    Layout.scrolled_rows ~markdown:uncached_markdown ~inner_width ~height
+      ~from_bottom:expected_scroll entries
+  in
+  let scroll, rows =
+    Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested entries
+  in
+  check int "combined scroll matches the separate clamp" expected_scroll scroll;
+  check (list string) "combined window matches the separate slice"
+    (List.map (fun (row : Layout.row) -> row.text) expected_rows)
+    (List.map (fun (row : Layout.row) -> row.text) rows);
+  check (list string) "capacity + 1 entries were each rendered exactly once"
+    [ "turn-0"; "turn-1"; "turn-2" ] !rendered;
+  check int "persistent retention remains bounded" cache_capacity
+    (Markdown_cache.For_testing.retained_entries cache)
 
 let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
   List.iter
@@ -370,12 +446,25 @@ let test_clamping_a_scroll_reads_only_as_far_as_it_must () =
                  let limit =
                    Layout.max_scroll ~inner_width:30 ~height entries
                  in
+                 let expected = min requested limit in
                  check int
                    (Printf.sprintf "%d messages, height %d, scroll %d" count
                       height requested)
-                   (min requested limit)
+                   expected
                    (Layout.clamp_scroll ~inner_width:30 ~height requested
-                      entries))
+                      entries);
+                 let expected_rows =
+                   Layout.scrolled_rows ~inner_width:30 ~height
+                     ~from_bottom:expected entries
+                 in
+                 let combined_scroll, combined_rows =
+                   Layout.clamped_scrolled_rows ~inner_width:30 ~height
+                     ~requested entries
+                 in
+                 check int "combined clamp matches" expected combined_scroll;
+                 check (list string) "combined rows match"
+                   (List.map (fun (row : Layout.row) -> row.text) expected_rows)
+                   (List.map (fun (row : Layout.row) -> row.text) combined_rows))
               [ -3; 0; 1; 4; 17; 200 ])
          [ 0; 1; 5; 40 ])
     [ 0; 1; 3; 12 ]
@@ -795,6 +884,8 @@ let () =
             test_clamping_a_scroll_reads_only_as_far_as_it_must
         ; test_case "a scrolled window matches the full walk" `Quick
             test_a_scrolled_window_matches_the_full_walk
+        ; test_case "one frame renders capacity + 1 markdown entries once" `Quick
+            test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity
         ; test_case "trailing newlines keep reply visible" `Quick
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick

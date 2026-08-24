@@ -2759,7 +2759,15 @@
 (test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
- (libraries alcotest masc_tui_message_layout))
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
+ (name test_tui_markdown_render_cache)
+ (modules test_tui_markdown_render_cache)
+ (libraries alcotest masc_tui_markdown_render_cache))
 
 (test
  (name test_tui_csi)

@@ -6,12 +6,27 @@ type style =
   | Tool
   | Thinking
 
+type markdown_source =
+  | Markdown_stable of {
+      keeper_name : string;
+      request_id : string;
+      observed_at : float;
+      entry_index : int;
+          (** Position in the current ordered history. It distinguishes two
+              rows whose timestamp and request fields are equal. *)
+    }
+  | Markdown_streaming
+(** Whether a chat entry's Markdown source can be reused. Completed history
+    rows carry their source facts and position in the current ordered history.
+    A live row is still growing and must bypass any render cache. *)
+
 type entry = {
   style : style;
   timestamp : string;
   role_label : string;
   request_label : string;
   body : string;
+  markdown_source : markdown_source;
 }
 
 type metadata =
@@ -132,7 +147,7 @@ val wrap_body :
     word wrap would ruin. *)
 
 val visible_rows :
-  ?markdown:(width:int -> string -> string list) ->
+  ?markdown:(entry:entry -> width:int -> string list) ->
   inner_width:int ->
   height:int ->
   entry list ->
@@ -140,14 +155,16 @@ val visible_rows :
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
     the newest rows. The newest entry always keeps its metadata row.
 
-    [markdown] renders one body into rows already wrapped to the width it is
-    given. Supplied by the caller so this module keeps no terminal vocabulary;
-    omitted, a body is wrapped as the plain text it always was. Every scroll
-    function takes the same argument, and passing it to one but not another
-    would measure the pane against a different height than it draws. *)
+    [markdown] renders one entry into rows already wrapped to the width it is
+    given. The whole entry is supplied so a caller can distinguish stable
+    history from a growing live source without parsing display text. Supplied
+    by the caller so this module keeps no terminal vocabulary; omitted, a body
+    is wrapped as the plain text it always was. Every scroll function takes the
+    same argument, and passing it to one but not another would measure the pane
+    against a different height than it draws. *)
 
 val total_rows :
-  ?markdown:(width:int -> string -> string list) ->
+  ?markdown:(entry:entry -> width:int -> string list) ->
   inner_width:int ->
   entry list ->
   int
@@ -155,7 +172,7 @@ val total_rows :
     position is measured against. *)
 
 val scrolled_rows :
-  ?markdown:(width:int -> string -> string list) ->
+  ?markdown:(entry:entry -> width:int -> string list) ->
   inner_width:int ->
   height:int ->
   from_bottom:int ->
@@ -169,7 +186,7 @@ val scrolled_rows :
     back, every row is already whole, and the window is a plain slice. *)
 
 val clamp_scroll :
-  ?markdown:(width:int -> string -> string list) ->
+  ?markdown:(entry:entry -> width:int -> string list) ->
   inner_width:int ->
   height:int ->
   int ->
@@ -180,8 +197,22 @@ val clamp_scroll :
     ...)]. It reads only as far back as the answer depends on, so a pane that
     is not scrolled does not pay for the whole conversation on every frame. *)
 
+val clamped_scrolled_rows :
+  ?markdown:(entry:entry -> width:int -> string list) ->
+  inner_width:int ->
+  height:int ->
+  requested:int ->
+  entry list ->
+  int * row list
+(** Clamp [requested] and return that window together.
+
+    A positive scroll position is measured and sliced from one newest-to-oldest
+    layout pass. Calling {!clamp_scroll} and then {!scrolled_rows} separately
+    is still available to independent callers, but a frame that needs both
+    should use this function so the same entry is not rendered twice. *)
+
 val max_scroll :
-  ?markdown:(width:int -> string -> string list) ->
+  ?markdown:(entry:entry -> width:int -> string list) ->
   inner_width:int ->
   height:int ->
   entry list ->

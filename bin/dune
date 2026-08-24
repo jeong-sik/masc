@@ -318,6 +318,11 @@
  (libraries uucp uuseg))
 
 (library
+ (name masc_tui_markdown_render_cache)
+ (wrapped false)
+ (modules masc_tui_markdown_render_cache))
+
+(library
  (name masc_tui_send_disposition)
  (wrapped false)
  (modules masc_tui_send_disposition))
@@ -513,6 +518,7 @@
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_graphics
+  masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
   masc_tui_paste_spill

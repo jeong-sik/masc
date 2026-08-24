@@ -277,7 +277,7 @@ let test_operator_approvals_use_current_contract () =
      the renderer. A failed transport read needs no projection of its own; it
      reaches the operator through the Recent Events row the surface error
      already writes. *)
-  check int "overview event text crosses the terminal boundary" 7
+  check int "overview event text crosses the terminal boundary" 5
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_overview"
@@ -673,9 +673,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
+  (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
+     wait moved with it. The contract did not: whichever binding blocks for
+     input owns the deadline, and EINTR has to come back as a retry rather
+     than as end of input. *)
   check bool "interrupted input uses the deadline-aware retry contract" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"read_byte_unix"
+       ~binding_name:"refill_input_reader"
        ~callee:"Render_schedule.Input_wait.await"
      = 1);
   check int "surface renderers perform no direct stdout writes" 0
@@ -1116,8 +1120,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ov_project"
     ; "ai_summary"
     ; "content"
-    ; "th_primary_path"
-    ; "th_queue_pressure"
+      (* [th_primary_path] and [th_queue_pressure] left this list because they
+         left the category. Both are closed variants now, rendered through
+         [Transport_metrics.*_kind_to_string], so the renderer has no arbitrary
+         text to sanitize -- the type removed what the sanitizer was for. Asking
+         for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   check_fields "render_approvals"
@@ -1154,7 +1161,14 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  check_fields "keeper_detail_pane"
+  (* [String.equal] is named here for the same reason [Board_detail.view_for]
+     is above: the guard counts a field reference that is not inside one of
+     these calls, and #30219 compares the pane's keeper against the stamp on a
+     cached answer so one keeper's live context cannot be drawn under
+     another's name. A comparison reaches no terminal, so there is nothing for
+     a sanitiser to do -- and asking for one would be asking the pane to
+     compare sanitised text against raw text, which is a different string. *)
+  check_fields ~non_rendering_calls:[ "String.equal" ] "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
     ; "live_context_error"

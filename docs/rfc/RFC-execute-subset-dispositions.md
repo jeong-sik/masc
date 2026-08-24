@@ -319,6 +319,35 @@ what the gate would have said        what the caller should have called
       4  subshell
 ```
 
+Live traffic says something different, and the difference is the point.
+`shell_costume` records from `<base-path>/.masc/logs/`, 531 of them on
+2026-08-24:
+
+```
+   314  command_separator      12  subshell         2  arith_expansion
+   153  representable           6  redirect         1  proc_subst
+    38  cmd_subst               4  heredoc          1  here_string
+```
+
+The corpus and the tap disagree about which construct dominates: `;` is 16% of
+recorded costumes over 24 days and 59% of live ones. An earlier reading of 27
+records put `subshell` at 44%; at 531 it is 2%, so that one was sample noise
+and this note keeps both numbers rather than only the one that survived.
+
+Two things follow for the staging below.
+
+The flip covers less than the corpus suggested. `representable` is 29% of live
+escapes, not 76%, so §3.7 step 4 buys the boundary for roughly a third of them
+rather than three quarters. It is still the largest thing the gate can take
+without refusing anything, and it is still worth doing; it is not the whole
+problem.
+
+And the largest live category is the one the IR refuses on purpose. `;` means
+"run the next thing whether or not the last one worked", and
+`Shell_ir.connector` omits it deliberately. Six of every ten escapes are
+someone reaching for exactly that. The rewrite that names `&&` is therefore
+doing more work than the flip is, which inverts the order the corpus implied.
+
 Two entries of the first draft do not survive it.
 
 **`glob_brace` is zero.** The 284 this RFC first quoted counted argv that

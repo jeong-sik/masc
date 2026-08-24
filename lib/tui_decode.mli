@@ -289,7 +289,6 @@ val keeper_health_to_string : keeper_health -> string
 
 type keeper_runtime = {
   kr_name : string;
-  kr_status : Keeper_status_runtime.surface_status;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -306,11 +305,6 @@ type keeper_runtime = {
     field here: [kr_phase] is the lifecycle cell, [kr_health] is whether the
     keeper is reporting on time, [kr_paused] is whether a person stopped it,
     and [kr_next_action] is what the runtime derived to do about it.
-
-    [kr_status] is a fifth field that re-answers [kr_health] with [stale],
-    [degraded] and [zombie] folded into one word. It is kept only until the
-    surfaces stop reading it; a caller wanting health should read
-    [kr_health].
 
     [kr_next_action] is [None] when the runtime named no action, which is not
     the same as naming one that means "nothing to do". *)

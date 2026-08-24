@@ -277,6 +277,7 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
                 ("name", `String keeper_name);
                 ("agent_name", `String keeper_name);
                 ("status", `String "offline");
+                ("diagnostic", `Assoc [ ("health_state", `String "offline") ]);
                 ("updated_at", `String (Masc_domain.now_iso ()));
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
@@ -401,6 +402,7 @@ let test_dashboard_keeper_unknown_context_is_informational () =
             ("name", `String name);
             ("agent_name", `String name);
             ("status", `String "active");
+            ("diagnostic", `Assoc [ ("health_state", `String "healthy") ]);
             ("updated_at", `String updated_at);
             ("context_ratio", context_ratio);
             ( "context_metrics_unavailable",
@@ -542,11 +544,11 @@ let test_pressure_rank_orders_by_surface_status () =
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Workspace_utils.default_config dir in
       let updated_at = Masc_domain.now_iso () in
-      let row name status =
+      let row name health =
         `Assoc
           [ ("name", `String name)
           ; ("agent_name", `String name)
-          ; ("status", `String status)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
           ; ("updated_at", `String updated_at)
           ; ("latest_tool_names", `List [])
           ]
@@ -556,13 +558,17 @@ let test_pressure_rank_orders_by_surface_status () =
         Dashboard_briefing_assembly.build_keeper_briefs config rows
         |> List.map (fun row -> row |> member "name" |> to_string)
       in
+      (* Ranked by health. The status word this used to read spelled stale,
+         degraded and zombie all "inactive", so a keeper with a late heartbeat
+         sorted level with one whose fiber had died. *)
       Alcotest.(check (list string))
-        "offline and inactive outrank idle, which outranks active"
-        [ "k-inactive"; "k-offline"; "k-idle"; "k-active" ]
+        "zombie and offline outrank idle, which outranks healthy"
+        [ "k-zombie"; "k-offline"; "k-idle"; "k-healthy"; "k-stale" ]
         (names
-           [ row "k-active" "active"
+           [ row "k-healthy" "healthy"
            ; row "k-idle" "idle"
-           ; row "k-inactive" "inactive"
+           ; row "k-stale" "stale"
+           ; row "k-zombie" "zombie"
            ; row "k-offline" "offline"
            ]))
 ;;
@@ -596,7 +602,7 @@ let () =
             test_dashboard_keeper_unknown_context_is_informational;
           Alcotest.test_case "internal signals rank critical above bad" `Quick
             test_internal_signals_rank_critical_above_bad;
-          Alcotest.test_case "pressure rank orders by surface status" `Quick
+          Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;

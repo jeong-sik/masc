@@ -94,25 +94,10 @@ let liveness_of_roster roster name =
       | None -> Absent)
 
 
-let display_status reading =
-  match reading.liveness with
-  | Unobserved -> None
-  | Absent ->
-      (* The roster answered and left this keeper out, so no fiber is running
-         it. Pause still shows through: an operator who paused a keeper and
-         then stopped it should read "paused", not "offline", or the resume
-         the boot needs looks unnecessary. *)
-      if reading.paused then Some Status.Cp_paused
-      else Some (Status.Cp_surface Status.Surface_offline)
-  | Present runtime ->
-      if reading.paused then Some Status.Cp_paused
-      else Some (Status.Cp_surface runtime.Decode.kr_status)
-
-(* One keeper, four separate readings. [display_status] answers with one word
-   because operator pause overrides the surface status inside it, which loses
-   the health of a paused keeper: a keeper stopped by a person and a keeper
-   whose fiber died read the same. These accessors answer one axis each, and
-   nothing here folds one into another.
+(* One keeper, four separate readings, one accessor each. Nothing here folds
+   one axis into another: the function this replaced let operator pause
+   overwrite the surface status, so a keeper a person stopped and a keeper
+   whose fiber died read the same word.
 
    [None] everywhere means the roster was not read for this keeper - a fact
    about the reading, not a state the keeper is in. *)
@@ -126,15 +111,15 @@ let next_action reading =
   | Unobserved | Absent -> None
   | Present runtime -> runtime.Decode.kr_next_action
 
+(* Three outcomes, not two. A roster that was never read and a roster that
+   answered without this keeper are different facts: the first says nothing
+   about the keeper, the second says no fiber is running it. Spelling both
+   "unread" would fold a reading into the absence of one. *)
 let health_label reading =
-  match health reading with
-  | None -> "unread"
-  | Some value -> Decode.keeper_health_to_string value
-
-let status_label reading =
-  match display_status reading with
-  | None -> "unread"
-  | Some status -> Status.control_plane_status_to_string status
+  match reading.liveness with
+  | Unobserved -> "unread"
+  | Absent -> "absent"
+  | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
 
 (* The roster header's tally, counted with the same function that labels the
    status column so the header and the column cannot disagree. They did: the

@@ -23,8 +23,6 @@ let test_of_string_known () =
       (K.surface_status_of_string_opt label = Some ctor)
   in
   one "active" K.Surface_active;
-  one "busy" K.Surface_busy;
-  one "listening" K.Surface_listening;
   one "inactive" K.Surface_inactive;
   one "offline" K.Surface_offline;
   one "idle" K.Surface_idle;
@@ -50,8 +48,6 @@ let test_to_string_inverse () =
         = Some ctor))
     [
       K.Surface_active;
-      K.Surface_busy;
-      K.Surface_listening;
       K.Surface_inactive;
       K.Surface_offline;
       K.Surface_idle;

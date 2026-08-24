@@ -7,6 +7,14 @@ import type {
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
+import {
+  LaneAgeAxis,
+  LaneWaitingRow,
+  ageMinutes,
+  boundedCount,
+  DAY_MINUTES,
+  waitingRowsOldestFirst,
+} from '../keeper-workspace/keeper-lane-strip'
 
 // Exported for the keeper workspace lane strip (#23507): the lane
 // state/source palettes stay single-sourced here instead of growing a
@@ -14,12 +22,6 @@ import { StatusChip, type StatusChipTone } from '../common/status-chip'
 export function enumLabel(value: string | null | undefined): string {
   if (!value) return '-'
   return value.replace(/_/g, ' ')
-}
-
-function evidenceLabel(value: string | null | undefined, missingLabel: string): string {
-  if (!value) return missingLabel
-  const trimmed = value.trim()
-  return trimmed ? enumLabel(trimmed) : missingLabel
 }
 
 export function stateTone(state: string | null | undefined): StatusChipTone {
@@ -90,86 +92,55 @@ function SourceCounts({ counts }: { counts: Record<string, number> | null | unde
   `
 }
 
-function asDetailRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function WaitingRowOperationDetail({ row }: { row: DashboardKeeperWaitingRow }) {
-  const detail = asDetailRecord(row.detail)
-  const operationId = typeof detail?.operation_id === 'string' ? detail.operation_id : null
-  const queuedCount = typeof detail?.queued_count === 'number' ? detail.queued_count : null
-  if (!operationId && queuedCount === null) return null
+/** The shared V2 waiting-row block (#29473): rows oldest first on a log age
+ *  axis, each row the server's operator sentence (`what`) with the raw wire
+ *  vocabulary behind the 기술 상세 toggle. Reused by the keeper workspace
+ *  lane strip and the fleet surfaces so both draw the same row component.
+ *  No client-side cap: the server's own truncation flag is the only bound. */
+function LaneRows({ rows, dev }: { rows: DashboardKeeperWaitingRow[]; dev: boolean }) {
+  const sorted = waitingRowsOldestFirst(rows)
+  const nowMs = Date.now()
+  const ages = sorted.map(row => ageMinutes(row, nowMs))
+  const axisMax = Math.max(DAY_MINUTES, ...ages.filter((age): age is number => age != null))
+  if (sorted.length === 0) return null
   return html`
-    <div
-      class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
-      data-keeper-chat-operation=${operationId ?? ''}
-    >
-      ${operationId ? html`<span class="min-w-0 break-all font-mono">operation ${operationId}</span>` : null}
-      ${queuedCount === null ? null : html`<span class="font-mono">queued ${queuedCount}</span>`}
-    </div>
-  `
-}
-
-function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
-  if (row.source !== 'owner_shutdown') return null
-  const detail = asDetailRecord(row.detail)
-  const operationId = typeof detail?.shutdown_operation_id === 'string'
-    ? detail.shutdown_operation_id.trim()
-    : ''
-  if (!operationId) return null
-  const admissionFenced = detail?.admission_fenced === true
-  return html`
-    <div
-      class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
-      data-keeper-shutdown-operation-id=${operationId}
-    >
-      <span class="min-w-0 break-all font-mono">shutdown operation ${operationId}</span>
-      ${admissionFenced ? html`<span>admission fenced</span>` : null}
-    </div>
-  `
-}
-
-function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
-  const wakeProducer = evidenceLabel(row.wake_producer, 'wake producer missing')
-  const nextAction = evidenceLabel(row.next_action, 'next action missing')
-  return html`
-    <div class="grid gap-1 border-t border-[var(--color-border-subtle)] py-2 first:border-t-0">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <${StatusChip} tone=${sourceTone(row.source)} uppercase=${false}>${enumLabel(row.source)}<//>
-        <span class="min-w-0 truncate font-mono text-xs text-[var(--color-fg-primary)]">${row.waiting_on}</span>
+    <div class="grid gap-1">
+      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
+      <${LaneAgeAxis} axisMax=${axisMax} />
+      <div class="grid max-h-[30rem] gap-1 overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 나이순 작업 흐름">
+        ${sorted.map((row, index) => html`
+          <${LaneWaitingRow}
+            key=${`${row.source}:${row.waiting_on}:${index}`}
+            row=${row}
+            age=${ages[index] ?? null}
+            axisMax=${axisMax}
+            dev=${dev}
+            actions=${null}
+          />
+        `)}
       </div>
-      <div class="grid gap-1 text-2xs text-[var(--color-fg-muted)] sm:grid-cols-4">
-        <span>since ${timeLabel(row.since_iso)}</span>
-        <span>due ${timeLabel(row.due_at_iso)}</span>
-        <span class="font-mono">producer ${wakeProducer}</span>
-        <span class="font-mono">${nextAction}</span>
-      </div>
-      <${WaitingRowOperationDetail} row=${row} />
-      <${WaitingRowShutdownDetail} row=${row} />
     </div>
   `
 }
 
-function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const [expanded, setExpanded] = useState(false)
-  const allRows = keeper.waiting_on ?? []
-  const rows = expanded ? allRows : allRows.slice(0, 4)
+function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev: boolean }) {
+  const rows = keeper.waiting_on ?? []
+  const waitingCount = keeper.waiting_count ?? 0
+  const countTruncated = keeper.waiting_count_truncated === true
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
   return html`
-    <div class="border-t border-[var(--color-border-subtle)] py-3 first:border-t-0">
+    <div class="border-t border-[var(--color-border-subtle)] py-3 first:border-t-0" data-keeper-lane=${keeper.keeper_name}>
       <div class="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           <span class="min-w-0 truncate font-mono text-sm text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
           <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
         </div>
-        <span class="text-2xs text-[var(--color-fg-muted)]">${keeper.waiting_count.toLocaleString()} rows</span>
+        <span class="text-2xs text-[var(--color-fg-muted)]">${boundedCount(waitingCount, countTruncated)} rows</span>
       </div>
       <${SourceCounts} counts=${keeper.sources} />
-      ${keeper.waiting_count_truncated
+      ${countTruncated
         ? html`
             <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
               truncated ${truncatedSources.length > 0 ? truncatedSources.join(', ') : 'waiting rows'}
@@ -177,15 +148,7 @@ function KeeperRow({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
           `
         : null}
       <div class="mt-2">
-        ${rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
-        ${allRows.length > rows.length
-          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-waiting-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
-          : expanded && allRows.length > 4
-            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-waiting-rows>접기</button>`
-          : null}
-        ${keeper.waiting_count > allRows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
-          : null}
+        <${LaneRows} rows=${rows} dev=${dev} />
       </div>
     </div>
   `
@@ -200,13 +163,12 @@ export function KeeperWaitingInventoryPanel({
 }: {
   inventory: DashboardKeeperWaitingInventory | null | undefined
 }) {
+  const [dev, setDev] = useState(false)
   if (!inventory) {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">waiting inventory unavailable</div>`
   }
-  const activeKeepers = (inventory.keepers ?? [])
-    .filter(keeperVisible)
-    .slice(0, 8)
-  const globalRows = (inventory.global_waiting_on ?? []).slice(0, 4)
+  const activeKeepers = (inventory.keepers ?? []).filter(keeperVisible)
+  const globalRows = inventory.global_waiting_on ?? []
   const keeperCount =
     inventory.keeper_count_known === false ? 'unknown' : inventory.keeper_count
   const pendingConfirmCount =
@@ -225,16 +187,24 @@ export function KeeperWaitingInventoryPanel({
         ${inventory.row_count_truncated
           ? html`<${CountPill} label="truncated keepers" value=${truncatedKeeperCount} />`
           : null}
+        <button
+          type="button"
+          class=${`ml-auto rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-normal ${dev ? 'border-[var(--color-accent)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+          aria-pressed=${dev}
+          title="내부 식별자 · 원본 필드 표시"
+          data-testid="keeper-lane-dev-toggle"
+          onClick=${() => setDev(current => !current)}
+        >기술 상세</button>
       </div>
       <${SourceCounts} counts=${inventory.source_counts} />
       ${activeKeepers.length > 0
-        ? html`<div>${activeKeepers.map(keeper => html`<${KeeperRow} key=${keeper.keeper_name} keeper=${keeper} />`)}</div>`
+        ? html`<div>${activeKeepers.map(keeper => html`<${KeeperRow} key=${keeper.keeper_name} keeper=${keeper} dev=${dev} />`)}</div>`
         : html`<div class="text-xs text-[var(--color-fg-muted)]">no keeper-specific waiting rows</div>`}
       ${globalRows.length > 0
         ? html`
             <div class="border-t border-[var(--color-border-subtle)] pt-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global waiting</div>
-              ${globalRows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
+              <${LaneRows} rows=${globalRows} dev=${dev} />
             </div>
           `
         : null}
@@ -262,10 +232,10 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
   ].join(' · ')
 }
 
-function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) {
-  const [expanded, setExpanded] = useState(false)
-  const allRows = keeper.waiting_on ?? []
-  const rows = expanded ? allRows : allRows.slice(0, 6)
+function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev: boolean }) {
+  const rows = keeper.waiting_on ?? []
+  const waitingCount = keeper.waiting_count ?? 0
+  const countTruncated = keeper.waiting_count_truncated === true
   const truncatedSources = Object.entries(keeper.truncated_sources ?? {})
     .filter(([, truncated]) => truncated)
     .map(([source]) => enumLabel(source))
@@ -288,7 +258,7 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
           </div>
         </div>
         <div class="text-right text-2xs text-[var(--color-fg-muted)]">
-          <div><span class="font-mono text-[var(--color-fg-primary)]">${keeper.waiting_count.toLocaleString()}</span> lane rows</div>
+          <div><span class="font-mono text-[var(--color-fg-primary)]">${boundedCount(waitingCount, countTruncated)}</span> lane rows</div>
           ${Object.keys(keeper.source_next_actions ?? {}).length > 0
             ? html`<div class="font-mono">source별 next action</div>`
             : html`<div class="font-mono text-[var(--color-status-warn)]">source actions unavailable</div>`}
@@ -297,7 +267,7 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
       <div class="mt-2">
         <${SourceCounts} counts=${keeper.sources} />
       </div>
-      ${keeper.waiting_count_truncated
+      ${countTruncated
         ? html`
             <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
               truncated ${truncatedSources.length > 0 ? truncatedSources.join(', ') : 'waiting rows'}
@@ -306,16 +276,8 @@ function LaneEvidenceCard({ keeper }: { keeper: DashboardKeeperWaitingKeeper }) 
         : null}
       <div class="mt-2">
         ${rows.length > 0
-          ? rows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)
+          ? html`<${LaneRows} rows=${rows} dev=${dev} />`
           : html`<div class="border-t border-[var(--color-border-subtle)] pt-2 text-xs text-[var(--color-fg-muted)]">no keeper-specific waiting rows</div>`}
-        ${allRows.length > rows.length
-          ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(true)} data-expand-lane-rows>+${allRows.length - rows.length} more · 전체 보기</button>`
-          : expanded && allRows.length > 6
-            ? html`<button type="button" class="pt-1 text-2xs font-medium text-[var(--color-accent-fg)]" onClick=${() => setExpanded(false)} data-collapse-lane-rows>접기</button>`
-          : null}
-        ${keeper.waiting_count > allRows.length
-          ? html`<div class="pt-1 text-2xs text-[var(--color-status-warn)]">서버 projection에서 ${keeper.waiting_count - allRows.length}행이 추가로 생략되었습니다.</div>`
-          : null}
       </div>
     </article>
   `
@@ -326,11 +288,12 @@ export function KeeperLaneInventoryPanel({
 }: {
   inventory: DashboardKeeperWaitingInventory | null | undefined
 }) {
+  const [dev, setDev] = useState(false)
   if (!inventory) {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">keeper lane evidence unavailable</div>`
   }
   const lanes = inventory.keepers ?? []
-  const globalRows = (inventory.global_waiting_on ?? []).slice(0, 6)
+  const globalRows = inventory.global_waiting_on ?? []
   const keeperCount =
     inventory.keeper_count_known === false ? 'unknown' : inventory.keeper_count
   const pendingConfirmCount =
@@ -345,10 +308,18 @@ export function KeeperLaneInventoryPanel({
         <${CountPill} label="lane rows" value=${inventory.row_count} />
         <${CountPill} label="global rows" value=${inventory.global_row_count ?? 0} />
         <${CountPill} label="unmapped confirms" value=${pendingConfirmCount} />
+        <button
+          type="button"
+          class=${`ml-auto rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-normal ${dev ? 'border-[var(--color-accent)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'}`}
+          aria-pressed=${dev}
+          title="내부 식별자 · 원본 필드 표시"
+          data-testid="keeper-lane-dev-toggle"
+          onClick=${() => setDev(current => !current)}
+        >기술 상세</button>
       </div>
       <${SourceCounts} counts=${inventory.source_counts} />
       ${lanes.length > 0
-        ? html`<div class="grid gap-2 lg:grid-cols-2">${lanes.map(keeper => html`<${LaneEvidenceCard} key=${keeper.keeper_name} keeper=${keeper} />`)}</div>`
+        ? html`<div class="grid gap-2 lg:grid-cols-2">${lanes.map(keeper => html`<${LaneEvidenceCard} key=${keeper.keeper_name} keeper=${keeper} dev=${dev} />`)}</div>`
         : html`<div class="text-xs text-[var(--color-fg-muted)]">no keeper lane rows in projection</div>`}
       ${inventory.row_count_truncated
         ? html`
@@ -361,7 +332,7 @@ export function KeeperLaneInventoryPanel({
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global lane evidence</div>
-              ${globalRows.map((row, index) => html`<${WaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />`)}
+              <${LaneRows} rows=${globalRows} dev=${dev} />
             </div>
           `
         : null}

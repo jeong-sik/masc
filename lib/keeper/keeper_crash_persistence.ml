@@ -14,7 +14,9 @@ let store_mu = Eio.Mutex.create ()
 
 let crash_store ~keepers_dir name =
   let dir =
-    Filename.concat (Filename.concat keepers_dir name) "crash-events"
+    Filename.concat
+      (Filename.concat keepers_dir name)
+      (Common.keeper_runtime_store_dirname Common.Keeper_crash_events)
   in
   Eio_guard.with_mutex store_mu (fun () ->
     match Hashtbl.find_opt store_cache dir with

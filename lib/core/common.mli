@@ -58,9 +58,39 @@ type keeper_runtime_store =
   | Keeper_turn_records
   | Keeper_reaction_ledger
   | Keeper_trajectories
+  | Keeper_crash_events
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
+val keeper_runtime_store_dirname : keeper_runtime_store -> string
+val keeper_runtime_stores : keeper_runtime_store list
+
+type keeper_runtime_store_placement =
+  | Keeper_scoped_dated
+      (** [keepers/<name>/<store>/YYYY-MM/DD.jsonl]. Grows without bound, so
+          both the startup pass and the 24h pass prune it by age. *)
+  | Keeper_scoped_versioned
+      (** [keepers/<name>/<store>/v<N>/]. A schema change moves to the next
+          directory and the previous one is simply never read again, which is
+          what a hard cut is supposed to look like. *)
+  | Keeper_scoped_rotated
+      (** [keepers/<name>/<store>/<file>.jsonl] plus numeric rotations. The
+          flat-file pass owns these, not the dated one. *)
+  | Workspace_scoped
+      (** [<masc root>/<store>]: named here for the dirname, but not written
+          under [keepers/]. *)
+
+val keeper_runtime_store_placement
+  :  keeper_runtime_store
+  -> keeper_runtime_store_placement
+(** Where a store puts its files, and therefore which retention pass owns it.
+
+    This exists because the answer used to be a second list of directory names
+    written out in the maintenance pass. turn-records was added to the store
+    table on 2026-07-31 and nobody added it to that list, so it went unpruned
+    for months at roughly 4 MB a day fleet-wide. A store now has to say where
+    it lives, and the match is exhaustive, so the next one cannot be added
+    without answering. *)
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

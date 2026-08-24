@@ -56,6 +56,18 @@ val post_sync :
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
+val post_response_sync :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  unit ->
+  (response, string) result
+(** [post_response_sync] is {!post_sync} with the response headers kept,
+    for a caller that needs one of them -- the MCP transport returns a new
+    session's id in [Mcp-Session-Id], not in the body. *)
+
 val patch_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
@@ -112,6 +124,21 @@ val post_stream :
     delivering bytes. [idle_timeout_sec] bounds silence instead, and is
     required because a tolerable silence depends on the protocol — a keeper
     turn goes quiet for as long as the tool it is running takes. *)
+
+val get_stream :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  (Pool.stream_outcome, string) result
+(** [get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk ()] is
+    {!post_stream} for a GET: one request whose body is a server-sent event
+    stream the caller reads chunk by chunk for as long as it delivers. The
+    observer feed at [GET /mcp?sse_kind=observer] is the case. The same
+    rules apply: no total cap, silence bounded by [idle_timeout_sec], a
+    non-success status comes back [Buffered] with [on_chunk] never called. *)
 
 (** {1 Typed pool surface}
 

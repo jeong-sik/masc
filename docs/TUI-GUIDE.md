@@ -111,6 +111,18 @@ spelled out - a steady queue that drops is not a healthy transport.
 
 This tail is read only while Overview is the current surface.
 
+The same row ends with the runtime event feed: `feed: live 1240` while the
+TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
+has received, `feed: opening` while the MCP session and the subscription are
+being set up, and `feed: closed after N` once the stream has ended (the
+reason is in Recent Events and on the Acting status row) -
+the count stays so a stream that dropped after a thousand events and one that
+never opened do not read alike. The feed is opened after the first refresh
+that reaches the server and reopened on the refresh cadence after it closes;
+both transitions land in Recent Events. Every keeper's tool calls, turn
+boundaries, heartbeats, and turn settlements arrive on it; this build keeps
+the last 1,000 and counts what falls off the end.
+
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
@@ -225,15 +237,22 @@ its own is drawn as what it did, not as a blank line: a `thinking` row with
 the reasoning the server kept and a count of the steps it withheld, then a
 `tools` block with one row per call - the finished glyph for a call that
 returned, `✗` for one that returned an error, `·` for one the trace never
-saw finish, each with its duration - and then whatever the turn said.
+saw finish, `?` for one whose outcome the trace did not record - and then
+whatever the turn said. A call that finished carries its duration, in
+milliseconds as the server records it; a call still open when the trace
+closed has none.
 
 ```
  [21:41:34] thinking
    (2 reasoning steps, content withheld)
  [21:41:34] tools
    ✓ masc_task_history · 32ms
-   ✗ tool_execute · 1.2s
+   ✗ tool_execute · 1200ms
 ```
+
+Only rows the server marks as autonomous turns are read this way. A turn
+in the conversation itself already has its calls in the transcript as tool
+rows, so its trace block is not drawn a second time.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes

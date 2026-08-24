@@ -120,6 +120,22 @@ let append_turn_exchange config keeper_name ts =
     (`Assoc [ "channel", `String "turn"; "ts_unix", `Float ts ])
 ;;
 
+(* One decision-log row wider than the reader's segment head budget
+   (Dashboard_keeper_decision_log_proof.decision_head_max_bytes, 512 KB). The
+   head scan ends inside this row, so every turn row appended after it sits in
+   an unscanned suffix and the earliest turn is never seen. *)
+let head_budget_overflow_bytes = 600 * 1024
+
+let append_unreadable_head_row config keeper_name ts =
+  Masc.Keeper_types_support.append_jsonl_line
+    (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name)
+    (`Assoc
+        [ "channel", `String "heartbeat"
+        ; "ts_unix", `Float ts
+        ; "detail", `String (String.make head_budget_overflow_bytes 'x')
+        ])
+;;
+
 let test_stale_keeper_fails_runtime_liveness () =
   with_workspace
   @@ fun config ->
@@ -252,6 +268,93 @@ let test_stopped_keeper_fails_board_reactive_autonomy () =
     (U.member "status" feature |> U.to_string)
 ;;
 
+(* A keeper whose record will not open did not fail to exercise the feature --
+   it failed to be read. Reporting it under both readings puts one name in two
+   lists that mean opposite things, and every surface drawing the report shows
+   it twice, once as a keeper to go chase and once as a record to go fix. *)
+let corrupt_keeper_record config name =
+  let path = Masc.Keeper_types_profile.keeper_meta_path config name in
+  let out = open_out path in
+  output_string out "{ this is not a keeper record";
+  close_out out
+;;
+
+let read_error_keepers feature =
+  feature
+  |> U.member "keeper_evidence"
+  |> U.member "read_errors"
+  |> U.to_list
+  |> List.map (fun entry -> U.member "keeper" entry |> U.to_string)
+  |> List.sort compare
+;;
+
+let test_unreadable_keeper_is_not_reported_as_missing () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    (list string)
+    "the readable keeper is observed"
+    [ "alive" ]
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "the unreadable one is not blamed for the feature"
+    []
+    (keeper_names feature "missing_keepers");
+  check
+    (list string)
+    "it is reported as a record that would not open"
+    [ "broken" ]
+    (read_error_keepers feature)
+;;
+
+(* Setting the unreadable keeper aside must not promote the fleet. Nothing is
+   known about that keeper, and unknown does not become proven by being moved
+   out of the missing list. *)
+let test_unreadable_keeper_still_blocks_pass () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "runtime_liveness" in
+  check
+    string
+    "a fleet with an unreadable record is not proven"
+    "warn"
+    (U.member "status" feature |> U.to_string)
+;;
+
+(* [scheduled_proactive_autonomy] counted its read errors over the keepers it
+   had already filtered to proactive-enabled, which a keeper with no readable
+   meta can never reach. The field could only ever be empty, which reads as
+   "every record opened". *)
+let test_scheduled_proactive_reports_unreadable_records () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"alive" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"broken" ~last_turn_ts:(now -. hour_seconds) ();
+  corrupt_keeper_record config "broken";
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "scheduled_proactive_autonomy" in
+  check
+    (list string)
+    "the unreadable record is named here too"
+    [ "broken" ]
+    (read_error_keepers feature);
+  check
+    bool
+    "and it keeps the feature off pass"
+    false
+    (U.member "status" feature |> U.to_string = "pass")
+;;
+
 let test_persistence_duration_tiers_use_durable_turn_history () =
   with_workspace
   @@ fun config ->
@@ -303,6 +406,96 @@ let test_persistence_duration_tiers_reject_future_turns () =
     [ "1h"; "2h"; "4h"; "24h" ]
 ;;
 
+(* A keeper whose earliest turn row the head scan never reached has not failed
+   to persist turns: the reader stopped first. Reporting it beside keepers that
+   genuinely have no durable span blames a keeper for a reader budget, and the
+   distinction already exists - [first_ts_origin] publishes "scan_exhausted" -
+   so the report was discarding an answer it had. *)
+let test_unreached_history_is_not_a_missing_keeper () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"readable" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"unread" ~last_turn_ts:(now -. hour_seconds) ();
+  append_turn_exchange config "readable" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "readable" now;
+  append_unreadable_head_row config "unread" (now -. (30.0 *. hour_seconds));
+  append_turn_exchange config "unread" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "unread" now;
+  let feature =
+    Feature_proof.json ~config ~now ()
+    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  in
+  check
+    (list string)
+    "the keeper with a readable span is the only one observed"
+    [ "readable" ]
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "an unreached history is not blamed for the feature"
+    []
+    (keeper_names feature "missing_keepers");
+  check
+    (list string)
+    "an unreached history is named as undetermined"
+    [ "unread" ]
+    (keeper_names feature "undetermined_keepers");
+  check string "one proven and one unknown is partial" "warn" U.(member "status" feature |> to_string);
+  let tier_24h = duration_tier feature "24h" in
+  check int "24h tier counts the unread keeper apart" 1 U.(member "undetermined_count" tier_24h |> to_int);
+  check int "24h tier blames nobody" 0 U.(member "missing_count" tier_24h |> to_int)
+;;
+
+(* Fail says nobody met the span. With every keeper unread the report does not
+   know that, and stating it turns a reader limit into a fleet-wide verdict. *)
+let test_unreached_history_alone_does_not_read_as_failure () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"unread" ~last_turn_ts:(now -. hour_seconds) ();
+  append_unreadable_head_row config "unread" (now -. (30.0 *. hour_seconds));
+  append_turn_exchange config "unread" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "unread" now;
+  let feature =
+    Feature_proof.json ~config ~now ()
+    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  in
+  check string "an entirely unread fleet is not a failed one" "warn" U.(member "status" feature |> to_string);
+  check
+    (list string)
+    "nothing is observed either"
+    []
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "and nothing is called missing"
+    []
+    (keeper_names feature "missing_keepers")
+;;
+
+(* Control: a keeper with no turn rows at all is readable and genuinely has no
+   span, so it stays in [missing]. Without this, moving every unproven keeper
+   out of [missing] would look like the same change. *)
+let test_readable_history_without_turns_is_still_missing () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"silent" ~last_turn_ts:(now -. hour_seconds) ();
+  let feature =
+    Feature_proof.json ~config ~now ()
+    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  in
+  check
+    (list string)
+    "a readable history with no turns is a missing span"
+    [ "silent" ]
+    (keeper_names feature "missing_keepers");
+  check
+    (list string)
+    "and is not filed as undetermined"
+    []
+    (keeper_names feature "undetermined_keepers");
+  check string "a keeper that never persisted a turn still fails" "fail" U.(member "status" feature |> to_string)
+;;
+
 let () =
   run
     "dashboard_keeper_feature_proof"
@@ -313,6 +506,20 @@ let () =
             "keeper without turns fails"
             `Quick
             test_keeper_without_turns_fails_runtime_liveness
+        ] )
+    ; ( "unreadable_is_not_missing"
+      , [ test_case
+            "an unreadable record is not a missing keeper"
+            `Quick
+            test_unreadable_keeper_is_not_reported_as_missing
+        ; test_case
+            "and it still keeps the feature off pass"
+            `Quick
+            test_unreadable_keeper_still_blocks_pass
+        ; test_case
+            "scheduled proactive reports it too"
+            `Quick
+            test_scheduled_proactive_reports_unreadable_records
         ] )
     ; ( "counter_features_are_dated"
       , [ test_case
@@ -333,6 +540,20 @@ let () =
             "future timestamps cannot prove a duration tier"
             `Quick
             test_persistence_duration_tiers_reject_future_turns
+        ] )
+    ; ( "unreached_history_is_not_missing"
+      , [ test_case
+            "an unreached history is undetermined, not missing"
+            `Quick
+            test_unreached_history_is_not_a_missing_keeper
+        ; test_case
+            "an entirely unreached fleet is not a failure"
+            `Quick
+            test_unreached_history_alone_does_not_read_as_failure
+        ; test_case
+            "control: a readable history without turns stays missing"
+            `Quick
+            test_readable_history_without_turns_is_still_missing
         ] )
     ]
 ;;

@@ -118,6 +118,15 @@ let render_chat_row buf cols (row : Message_layout.row) =
          block's own colour, so where one block ends and the next begins
          reads at a glance instead of from the headings alone. *)
       let text = row.text in
+      let dress rest =
+        (* A pasted URL reads as a link, not prose. Closed by restoring the
+           row's own style — a bare reset would strip it from everything
+           after the link. *)
+        Masc_tui_message_layout.dress_bare_links
+          ~open_style:(Ansi.underline ^ Ansi.blue)
+          ~close_style:(Ansi.reset ^ chat_body_style row.style)
+          rest
+      in
       if
         String.length text >= 2 && Char.equal text.[0] ' '
         && Char.equal text.[1] ' '
@@ -126,8 +135,10 @@ let render_chat_row buf cols (row : Message_layout.row) =
         box_line buf cols
           (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
              (chat_origin_style row.style) Ansi.reset
-             (chat_body_style row.style) rest Ansi.reset))
-      else box_line_styled buf cols ~style:(chat_body_style row.style) text
+             (chat_body_style row.style) (dress rest) Ansi.reset))
+      else
+        box_line_styled buf cols ~style:(chat_body_style row.style)
+          (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
         (Printf.sprintf "[%s]" timestamp)
@@ -2861,12 +2872,19 @@ let render_keeper_message (state : state) =
      | Some live ->
          List.iter
            (fun (kind, text) ->
-             let style =
-               match kind with
-               | Keeper_chat_transcript.Progress -> Ansi.dim
-               | Keeper_chat_transcript.Attention -> Ansi.yellow
+             (* The streaming turn is the row the eye waits on: drawn in the
+                accent rather than dimmed, behind a spinner stepped from the
+                clock so consecutive frames visibly move. *)
+             let spinner =
+               let glyphs = [| "\xe2\xa0\x8b"; "\xe2\xa0\x99"; "\xe2\xa0\xb8"; "\xe2\xa0\xb4" |] in
+               glyphs.(int_of_float (Unix.gettimeofday ()) mod 4)
              in
-             box_line_styled buf cols ~style ("  " ^ text))
+             (match kind with
+              | Keeper_chat_transcript.Progress ->
+                  box_line_styled buf cols ~style:Ansi.cyan
+                    ("  " ^ spinner ^ " " ^ text)
+              | Keeper_chat_transcript.Attention ->
+                  box_line_styled buf cols ~style:Ansi.yellow ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
     if not target_registered then begin

@@ -2697,6 +2697,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_palette_matching)
+ (modules test_tui_palette_matching)
+ (libraries alcotest masc_tui_types))
+
+(test
  (name test_tui_acting)
  (modules test_tui_acting)
  (libraries alcotest masc_tui_acting masc_tui_observer))

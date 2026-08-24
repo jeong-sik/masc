@@ -1226,6 +1226,13 @@ def run_terminal_scenario(
                 environment = os.environ.copy()
                 environment.pop("LINES", None)
                 environment.pop("COLUMNS", None)
+                # Same reason as LINES/COLUMNS: the terminal the assertions
+                # describe is the harness's, not the shell's. A developer with
+                # NO_COLOR set would run this suite against a TUI drawing no
+                # colour at all, and pass or fail on a variable nobody chose
+                # here. Both directions leave, so neither shell decides.
+                environment.pop("NO_COLOR", None)
+                environment.pop("MASC_TUI_FORCE_COLOR", None)
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,

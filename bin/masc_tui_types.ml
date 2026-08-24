@@ -525,6 +525,12 @@ type state = {
   mutable palette_open: bool;
   mutable palette_query: string;
   mutable palette_cursor: int;
+  (* [/] on the roster: a search that moves the cursor, not a filter that
+     subsets the list -- every action reads the same [keepers] the rows
+     draw, so nothing can act on a hidden row. [Some q] while typing;
+     [roster_search_last] feeds n/N after Enter. *)
+  mutable roster_search: string option;
+  mutable roster_search_last: string;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -848,6 +854,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
+  roster_search = None;
+  roster_search_last = "";
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;
@@ -1204,10 +1212,34 @@ let palette_entries (state : state) =
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
       state.keepers
 
+(* Subsequence match: every query character appears in order. "kadm" finds
+   "keeper adm-race". *)
+let palette_subsequence ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let hl = String.length h and nl = String.length needle in
+  let rec walk hi ni =
+    if ni >= nl then true
+    else if hi >= hl then false
+    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else walk (hi + 1) ni
+  in
+  walk 0 0
+
 let palette_matches (state : state) =
   let needle =
     String.lowercase_ascii (String.trim state.palette_query)
   in
-  List.filter
-    (fun (label, _) -> palette_contains ~needle label)
-    (palette_entries state)
+  let entries = palette_entries state in
+  (* Substring hits rank above subsequence-only hits, both keep entry
+     order inside their rank. *)
+  let substring_hits =
+    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  in
+  let subsequence_hits =
+    List.filter
+      (fun (label, _) ->
+        (not (palette_contains ~needle label))
+        && palette_subsequence ~needle label)
+      entries
+  in
+  substring_hits @ subsequence_hits

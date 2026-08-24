@@ -6,35 +6,51 @@ module Ansi = struct
   let hide_cursor = "\027[?25l"
   let show_cursor = "\027[?25h"
 
-  (* Colors *)
+  (* no-color.org: a non-empty NO_COLOR suppresses styling. Structure --
+     borders, markers, reverse-video selection -- stays, because it carries
+     meaning colour only repeats. MASC_TUI_FORCE_COLOR=1 overrides for a
+     pipeline that strips the variable it wants. *)
+  let colors_enabled =
+    match Sys.getenv_opt "MASC_TUI_FORCE_COLOR" with
+    | Some "1" -> true
+    | Some _ | None ->
+      (match Sys.getenv_opt "NO_COLOR" with
+       | Some value when String.length value > 0 -> false
+       | Some _ | None -> true)
+
+  let style code = if colors_enabled then code else ""
+
+  (* Colors. [reset] stays unconditional: reverse-video survives NO_COLOR,
+     and this is what closes it. *)
   let reset = "\027[0m"
-  let bold = "\027[1m"
-  let dim = "\027[2m"
+  let bold = style "\027[1m"
+  let dim = style "\027[2m"
   (* A third weight between bold and dim. The renderer had only two, so a
      heading and the paragraph under it could differ by nothing an eye reads
      as rank. *)
-  let underline = "\027[4m"
+  let underline = style "\027[4m"
 
-  let red = "\027[31m"
-  let green = "\027[32m"
-  let yellow = "\027[33m"
-  let blue = "\027[34m"
-  let magenta = "\027[35m"
-  let cyan = "\027[36m"
-  let white = "\027[37m"
+  let red = style "\027[31m"
+  let green = style "\027[32m"
+  let yellow = style "\027[33m"
+  let blue = style "\027[34m"
+  let magenta = style "\027[35m"
+  let cyan = style "\027[36m"
+  let white = style "\027[37m"
 
   (* SGR 39 restores the terminal's own text colour. [white] is a colour like
      any other -- on a light background it is the background -- so a fallback
      that means "nothing special about this value" has to say default, not
      white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
      an emphasised run without flattening it. *)
-  let default_fg = "\027[39m"
-  let gray = "\027[90m"
+  let default_fg = style "\027[39m"
+  let gray = style "\027[90m"
 
   (* Cursor movement *)
   let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 
-  (* Reverse video for selection highlight *)
+  (* Reverse video for selection highlight. Kept under NO_COLOR: it is the
+     one selection signal every terminal renders without colour. *)
   let reverse = "\027[7m"
 
   (* Box drawing characters *)

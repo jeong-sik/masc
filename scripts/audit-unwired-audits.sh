@@ -26,7 +26,7 @@ cd "$(git rev-parse --show-toplevel)"
 # and did not match lint-* names, so three self-declared gates
 # (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
 # were invisible to it. See #27626.
-UNWIRED_BASELINE=13
+UNWIRED_BASELINE=11
 
 all="$(mktemp)"
 called="$(mktemp)"
@@ -60,10 +60,14 @@ fi
 # Below the baseline is the improvement this check exists to produce, so it
 # reports and passes. Failing here means the PR that wires an audit goes red
 # for doing the thing asked of it, and main stays red until someone edits this
-# number -- the failure mode audit-ci-test-targets.sh recorded when 748 went
-# red, #27181 set 747, and 746 was red again within the hour.
-# ocaml-structure-ratchet.sh and audit-ci-test-targets.sh already treat their
-# own drift-down this way; this now matches them.
+# number -- the failure mode recorded when 748 went red, #27181 set 747, and
+# 746 was red again within the hour.
+# ocaml-structure-ratchet.sh treats its own drift-down this way. Measured
+# 2026-08-24: ci-run-test-suite.sh does not — a suite that stops failing has
+# to lose its line in test/ci-known-failures.txt in the same commit, citing
+# #28383, where a slack gap let a new unwired suite land unnoticed. The two
+# policies each have an incident behind them and the repo has not picked one;
+# do not read this comment as saying every ratchet agrees.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
   echo "[unwired-audits] OK - ${unwired} audit scripts unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the gain"
   exit 0

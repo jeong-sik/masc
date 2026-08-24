@@ -97,68 +97,126 @@ let gate_causal_initial
     ]
 ;;
 
-let composition_catalog_config_error detail =
+let skill_catalog_config_error detail =
   Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig
-       { field = "tool-compositions.toml"; detail })
+    (Agent_core.Error.InvalidConfig { field = "skills"; detail })
 ;;
 
-let composition_catalog_io_error ~op ~path exn =
+let skill_catalog_io_error ~op ~path exn =
   Agent_core.Error.Io
     (Agent_core.Error.FileOpFailed
        { op; path; detail = Printexc.to_string exn })
 ;;
 
-let load_composition_catalog ~config_root =
-  let path = Keeper_tool_composition_catalog.path ~config_root in
+let skills_dir_of_base_path ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
+;;
+
+(* A directory under skills/ that carries no SKILL.md is not a skill and is
+   skipped: in the Agent Skills layout the file is the declaration, and a
+   half-installed directory should not take the whole tool surface down. A
+   SKILL.md that exists but fails to parse is a config error — the operator
+   declared a skill and masc cannot honour it. *)
+let load_skill_catalog ~base_path =
+  let skills_dir = skills_dir_of_base_path ~base_path in
   match
-    try Ok (Fs_compat.exact_path_kind path) with
+    try Ok (Fs_compat.exact_path_kind skills_dir) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (composition_catalog_io_error ~op:"inspect" ~path exn)
+    | exn -> Error (skill_catalog_io_error ~op:"inspect" ~path:skills_dir exn)
   with
   | Error _ as error -> error
-  | Ok Fs_compat.Exact_missing -> Ok None
-  | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
+  | Ok Fs_compat.Exact_missing -> Ok Keeper_skill_catalog.empty
+  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
     (match
-       try Ok (Fs_compat.load_file path) with
+       try Ok (List.sort String.compare (Fs_compat.read_dir skills_dir)) with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (composition_catalog_io_error ~op:"read" ~path exn)
+       | exn ->
+         Error (skill_catalog_io_error ~op:"read_dir" ~path:skills_dir exn)
      with
      | Error _ as error -> error
-     | Ok content ->
-       (match Keeper_tool_composition_catalog.parse content with
-        | Ok catalog -> Ok (Some catalog)
-        | Error error ->
-          Error
-            (composition_catalog_config_error
-               (Keeper_tool_composition_catalog.error_to_string error))))
+     | Ok entries ->
+       let rec collect documents = function
+         | [] -> Ok (List.rev documents)
+         | entry :: rest ->
+           let skill_md =
+             Filename.concat (Filename.concat skills_dir entry) "SKILL.md"
+           in
+           (match
+              try Ok (Fs_compat.exact_path_kind skill_md) with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Error (skill_catalog_io_error ~op:"inspect" ~path:skill_md exn)
+            with
+            | Error _ as error -> error
+            | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
+              (match
+                 try Ok (Fs_compat.load_file skill_md) with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   Error (skill_catalog_io_error ~op:"read" ~path:skill_md exn)
+               with
+               | Error _ as error -> error
+               | Ok contents -> collect ((entry, contents) :: documents) rest)
+            | Ok
+                ( Fs_compat.Exact_missing
+                | Fs_compat.Exact_unknown
+                | Fs_compat.Exact_kind
+                    ( Unix.S_DIR
+                    | Unix.S_CHR
+                    | Unix.S_BLK
+                    | Unix.S_LNK
+                    | Unix.S_FIFO
+                    | Unix.S_SOCK ) ) -> collect documents rest)
+       in
+       (match collect [] entries with
+        | Error _ as error -> error
+        | Ok documents ->
+          (match Keeper_skill_catalog.of_documents documents with
+           | Ok catalog -> Ok catalog
+           | Error error ->
+             Error
+               (skill_catalog_config_error
+                  (Keeper_skill_catalog.error_to_string error)))))
   | Ok
       (Fs_compat.Exact_kind
-        ( Unix.S_DIR
+        ( Unix.S_REG
         | Unix.S_CHR
         | Unix.S_BLK
         | Unix.S_LNK
         | Unix.S_FIFO
         | Unix.S_SOCK )) ->
-    Error (composition_catalog_config_error "catalog path is not a regular file")
+    Error (skill_catalog_config_error "skills path is not a directory")
   | Ok Fs_compat.Exact_unknown ->
-    Error (composition_catalog_config_error "catalog path kind is unavailable")
+    Error (skill_catalog_config_error "skills path kind is unavailable")
 ;;
 
-let expected_model_tool_names ~model_visible_descriptors ~composition_catalog =
+let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
+  let entries = Keeper_skill_catalog.composition_entries skill_catalog in
   let composition_names =
-    match composition_catalog with
-    | None -> []
-    | Some catalog -> Keeper_tool_composition_catalog.model_tool_names catalog
+    List.map Keeper_tool_composition_catalog.tool_name entries
+  in
+  (* The shared async controls join the surface when any skill declares an
+     async composition. *)
+  let control_names =
+    if
+      List.exists
+        (fun (entry : Keeper_tool_composition_catalog.entry) ->
+          entry.execution = Keeper_tool_composition_catalog.Async)
+        entries
+    then
+      [ Keeper_tool_composition_catalog.status_tool_name
+      ; Keeper_tool_composition_catalog.cancel_tool_name
+      ]
+    else []
   in
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: (descriptor_names @ composition_names))
+     :: (descriptor_names @ composition_names @ control_names))
 ;;
 
 let prepare_agent_setup
@@ -207,7 +265,7 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* composition_catalog = load_composition_catalog ~config_root in
+  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -224,6 +282,7 @@ let prepare_agent_setup
     ; prompt_blocks = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None
+    ; assistant_turn_texts = []
     }
   in
   let
@@ -241,7 +300,7 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
-      ?composition_catalog
+      ~skill_catalog
       ~turn_ctx_cell
       ()
   in
@@ -366,9 +425,7 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names
-      ~model_visible_descriptors
-      ~composition_catalog
+    expected_model_tool_names ~skill_catalog ~model_visible_descriptors
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

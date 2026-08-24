@@ -119,6 +119,16 @@ val gate_typed
     the same syntax, sandbox, and nested
     pipeline handling as the legacy [gate] entrypoint. *)
 
+val decide_raw
+  :  text:string
+  -> syntax_policy:syntax_policy
+  -> sandbox:sandbox_context
+  -> verdict
+(** The same verdict {!gate_raw} produces, without its log line.  For a caller
+    that is classifying text it is not about to run: a shadow classification
+    must not emit a line indistinguishable from a real raw dispatch, or the
+    signal it exists to measure is the signal it pollutes. *)
+
 val gate_raw
   :  text:string
   -> syntax_policy:syntax_policy

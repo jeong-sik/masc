@@ -42,13 +42,12 @@ export interface PromptDestination {
   summary: string
 }
 
-const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
+const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'missing']
 
 const SOURCE_LABELS: Record<PromptSourceFilter, string> = {
   all: '전체',
   file: '파일',
   override: '오버라이드',
-  default: '기본값',
   missing: '누락',
 }
 
@@ -202,7 +201,6 @@ export function promptSourceCounts(
     all: prompts.length,
     file: 0,
     override: 0,
-    default: 0,
     missing: 0,
   }
   for (const p of prompts) counts[p.source] += 1

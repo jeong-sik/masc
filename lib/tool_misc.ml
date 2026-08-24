@@ -88,12 +88,7 @@ let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_resul
         ~data:(Server_keeper_waiting_inventory.dashboard_json ctx.config)
         ()
 
-let strip_mcp_prefix name =
-  let prefix = "mcp__masc__" in
-  let plen = String.length prefix in
-  if String.length name > plen && String.equal (Stdlib.String.sub name 0 plen) prefix
-  then String.sub name plen (String.length name - plen)
-  else name
+let strip_mcp_prefix = Tool_transport_prefix.strip
 
 (* TEL-OK: help schema selection and formatting are read-only; the outer tool
    execution boundary owns invocation telemetry for every caller projection. *)

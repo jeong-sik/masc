@@ -373,14 +373,6 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
-  let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
-  let* autonomous_action_count = int_field fields "autonomous_action_count" in
-  let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
-  let* autonomous_text_turn_count = int_field fields "autonomous_text_turn_count" in
-  let* autonomous_tool_turn_count = int_field fields "autonomous_tool_turn_count" in
-  let* board_reactive_turn_count = int_field fields "board_reactive_turn_count" in
-  let* mention_reactive_turn_count = int_field fields "mention_reactive_turn_count" in
-  let* noop_turn_count = int_field fields "noop_turn_count" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
   let* last_runtime_attempt = parse_last_runtime_attempt fields in
   let* paused = bool_field fields "paused" in
@@ -449,18 +441,18 @@ let decode_current_meta fields =
       ; trace_id
       ; trace_history
       ; last_handoff_ts
-      ; last_autonomous_action_at
-      ; autonomous_action_count
-      ; autonomous_turn_count
-      ; autonomous_text_turn_count
-      ; autonomous_tool_turn_count
-      ; board_reactive_turn_count
-      ; mention_reactive_turn_count
-      ; noop_turn_count
       ; message_scope_ack_id
       ; last_runtime_attempt
       }
     in
+    (* The eleven config fields below are placeholders, not decoded values.
+       TOML owns them and [Keeper_meta_contract.effective_meta_of_profile_defaults]
+       overlays the real ones on the way out, so [meta_to_json] never writes
+       them and this decoder has nothing to read back. A caller that writes
+       [{ meta with autoboot_enabled = false }] through [write_keeper_meta]
+       compiles, stores nothing and reads back [true] (#27357). Splitting
+       config out of this record is the fix; until then the round-trip
+       contract is pinned by test_keeper_meta_config_not_durable. *)
     let sandbox_profile = default_sandbox_profile in
     let meta : keeper_meta =
       { id = None

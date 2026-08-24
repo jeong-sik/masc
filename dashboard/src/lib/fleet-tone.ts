@@ -55,7 +55,6 @@ export type KeeperPhaseToken =
   | 'draining'
   | 'restarting'
   | 'failing'
-  | 'overflowed'
   | 'stopped'
   | 'unbooted'
   | 'crashed'
@@ -99,7 +98,6 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       handoff: 'busy',
       restarting: 'busy',
       failing: 'bad',
-      overflowed: 'bad',
       stopped: 'idle',
       unbooted: 'idle',
       crashed: 'bad',
@@ -118,7 +116,7 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
 /** Korean phase label shown in roster sub-rows + chat header state pills.
  *  Keyed on the same lowercase tokens as `PHASE_TONE` so the two tables
  *  cannot drift. Previously lived at the bottom of `keeper-workspace-
- *  shared.ts` and missed `Overflowed` / `Restarting` variants; lifted here
+ *  shared.ts` and missed the `Restarting` variant; lifted here
  *  so agent-roster can share it.
  *
  *  Same null-prototype + freeze rationale as `PHASE_TONE` — closed-sum
@@ -133,7 +131,6 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       draining: '정리 중',
       restarting: '재시작 중',
       failing: '오류 발생',
-      overflowed: '컨텍스트 초과',
       stopped: '중지',
       unbooted: '미기동',
       crashed: '비정상 종료',
@@ -170,7 +167,6 @@ export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
       draining: '현재 작업을 마무리하는 중입니다.',
       restarting: '복구를 시도하고 있습니다.',
       failing: '최근 실행에서 오류를 감지했습니다.',
-      overflowed: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.',
       stopped: '정상 정지된 런타임입니다.',
       unbooted: '등록만 되어 있고 아직 부팅되지 않았습니다.',
       crashed: 'fiber가 비정상적으로 종료되었습니다.',

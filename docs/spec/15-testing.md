@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-12
-code_refs:
-  - test/
-  - lib/keeper/keeper_gate.ml
-  - lib/keeper/keeper_approval_queue.ml
-  - lib/eval_harness.ml
 ---
 
 # Testing

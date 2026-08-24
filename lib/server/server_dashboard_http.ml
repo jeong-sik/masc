@@ -231,9 +231,6 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
       proof_source ~id:"tlc_results"
         ~label:"TLA+ verification logs"
         ~route:"/api/v1/verification/tlc-results";
-      proof_source ~id:"keeper_feature_proof"
-        ~label:"Keeper autonomy feature proof"
-        ~route:"/api/v1/dashboard/keeper-feature-proof";
       proof_source ~id:"execution_trust"
         ~label:"Execution trust provenance"
         ~route:"/api/v1/dashboard/execution-trust";

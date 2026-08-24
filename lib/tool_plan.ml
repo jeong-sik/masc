@@ -228,7 +228,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | _ -> None
 
 (* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via
-   Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
+   config/tools/masc_plan_*.toml (Tool_schemas_misc.schemas chain). *)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

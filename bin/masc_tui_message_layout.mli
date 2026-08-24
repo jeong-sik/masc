@@ -14,8 +14,24 @@ type entry = {
   body : string;
 }
 
+type metadata =
+  | Origin of {
+      timestamp : string;
+      role_label : string;
+      request_label : string;
+    }
+  | Continued_at of { timestamp : string }
+(** A new origin carries every field the renderer needs for its badge. A later
+    row from the same origin carries only its new timestamp, so callers never
+    have to parse display text to decide what should be highlighted. *)
+
+type row_kind =
+  | Metadata of metadata
+  | Body
+
 type row = {
   style : style;
+  kind : row_kind;
   text : string;
 }
 
@@ -36,6 +52,19 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val dress_bare_links :
+  open_style:string -> close_style:string -> string -> string
+(** Style every bare [http://]/[https://] run in [text].
+
+    For the URL pasted as plain text — a markdown link already carries its
+    own spans. The URL token ends at whitespace, a control byte (so a
+    styling escape already in the row is never swallowed), or a closing
+    quote/bracket, which is how prose most often ends one. Rows are styled
+    after wrapping, so a URL split across rows gets each fragment dressed.
+    [close_style] is the caller's row-restoring sequence, not a bare reset:
+    a reset alone would strip the row's own dress from everything after the
+    link. *)
+
 val fit_width : string -> int -> string
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
     or renderer-owned ANSI CSI sequence. Short text is padded to the budget. *)
@@ -51,13 +80,31 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
-val input_cursor_row :
-  terminal_rows:int -> history_height:int -> status_rows:int -> int
-(** One-based input row clamped to the terminal viewport. *)
+val scroll_hint : scrolled_back:int -> older_exist:bool -> string
+(** The footer's scrolling hint: which keys move the pane, how far back it
+    sits, and whether anything older is left to fetch.
+
+    The count used to be a row of its own above the composer. That row was
+    drawn from the clamped position and counted from the unclamped one, so the
+    pane came out a row short whenever they disagreed -- an [up] press on a
+    conversation that already fits does it. The count says the same thing here
+    without a row whose presence the pane's own height depends on. *)
 
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
-    immediately before the right border. *)
+    immediately before the right border. Measured from the prefix the pane
+    renders ([chat_input_prompt_prefix]), so the caret lands where the typed
+    text ends. *)
+
+val chat_input_prompt_prefix : string
+(** The chat pane's composer prefix. The pane renders it and the caret is
+    measured from it; both sites share this constant so they cannot drift. *)
+
+val chat_input_prompt_cells : int
+
+val align_role_label : string -> string
+(** Pad (or ellipsis-truncate) a metadata role label to one fixed cell column,
+    so [timestamp] [From] origin badges align down the pane. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
@@ -68,6 +115,21 @@ val message_viewport_supported :
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
+
+val wrap_body :
+  ?markdown:(width:int -> string -> string list) ->
+  max_cells:int ->
+  sanitize:(string -> string) ->
+  string ->
+  string list
+(** Wrap a multi-line body, applying [sanitize] to each line rather than to the
+    whole text. A sanitiser that escapes control bytes escapes a newline too,
+    so sanitising a document whole collapses it into one run with the escape
+    printed at every break. Blank lines are kept as blank rows: a paragraph
+    break is not an absence. [sanitize] is the caller's so this module keeps no
+    terminal vocabulary of its own, and so is [markdown]: given one, it renders
+    the escaped text and owns the wrapping, because fenced code keeps breaks a
+    word wrap would ruin. *)
 
 val visible_rows :
   ?markdown:(width:int -> string -> string list) ->
@@ -106,6 +168,18 @@ val scrolled_rows :
     newest entry holds its metadata row and loses body lines instead. Scrolled
     back, every row is already whole, and the window is a plain slice. *)
 
+val clamp_scroll :
+  ?markdown:(width:int -> string -> string list) ->
+  inner_width:int ->
+  height:int ->
+  int ->
+  entry list ->
+  int
+(** [clamp_scroll ~height requested entries] is [requested] held within what
+    the transcript can scroll, the same answer as [min requested (max_scroll
+    ...)]. It reads only as far back as the answer depends on, so a pane that
+    is not scrolled does not pay for the whole conversation on every frame. *)
+
 val max_scroll :
   ?markdown:(width:int -> string -> string list) ->
   inner_width:int ->
@@ -127,3 +201,22 @@ val composer_lines : max_rows:int -> string -> string list
     before the width is applied, and a count that moved with the width would
     disagree with the drawing. A line wider than the pane is fitted by
     {!input_viewport}, the way the single-line composer already was. *)
+
+val last_page_start : height:int -> int list -> int
+(** The smallest index from which items costing the given rows each still fit
+    in [height] when drawn from there to the end.
+
+    A scroll bound for a list whose items are not one row apiece. Bounding
+    such a list by [count - height] leaves its tail unreachable: when every
+    item costs two rows, half of them sit past the end of that bound. An item
+    taller than the whole height is still reachable -- it is drawn as far as
+    the height allows rather than skipped. *)
+
+val age_text : now:float -> since:float -> string option
+(** How long something has been outstanding, as [12s] or [3m07s].
+
+    An age, not a countdown: it says how long a thing has been going so a
+    reader can tell slow from stuck. Rendered from a clock the caller passes
+    rather than one read here, so a test can state the instant and two rows in
+    one frame can share a single read. A clock that moved backwards says
+    nothing rather than a negative age. *)

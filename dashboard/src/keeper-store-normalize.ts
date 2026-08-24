@@ -198,7 +198,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
-  overflowed: 'Overflowed',
   compacting: 'Compacting',
   handing_off: 'HandingOff',
   draining: 'Draining',
@@ -215,7 +214,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Offline: 'Offline',
   Running: 'Running',
   Failing: 'Failing',
-  Overflowed: 'Overflowed',
   Compacting: 'Compacting',
   HandingOff: 'HandingOff',
   Draining: 'Draining',
@@ -261,7 +259,7 @@ export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | nul
 // `toKeeperLifecycleState` (iter65, sibling cleanup PR).
 const PIPELINE_STAGES: ReadonlySet<PipelineStage> = new Set<PipelineStage>([
   'idle', 'compacting', 'handoff', 'offline',
-  'failing', 'overflowed', 'draining', 'paused',
+  'failing', 'draining', 'paused',
   'crashed', 'restarting', 'unknown',
 ])
 
@@ -740,18 +738,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           ? undefined
           : asString(row.last_heartbeat),
         heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
-        last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
         total_tokens: asNumber(row.total_tokens),
         last_latency_ms: asNumber(row.last_latency_ms),
-        autonomous_action_count: asNumber(row.autonomous_action_count),
-        autonomous_turn_count: asNumber(row.autonomous_turn_count),
-        autonomous_text_turn_count: asNumber(row.autonomous_text_turn_count),
-        autonomous_tool_turn_count: asNumber(row.autonomous_tool_turn_count),
-        board_reactive_turn_count: asNumber(row.board_reactive_turn_count),
-        mention_reactive_turn_count: asNumber(row.mention_reactive_turn_count),
-        noop_turn_count: asNumber(row.noop_turn_count),
         keeper_age_s: asNumber(row.keeper_age_s),
         last_turn_ago_s: asNumber(row.last_turn_ago_s),
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),

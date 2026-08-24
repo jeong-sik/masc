@@ -45,7 +45,17 @@ let format_expiry expires_at =
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
   | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
-  | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
+  | Board.Comment_not_found s ->
+    (* A guessed id can pass the [Comment_id] shape check — all-zero hex is
+       valid hex — so this lookup miss is the first place a caller learns the
+       address was made up (keeper:polisher voted c-000…0, 2026-08-24). The
+       id parsers' [Invalid_id] message already names the two producers of
+       real ids; the miss teaches the same recovery, not just the dead id. *)
+    Printf.sprintf
+      "Comment not found: %s. Use an id the masc_board_post_get comment \
+       listing or the masc_board_comment result returns; a guessed id that \
+       matches the c-hex shape still fails here."
+      s
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
@@ -148,12 +158,20 @@ let format_comment ?(indent = 0) (c : Board.comment) =
     then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
     else ""
   in
+  (* The id is what [masc_board_comment_vote] and a threaded
+     [masc_board_comment] take, and this listing is where the rejection tells a
+     caller to look for it ("the id masc_board_post_get and masc_board_comment
+     return"). It was not in the line. Live tool-call logs carry the cost:
+     [masc_board_comment_vote] failed 160 times out of 239, and the ids sent
+     were c-placeholder, c-b1, c-???, and in 28 calls the comment's own text in
+     place of an id. *)
   Printf.sprintf
-    "%s%s%s: %s [%s%s]"
+    "%s%s%s: %s [%s, %s%s]"
     prefix
     tree_prefix
     (Board.Agent_id.to_string c.author)
     c.content
+    (Board.Comment_id.to_string c.id)
     time_str
     vote_str
 ;;

@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-08
-code_refs:
-  - packages/agent_core/lib
-  - lib/runtime/runtime_agent.ml
-  - lib/tool_bridge.ml
-  - lib/keeper/keeper_event_bridge.ml
 ---
 
 # MASC Agent Core Boundary Contract

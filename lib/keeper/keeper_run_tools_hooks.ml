@@ -269,6 +269,11 @@ let assemble_hooks
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
+        ~on_after_turn_response:
+          (fun ~response ->
+             Keeper_run_tools_hook_accumulator.record_assistant_turn_text
+               acc
+               response)
         ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:
@@ -421,6 +426,27 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
+                (* A round that follows tool results must read to the model as
+                   "the tools returned", not "someone spoke again": the
+                   assembly rides the wire as a trailing User-role message,
+                   and re-broadcasting the world state there made models
+                   re-answer it on every round of a tool loop (task-514,
+                   2026-08-24 one keeper — 36 single-call rounds restating one
+                   answer). Which blocks still ride a post-tool round is the
+                   typed declaration [Prompt_block_id.injected_on_post_tool_round];
+                   the filter sits at assembly below so a new recording site
+                   cannot bypass it.
+
+                   The predicate is the position of the conversation's last
+                   message, not [last_tool_results]: that hook payload reports
+                   the last Tool message anywhere in history, so it is
+                   non-empty for almost every turn of a keeper that has ever
+                   used a tool, and gating on it suppressed the world state on
+                   the first round of ordinary turns (live: one keeper's turn 15,
+                   2026-08-24 08:08Z). *)
+                let post_tool_round =
+                  Keeper_run_prompt.ends_with_tool_results messages
+                in
                 (if String.trim dynamic_context <> ""
                  then
                    record_block Prompt_block_id.Dynamic_context dynamic_context);
@@ -434,24 +460,29 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
-                (match
-                   (* Memory OS recall — advisory block rendered from every
-                      persisted current fact in stored order (read side; the
-                      write side is the librarian current-selection pass).
-                      Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. *)
-                   (* Off-main: recall reads the current snapshot via synchronous
-                      file I/O, which would starve the main Eio domain and HOL
-                      sibling keepers. Read-side only, no module-level mutable
-                      state, so it is domain-safe on the shared pool. *)
-                   Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_memory_os_recall.render_if_enabled
-                       ~keepers_dir:memory_os_keepers_dir
-                       ~keeper_id:meta.name
-                       ~now:(Time_compat.now ())
-                       ())
-                 with
-                 | None -> ()
-                 | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                (if not post_tool_round
+                 then
+                   match
+                     (* Memory OS recall — advisory block rendered from every
+                        persisted current fact in stored order (read side; the
+                        write side is the librarian current-selection pass).
+                        Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. The read is
+                        skipped, not just filtered, on post-tool rounds: the
+                        block would be dropped at assembly anyway and the file
+                        I/O is per round. *)
+                     (* Off-main: recall reads the current snapshot via synchronous
+                        file I/O, which would starve the main Eio domain and HOL
+                        sibling keepers. Read-side only, no module-level mutable
+                        state, so it is domain-safe on the shared pool. *)
+                     Domain_pool_ref.submit_io_or_inline (fun () ->
+                       Keeper_memory_os_recall.render_if_enabled
+                         ~keepers_dir:memory_os_keepers_dir
+                         ~keeper_id:meta.name
+                         ~now:(Time_compat.now ())
+                         ())
+                   with
+                   | None -> ()
+                   | Some block -> record_block Prompt_block_id.Memory_os_recall block);
                 (* RFC-0366: last in assembly order. It is the most recent fact
                    the keeper has, and when it disagrees with an earlier block
                    the later text is the one that reads as current. Stamped
@@ -467,11 +498,21 @@ let assemble_hooks
                        record_block Prompt_block_id.Operator_note block;
                        true)
                 in
+                let turn_blocks =
+                  let blocks = List.rev !recorded_blocks in
+                  if post_tool_round
+                  then
+                    List.filter
+                      (fun (block, _) ->
+                         Prompt_block_id.injected_on_post_tool_round block)
+                      blocks
+                  else blocks
+                in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
                     ~existing_extra_system_context:
                       current_params.extra_system_context
-                    ~blocks:(List.rev !recorded_blocks)
+                    ~blocks:turn_blocks
                 in
                 let ctx = extra_system_context_assembly.extra_system_context in
                 let recorded_blocks_for_receipt =
@@ -484,13 +525,18 @@ let assemble_hooks
                    overwrites one file per keeper: the blocks are stable turn to
                    turn, so the turn that just assembled is what the next one
                    will assemble, and keeping only the last bounds the store. *)
-                Keeper_prompt_capture.write
-                  ~config
-                  ~keeper:meta.name
-                  ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~absolute_turn:turn
-                  ~blocks:recorded_blocks_for_receipt
-                  ~assembled:ctx;
+                (* An empty post-tool assembly is not an injection: writing it
+                   would overwrite the first-round capture — the one that says
+                   what this keeper was actually told — with nothing. *)
+                (if recorded_blocks_for_receipt <> []
+                 then
+                   Keeper_prompt_capture.write
+                     ~config
+                     ~keeper:meta.name
+                     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                     ~absolute_turn:turn
+                     ~blocks:recorded_blocks_for_receipt
+                     ~assembled:ctx);
                 if consumed_operator_note
                 then
                   Keeper_operator_note.mark_consumed
@@ -608,9 +654,7 @@ let assemble_hooks
                 acc.extra_system_context_size <- Option.map String.length ctx;
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
-                   let post_tool_context =
-                     last_tool_results <> []
-                   in
+                   let post_tool_context = post_tool_round in
                    append_manifest
                      (Keeper_runtime_manifest.make_for_context
                         manifest_context

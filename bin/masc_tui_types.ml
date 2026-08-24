@@ -49,6 +49,11 @@ type msg_role =
           drew while it ran. The strict stream decode carries no tool
           information, so without this a turn that read six files and edited
           two scrolls back looking like one answered from memory. *)
+  | Message_thinking
+      (** The reasoning of one autonomous turn as the transcript carried it:
+          the lines the server kept and the count it withheld. Drawn with the
+          live pane's thinking style, so a turn the keeper ran on its own and
+          one watched live read alike. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -65,13 +70,7 @@ type msg_entry = {
   me_at: float;
 }
 
-type msg_recovery_error = Recovery_blocked of string
 
-type msg_inflight_kind =
-  | Dispatch_claim
-  | Chat_post
-  | Operation_get
-  | Cleanup_delete
 
 (** Attention item for the Overview surface *)
 type attention_severity =
@@ -131,6 +130,33 @@ type board_comment = {
   bc_created_at: string;
 }
 
+(** One scheduled-automation row, from the dashboard schedule projection.
+    [sch_status] stays a string rather than a variant: the pane projects the
+    store's own status vocabulary, and a status this build does not name
+    renders as itself rather than disappearing. *)
+type schedule_row = {
+  sch_schedule_id: string;
+  sch_status: string;
+  sch_source: string;
+  sch_due_at_iso: string option;
+  sch_recurrence_summary: string;
+  sch_payload_target: string option;
+  sch_payload_summary: string option;
+}
+
+(** Schedule list snapshot. [scs_request_count] is [None] exactly when the
+    store read failed -- the server reports that as [status = "unknown"]
+    rather than an empty list, and the pane keeps the two facts apart the
+    same way. *)
+type schedule_snapshot = {
+  scs_status: string;
+  scs_read_error: string option;
+  scs_request_count: int option;
+  scs_truncated: bool;
+  scs_next_due_iso: string option;
+  scs_rows: schedule_row list;
+}
+
 (** Board surface sub-mode *)
 type board_mode =
   | Board_list
@@ -146,6 +172,12 @@ type board_mode =
 type planning_mode =
   | Planning_list
   | Planning_detail of string
+
+(** One authority for the Fusion surface's list/detail state. The top-level
+    [surface] only says Fusion is open; it does not repeat this mode. *)
+type fusion_mode =
+  | Fusion_list
+  | Fusion_detail of string
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -193,11 +225,41 @@ type workspace_health =
   | Workspace_health_ok
   | Workspace_health_unknown
 
+(** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
+    The feed is opened once the server has answered a refresh and reopened
+    on the refresh cadence after it closes, so an operator reads the same
+    row for "no server yet" and "the stream dropped" -- with the reason. *)
+type observer_status =
+  | Observer_off  (** not opened: no server has answered yet *)
+  | Observer_opening  (** initialize and subscribe in flight *)
+  | Observer_live of {
+      session_id : string;
+      since : float;
+      events : int;  (** frames received on this stream *)
+    }
+  | Observer_closed of {
+      reason : string;
+      at : float;
+      events : int;  (** frames the stream delivered before it closed *)
+    }
+
+(** One event off the feed, kept for the Acting surface. *)
+type acting_entry = {
+  ae_at : float;  (** when the TUI received it *)
+  ae_event : Masc_tui_observer.event;
+}
+
+(* How many feed events the TUI keeps. On the live runtime the feed ran at
+   about four events a second, so this is a few minutes of scrollback; what
+   falls off the end is counted in [acting_dropped], not lost in silence. *)
+let acting_retained_entries = 1000
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_active_agents: int;
+  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
@@ -288,22 +350,87 @@ type keeper_mode =
   | Keeper_list
   | Keeper_detail
   | Keeper_logs
+  | Keeper_calls
   | Keeper_message
+  | Keeper_runtime_pick
+      (** Choosing a runtime for the keeper under the roster cursor. *)
+
+(** Which face the detail pane is showing. Tabs inside one panel, cycled
+    with [ and ]: different views of the same selected keeper, exactly the
+    case a tab earns (unrelated content would want its own surface). *)
+type keeper_detail_tab =
+  | Detail_info
+  | Detail_instructions
+  | Detail_github
+
+let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
+
+let keeper_detail_tab_label = function
+  | Detail_info -> "Info"
+  | Detail_instructions -> "Instructions"
+  | Detail_github -> "GitHub"
+
+(** Where [Esc] returns after the chat pane was opened. Keeping only the two
+    legal destinations makes a new Keeper sub-view an explicit compiler error
+    instead of silently becoming the detail view. *)
+type keeper_chat_return =
+  | Keeper_chat_return_list
+  | Keeper_chat_return_detail
 
 (** Top-level TUI surface. *)
 type surface =
   | Overview
+  | Acting
   | Keepers of keeper_mode
+  | Lanes
   | Board
   | Approvals
   | Planning
+  | Schedules
   | Verification
   | Harness
+  | Fusion
   | Repositories
   | Connectors
+  | Runtime
+  | Config
+  | Resources
   | Tools
-  | Autonomy
   | System_logs
+
+(* The Tab cycle and the strip drawn above every surface share this order,
+   so the strip cannot disagree with where Tab actually goes. Labels are the
+   strip's spelling; the Keepers entry stands for every keeper sub-mode. *)
+let surface_ring : (surface * string) list =
+  [ (Overview, "Overview");
+    (Acting, "Acting");
+    (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
+    (Approvals, "Approvals");
+    (Board, "Board");
+    (Planning, "Planning");
+    (Schedules, "Schedules");
+    (Verification, "Verify");
+    (Harness, "Harness");
+    (Fusion, "Fusion");
+    (Repositories, "Repos");
+    (Connectors, "Connectors");
+    (Runtime, "Runtime");
+    (Config, "Config");
+    (Resources, "Resources");
+    (Tools, "Tools");
+    (System_logs, "Logs");
+  ]
+
+(* Ring position of the family a view belongs to. Keeper sub-modes collapse
+   onto the Keepers entry; every other surface is its own entry. *)
+let surface_ring_index (view : surface) =
+  let family = match view with Keepers _ -> Keepers Keeper_list | v -> v in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 surface_ring
 
 (** What a surface needs loaded to draw itself.
 
@@ -315,16 +442,91 @@ type surface =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
+  needs_fleet_safety : bool;
+  needs_board : bool;
+  needs_planning : bool;
+  needs_system_logs : bool;
+  needs_keeper_chat : bool;
 }
 
+let nothing =
+  { needs_transport = false;
+    needs_keeper_roster = false;
+    needs_fleet_safety = false;
+    needs_board = false;
+    needs_planning = false;
+    needs_system_logs = false;
+    needs_keeper_chat = false;
+  }
+
+(* Each datum is read by the one surface that draws it, so a refresh spends a
+   request and a decode on it only while that surface is open. The planning and
+   system-log payloads are tens of kilobytes each, and fetching them behind
+   every other surface cost that on every tick for rows nobody was looking at. *)
 let surface_needs : surface -> surface_needs = function
-  | Overview -> { needs_transport = true; needs_keeper_roster = false }
-  | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
-  | Board | Approvals | Planning | Verification | Harness | Repositories
-  | Connectors | Tools | Autonomy | System_logs ->
-      { needs_transport = false; needs_keeper_roster = false }
+  | Overview -> { nothing with needs_transport = true }
+  (* Its rows come from the acting store and the keeper list, neither of which
+     is fetched here. *)
+  | Acting -> nothing
+  (* Exhaustive over the sub-mode rather than [Keepers _]: the chat pane is
+     the one that was missed. It loaded its history when it opened and never
+     again, so a message that arrived while it was on screen only appeared
+     after leaving and coming back. *)
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls)
+  (* The picker keeps the roster fresh for the same reason the list does: the
+     keeper it is choosing for can leave the roster while it is open. Its
+     catalogue has its own loader, fetched when the picker opens. *)
+  | Keepers Keeper_runtime_pick ->
+      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+  | Keepers Keeper_message ->
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_keeper_chat = true
+      }
+  | Board -> { nothing with needs_board = true }
+  | Planning -> { nothing with needs_planning = true }
+  | System_logs -> { nothing with needs_system_logs = true }
+  | Lanes | Approvals | Schedules | Verification | Harness | Fusion
+  | Repositories | Connectors | Runtime | Config | Resources | Tools ->
+      nothing
+
+(** How far a surface's list can scroll, given the terminal's height.
+
+    A bound belongs where the move happens, and the move is a keypress. The
+    drawing used to work it out mid-frame and write the clamped value back
+    into the state -- the same four lines copied once per surface -- so
+    drawing a frame corrected the state it was drawing from. Declared here,
+    the key handler and the drawing read one answer and the drawing only
+    reads.
+
+    [None] is a surface whose rows the state cannot count: its row count is
+    built by the drawing, out of text the drawing formats. Those report the
+    value they used as a {!clamped_scroll} beside the frame instead, so the
+    drawing still does not write. *)
+type scrolled = {
+  sc_count : int;  (** rows of content the surface has *)
+  sc_chrome : int;  (** rows it spends on its own frame *)
+}
+
+(* These seven draw the same frame: a title, a column row, three dividers, the
+   scroll line and the footer -- and two more rows when a load error is on
+   screen. The number is the drawing's; a surface whose chrome moves has to
+   move it here in the same change. *)
+let listing_chrome ~error = if Option.is_some error then 9 else 7
+let runtime_listing_chrome ~error = listing_chrome ~error + 2
 
 (** Dashboard state *)
+(* A request that has been POSTed and has not settled, with when it went out.
+   The instant rides with the request rather than in a second structure keyed
+   by id: a turn taking minutes is normal here and an operator watching one
+   needs to see it advancing, but two structures for one fact drift the moment
+   somebody adds a third place that removes a request. *)
+type inflight =
+  { sent_request : Masc_tui_keeper_chat_projection.request
+  ; sent_at : float
+  }
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -333,6 +535,43 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_focus: bool;
+  (* The [?] help overlay: open replaces the surface body until Esc/? closes
+     it. The scroll survives only while it is open. *)
+  mutable help_open: bool;
+  mutable help_scroll: int;
+  (* The [:] command palette: a typed filter over jump targets. Query and
+     cursor live only while it is open. *)
+  mutable palette_open: bool;
+  mutable palette_query: string;
+  mutable palette_cursor: int;
+  (* [/] on the roster: a search that moves the cursor, not a filter that
+     subsets the list -- every action reads the same [keepers] the rows
+     draw, so nothing can act on a hidden row. [Some q] while typing;
+     [roster_search_last] feeds n/N after Enter. *)
+  mutable roster_search: string option;
+  mutable roster_search_last: string;
+  (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
+     read is stamped with the keeper it answers for, so a cursor move cannot
+     show one keeper's instructions under another's name. *)
+  (* The Config surface: runtime.toml's path and text as the server read
+     them, refreshed on entry and after every save. *)
+  (* The Resources surface: the MCP resource inventory, and the one read
+     the content pane shows, stamped with its uri. *)
+  mutable resources_list: (string * string) list option;
+  mutable resources_error: string option;
+  mutable resources_cursor: int;
+  mutable resource_content: (string * string list) option;
+  mutable resource_content_error: string option;
+  mutable resource_scroll: int;
+  mutable resource_focus: bool;
+  mutable runtime_config_view: (string * string list) option;
+  mutable runtime_config_view_error: string option;
+  mutable config_scroll: int;
+  mutable detail_tab: keeper_detail_tab;
+  mutable keeper_config_view: (string * string list) option;
+  mutable keeper_config_view_error: string option;
+  mutable github_identity_view: (string * string list) option;
+  mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -366,6 +605,17 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  (* The runtime picker: the keeper it is choosing for, its cursor into the
+     dispatchable catalogue, and the catalogue itself with where every keeper
+     points today. Loaded when the picker opens; absent otherwise. *)
+  mutable runtime_pick_keeper: string option;
+  mutable runtime_pick_cursor: int;
+  mutable runtime_catalog: Tui_decode.runtime_option list;
+  mutable runtime_assignments: Tui_decode.runtime_assignment list;
+  mutable runtime_catalog_error: string option;
+  mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
+  mutable keeper_calls_error: string option;
+  mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
@@ -377,6 +627,15 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* The tool calls keepers are holding, drawn above the operator actions on
+     the same surface. Live registry state on the server; refreshed with the
+     surface. *)
+  mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
+  mutable keeper_tool_approvals_error: string option;
+  (* Keepers whose approval gate runs every call unasked. Names only: the
+     wire carries (keeper, mode) pairs and [auto] is the absent default, so
+     what the pane needs is exactly the yolo set. *)
+  mutable keeper_yolo_names: string list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
@@ -412,6 +671,20 @@ type state = {
   mutable goal_action_armed:
     (string * Goal_phase.Public_action.t) option;
   mutable goal_action_error: string option;
+  (* The schedule list and its cursor. The snapshot keeps the server's
+     ok/unknown split so a failed store read never draws as "no schedules". *)
+  mutable schedules: schedule_snapshot option;
+  mutable schedules_error: string option;
+  mutable schedule_cursor: int;
+  mutable schedule_scroll: int;
+  (* A cancel armed for a second keypress: which schedule. The cursor can move
+     between the two presses, so the schedule id is captured at arm time and a
+     press on a different row re-arms for that row. *)
+  mutable schedule_cancel_armed: string option;
+  mutable schedule_cancel_error: string option;
+  mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable lanes_error: string option;
+  mutable lanes_scroll: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -421,18 +694,52 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
+  (* Two server-owned documents joined by exact runtime id: resolved owns
+     lanes/provider/model identity, probe owns cached reachability. *)
+  mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
+  mutable runtime_surface_error: string option;
+  mutable runtime_surface_scroll: int;
+  mutable runtime_surface_generation: int;
+  mutable runtime_surface_inflight: int option;
+  mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  mutable fusion_runs: Tui_decode.fusion_snapshot option;
+  mutable fusion_error: string option;
+  mutable fusion_cursor: int;
+  mutable fusion_scroll: int;
+  mutable fusion_mode: fusion_mode;
+  mutable fusion_runs_generation: int;
+  mutable fusion_runs_inflight: int option;
+  mutable fusion_detail: Tui_decode.fusion_detail option;
+  mutable fusion_detail_error: string option;
+  (* A detail GET captures this generation. A late response for a run the
+     operator already left cannot replace the exact run now on screen. *)
+  mutable fusion_detail_generation: int;
+  (* The current generation/run pair already being read. Periodic refreshes
+     do not pile another GET on top of it; changing runs still starts a new
+     request immediately, whose pair replaces this marker. *)
+  mutable fusion_detail_inflight: (int * string) option;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
-  mutable autonomy: Tui_decode.autonomy_snapshot option;
-  mutable autonomy_error: string option;
-  mutable autonomy_scroll: int;
+  mutable observer: observer_status;
+  mutable mcp_session: string option;
+      (** The MCP session the server issued, kept across streams: the server
+          holds it after a stream closes, so reopening the feed and calling
+          tools reuse it rather than minting one per attempt. Cleared when
+          the server refuses it. *)
+  mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
+  mutable acting_undecodable: int;  (** frames the feed reader could not read *)
+  mutable acting_undecodable_last: string option;  (** why, for the most recent one *)
+  mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
+  mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
+  mutable acting_filter: Masc_tui_acting.filter;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -441,8 +748,14 @@ type state = {
   mutable system_logs_scroll: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
+  mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
+  (* How far back the arrows have walked through what this pane sent, and the
+     draft they set aside to do it. [None] means the composer holds the
+     operator's own text, so pressing down has nothing to give back. *)
+  mutable msg_recall_at: int option;
+  mutable msg_recall_draft: string;
   (* The turn currently streaming, if any. Drawn below the history and
      discarded when the turn settles; its tool rows are committed to the
      history first. Never authoritative -- the recorded reply comes from the
@@ -456,6 +769,10 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* Every full-history GET captures this generation. Keeper identity alone is
+     not enough after alpha -> beta -> alpha: the first alpha response can
+     arrive after the second alpha request and still name the visible Keeper. *)
+  mutable msg_history_load_generation: int;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -469,6 +786,9 @@ type state = {
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
   mutable msg_older_error: string option;
+  (* Whether this pane folds reasoning blocks to a one-line count. A view
+     preference, not data: toggled by /thinking and never persisted. *)
+  mutable msg_thinking_collapsed: bool;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -480,17 +800,36 @@ type state = {
      while a turn runs; sending a queued line to whoever happens to be selected
      later would put it in front of the wrong keeper. *)
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_inflight_kind: msg_inflight_kind option;
-  mutable msg_prepared: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_cleanup_pending: Masc_tui_keeper_chat_projection.request option;
-  mutable msg_recovery_error: msg_recovery_error option;
+  (* One request per keeper, not one per workspace. Dispatch used to be
+     serialized on a single slot because the durable recovery fence held one
+     un-acknowledged POST for the whole workspace; with that gone the only
+     reason left is per keeper, which is how the server runs turns anyway. *)
+  mutable msg_inflight: inflight list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
   refresh_interval: float;
 }
+
+(* One reading of the state for both the send path and the footer; the order
+   and the reasoning live in [Masc_tui_send_disposition]. *)
+type send_disposition =
+  Masc_tui_keeper_chat_projection.request Masc_tui_send_disposition.t
+
+(* The keeper the composer is pointed at, since a turn running for another
+   keeper does not decide what Enter does here. *)
+let inflight_for_keeper state keeper_name =
+  List.find_opt
+    (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+    state.msg_inflight
+;;
+
+let send_disposition state ~keeper_name : send_disposition =
+  Masc_tui_send_disposition.of_state
+    ~inflight:
+      (Option.map
+         (fun entry -> entry.sent_request)
+         (inflight_for_keeper state keeper_name))
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -526,12 +865,53 @@ let keeper_available_for_new_message (state : state) keeper_name =
        (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
        state.keepers
 
+(** The next target both the input path and footer agree is safe to select.
+    A pending request or live transcript stays pinned to its Keeper until that
+    turn settles. A retained roster is not enough after a failed refresh:
+    switching is disabled until the roster is readable again. *)
+let next_keeper_message_target (state : state) =
+  if
+    Option.is_some state.keepers_error
+    || Option.is_some state.msg_live
+    || state.msg_inflight <> []
+  then
+    Masc_tui_keeper_selection.No_alternative
+  else
+    match state.msg_target_keeper_name with
+    | None -> Masc_tui_keeper_selection.No_alternative
+    | Some current_keeper ->
+        Masc_tui_keeper_selection.next_message_target ~current_keeper
+          ~keeper_ids:
+            (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+
 (** Create initial state *)
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
   tasks = [];
   tasks_domain = [];
   task_focus = false;
+  help_open = false;
+  help_scroll = 0;
+  palette_open = false;
+  palette_query = "";
+  palette_cursor = 0;
+  roster_search = None;
+  roster_search_last = "";
+  resources_list = None;
+  resources_error = None;
+  resources_cursor = 0;
+  resource_content = None;
+  resource_content_error = None;
+  resource_scroll = 0;
+  resource_focus = false;
+  runtime_config_view = None;
+  runtime_config_view_error = None;
+  config_scroll = 0;
+  detail_tab = Detail_info;
+  keeper_config_view = None;
+  keeper_config_view_error = None;
+  github_identity_view = None;
+  github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;
@@ -552,6 +932,14 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  runtime_pick_keeper = None;
+  runtime_pick_cursor = 0;
+  runtime_catalog = [];
+  runtime_assignments = [];
+  runtime_catalog_error = None;
+  keeper_calls = None;
+  keeper_calls_error = None;
+  keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;
   log_scroll = 0;
@@ -563,6 +951,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  keeper_tool_approvals = [];
+  keeper_tool_approvals_error = None;
+  keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_cursor = 0;
   pending_approval_action = None;
@@ -584,6 +975,15 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_mode = Planning_list;
   goal_action_armed = None;
   goal_action_error = None;
+  schedules = None;
+  schedules_error = None;
+  schedule_cursor = 0;
+  schedule_scroll = 0;
+  schedule_cancel_armed = None;
+  schedule_cancel_error = None;
+  lanes = None;
+  lanes_error = None;
+  lanes_scroll = 0;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -592,40 +992,63 @@ let create_state ~workspace ~port ~refresh_interval = {
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
+  runtime_surface = None;
+  runtime_surface_error = None;
+  runtime_surface_scroll = 0;
+  runtime_surface_generation = 0;
+  runtime_surface_inflight = None;
+  runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
   harness = None;
   harness_error = None;
   harness_scroll = 0;
-  autonomy = None;
-  autonomy_error = None;
-  autonomy_scroll = 0;
+  fusion_runs = None;
+  fusion_error = None;
+  fusion_cursor = 0;
+  fusion_scroll = 0;
+  fusion_mode = Fusion_list;
+  fusion_runs_generation = 0;
+  fusion_runs_inflight = None;
+  fusion_detail = None;
+  fusion_detail_error = None;
+  fusion_detail_generation = 0;
+  fusion_detail_inflight = None;
+  observer = Observer_off;
+  mcp_session = None;
+  acting = [];
+  acting_dropped = 0;
+  acting_undecodable = 0;
+  acting_undecodable_last = None;
+  acting_scroll = 0;
+  acting_unseen = 0;
+  acting_filter = Masc_tui_acting.Actions;
   verification = None;
   verification_error = None;
   verification_scroll = 0;
   system_logs_scroll = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
+  msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
+  msg_recall_at = None;
+  msg_recall_draft = "";
   msg_live = None;
   msg_loaded = [];
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
   msg_older_error = None;
+  msg_thinking_collapsed = false;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
-  msg_inflight = None;
-  msg_inflight_kind = None;
-  msg_prepared = None;
-  msg_unverified = None;
-  msg_cleanup_pending = None;
-  msg_recovery_error = None;
+  msg_inflight = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -642,6 +1065,22 @@ let create_state ~workspace ~port ~refresh_interval = {
    concatenated -- a notice the TUI wrote belongs where it happened, not after
    everything the server knows about. Ties keep the loaded row first, which is
    what [stable_sort] over [loaded @ session] gives. *)
+(* What a polled surface can say when it has no rows to draw. Three facts,
+   not one: nothing has been read yet, the read failed, or the read came back
+   with nothing. The first was drawn as the third -- "nothing waiting on a
+   verdict" on a Verification surface that had not yet asked -- so an
+   operator read an empty queue off a screen that knew no queue at all. *)
+type empty_page =
+  | Page_unread
+  | Page_failed
+  | Page_empty
+
+let empty_page_of ~snapshot ~error =
+  match (snapshot, error) with
+  | _, Some _ -> Page_failed
+  | None, None -> Page_unread
+  | Some _, None -> Page_empty
+
 let chat_rows_for (state : state) keeper_name =
   let loaded =
     match state.msg_loaded_keeper with
@@ -670,6 +1109,93 @@ let composer_extra_rows (state : state) =
   in
   max 0 (List.length lines - 1)
 
+(** A scroll a frame had to hold inside what it could show.
+
+    {!scrolled_surface} answers this before the frame is built, for the
+    surfaces whose rows the state can count. The rest count rows the drawing
+    formats -- lines of a task's notes, of a board post, of a keeper's detail
+    -- so the bound is not knowable until the frame exists. Those frames say
+    which value they used and the loop stores it, which is not the same as the
+    drawing reaching back into the state it is drawing from: the drawing is a
+    function of the state again, and every write lives on one side of it. *)
+type clamped_scroll =
+  | Overview_events of int
+  | Task_detail of int
+  | Board_read of int
+  | Keeper_detail of int
+  | Keeper_calls of int
+  | Acting of int
+  | Fusion_detail_scroll of int
+
+let apply_clamped_scroll (state : state) = function
+  | Overview_events value -> state.overview_event_scroll <- value
+  | Task_detail value -> state.task_detail_scroll <- value
+  | Board_read value -> state.board_scroll <- value
+  | Keeper_detail value -> state.detail_scroll <- value
+  | Keeper_calls value -> state.keeper_calls_scroll <- value
+  | Acting value -> state.acting_scroll <- value
+  | Fusion_detail_scroll value -> state.fusion_scroll <- value
+
+let scrolled_surface (state : state) : surface -> scrolled option =
+  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  function
+  | System_logs ->
+      listing ~error:state.system_logs_error
+        (match state.system_logs with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.sys_entries)
+  | Verification ->
+      listing ~error:state.verification_error
+        (match state.verification with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.vs_requests)
+  | Lanes ->
+      listing ~error:state.lanes_error
+        (match state.lanes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.kls_lanes)
+  | Harness ->
+      listing ~error:state.harness_error
+        (match state.harness with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.hs_verdicts)
+  | Repositories ->
+      listing ~error:state.repositories_error
+        (match state.repositories with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Connectors ->
+      listing ~error:state.connectors_error
+        (match state.connectors with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Runtime ->
+      Some
+        { sc_count =
+            (match state.runtime_surface with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.rss_candidates)
+        ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        }
+  | Tools ->
+      listing ~error:state.tools_error
+        (match state.tools_inventory with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.ts_tools)
+  | Config ->
+      listing ~error:state.runtime_config_view_error
+        (match state.runtime_config_view with
+         | None -> 0
+         | Some (_, lines) -> List.length lines)
+  (* Acting counts rows the drawing builds out of formatted text, not rows the
+     state holds; counting them here would be a second copy of the formatting,
+     so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
+     Planning and Schedules move a cursor or a detail pane rather than a plain
+     list. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion | Resources ->
+      None
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -677,13 +1203,7 @@ let keeper_message_status_rows (state : state) =
       -> 0
     | Some _ | None -> 1
   in
-  (if Option.is_some state.msg_inflight then 1 else 0)
-  + (if Option.is_none state.msg_inflight && Option.is_some state.msg_prepared
-     then 1
-     else 0)
-  + (if Option.is_some state.msg_unverified then 1 else 0)
-  + (if Option.is_some state.msg_cleanup_pending then 1 else 0)
-  + (if Option.is_some state.msg_recovery_error then 1 else 0)
+  List.length state.msg_inflight
   + unavailable_target
   + (match state.msg_live with
      | None -> 0
@@ -695,14 +1215,92 @@ let keeper_message_status_rows (state : state) =
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
               ~now:(Unix.gettimeofday ()) live))
+  (* One row per waiting line, drawn in full so an operator can see which
+     lines are held. Same call the pane makes, for the same reason as the
+     live rows above: a row that is drawn and not counted pushes the frame
+     past the terminal, and the presenter drops whatever ran off the bottom. *)
+  + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
-  + (if state.msg_scroll > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
   + composer_extra_rows state
 
-let approval_items (state : state) =
+(* One list under one cursor: the calls keepers are holding first (they run
+   out in [kta_timeout_sec]; the operator actions keep), then the operator
+   actions. The two kinds answer through different routes, so the row is a
+   sum the key handler matches on rather than a shape it infers. *)
+type approval_row =
+  | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Operator_row of Masc_tui_operator_projection.approval_item
+
+let operator_approval_items (state : state) =
   match state.approval_snapshot with
   | Some snapshot -> snapshot.aps_items
   | None -> []
+
+let approval_items (state : state) =
+  List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun item -> Operator_row item) (operator_approval_items state)
+
+
+(* Command-palette jump targets. Surfaces come from the same ring the strip
+   draws; keepers come from the loaded roster, so the palette can only offer
+   a chat the roster can open. *)
+type palette_action =
+  | Palette_goto of surface
+  | Palette_chat of string
+
+let palette_contains ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle and hl = String.length h in
+  if n = 0 then true
+  else begin
+    let found = ref false in
+    for start = 0 to hl - n do
+      if (not !found) && String.equal (String.sub h start n) needle then
+        found := true
+    done;
+    !found
+  end
+
+let palette_entries (state : state) =
+  List.map
+    (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+    surface_ring
+  @ List.map
+      (fun (keeper : keeper) ->
+        ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
+      state.keepers
+
+(* Subsequence match: every query character appears in order. "kadm" finds
+   "keeper adm-race". *)
+let palette_subsequence ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let hl = String.length h and nl = String.length needle in
+  let rec walk hi ni =
+    if ni >= nl then true
+    else if hi >= hl then false
+    else if Char.equal h.[hi] needle.[ni] then walk (hi + 1) (ni + 1)
+    else walk (hi + 1) ni
+  in
+  walk 0 0
+
+let palette_matches (state : state) =
+  let needle =
+    String.lowercase_ascii (String.trim state.palette_query)
+  in
+  let entries = palette_entries state in
+  (* Substring hits rank above subsequence-only hits, both keep entry
+     order inside their rank. *)
+  let substring_hits =
+    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  in
+  let subsequence_hits =
+    List.filter
+      (fun (label, _) ->
+        (not (palette_contains ~needle label))
+        && palette_subsequence ~needle label)
+      entries
+  in
+  substring_hits @ subsequence_hits

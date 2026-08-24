@@ -98,9 +98,12 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
   })
 
-  it('paused operator cause when only status === paused', () => {
+  // 예전에는 phase 가 없고 `status === 'paused'` 이기만 하면 flag 가 false 여도
+  // 일시정지로 봤다. 서버는 그 단어를 flag 와 같은 `ld_paused` 로 만들지만
+  // `Stopped` 이벤트에서 단어만 남겨두므로, 이미 멈춘 키퍼가 재개 가능으로 보였다.
+  it('phase 가 없으면 flag 가 판정한다', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status: 'paused', phase: null, paused: false }),
+      keeper: makeKeeper({ status: 'active', phase: null, paused: true }),
       composite: null,
     })
     expect(state).toMatchObject({
@@ -153,16 +156,23 @@ describe('deriveKeeperOperationalState — offline branch', () => {
     expect(state).toMatchObject({ kind: 'offline', attention: 'clean', cause })
   })
 
-  it.each<['offline' | 'inactive' | 'unbooted']>([
-    ['offline'],
-    ['inactive'],
-    ['unbooted'],
-  ])('status=%s without phase → offline', (status) => {
+  // 예전에는 status 가 'offline' | 'inactive' | 'unbooted' 중 하나이기만 하면
+  // phase 없이도 offline 으로 접혔다. 'inactive' 한 단어가 stale·degraded·zombie
+  // 셋을 함께 가리켰으므로, 늦은 하트비트 하나가 멈춘 키퍼와 같은 판정을 받았다.
+  it('phase 가 없어도 health=offline 이면 offline', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status }),
+      keeper: makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>),
       composite: null,
     })
     expect(state.kind).toBe('offline')
+  })
+
+  it.each(['stale', 'degraded', 'zombie'])('health=%s 는 offline 이 아니다', (health_state) => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ diagnostic: { health_state } } as Partial<Keeper>),
+      composite: null,
+    })
+    expect(state.kind).not.toBe('offline')
   })
 
   it('composite phase Stopped overrides keeper.phase', () => {
@@ -419,7 +429,7 @@ interface DeriveInputsLite {
 
 describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
   it.each<KeeperPhase>([
-    'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+    'Offline', 'Running', 'Failing', 'Compacting',
     'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
     'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
@@ -450,7 +460,7 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
   it.each<KeeperPhase>([
-    'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
+    'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })

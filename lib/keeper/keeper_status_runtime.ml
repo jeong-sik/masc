@@ -12,14 +12,36 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
+(* Slack over the slower of the two producer cadences, for the scheduling and
+   transport delay between a heartbeat being written and being read. The .mli
+   calls it "one minute of scheduling / transport jitter"; it was spelled 60.0
+   inside the expression, where nothing said which of the two windows below it
+   belonged to. *)
+let heartbeat_transport_jitter_s = 60.0
+
+(* A turn record is emitted after a cycle completes, so its freshness window
+   carries the cycle's own execution time on top of the configured sleep. Two
+   separate numbers: how long a cycle may take, and the floor the window never
+   drops below however short the cadence is configured. *)
+let turn_cycle_execution_slack_s = 120.0
+let turn_record_freshness_floor_s = 300.0
+
+(* A keepalive loop that has only just started has not had time to write the
+   evidence the health read looks for, so it reads as recovering rather than
+   unhealthy until this window passes. Distinct from the jitter above: that one
+   widens a staleness window, this one suppresses a verdict. *)
+let keepalive_recovery_window_s = 60.0
+
 let keeper_heartbeat_stale_after_s ~keepalive_interval_s ~snapshot_interval_s =
   Float.max
     agent_staleness_threshold_s
-    (Float.max keepalive_interval_s snapshot_interval_s +. 60.0)
+    (Float.max keepalive_interval_s snapshot_interval_s +. heartbeat_transport_jitter_s)
 ;;
 
 let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
-  Float.max 300.0 (keepalive_interval_s +. 120.0)
+  Float.max
+    turn_record_freshness_floor_s
+    (keepalive_interval_s +. turn_cycle_execution_slack_s)
 ;;
 
 let keeper_turn_record_source_health
@@ -52,7 +74,6 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Failing -> Atomic.get entry.cadence_sleeping
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Running
-       | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Compacting
        | Keeper_state_machine.HandingOff
        | Keeper_state_machine.Draining
@@ -126,18 +147,6 @@ let json_string_opt key json = Json_util.get_string_nonempty json key
 
 let json_float_opt key json = Safe_ops.json_float_opt key json
 
-let quiet_hours_active ~now_ts =
-  let current_hour =
-    let tm = Unix.gmtime now_ts in
-    (* KST = UTC+9; must use gmtime, not localtime *)
-    (tm.Unix.tm_hour + 9) mod 24
-  in
-  let quiet_start = Env_config.Autonomy.quiet_start in
-  let quiet_end = Env_config.Autonomy.quiet_end in
-  quiet_start < quiet_end
-  && current_hour >= quiet_start
-  && current_hour < quiet_end
-
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   let normalize_content item =
     match json_string_opt "content" item with
@@ -180,21 +189,55 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
+(* Wire vocabularies shared with the dashboard. Both are closed here so a new
+   case cannot reach the wire without the compiler naming every consumer. *)
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
+
+let keeper_quiet_reason_to_string = function
+  | Proactive_disabled -> "disabled"
+  | Keepalive_not_running -> "not_running"
+  | Starting_up -> "startup"
+  | Never_started -> "never_started"
+
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
+
+(* Strict inverse of {!keeper_next_action_path_to_string}. [None] outside the
+   published vocabulary: a reader that cannot spell an action must say so
+   rather than resolve it to whichever action happens to be first. *)
+let keeper_next_action_path_of_string_opt = function
+  | "auto_restart" -> Some Auto_restart
+  | "recover" -> Some Recover
+  | "probe" -> Some Probe
+  | "direct_message" -> Some Direct_message
+  | _ -> None
+
+let keeper_next_action_path_to_string = function
+  | Auto_restart -> "auto_restart"
+  | Recover -> "recover"
+  | Probe -> "probe"
+  | Direct_message -> "direct_message"
+
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts =
-  let quiet_active = quiet_hours_active ~now_ts in
   if not meta.proactive.enabled then
-    Some "disabled"
+    Some Proactive_disabled
   else if not keepalive_running then
-    Some "not_running"
+    Some Keepalive_not_running
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
       match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= agent_staleness_threshold_s then Some "startup" else Some "never_started"
-  else if quiet_active then
-    Some "quiet_hours"
+    if keeper_age_s <= agent_staleness_threshold_s then Some Starting_up
+    else Some Never_started
   else None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
@@ -228,15 +271,14 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
 
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
-  | KH_zombie -> "auto_restart"
-  | KH_offline | KH_stale | KH_degraded -> "recover"
+  | KH_zombie -> Auto_restart
+  | KH_offline | KH_stale | KH_degraded -> Recover
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "quiet_hours" -> "manual_social_poke"
-      | Some "not_running" -> "recover"
-      | Some "startup" -> "probe"
-      | Some "disabled" -> "recover"
-      | _ -> "direct_message")
+      | Some Keepalive_not_running -> Recover
+      | Some Proactive_disabled -> Recover
+      | Some Starting_up -> Probe
+      | Some Never_started | None -> Direct_message)
 
 let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
@@ -246,15 +288,14 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "disabled" ->
+      | Some Proactive_disabled ->
           "Keeper proactive automation is disabled. Direct messages still work, but scheduled social ticks will stay quiet."
-      | Some "not_running" ->
+      | Some Keepalive_not_running ->
           "Keeper keepalive is enabled, but its loop is not running."
-      | Some "quiet_hours" ->
-          "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
-      | Some "never_started" ->
+      | Some Never_started ->
           "Keeper metadata exists but no reply turn has been recorded yet."
-      | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
+      | Some Starting_up | None ->
+          "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
     ~(keepalive_running : bool)
@@ -268,9 +309,7 @@ let keeper_continuity_state
   in
   let recently_started =
     match keepalive_started_at with
-    | Some started_at ->
-        let recovery_window_s = 60.0 in
-        now_ts -. started_at < recovery_window_s
+    | Some started_at -> now_ts -. started_at < keepalive_recovery_window_s
     | None -> false
   in
   if not keepalive_running then Continuity_not_running
@@ -329,16 +368,12 @@ let augment_keeper_diagnostic_json
    of this domain; it is an operator override applied one layer above. *)
 type surface_status =
   | Surface_active
-  | Surface_busy
-  | Surface_listening
   | Surface_inactive
   | Surface_offline
   | Surface_idle
 
 let surface_status_to_string = function
   | Surface_active -> "active"
-  | Surface_busy -> "busy"
-  | Surface_listening -> "listening"
   | Surface_inactive -> "inactive"
   | Surface_offline -> "offline"
   | Surface_idle -> "idle"
@@ -346,8 +381,6 @@ let surface_status_to_string = function
 let surface_status_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "active" -> Some Surface_active
-  | "busy" -> Some Surface_busy
-  | "listening" -> Some Surface_listening
   | "inactive" -> Some Surface_inactive
   | "offline" -> Some Surface_offline
   | "idle" -> Some Surface_idle
@@ -366,11 +399,17 @@ let control_plane_status_of_string_opt s =
   | "paused" -> Some Cp_paused
   | _ -> Option.map (fun surface -> Cp_surface surface) (surface_status_of_string_opt s)
 
+(* Health as the diagnostic reports it. An unreadable diagnostic falls to
+   KH_offline with a warning rather than to a healthy-looking word, the same
+   way every other reader of this field resolves it. *)
+let keeper_diagnostic_health ~(diagnostic : Yojson.Safe.t) ~source =
+  json_string_opt "health_state" diagnostic
+  |> Option.value ~default:"offline"
+  |> keeper_health_or_offline ~source
+
 let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
   let health_state =
-    json_string_opt "health_state" diagnostic
-    |> Option.value ~default:"offline"
-    |> keeper_health_or_offline ~source:"keeper_surface_status"
+    keeper_diagnostic_health ~diagnostic ~source:"keeper_surface_status"
   in
   let surface =
     match health_state with
@@ -426,9 +465,12 @@ let keeper_diagnostic_json
   `Assoc
     [
       ("health_state", `String (keeper_health_to_string health_state));
-      ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
-      ("next_action_path", `String next_action_path);
-      ("recoverable", `Bool (String.equal next_action_path "recover"));
+      ( "quiet_reason",
+        Json_util.string_opt_to_json
+          (Option.map keeper_quiet_reason_to_string quiet_reason) );
+      ("next_action_path",
+       `String (keeper_next_action_path_to_string next_action_path));
+      ("recoverable", `Bool (next_action_path = Recover));
       ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);
@@ -451,7 +493,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Offline -> "offline"
   | Keeper_state_machine.Running -> "idle"
   | Keeper_state_machine.Failing -> "failing"
-  | Keeper_state_machine.Overflowed -> "overflowed"
   | Keeper_state_machine.Compacting -> "compacting"
   | Keeper_state_machine.HandingOff -> "handoff"
   | Keeper_state_machine.Draining -> "draining"
@@ -468,9 +509,6 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
   | Keeper_state_machine.Running -> "phase_running_idle"
   | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
-  | Keeper_state_machine.Overflowed ->
-    (* Retired phase (#26546): only historical records can carry it. *)
-    "context_overflow_retired_phase"
   | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
   | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
   | Keeper_state_machine.Draining -> "graceful_shutdown_draining"

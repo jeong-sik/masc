@@ -2,13 +2,6 @@
 
 let mask_sensitive _value = "[REDACTED]"
 
-let trim_nonempty = function
-  | None -> None
-  | Some value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
-;;
-
 let is_sensitive_name name =
   let lower = String.lowercase_ascii name in
   List.exists
@@ -159,7 +152,7 @@ let to_json (spec : spec) observation =
       let value = if spec.sensitive then mask_sensitive value else value in
       applied_provenance spec source, Some value
     | Raw_environment raw_env ->
-      let raw = trim_nonempty raw_env in
+      let raw = String_util.option_trim raw_env in
       let provenance = source_provenance spec ~raw_env raw in
       let display_value =
         match raw with

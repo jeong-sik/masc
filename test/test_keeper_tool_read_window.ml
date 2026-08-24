@@ -296,6 +296,59 @@ let test_single_long_line_stays_partial_but_advances () =
     (parse_int "next_offset" raw)
 ;;
 
+(* The verification snapshot and the judge's live read cap bytes with two
+   independent literals. They agree today only because #29407 moved the
+   snapshot cap from 20_000 to 200_000 while the tool ceiling already sat
+   there; before that a judge could ask for ten times what the operator would
+   later see in the snapshot (#27397). Nothing derives one from the other, and
+   a dependency edge from lib/workspace to the tool limits does not exist, so
+   pin the relation where both are visible: whatever a live read returns has
+   to fit in what the snapshot records. *)
+(* The behavioural case above passes whether the two caps are one value or
+   two literals that happen to agree. #27397 is about the second shape: the
+   doc claimed a shared reader made them inseparable while they were in fact
+   independent. They now come from one place, and this says so. *)
+let test_read_ceiling_and_snapshot_cap_are_one_value () =
+  Alcotest.(check int)
+    "the snapshot cap is the Read ceiling"
+    Tool_shard_limits.read_file_max_max_bytes
+    Workspace_verification_store.verification_evidence_max_bytes;
+  Alcotest.(check bool)
+    "and the default sits under it"
+    true
+    (Tool_shard_limits.read_file_default_max_bytes
+     <= Tool_shard_limits.read_file_max_max_bytes)
+;;
+
+let test_live_read_cannot_outrun_the_evidence_snapshot () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  let snapshot_cap = Workspace_verification_store.verification_evidence_max_bytes in
+  (* 9 bytes a line, so this file is comfortably larger than the cap. *)
+  write_file
+    (Filename.concat playground "repos/masc/large.ml")
+    (numbered_lines ((snapshot_cap / 9) + 5_000));
+  let raw =
+    read
+      ~config
+      ~meta
+      (`Assoc
+         [ "path", `String "repos/masc/large.ml"
+         ; "max_bytes", `Int (snapshot_cap * 10)
+         ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  let bytes = parse_int "bytes" raw |> Option.value ~default:max_int in
+  Alcotest.(check bool)
+    (Printf.sprintf
+       "a live read of %d bytes has to fit the %d-byte snapshot cap"
+       bytes
+       snapshot_cap)
+    true
+    (bytes <= snapshot_cap);
+  Alcotest.(check bool) "and the file really was larger" true (parse_bool "truncated" raw)
+;;
+
 let test_zero_limit_is_rejected () =
   setup
   @@ fun ~config ~meta ~playground ->
@@ -365,6 +418,14 @@ let () =
             "single long line stays partial but advances"
             `Quick
             test_single_long_line_stays_partial_but_advances
+        ; Alcotest.test_case
+            "a live read cannot outrun the evidence snapshot"
+            `Quick
+            test_live_read_cannot_outrun_the_evidence_snapshot
+        ; Alcotest.test_case
+            "read ceiling and snapshot cap are one value"
+            `Quick
+            test_read_ceiling_and_snapshot_cap_are_one_value
         ; Alcotest.test_case "zero limit is rejected" `Quick test_zero_limit_is_rejected
         ; Alcotest.test_case
             "offset past EOF returns empty"

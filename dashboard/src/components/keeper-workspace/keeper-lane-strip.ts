@@ -114,7 +114,7 @@ const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
 
 const SECONDS_PER_MINUTE = 60
 const HOUR_MINUTES = 60
-const DAY_MINUTES = 24 * HOUR_MINUTES
+export const DAY_MINUTES = 24 * HOUR_MINUTES
 /** A bar never shrinks below this so a fresh row stays clickable. */
 const MIN_BAR_PERCENT = 6
 
@@ -152,7 +152,7 @@ function LaneGap({ children }: { children: VNode | string }): VNode {
 /** A count the server folded over a possibly-capped row list. `truncated`
  *  carries the server's own `waiting_count_truncated` / `truncated_sources`
  *  verdict, so a capped count never renders as an exact total. */
-function boundedCount(value: number, truncated: boolean): string {
+export function boundedCount(value: number, truncated: boolean): string {
   return truncated ? `≥${value}` : `${value}`
 }
 
@@ -172,7 +172,7 @@ function rowSince(row: DashboardKeeperWaitingRow): number | null {
 
 /** Oldest observation first. Equal/missing timestamps keep their server order,
  * and missing timestamps stay visible at the end. */
-function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
+export function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
   return rows
     .map((row, serverIndex) => ({ row, serverIndex, since: rowSince(row) }))
     .sort((left, right) => {
@@ -184,7 +184,7 @@ function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): Das
     .map(({ row }) => row)
 }
 
-function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
+export function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
   const since = rowSince(row)
   if (since == null) return null
   return Math.max(0, (nowMs / 1000 - since) / SECONDS_PER_MINUTE)
@@ -283,7 +283,7 @@ function LanePipeline({ entry, dev }: { entry: DashboardKeeperWaitingKeeper; dev
   `
 }
 
-function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
+export function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
   const ticks: Array<{ label: string; at: number }> = [
     { label: '지금', at: 0 },
     { label: '1시간', at: axisPosition(HOUR_MINUTES, axisMax) },
@@ -312,7 +312,7 @@ function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
   `
 }
 
-function LaneWaitingRow({
+export function LaneWaitingRow({
   row,
   age,
   axisMax,

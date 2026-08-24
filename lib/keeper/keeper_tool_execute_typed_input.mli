@@ -36,6 +36,14 @@ type input_source =
   | Inherit_input  (** default; the child keeps the parent's stdin *)
   | Empty_input  (** read nothing — [/dev/null] *)
   | Read_file of { path : string }  (** absolute path opened for reading *)
+  | Literal_input of { bytes : string }
+      (** the bytes themselves, with no file anywhere.
+
+          This is what a heredoc is, and until it existed the tool could tell a
+          caller its heredoc belonged in the stdin field while the stdin field
+          had nowhere to put it. Content never reaches the filesystem, so
+          nothing has to be cleaned up and nothing else can read it on the way
+          past. *)
       (** stdin cannot duplicate another descriptor: a merge is carried out on
           captured output and stdin is not a capture. *)
 
@@ -71,13 +79,25 @@ type conditional =
   | And_then  (** run the next program only if the one before it exited zero *)
   | Or_else  (** run the next program only if the one before it did not *)
 
+type source =
+  | Staged of {
+      program : program;
+      next : (conditional * program) list;
+          (** programs to run after [program], each guarded by how the one
+              before it ended. Empty for a single program. The guard looks at
+              whatever ran last, so a run of them reads left to right, as a
+              shell reads [a && b || c]. *)
+    }
+  | Script of string
+      (** one command line, lowered by the bash parser to the same
+          {!Masc_exec.Shell_ir.t} the staged form builds. A construct the IR
+          cannot represent is refused by name; nothing reaches a shell. *)
+(** Where the work comes from. The schema says [argv], [pipeline] and [script]
+    exclude each other; saying it here too makes "both" and "neither"
+    unrepresentable rather than something {!validate} has to catch. *)
+
 type execute_input = {
-  program : program;
-  next : (conditional * program) list;
-      (** programs to run after [program], each guarded by how the one before
-          it ended. Empty for a single program. The guard looks at whatever
-          ran last, so a run of them reads left to right, as a shell reads
-          [a && b || c]. *)
+  source : source;
   cwd : string option;
   env : (string * string) list;
   timeout_sec : float option;
@@ -113,6 +133,14 @@ type validation_error =
           relative paths are rejected to
           mirror {!Cwd_not_absolute} semantics. *)
   | Cwd_not_absolute of string
+  | Script_not_a_command_line of {
+      token : string;
+      expected : string list;
+    }
+  | Script_unreadable of Masc_exec.Parsed.reason_aborted
+  | Script_outside_the_subset of Masc_exec.Parsed.reason_too_complex
+  | Script_nested_pipeline
+  | Script_rejected_by_the_gate of string
   | Redirect_fd_unknown of {
       fd : int;
       target : int;
@@ -161,6 +189,24 @@ val to_shell_ir_unvalidated :
     Callers that use the Shell IR facade ([Shell_command_gate.gate_typed])
     may use this entrypoint when the boundary has already been checked.  Argv
     is preserved byte-for-byte. *)
+
+val hidden_script_findings
+  :  sandbox:Masc_exec.Sandbox_target.t
+  -> execute_input
+  -> (string * string) list
+(** The scripts hidden inside argv, and what the gate would have called each.
+
+    [argv:["sh";"-c";S]] arrives as one opaque program with two literal
+    arguments, so S is counted as nothing at all while the guarantees that
+    apply to [script:S] -- path scope, redirect policy, the absence of [;] from
+    {!Masc_exec.Shell_ir.connector} -- stop applying inside it.  Each pair is
+    the shell name and a closed-vocabulary tag from
+    {!Keeper_tooling.Shell_costume.finding_tag}.
+
+    Recognition and classification only: calling this changes nothing about
+    what runs.  [Script] sources yield [[]] -- they already crossed the gate.
+    RFC execute-subset-dispositions step 1: this distribution is what decides
+    which constructs the subset rewrites first. *)
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->

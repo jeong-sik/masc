@@ -6,29 +6,51 @@ module Ansi = struct
   let hide_cursor = "\027[?25l"
   let show_cursor = "\027[?25h"
 
-  (* Colors *)
+  (* no-color.org: a non-empty NO_COLOR suppresses styling. Structure --
+     borders, markers, reverse-video selection -- stays, because it carries
+     meaning colour only repeats. MASC_TUI_FORCE_COLOR=1 overrides for a
+     pipeline that strips the variable it wants. *)
+  let colors_enabled =
+    match Sys.getenv_opt "MASC_TUI_FORCE_COLOR" with
+    | Some "1" -> true
+    | Some _ | None ->
+      (match Sys.getenv_opt "NO_COLOR" with
+       | Some value when String.length value > 0 -> false
+       | Some _ | None -> true)
+
+  let style code = if colors_enabled then code else ""
+
+  (* Colors. [reset] stays unconditional: reverse-video survives NO_COLOR,
+     and this is what closes it. *)
   let reset = "\027[0m"
-  let bold = "\027[1m"
-  let dim = "\027[2m"
+  let bold = style "\027[1m"
+  let dim = style "\027[2m"
+  (* A third weight between bold and dim. The renderer had only two, so a
+     heading and the paragraph under it could differ by nothing an eye reads
+     as rank. *)
+  let underline = style "\027[4m"
 
-  let _black = "\027[30m"
-  let red = "\027[31m"
-  let green = "\027[32m"
-  let yellow = "\027[33m"
-  let blue = "\027[34m"
-  let magenta = "\027[35m"
-  let cyan = "\027[36m"
-  let white = "\027[37m"
-  let gray = "\027[90m"
+  let red = style "\027[31m"
+  let green = style "\027[32m"
+  let yellow = style "\027[33m"
+  let blue = style "\027[34m"
+  let magenta = style "\027[35m"
+  let cyan = style "\027[36m"
+  let white = style "\027[37m"
 
-  let _bg_black = "\027[40m"
-  let _bg_blue = "\027[44m"
-  let bg_white = "\027[47m"
+  (* SGR 39 restores the terminal's own text colour. [white] is a colour like
+     any other -- on a light background it is the background -- so a fallback
+     that means "nothing special about this value" has to say default, not
+     white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
+     an emphasised run without flattening it. *)
+  let default_fg = style "\027[39m"
+  let gray = style "\027[90m"
 
   (* Cursor movement *)
   let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 
-  (* Reverse video for selection highlight *)
+  (* Reverse video for selection highlight. Kept under NO_COLOR: it is the
+     one selection signal every terminal renders without colour. *)
   let reverse = "\027[7m"
 
   (* Box drawing characters *)
@@ -38,12 +60,65 @@ module Ansi = struct
   let box_tr = "\xe2\x94\x90" (* top-right corner *)
   let box_bl = "\xe2\x94\x94" (* bottom-left corner *)
   let box_br = "\xe2\x94\x98" (* bottom-right corner *)
-  let _box_t = "\xe2\x94\xac"  (* top tee *)
-  let _box_b = "\xe2\x94\xb4"  (* bottom tee *)
   let box_l = "\xe2\x94\x9c"  (* left tee *)
   let box_r = "\xe2\x94\xa4"  (* right tee *)
-  let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
+
+(** Semantic styles for state and content syntax.
+
+    A fact about health, phase, or attention draws through these names, so
+    one remap -- a theme, a colourblind palette -- moves every reading at
+    once. The boundary: state goes through the top-level names; syntax colours
+    stay under [Syntax], because "this word is green" is content (a diff or a
+    code literal) rather than a reading of state. Renderers do not choose raw
+    red, yellow, or green themselves. *)
+module Theme = struct
+  let ok = Ansi.green
+  let warn = Ansi.yellow
+  let bad = Ansi.red
+  let info = Ansi.cyan
+  let muted = Ansi.dim
+  let selection = Ansi.reverse
+  let border_focus = Ansi.cyan
+
+  module Syntax = struct
+    let keyword = Ansi.yellow
+    let string = Ansi.green
+  end
+end
+
+(** One owner for the visual distinction between conversation roles.
+
+    Role and state are different axes: a Keeper message is not a success, and
+    a user message is not merely informational. The renderer asks this module
+    for its badge/gutter and body styles instead of rebuilding that mapping.
+    Both human and Keeper prose deliberately keep the terminal's foreground. *)
+module Chat_theme = struct
+  let origin : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User -> Ansi.cyan
+    | Masc_tui_message_layout.Keeper -> Ansi.blue
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool -> Ansi.magenta
+    | Masc_tui_message_layout.Thinking -> Ansi.gray
+
+  let body : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking -> Ansi.dim
+end
+
+(** A screen title.
+
+    Emphasis belongs to the words that name the screen, not to the whole header
+    line. Headers interpolate coloured badges, and the reset that closes a badge
+    also closes any style wrapped around the line, so styling the line bolded a
+    different amount of text on every screen -- as far as its first badge, which
+    sits in a different place each time. Eight screens wrapped the line and eight
+    drew it plain, and the four styles that came out of that were not a
+    decision. *)
+let screen_title text = Ansi.bold ^ text ^ Ansi.reset
 
 (** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
     an idle TUI does not spawn [tput] twice per frame. *)
@@ -53,21 +128,21 @@ let terminal_size_cache =
 let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
-let probe_terminal_size () =
-  let read_tput arg =
-    try
-      let line, status =
-        With_process.with_process_args_in "tput" [| "tput"; arg |]
-          input_line
-      in
-      match status with
-      | Unix.WEXITED 0 -> int_of_string_opt (String.trim line)
-      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
-    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
-  in
-  match read_tput "cols", read_tput "lines" with
-  | Some cols, Some rows -> Some (rows, cols)
-  | _ -> None
+(* Asked of the tty itself, without a child process.
+
+   [tput] reads the size from TIOCGWINSZ on its own stdout, and this probe
+   captured that stdout through a pipe, so the ioctl never saw a terminal and
+   [tput] answered from the static terminfo entry instead -- 80x24 for most
+   terminals, returned as though it were a measurement. #30187 found the other
+   half: since #30160 pointed stderr at a file, a child probe can inherit no
+   tty fd at all, which is why it reached for /dev/tty by name.
+
+   Both halves are answered by asking the kernel directly. [Terminal_size]
+   tries the three standard descriptors and then /dev/tty, and says [None]
+   rather than guessing when none of them is a terminal -- the [tput] fallback
+   is gone because a fabricated 80x24 is the failure, not the cure. Two
+   processes per resize become none. *)
+let probe_terminal_size () = Terminal_size.get ()
 
 (** Get terminal size (fallback to 80x24). *)
 let get_terminal_size () =
@@ -92,23 +167,11 @@ module Terminal_text = struct
 
   let single_lines values = List.map single_line values
   let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
-  let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
+  (* The screen's clock is the terminal's zone. This is the one place that
+     names it, so every row clock and the header clock agree. *)
+  let clock_timestamp text =
+    Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
 end
-
-let is_keeper name =
-  String.length name >= 7 && String.sub name 0 7 = "keeper-"
-
-(** Agent icon — deterministic by name hash, vendor-agnostic *)
-let agent_icon name =
-  let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
-  else icons.(Hashtbl.hash name mod Array.length icons)
-
-(** Agent color — deterministic by name hash, vendor-agnostic *)
-let agent_color name =
-  let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if is_keeper name then Ansi.white
-  else colors.(Hashtbl.hash name mod Array.length colors)
 
 (** Status color *)
 let status_color status =
@@ -117,7 +180,7 @@ let status_color status =
   | "idle" | "online" -> Ansi.green
   | "offline" -> Ansi.gray
   | "error" -> Ansi.red
-  | _ -> Ansi.white
+  | _ -> Ansi.default_fg
 
 (** Task status icon *)
 let task_status_icon status =
@@ -135,15 +198,6 @@ let priority_indicator p =
   else if p <= 2 then Ansi.red ^ "!!" ^ Ansi.reset
   else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
   else ""
-
-(** Soul profile color *)
-let soul_color profile =
-  match profile with
-  | "relationship" -> Ansi.magenta
-  | "delivery" -> Ansi.green
-  | "balanced" -> Ansi.cyan
-  | "creative" -> Ansi.yellow
-  | _ -> Ansi.white
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =
@@ -164,52 +218,69 @@ let ctx_bar ratio width =
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
 
-(** Format channel name with color *)
-let channel_color ch =
-  match ch with
-  | "heartbeat" -> Ansi.dim ^ "hb" ^ Ansi.reset
-  | "turn" -> Ansi.cyan ^ "turn" ^ Ansi.reset
-  | "compaction" -> Ansi.yellow ^ "comp" ^ Ansi.reset
-  | "handoff" -> Ansi.magenta ^ "hand" ^ Ansi.reset
-  | "initiative" -> Ansi.blue ^ "init" ^ Ansi.reset
-  | s -> s
+(* The framed family keeps the full border box. Modals (palette, help) and
+   side-by-side panes still need it: a border is what separates an overlay
+   from the surface under it, and two panes from each other. *)
 
-(** Shared helper: draw box top border *)
-let box_top buf cols =
+let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset)
 
-(** Shared helper: draw box bottom border *)
-let box_bottom buf cols =
+let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset)
 
-(** Shared helper: draw box divider *)
-let box_divider buf cols =
+let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
 
-(** Shared helper: draw a line inside a box *)
-let box_line buf cols content =
+let framed_line buf cols content =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Fit plain content first, then add style bytes so ANSI escapes never count
-    toward the terminal width. *)
-let box_line_styled buf cols ~style content =
+let framed_line_styled buf cols ~style content =
   let inner = cols - 4 in
   let content = fit_width content inner in
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
        Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Shared helper: empty line inside a box *)
-let box_empty buf cols =
+let framed_empty buf cols =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (String.make inner ' ')
     Ansi.gray Ansi.box_v Ansi.reset)
+
+(* Full-screen surfaces draw without the outer box: the terminal edge is
+   already the frame, and a border around everything separates nothing (the
+   clutter audit's first offender). Every helper keeps its old geometry --
+   one row per call, content width [cols - 4] -- so no surface's row budget
+   or wrap math moves. *)
+
+let box_top buf _cols = Buffer.add_char buf '\n'
+let box_bottom buf _cols = Buffer.add_char buf '\n'
+
+let box_divider buf cols =
+  Buffer.add_string buf
+    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset)
+
+(* Rows keep the framed geometry -- two margin cells each side, content
+   width [cols - 4] -- and still span the full [cols], so anything that
+   measures a row (the PTY suite does) reads the same width either way. *)
+let box_line buf cols content =
+  let inner = cols - 4 in
+  Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
+
+let box_line_styled buf cols ~style content =
+  let inner = cols - 4 in
+  let content = fit_width content inner in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
+
+let box_empty buf cols =
+  Buffer.add_string buf (String.make cols ' ');
+  Buffer.add_char buf '\n' 

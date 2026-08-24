@@ -52,7 +52,7 @@ describe('appendCompositeObservation', () => {
   })
 
   it('trims to maxEntries', () => {
-    const phases = ['Stable', 'Running', 'Compacting', 'HandingOff', 'Failing', 'Draining', 'Overflowed'] as const
+    const phases = ['Stable', 'Running', 'Compacting', 'HandingOff', 'Failing', 'Draining'] as const
     const observations = Array.from({ length: 30 }, (_, i) => obs({ ts: i, phase: phases[i % phases.length]! }))
     const extra = obs({ ts: 100, phase: 'Failing' })
     const result = appendCompositeObservation(observations, extra, 10)

@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -43,6 +42,20 @@ val assemble_extra_system_context :
 (** Assemble every complete typed prompt block in source order. No local size
     estimate has authority over assembly or dispatch; typed provider overflow
     is handled at the MASC lane boundary. *)
+
+val ends_with_tool_results : Agent_core.Types.message list -> bool
+(** Whether the conversation's last message is a Tool-role message — i.e. the
+    next provider round immediately continues a tool loop.
+
+    This is a position question, not a containment question:
+    [Hooks.last_tool_results] reports the results of the last Tool message
+    anywhere in history, so it is non-empty for almost every turn of a keeper
+    that has ever used a tool. Gating the recurring context blocks on that
+    predicate suppressed the world state on the first round of ordinary turns
+    (live: one keeper's turn 15, 2026-08-24 08:08Z — ctx absent on round one).
+    The
+    first round of a turn ends with the user's message; only rounds that
+    follow tool execution end with the Tool message. *)
 
 val build_turn_context
   :  ctx:Keeper_run_context.run_context

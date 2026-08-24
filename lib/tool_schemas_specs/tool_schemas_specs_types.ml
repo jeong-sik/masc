@@ -8,6 +8,38 @@
    exe depends on tool_schemas_specs (types only), and masc_tool_schemas
    depends on nothing new — it just receives the generated ml. *)
 
+(* The dashboard tool's [scope] argument. It is spelled in two places that
+   cannot see each other: the JSON Schema enum the generator emits, and the
+   runtime parser in [Dashboard] that rejects anything outside it. Adding a
+   scope to one and not the other either hides it from the model or advertises
+   one the runtime refuses, and nothing failed when they drifted (#27069).
+
+   It lives in this library because the generator already links it and nothing
+   here depends on the consumers, so [Dashboard] can take it too without the
+   cycle the generator exists to avoid. *)
+type dashboard_scope =
+  | Dashboard_scope_all
+  | Dashboard_scope_current
+
+let dashboard_scope_to_string = function
+  | Dashboard_scope_all -> "all"
+  | Dashboard_scope_current -> "current"
+;;
+
+let dashboard_scope_of_string_opt = function
+  | "all" -> Some Dashboard_scope_all
+  | "current" -> Some Dashboard_scope_current
+  | _ -> None
+;;
+
+(* Order is the enum order in the emitted schema. *)
+let all_dashboard_scopes = [ Dashboard_scope_all; Dashboard_scope_current ]
+
+let dashboard_scope_strings =
+  List.map dashboard_scope_to_string all_dashboard_scopes
+;;
+
+
 type param_type =
   | T_string of
       { enum : string list option

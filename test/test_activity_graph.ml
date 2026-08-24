@@ -27,6 +27,35 @@ let with_config f =
       let config = Lib.Workspace.default_config dir in
       f config)
 
+(* The store used to spell the YYYY-MM/DD.jsonl layout out for itself, and it
+   read the clock once for the month directory and once more for the day file,
+   so a write crossing midnight on the last of a month could land the new
+   day's file under the old month's directory (#27143). The layout comes from
+   Jsonl_writer now; this pins that it still does. *)
+let test_day_file_follows_the_shared_layout () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"agent.joined"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~payload:(`Assoc [])
+           ());
+      let path = Activity_graph.For_testing.current_day_path config in
+      check bool "the emitted day file exists" true (Sys.file_exists path);
+      let expected =
+        (Jsonl_writer.dated_path_now
+           ~base_dir:
+             (Filename.concat
+                (Workspace_utils.masc_dir config)
+                "activity-events"))
+          .Jsonl_writer.path
+      in
+      check string "and Jsonl_writer names the same file" expected path;
+      check bool
+        "its directory is the one the writer would make"
+        true
+        (Sys.is_directory (Filename.dirname path)))
+;;
+
 let test_emit_and_list_events () =
   with_config (fun config ->
       ignore
@@ -359,7 +388,7 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       let event_path = Filename.concat month_dir "01.jsonl" in
       let raw_line =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"kind\":\"message.broadcast\",\
          \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
       in
       Fs_compat.save_file event_path raw_line;
@@ -726,7 +755,7 @@ let test_current_day_cache_rescans_from_zero_on_truncation () =
       let raw_line seq =
         Printf.sprintf
           "{\"seq\":%d,\"ts_ms\":%d,\"ts_iso\":\"2026-01-01T00:00:00Z\",\
-           \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+           \"kind\":\"message.broadcast\",\
            \"payload\":{},\"tags\":[]}\n"
           seq seq
       in
@@ -746,7 +775,7 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
       let day_path = Filename.concat month_dir "01.jsonl" in
       Fs_compat.save_file day_path
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"kind\":\"message.broadcast\",\
          \"payload\":{},\"tags\":[]}\n";
       ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
       check bool "past-day file is now cached" true
@@ -789,7 +818,6 @@ let test_reducer_replaces_node_entries_instead_of_writing_through () =
       seq;
       ts_ms = seq * 1000;
       ts_iso;
-      workspace_id = "ws-immutable-reducer";
       kind = "task.assigned";
       actor = Some { kind = "agent"; id = "a1" };
       subject = Some { kind = "task"; id = "t1" };
@@ -827,6 +855,8 @@ let () =
     [
       ( "core",
         [
+          test_case "day file follows the shared layout" `Quick
+            test_day_file_follows_the_shared_layout;
           test_case "emit and list events" `Quick test_emit_and_list_events;
           test_case "events json derives IDE context" `Quick
             test_events_json_derives_ide_context;

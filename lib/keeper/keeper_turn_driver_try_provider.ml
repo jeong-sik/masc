@@ -256,7 +256,8 @@ let apply_accept
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,
@@ -871,6 +872,9 @@ let run_try_provider
           ; raw_trace = ctx.raw_trace
           ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
+            (* Read per turn rather than captured at boot so the ceiling can be
+               tuned through the runtime-params API without a restart. *)
+          ; max_tool_rounds = Keeper_config.keeper_max_tool_rounds ()
           }
   in
   let local_agent_ref : Agent_core.Agent.t option ref = ref None in

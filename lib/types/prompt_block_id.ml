@@ -34,3 +34,13 @@ let of_string = function
 let all_known =
   [ Keeper_instructions; Dynamic_context; Temporal_summary; Memory_os_recall; Operator_note ]
 ;;
+
+(* See the mli. [Keeper_instructions] never enters the extra-context
+   assembly (it is the rendered system prompt, recorded separately for the
+   TurnRecord); it answers [true] because it is not a recurring world-state
+   re-broadcast, and the exhaustive match keeps a new constructor from
+   inheriting either class silently. *)
+let injected_on_post_tool_round = function
+  | Dynamic_context | Temporal_summary | Memory_os_recall -> false
+  | Keeper_instructions | Operator_note -> true
+;;

@@ -14,8 +14,51 @@ module KSM = Keeper_state_machine
 
 (* ── Keeper phase round-trip completeness ─────────────────── *)
 
-let all_phases_count_is_11 =
-  List.length KSM.all_phases = 11
+(* Every phase this test knows, by name. [KSM.all_phases] is compared against
+   this rather than against a number.
+
+   A count cannot say which phase drifted, and it goes stale in silence:
+   #30133 retired [Overflowed] and left the [11] behind, so the assertion
+   failed on every build after that change instead of on the change itself,
+   and what it said was "expected true, got false". Naming them means the
+   failure names the phase. *)
+let every_phase : KSM.phase list =
+  [ Offline
+  ; Running
+  ; Failing
+  ; Compacting
+  ; HandingOff
+  ; Draining
+  ; Paused
+  ; Stopped
+  ; Crashed
+  ; Restarting
+  ]
+
+(* The compiler's half of the same contract. A variant added to [KSM.phase]
+   makes this match non-exhaustive, so the build stops at the commit that adds
+   it -- before any list or count has a chance to disagree at run time. *)
+let _phase_is_named : KSM.phase -> unit = function
+  | Offline
+  | Running
+  | Failing
+  | Compacting
+  | HandingOff
+  | Draining
+  | Paused
+  | Stopped
+  | Crashed
+  | Restarting -> ()
+
+let names phases = List.map KSM.phase_to_string phases
+
+let all_phases_lists_every_variant () =
+  Alcotest.(check (list string))
+    "phases this test names that all_phases omits" []
+    (names (List.filter (fun p -> not (List.mem p KSM.all_phases)) every_phase));
+  Alcotest.(check (list string))
+    "phases all_phases carries that this test does not name" []
+    (names (List.filter (fun p -> not (List.mem p every_phase)) KSM.all_phases))
 
 let roundtrip_every_phase () =
   List.iter (fun p ->
@@ -78,8 +121,8 @@ let agent_core_stop_reason_strings =
 let () =
   Alcotest.run "keeper_phase_drift_contract"
     [ ( "keeper_phase_roundtrip"
-      , [ Alcotest.test_case "all_phases has 11 variants" `Quick (fun () ->
-            Alcotest.(check bool) "11 phases" true all_phases_count_is_11)
+      , [ Alcotest.test_case "all_phases lists every variant" `Quick
+            all_phases_lists_every_variant
         ; Alcotest.test_case "roundtrip: to_string -> of_string = id" `Quick roundtrip_every_phase
         ; Alcotest.test_case "no orphan strings" `Quick no_orphan_strings
         ; Alcotest.test_case "all phase strings are unique" `Quick

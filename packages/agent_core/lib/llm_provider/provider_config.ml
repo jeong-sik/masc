@@ -43,6 +43,13 @@ type t =
   ; top_p : float option
   ; top_k : int option
   ; min_p : float option
+  (* Ollama's own repetition samplers. A model that falls into an R1-style
+     loop -- re-evaluating its own reasoning without ever answering -- is
+     caught by penalising verbatim repetition over a window, and the provider
+     supports both knobs natively. Without them the loop had nothing in the
+     request that could end it. *)
+  ; repeat_penalty : float option
+  ; repeat_last_n : int option
   ; system_prompt : string option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
@@ -83,6 +90,8 @@ let make
       ?top_p
       ?top_k
       ?min_p
+      ?repeat_penalty
+      ?repeat_last_n
       ?system_prompt
       ?enable_thinking
       ?preserve_thinking
@@ -141,6 +150,8 @@ let make
   ; top_p
   ; top_k
   ; min_p
+  ; repeat_penalty
+  ; repeat_last_n
   ; system_prompt
   ; enable_thinking
   ; preserve_thinking

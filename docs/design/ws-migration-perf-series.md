@@ -1,14 +1,5 @@
 ---
 status: draft
-last_verified: 2026-04-25
-code_refs:
-  - lib/server/server_mcp_transport_ws.ml
-  - lib/sse.ml
-  - lib/transport_metrics.ml
-  - lib/server/masc_grpc_service.ml
-  - dashboard/src/dashboard-ws.ts
-  - dashboard/src/sse.ts
-  - dashboard/src/components/transport-health.ts
 ---
 
 # WS Migration Performance Series

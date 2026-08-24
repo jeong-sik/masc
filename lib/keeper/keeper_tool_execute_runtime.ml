@@ -577,6 +577,22 @@ let handle_tool_execute_typed
             let data = Keeper_secret_redaction.redact_stream_chunk state data in
             record_stream_chunk stream data
           in
+          (* RFC execute-subset-dispositions step 1.  A script that arrived
+             inside [argv:["sh";"-c";...]] is invisible to everything else on
+             this path, so it is counted here and nowhere else.  Recognition
+             and classification only -- the dispatch below is unchanged, and
+             what runs is exactly what ran before this line existed. *)
+          List.iter
+            (fun (shell, finding) ->
+               Log.Keeper.info
+                 "shell_costume keeper=%s shell=%s finding=%s cmd=%s"
+                 meta.name
+                 shell
+                 finding
+                 cmd_for_log)
+            (Keeper_tool_execute_typed_input.hidden_script_findings
+               ~sandbox:dispatch_sandbox
+               input);
           let dispatch () =
             match !For_testing.dispatch_override with
             | Some override -> override ()

@@ -95,12 +95,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("total_cost_usd", `Float 0.42)
        ; ("last_turn_ts", `Float last_turn_ts)
        ; ("compaction_count", `Int 1)
-       ; ("autonomous_turn_count", `Int 7)
-       ; ("autonomous_text_turn_count", `Int 5)
-       ; ("autonomous_tool_turn_count", `Int 2)
-       ; ("board_reactive_turn_count", `Int 3)
-       ; ("mention_reactive_turn_count", `Int 1)
-       ; ("noop_turn_count", `Int 4)
        ; ("last_proactive_outcome", `String "tool_use")
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
@@ -124,22 +118,11 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
         keeper.k_current_task_id;
-      Alcotest.(check int) "autonomous turns" 7
-        keeper.k_autonomous_turn_count;
       Alcotest.(check int) "total turns" 4 keeper.k_total_turns;
       Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
         keeper.k_total_cost_usd;
       Alcotest.(check int) "compactions" 1 keeper.k_compaction_count;
-      Alcotest.(check int) "autonomous text turns" 5
-        keeper.k_autonomous_text_turn_count;
-      Alcotest.(check int) "autonomous tool turns" 2
-        keeper.k_autonomous_tool_turn_count;
-      Alcotest.(check int) "board turns" 3
-        keeper.k_board_reactive_turn_count;
-      Alcotest.(check int) "mention turns" 1
-        keeper.k_mention_reactive_turn_count;
-      Alcotest.(check int) "no-op turns" 4 keeper.k_noop_turn_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
@@ -218,15 +201,148 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
+  `Assoc
+    ([ "ts", `Float 1787534998.4
+     ; "keeper", `String keeper
+     ; "tool", `String tool
+     ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
+     ; "success", `Bool success
+     ]
+    @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
+    @ (match turn with None -> [] | Some t -> [ "turn", `Int t ]))
+
+let test_keeper_calls_reject_rows_naming_another_keeper () =
+  let payload =
+    `Assoc
+      [ "keeper", `String "largo"
+      ; "count", `Int 3
+      ; "health", `String "ok"
+      ; "latest_age_s", `Float 8.2
+      ; "stale_reason", `String "fresh"
+      ; ( "entries"
+        , `List
+            [ keeper_call_row ~keeper:"largo" ~tool:"Read" ~duration_ms:28.4
+                ~turn:2143 ()
+            ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
+            ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
+                ~success:false ()
+            ] )
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo" payload
+  with
+  | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+  | Ok snapshot ->
+      Alcotest.(check int) "two rows kept in order" 2
+        (List.length snapshot.Tui_decode.kcs_entries);
+      Alcotest.(check int) "the foreign row is counted, not drawn" 1
+        snapshot.Tui_decode.kcs_mismatched;
+      (match snapshot.Tui_decode.kcs_entries with
+       | [ first; second ] ->
+           Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
+           Alcotest.(check bool) "failure carried" false
+             second.Tui_decode.kc_success;
+           Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
+             (Some 28.4) first.Tui_decode.kc_duration_ms;
+           Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
+             first.Tui_decode.kc_turn
+       | _ -> Alcotest.fail "expected two rows");
+      Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
+        snapshot.Tui_decode.kcs_stale_reason;
+      Alcotest.(check string) "health verbatim" "ok"
+        snapshot.Tui_decode.kcs_health
+
+(* The envelope has always carried what a call answered; the row did not read
+   it, so a call that failed said so without saying why. Absent and empty stay
+   absent: a row that carried no result is not a call that answered "". *)
+let test_keeper_calls_carry_what_the_call_answered () =
+  let row ~output =
+    `Assoc
+      [ "ts", `Float 1787534998.4
+      ; "keeper", `String "largo"
+      ; "tool", `String "Execute"
+      ; "input", `String {|{"argv": ["ls"]}|}
+      ; "success", `Bool true
+      ; "output", output
+      ]
+  in
+  let payload entries =
+    `Assoc
+      [ "keeper", `String "largo"
+      ; "count", `Int (List.length entries)
+      ; "health", `String "ok"
+      ; "entries", `List entries
+      ]
+  in
+  let outputs entries =
+    match
+      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+        (payload entries)
+    with
+    | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+    | Ok snapshot ->
+        List.map
+          (fun (call : Tui_decode.keeper_call) -> call.Tui_decode.kc_output)
+          snapshot.Tui_decode.kcs_entries
+  in
+  Alcotest.(check (list (option string)))
+    "text kept, absent and blank stay absent, a non-string is serialised"
+    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    (outputs
+       [ row ~output:(`String "a.ml  b.ml")
+       ; row ~output:`Null
+       ; row ~output:(`String "   ")
+       ; row ~output:(`Assoc [ "code", `Int 0 ])
+       ])
+
+let test_keeper_calls_require_the_envelope () =
+  Alcotest.(check bool) "no entries list is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+          (`Assoc
+             [ "keeper", `String "largo"
+             ; "count", `Int 0
+             ; "health", `String "ok"
+             ])));
+  Alcotest.(check bool) "a row without success is an error" true
+    (Result.is_error
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+          (`Assoc
+             [ "keeper", `String "largo"
+             ; "count", `Int 1
+             ; "health", `String "ok"
+             ; ( "entries"
+               , `List
+                   [ `Assoc
+                       [ "ts", `Float 1.0
+                       ; "keeper", `String "largo"
+                       ; "tool", `String "Read"
+                       ]
+                   ] )
+             ])))
+
 let test_timestamp_slices_are_sanitized_after_selection () =
-  Alcotest.(check string) "normal clock timestamp" "04:05:06"
-    (Tui_decode.clock_timestamp_for_terminal "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "normal clock timestamp, in the zone asked for"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "the row clock follows the terminal's zone"
+    "13:05:06"
+    (Tui_decode.clock_timestamp_for_terminal
+       ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "fractional seconds and offsets read the same clock"
+    "04:05:06"
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
+       "2026-08-22T13:05:06.250+09:00");
   Alcotest.(check string) "empty short timestamp" "(never)"
     (Tui_decode.short_timestamp_for_terminal "");
   Alcotest.(check string)
     "clock slice cannot expose a UTF-8 continuation as raw C1"
     "\\x9B31mOWNE"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "0123456789Û31mOWNED!!");
   Alcotest.(check string)
     "short timestamp cannot leave a split UTF-8 lead byte"
@@ -236,7 +352,7 @@ let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string)
     "clock slice escapes selected terminal controls"
     "0\\x1B]2;Xab"
-    (Tui_decode.clock_timestamp_for_terminal
+    (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T0\027]2;Xabcd")
 
 let test_decode_keeper_rejects_retired_fields () =
@@ -425,9 +541,22 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      with
      | Tui_decode.Proof_unreadable _ -> true
      | _ -> false);
-  Alcotest.check Alcotest.bool "no verification at all is idle" true
+  (* The server attaches this block to every goal -- the default record when
+     there is no ledger row, the ledger_error marker when the store will not
+     decode. A goal that arrives without one is a wire this build cannot read,
+     and reading it as "nobody asked" is the same disguise the server's own
+     note refuses to put on. *)
+  Alcotest.check Alcotest.bool "no verification block at all is not idle" true
     (match (decoded_proof ()).Tui_decode.pg_proof with
-     | Tui_decode.Proof_idle -> true
+     | Tui_decode.Proof_unreadable _ -> true
+     | _ -> false);
+  Alcotest.check Alcotest.bool "and neither is a block with no completion state"
+    true
+    (match
+       (decoded_proof ~verification:(`Assoc [ "completion", `Assoc [] ]) ())
+         .Tui_decode.pg_proof
+     with
+     | Tui_decode.Proof_unreadable _ -> true
      | _ -> false)
 ;;
 
@@ -518,10 +647,10 @@ let fleet_safety_json ?(missing = true) () =
                    (List.map
                       (fun n -> `String n)
                       (if missing
-                       then [ "analyst"; "kidsnote"; "sangsu" ]
-                       else [ "analyst"; "kidsnote" ])) )
+                       then [ "analyst"; "bluebird"; "haneul" ]
+                       else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
-               , `List [ `String "analyst"; `String "kidsnote" ] )
+               , `List [ `String "analyst"; `String "bluebird" ] )
              ]) )
     ]
 
@@ -541,11 +670,11 @@ let test_decode_fleet_safety_carries_both_name_lists () =
         fleet.fs_active_task_owner_without_fiber_count;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
-        [ "analyst"; "kidsnote"; "sangsu" ] fleet.fs_bootable_names;
+        [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
       Alcotest.(check (list string)) "keepers that do run"
-        [ "analyst"; "kidsnote" ] fleet.fs_executable_names;
+        [ "analyst"; "bluebird" ] fleet.fs_executable_names;
       Alcotest.(check (list string)) "the difference names the missing keeper"
-        [ "sangsu" ]
+        [ "haneul" ]
         (List.filter
            (fun n -> not (List.mem n fleet.fs_executable_names))
            fleet.fs_bootable_names)
@@ -1132,6 +1261,71 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
        | Ok other -> Alcotest.failf "expected error, got %s" other)
     cases
 
+(* A wheel report must claim a key of its own -- not the arrow's. The wheel
+   moves further than one row per notch, and the chat composer answers the
+   arrows with its history, so a shared key made one of the two wrong. Clicks
+   and releases arriving on the same encoding must still not leak into the key
+   stream. *)
+let test_sgr_wheel_up_is_its_own_key () =
+  match Tui_decode.sgr_wheel_key "<64;10;5" 'M' with
+  | Some "wheel-up" -> ()
+  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim a key"
+
+let test_sgr_wheel_down_is_its_own_key () =
+  match Tui_decode.sgr_wheel_key "<65;10;5" 'M' with
+  | Some "wheel-down" -> ()
+  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim a key"
+
+let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
+  let cases = [ ("<0;10;5", 'M'); ("<32;10;5", 'M'); ("<66;10;5", 'M'); ("<0;10;5", 'm') ] in
+  List.iter
+    (fun (params, final) ->
+       match Tui_decode.sgr_wheel_key params final with
+       | None -> ()
+       | Some other ->
+           Alcotest.failf "report %S should stay unclaimed, got %s" params other)
+    cases
+
+(* Apple Terminal, the macOS default, answers [?1006;1000h] with the legacy X10
+   shape instead of SGR. The button byte carries the same numbers offset by 32,
+   so the wheel has to be readable from it or the notch is lost -- and the three
+   bytes after [CSI M] have to be consumed by the caller either way, which is
+   what stopped them being typed into the composer. *)
+let test_x10_wheel_up_is_its_own_key () =
+  match Tui_decode.x10_wheel_key (Char.chr (32 + 64)) with
+  | Some "wheel-up" -> ()
+  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim a key"
+
+let test_x10_wheel_down_is_its_own_key () =
+  match Tui_decode.x10_wheel_key (Char.chr (32 + 65)) with
+  | Some "wheel-down" -> ()
+  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim a key"
+
+let test_x10_clicks_and_drags_stay_unclaimed () =
+  List.iter
+    (fun button ->
+       match Tui_decode.x10_wheel_key (Char.chr (32 + button)) with
+       | None -> ()
+       | Some other ->
+           Alcotest.failf "button %d should stay unclaimed, got %s" button other)
+    [ 0; 1; 2; 3; 32; 35; 66; 67 ]
+
+(* The two decoders answer the same physical notch, so they must agree. A
+   terminal that switches encodings between sessions must not change what the
+   wheel does. *)
+let test_x10_and_sgr_agree_on_the_wheel () =
+  List.iter
+    (fun (button, params) ->
+       let x10 = Tui_decode.x10_wheel_key (Char.chr (32 + button)) in
+       let sgr = Tui_decode.sgr_wheel_key params 'M' in
+       Alcotest.(check (option string))
+         (Printf.sprintf "button %d" button) sgr x10)
+    [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -1240,6 +1434,28 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
            Alcotest.(check bool) "callable directly" true
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
+
+(* The server answers a cold cache with its warming placeholder: the same
+   envelope, an empty inventory, and a flag saying so. Reading only the list
+   made that identical to a workspace with no tools, and the pane said "no
+   tools registered" to an operator who has a hundred. *)
+let test_decode_tool_snapshot_keeps_the_warming_flag () =
+  let warming =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (("is_warming", `Bool true) :: fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_tool_snapshot warming with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check bool) "an empty warming inventory is not an answer" true
+         (snapshot.Tui_decode.ts_freshness = Tui_decode.Warming));
+  (* A built inventory does not mention the flag at all. *)
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json []) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check bool) "an empty built inventory does mean none" true
+        (snapshot.Tui_decode.ts_freshness = Tui_decode.Settled)
 
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
@@ -1407,6 +1623,262 @@ let test_decode_repository_with_no_keepers () =
   | Ok _ -> Alcotest.fail "expected one repository"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* Keeper lane rows. Shape is the light projection the TUI reads from
+   [GET /api/v1/keepers/composite]. *)
+let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
+    ?(idle_seconds = 75) ?(last_outcome = `Null)
+    ?(diagnosis = `String "running_fiber_alive") keeper =
+  `Assoc
+    [ "keeper", `String keeper
+    ; "phase", `String phase
+    ; "turn_phase", `String turn_phase
+    ; "idle_seconds", `Int idle_seconds
+    ; "last_outcome", last_outcome
+    ; ( "phase_diagnosis"
+      , `Assoc [ "determining_condition", diagnosis ] )
+    ]
+
+let keeper_lanes_json lanes =
+  `Assoc
+    [ "generated_at", `Float 1787557669.715736
+    ; "count", `Int (List.length lanes)
+    ; "snapshots", `List lanes
+    ]
+
+let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
+  let last_outcome =
+    `Assoc
+      [ "runtime_state", `String "done"
+      ; "selected_model", `String "claude-opus-5"
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json
+         [ keeper_lane_json ~last_outcome "alpha"
+         ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
+             ~diagnosis:`Null "beta"
+         ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "envelope count" 2 snapshot.Tui_decode.kls_count;
+      (match snapshot.Tui_decode.kls_lanes with
+       | [ alpha; beta ] ->
+           Alcotest.(check string) "first keeper" "alpha" alpha.kl_keeper;
+           Alcotest.(check string) "known phase" "running"
+             (Tui_decode.keeper_lane_phase_to_string alpha.kl_phase);
+           Alcotest.(check string) "known turn" "executing"
+             (Tui_decode.keeper_lane_turn_phase_to_string alpha.kl_turn_phase);
+           Alcotest.(check int) "idle seconds" 75 alpha.kl_idle_seconds;
+           (match alpha.kl_last_outcome with
+            | Some outcome ->
+                Alcotest.(check string) "outcome" "done"
+                  outcome.klo_runtime_state;
+                Alcotest.(check (option string)) "model"
+                  (Some "claude-opus-5") outcome.klo_selected_model
+            | None -> Alcotest.fail "alpha lost its last outcome");
+           (match beta.kl_phase with
+            | Tui_decode.Lane_phase_unknown raw ->
+                Alcotest.(check string) "unknown phase" "future_phase" raw
+            | _ -> Alcotest.fail "future phase was folded into a known phase");
+           (match beta.kl_turn_phase with
+            | Tui_decode.Lane_turn_unknown raw ->
+                Alcotest.(check string) "unknown turn" "future_turn" raw
+            | _ -> Alcotest.fail "future turn was folded into a known turn");
+           Alcotest.(check (option string)) "no determining condition" None
+             beta.kl_diagnosis
+       | lanes ->
+           Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
+
+let test_decode_keeper_lanes_requires_the_table_fields () =
+  let incomplete =
+    `Assoc
+      [ "keeper", `String "alpha"
+      ; "phase", `String "running"
+      ; "turn_phase", `String "idle"
+      ; "last_outcome", `Null
+      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot (keeper_lanes_json [ incomplete ])
+  with
+  | Ok _ -> Alcotest.fail "a lane without idle_seconds decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the missing field" true
+        (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
+let fusion_run_json ?(status = "completed") ?(topology = "simple")
+    ?(failure_fields = []) run_id =
+  `Assoc
+    ([ "run_id", `String run_id
+     ; "keeper", `String "fusion-keeper"
+     ; "preset", `String "trio"
+     ; "topology", `String topology
+     ; "started_at", `Float 1787557669.715736
+     ; "status", `String status
+     ]
+    @ failure_fields)
+
+let fusion_recorded_detail_json ?(source = "fusion")
+    ?(origin_run_id = "fusion-recorded-501") () =
+  let run_id = "fusion-recorded-501" in
+  `Assoc
+    [ "generated_at", `String "2026-08-24T09:00:00Z"
+    ; "run", fusion_run_json run_id
+    ; ( "evidence"
+      , `Assoc
+          [ "status", `String "recorded"
+          ; ( "post"
+            , `Assoc
+                [ "id", `String "p-fusion-501"
+                ; "title", `String "Fusion title 501"
+                ; ( "origin"
+                  , `Assoc
+                      [ "source", `String source
+                      ; "fusion_run_id", `String origin_run_id
+                      ] )
+                ; ( "meta"
+                  , `Assoc
+                      [ "question", `String "question-501"
+                      ; ( "panel"
+                        , `List
+                            [ `Assoc
+                                [ "model", `String "panel-first"
+                                ; "status", `String "answered"
+                                ; "answer", `String "answer-first-501"
+                                ; "input_tokens", `Int 10
+                                ; "output_tokens", `Int 20
+                                ]
+                            ; `Assoc
+                                [ "model", `String "panel-second"
+                                ; "status", `String "failed"
+                                ; "reason_code", `String "timeout"
+                                ; "reason_detail", `String "failure-second-501"
+                                ]
+                            ] )
+                      ; ( "judge"
+                        , `Assoc
+                            [ "status", `String "synthesized"
+                            ; "decision", `String "answer"
+                            ; "resolved_answer", `String "judge-answer-501"
+                            ; "synthesis", `String "judge-reason-501"
+                            ] )
+                      ] )
+                ] )
+          ] )
+    ]
+
+let test_decode_fusion_list_and_exact_detail () =
+  let failed_fields =
+    [ "error", `String "panel unavailable"
+    ; "failure_code", `String "panel_failed"
+    ]
+  in
+  let snapshot_json =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "count", `Int 2
+      ; ( "runs"
+        , `List
+            [ fusion_run_json "fusion-recorded-501"
+            ; fusion_run_json ~status:"failed"
+                ~failure_fields:failed_fields "fusion-failed-501"
+            ] )
+      ]
+  in
+  (match Tui_decode.decode_fusion_snapshot snapshot_json with
+   | Error err -> Alcotest.failf "list decode failed: %s" err
+   | Ok snapshot ->
+       (match snapshot.Tui_decode.fus_runs with
+        | [ first; second ] ->
+            Alcotest.(check string) "source order" "fusion-recorded-501"
+              first.Tui_decode.fur_run_id;
+            (match second.Tui_decode.fur_status with
+             | Tui_decode.Fusion_failed failure ->
+                 Alcotest.(check string) "typed failure code" "panel_failed"
+                   failure.frs_failure_code
+             | Tui_decode.Fusion_running | Tui_decode.Fusion_completed ->
+                 Alcotest.fail "failed row lost its typed status")
+        | runs ->
+            Alcotest.failf "expected two fusion rows, got %d"
+              (List.length runs)));
+  (match
+     Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ())
+   with
+   | Error err -> Alcotest.failf "detail decode failed: %s" err
+   | Ok detail ->
+       Alcotest.(check string) "detail identity" "fusion-recorded-501"
+         detail.Tui_decode.fud_run.fur_run_id;
+       (match detail.Tui_decode.fud_evidence with
+        | Some evidence ->
+            (match evidence.Tui_decode.fe_panel with
+             | [ Tui_decode.Fusion_panel_answered answer
+               ; Tui_decode.Fusion_panel_failed failure
+               ] ->
+                 Alcotest.(check string) "first panel stays first" "panel-first"
+                   answer.fpa_model;
+                 Alcotest.(check string) "second panel failure stays second"
+                   "failure-second-501" failure.fpf_reason_detail
+             | panel ->
+                 Alcotest.failf "expected answered then failed, got %d rows"
+                   (List.length panel));
+            (match evidence.Tui_decode.fe_judge with
+             | Tui_decode.Fusion_judge_synthesized judge ->
+                 Alcotest.(check string) "judge reason" "judge-reason-501"
+                   judge.fj_reason
+             | Tui_decode.Fusion_judge_failed _ ->
+                 Alcotest.fail "synthesized judge decoded as failed")
+        | None -> Alcotest.fail "recorded evidence lost its Board post"));
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~source:"not-fusion" ())
+   with
+   | Ok _ -> Alcotest.fail "a non-fusion Board origin decoded as evidence"
+   | Error detail ->
+       Alcotest.(check bool) "origin mismatch is explicit" true
+         (String.starts_with
+            ~prefix:"fusion evidence origin.source is \"not-fusion\""
+            detail));
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~origin_run_id:"fusion-other" ())
+   with
+   | Ok _ -> Alcotest.fail "evidence for another Fusion run decoded"
+   | Error detail ->
+       Alcotest.(check bool) "run identity mismatch is explicit" true
+         (String.starts_with
+            ~prefix:"fusion evidence origin run id is \"fusion-other\""
+            detail));
+  let completed_pending =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "run", fusion_run_json "fusion-completed-pending"
+      ; ( "evidence"
+        , `Assoc [ "status", `String "pending"; "post", `Null ] )
+      ]
+  in
+  (match Tui_decode.decode_fusion_detail completed_pending with
+   | Ok _ -> Alcotest.fail "a completed run decoded as pending evidence"
+   | Error detail ->
+       Alcotest.(check string) "pending is running-only"
+         "only a running fusion run may have pending evidence" detail);
+  let unknown_topology =
+    `Assoc
+      [ "generated_at", `String "2026-08-24T09:00:00Z"
+      ; "count", `Int 1
+      ; "runs", `List [ fusion_run_json ~topology:"recursive" "fusion-new" ]
+      ]
+  in
+  match Tui_decode.decode_fusion_snapshot unknown_topology with
+  | Ok _ -> Alcotest.fail "an unknown Fusion topology decoded"
+  | Error detail ->
+      Alcotest.(check bool) "closed topology is explicit" true
+        (String.starts_with
+           ~prefix:"runs[0]: unknown fusion topology \"recursive\""
+           detail)
+
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
   `Assoc
@@ -1426,147 +1898,6 @@ let harness_snapshot_json verdicts =
     ; ("recent_verdicts", `List verdicts)
     ; ("calibration", `Assoc [])
     ]
-
-(* ── Autonomy feature-proof report ── *)
-
-let feature_proof_json ?(id = "autonomous_tool_use") ?(status = "warn")
-    ?(observed = [ "alice" ]) ?(missing = [ "bob" ]) ?(read_errors = []) () =
-  `Assoc
-    [ ("id", `String id)
-    ; ("label", `String "autonomous tool use")
-    ; ("status", `String status)
-    ; ("summary", `String "1/2 keepers called a tool on an autonomous turn")
-    ; ( "keeper_evidence"
-      , `Assoc
-          [ ("keeper_count", `Int 2)
-          ; ("meta_count", `Int 2)
-          ; ( "observed_keepers"
-            , `List (List.map (fun k -> `String k) observed) )
-          ; ("missing_keepers", `List (List.map (fun k -> `String k) missing))
-          ; ( "read_errors"
-            , `List
-                (List.map
-                   (fun k ->
-                     `Assoc
-                       [ ("keeper", `String k)
-                       ; ("error", `String "meta.json is not readable")
-                       ])
-                   read_errors) )
-          ] )
-    ; ("evidence_refs", `List [])
-    ; ("next_action", `String "Let the runtime run an autonomous cycle.")
-    ]
-
-let autonomy_json ?(status = "warn") ?(pass_count = 1) ?(gap_count = 1)
-    ?(window_hours = `Null) features =
-  `Assoc
-    [ ("generated_at", `String "2026-08-24T00:00:00Z")
-    ; ("status", `String status)
-    ; ( "summary"
-      , `Assoc
-          [ ("status", `String status)
-          ; ("feature_count", `Int (List.length features))
-          ; ("pass_count", `Int pass_count)
-          ; ("warn_count", `Int gap_count)
-          ; ("fail_count", `Int 0)
-          ; ("gap_count", `Int gap_count)
-          ; ("keeper_count", `Int 2)
-          ; ("window_hours", window_hours)
-          ] )
-    ; ("features", `List features)
-    ; ("evidence_refs", `List [])
-    ]
-
-let test_decode_autonomy_reads_the_live_shape () =
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json [ feature_proof_json () ])
-  with
-  | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok snapshot ->
-      Alcotest.(check int) "features proven" 1
-        snapshot.Tui_decode.au_pass_count;
-      Alcotest.(check int) "features still open" 1
-        snapshot.Tui_decode.au_gap_count;
-      Alcotest.(check int) "keepers the report covered" 2
-        snapshot.Tui_decode.au_keeper_count;
-      Alcotest.(check (option (float 0.01)))
-        "no window was asked for" None snapshot.Tui_decode.au_window_hours;
-      (match snapshot.Tui_decode.au_features with
-       | [ f ] ->
-           Alcotest.(check (list string))
-             "keepers with evidence" [ "alice" ] f.Tui_decode.fp_observed;
-           Alcotest.(check (list string))
-             "keepers without it" [ "bob" ] f.Tui_decode.fp_missing;
-           Alcotest.(check string) "what would close the gap"
-             "Let the runtime run an autonomous cycle."
-             f.Tui_decode.fp_next_action
-       | fs -> Alcotest.failf "expected one feature, got %d" (List.length fs))
-
-let test_decode_autonomy_keeps_read_errors_apart_from_missing () =
-  (* A keeper that never exercised the feature and a keeper whose record would
-     not open are different problems. Folding the second into the first blames
-     the keeper for a read failure and hides that the report is partly blind. *)
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json
-         [ feature_proof_json ~missing:[ "bob" ] ~read_errors:[ "carol" ] () ])
-  with
-  | Ok { Tui_decode.au_features = [ f ]; _ } ->
-      Alcotest.(check (list string))
-        "missing stays missing" [ "bob" ] f.Tui_decode.fp_missing;
-      Alcotest.(check (list string))
-        "and the unreadable one is named separately" [ "carol" ]
-        f.Tui_decode.fp_read_errors
-  | Ok _ -> Alcotest.fail "expected one feature"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_autonomy_unknown_status_is_a_gap () =
-  (* The whole screen answers "is this proven". A status word this build was
-     not taught means it cannot tell, and the safe reading of "I do not know"
-     is not "yes" -- so it must not decode into the passing member. *)
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json [ feature_proof_json ~status:"degraded" () ])
-  with
-  | Ok { Tui_decode.au_features = [ f ]; _ } ->
-      (match f.Tui_decode.fp_status with
-       | Tui_decode.Fp_unreadable raw ->
-           Alcotest.(check string) "the word is kept as written" "degraded" raw
-       | Tui_decode.Fp_pass | Tui_decode.Fp_warn | Tui_decode.Fp_fail ->
-           Alcotest.fail "an unknown status decoded into a known one");
-      Alcotest.(check bool) "and it counts as a gap" true
-        (Tui_decode.feature_proof_is_gap f.Tui_decode.fp_status)
-  | Ok _ -> Alcotest.fail "expected one feature"
-  | Error err -> Alcotest.failf "decode failed: %s" err
-
-let test_decode_autonomy_missing_evidence_block_is_an_error () =
-  (* A feature row with no keeper evidence is a malformed report, not a
-     feature nobody has exercised. Defaulting it to an empty roster would draw
-     "0/0" and read as a clean screen. *)
-  let broken =
-    `Assoc
-      [ ("id", `String "runtime_liveness")
-      ; ("label", `String "runtime liveness")
-      ; ("status", `String "pass")
-      ; ("summary", `String "all keepers up")
-      ; ("next_action", `String "nothing")
-      ]
-  in
-  match Tui_decode.decode_autonomy_snapshot (autonomy_json [ broken ]) with
-  | Ok _ -> Alcotest.fail "a report with no keeper evidence decoded"
-  | Error _ -> ()
-
-let test_autonomy_window_hours_survives () =
-  match
-    Tui_decode.decode_autonomy_snapshot
-      (autonomy_json ~window_hours:(`Float 24.0) [ feature_proof_json () ])
-  with
-  | Ok snapshot ->
-      Alcotest.(check (option (float 0.01)))
-        "the window the report used" (Some 24.0)
-        snapshot.Tui_decode.au_window_hours
-  | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_harness_snapshot_reads_the_live_shape () =
   match
@@ -1753,12 +2084,359 @@ let test_decode_system_log_requires_the_message () =
   | Ok _ -> Alcotest.fail "a line with no message decoded"
   | Error _ -> ()
 
+(* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
+   rows. A row missing a field is rejected, not dropped: a listing that
+   silently thins is how a held call goes unanswered again (masc#30034). *)
+let keeper_tool_approvals_json =
+  `Assoc
+    [ ( "pending"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "orbiter")
+              ; ("tool_call_id", `String "call-1")
+              ; ("tool", `String "Execute")
+              ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
+              ; ("question", `String "Run Execute on git status?")
+              ; ("asked_at", `Float 1787555000.)
+              ; ("timeout_sec", `Float 180.)
+              ]
+          ] )
+    ]
+
+let test_decode_keeper_tool_approvals () =
+  match Tui_decode.decode_keeper_tool_approvals keeper_tool_approvals_json with
+  | Error err -> Alcotest.fail err
+  | Ok [ held ] ->
+      Alcotest.(check string) "keeper" "orbiter" held.Tui_decode.kta_keeper;
+      Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
+      Alcotest.(check string) "tool" "Execute" held.kta_tool;
+      Alcotest.(check string) "question" "Run Execute on git status?"
+        held.kta_question;
+      Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
+      Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
+  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
+
+let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
+  let thin =
+    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "orbiter") ] ]) ]
+  in
+  match Tui_decode.decode_keeper_tool_approvals thin with
+  | Ok _ -> Alcotest.fail "a row with no call id decoded"
+  | Error _ -> ()
+
+(* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
+let picker_default_runtime =
+  `Assoc
+    [ ("id", `String "ollama_cloud.deepseek")
+    ; ("provider", `String "Ollama Cloud")
+    ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("keeper_dispatchable", `Bool true)
+    ; ("keeper_dispatch_blocked_reason", `Null)
+    ; ("is_default", `Bool false)
+    ]
+
+let runtime_resolved_json =
+  `Assoc
+    [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
+    ; ("source", `String "/api/v1/runtime/resolved")
+    ; ("config_path", `String "/workspace/config/runtime.toml")
+    ; ("default_runtime", picker_default_runtime)
+    ; ( "runtimes"
+      , `List
+          [ picker_default_runtime
+          ; `Assoc
+              [ ("id", `String "exact.embed")
+              ; ("provider", `String "Local")
+              ; ("model", `String "embed")
+              ; ("keeper_dispatchable", `Bool false)
+              ; ("keeper_dispatch_blocked_reason", `String "not a keeper model")
+              ; ("is_default", `Bool false)
+              ]
+          ] )
+    ; ( "lanes"
+      , `List
+          [ `Assoc
+              [ ("id", `String "ollama_cloud.deepseek")
+              ; ( "runtime_ids"
+                , `List
+                    [ `String "ollama_cloud.deepseek"; `String "exact.embed" ] )
+              ; ("preferred_candidate", `Null)
+              ; ("preferred_at_ts", `Null)
+              ]
+          ] )
+    ; ( "assignments"
+      , `List
+          [ `Assoc
+              [ ("keeper", `String "orbiter")
+              ; ("assignment_source", `String "explicit")
+              ; ( "resolved"
+                , `Assoc
+                    [ ("kind", `String "lane")
+                    ; ("id", `String "ollama_cloud.deepseek")
+                    ] )
+              ]
+          ] )
+    ]
+
+let test_decode_runtime_resolved () =
+  match Tui_decode.decode_runtime_resolved runtime_resolved_json with
+  | Error err -> Alcotest.fail err
+  | Ok (runtimes, assignments) ->
+      Alcotest.(check int) "both runtimes decode" 2 (List.length runtimes);
+      (match runtimes with
+       | first :: _ ->
+           Alcotest.(check string) "id" "ollama_cloud.deepseek"
+             first.Tui_decode.ro_id;
+           Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
+           Alcotest.(check bool) "top-level default" true first.ro_is_default
+       | [] -> Alcotest.fail "no runtimes");
+      (match assignments with
+       | [ a ] ->
+           Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
+           Alcotest.(check string) "source" "explicit" a.ra_source;
+           Alcotest.(check (option string)) "resolved id"
+             (Some "ollama_cloud.deepseek") a.ra_target_id
+       | other ->
+           Alcotest.failf "expected one assignment, got %d" (List.length other))
+
+let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
+    ?(transport = "http") ?(http_status = `Int 200)
+    ?(latency_ms = `Float 12.5) ?(error = `Null) runtime_id =
+  `Assoc
+    [ "runtime_id", `String runtime_id
+    ; "provider_id", `String ("provider-" ^ runtime_id)
+    ; "provider_display_name", `String "Probe provider label"
+    ; "model_id", `String ("probe-model-" ^ runtime_id)
+    ; "model_api_name", `String ("probe-api-" ^ runtime_id)
+    ; "protocol", `String "openai"
+    ; "runtime_kind", `String (if String.equal transport "cli" then "cli" else "http")
+    ; "transport", `String transport
+    ; "auth_kind", `String "none"
+    ; "credential_required", `Bool false
+    ; "auth_present", `Bool false
+    ; "status", `String status
+    ; "reachable", reachable
+    ; "http_status", http_status
+    ; "latency_ms", latency_ms
+    ; "model_count", (if String.equal status "reachable" then `Int 7 else `Null)
+    ; "content_type", (if String.equal status "reachable" then `String "application/json" else `Null)
+    ; "downloaded_bytes", (if String.equal status "reachable" then `Int 128 else `Null)
+    ; "endpoint_url", (if String.equal transport "cli" then `Null else `String "https://runtime.invalid/v1")
+    ; "probe_url", (if String.equal transport "cli" then `Null else `String "https://runtime.invalid/v1/models")
+    ; "error", error
+    ; "checked_at", `String "2026-08-24T10:20:00Z"
+    ]
+
+let runtime_probe_surface_json ?(first_status = "reachable")
+    ?(first_reachable = `Bool true) () =
+  let providers =
+    [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
+        "runtime-a"
+    ; runtime_probe_provider ~status:"skipped_cli" ~reachable:`Null
+        ~transport:"cli" ~http_status:`Null ~latency_ms:`Null
+        ~error:(`String "CLI runtimes do not expose an HTTP reachability endpoint")
+        "runtime-b"
+    ; runtime_probe_provider ~status:"network_error" ~reachable:(`Bool false)
+        ~http_status:`Null ~latency_ms:(`Float 45.0)
+        ~error:(`String "connection refused") "runtime-c"
+    ]
+  in
+  `Assoc
+    [ "generated_at", `String "2026-08-24T10:20:01Z"
+    ; "refreshed_at_unix", `Float 1787566800.0
+    ; "cache_ttl_sec", `Float 15.0
+    ; "cache_age_sec", `Float 16.0
+    ; "cache_hit", `Bool false
+    ; "refresh_state", `String "served_stale"
+    ; ( "probe"
+      , `Assoc
+          [ "source", `String "runtime.toml"
+          ; "status", `String "degraded"
+          ; "probe_ok", `Bool false
+          ; "checked_at", `String "2026-08-24T10:20:00Z"
+          ; ( "summary"
+            , `Assoc
+                [ "runtimes", `Int 3
+                ; "probed", `Int 2
+                ; "reachable", `Int 1
+                ; "failed", `Int 1
+                ; "skipped", `Int 1
+                ; "default_runtime_id", `String "runtime-a"
+                ] )
+          ; "providers", `List providers
+          ; "errors", `List [ `String "runtime-c: network_error" ]
+          ; "observations", `List [ `String "metadata endpoints only" ]
+          ; "limitations", `List [ `String "no completion request" ]
+          ] )
+    ]
+
+let resolved_runtime id provider model =
+  `Assoc
+    [ "id", `String id
+    ; "provider", `String provider
+    ; "model", `String model
+    ; "effective_max_context", `Int 200000
+    ; "max_context_source", `String "capability"
+    ; "max_output_tokens", `Int 8192
+    ; "is_local", `Bool false
+    ; "is_default", `Bool false
+    ; "keeper_dispatchable", `Bool true
+    ; "keeper_dispatch_blocked_reason", `Null
+    ]
+
+let runtime_lane ?(preferred = None) ?(preferred_at = None) id runtime_ids =
+  `Assoc
+    [ "id", `String id
+    ; "runtime_ids", `List (List.map (fun runtime_id -> `String runtime_id) runtime_ids)
+    ; "preferred_candidate", (match preferred with Some value -> `String value | None -> `Null)
+    ; "preferred_at_ts", (match preferred_at with Some value -> `Float value | None -> `Null)
+    ]
+
+let runtime_resolved_surface_json ?(broken_preference = false) () =
+  let runtime_a = resolved_runtime "runtime-a" "Resolved A" "model-a" in
+  let runtimes =
+    [ runtime_a
+    ; resolved_runtime "runtime-b" "Resolved B" "model-b"
+    ; resolved_runtime "runtime-c" "Resolved C" "model-c"
+    ; resolved_runtime "runtime-d" "Resolved D" "model-d"
+    ]
+  in
+  let preferred_at = if broken_preference then None else Some 1787566700.0 in
+  `Assoc
+    [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
+    ; "source", `String "/api/v1/runtime/resolved"
+    ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_runtime", runtime_a
+    ; "runtimes", `List runtimes
+    ; ( "lanes"
+      , `List
+          [ runtime_lane ~preferred:(Some "runtime-b") ~preferred_at
+              "primary" [ "runtime-a"; "runtime-b" ]
+          ; runtime_lane "degraded" [ "runtime-c" ]
+          ; runtime_lane "unobserved" [ "runtime-d" ]
+          ] )
+    ; ( "assignments"
+      , `List
+          [ `Assoc
+              [ "keeper", `String "orbiter"
+              ; "assignment_source", `String "default"
+              ; ( "resolved"
+                , `Assoc [ "kind", `String "lane"; "id", `String "primary" ] )
+              ]
+          ] )
+    ]
+
+let test_decode_and_join_runtime_surface () =
+  match
+    Tui_decode.decode_runtime_surface_snapshot
+      ~probe_json:(runtime_probe_surface_json ())
+      ~resolved_json:(runtime_resolved_surface_json ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      Alcotest.(check int) "all lane candidates" 4
+        (List.length snapshot.Tui_decode.rss_candidates);
+      Alcotest.(check int) "no probe-only rows" 0
+        snapshot.rss_unassigned_probe_count;
+      (match snapshot.rss_probe with
+       | Some probe ->
+           Alcotest.(check string) "freshness stays producer-owned"
+             "served_stale"
+             (Tui_decode.runtime_probe_refresh_state_to_string
+                probe.rps_refresh_state)
+       | None -> Alcotest.fail "fixture probe became unavailable");
+      (match snapshot.rss_candidates with
+       | first :: preferred :: failed :: unobserved :: [] ->
+           Alcotest.(check string) "lane order" "primary" first.rcr_lane_id;
+           Alcotest.(check int) "candidate position" 2 preferred.rcr_position;
+           Alcotest.(check string) "resolved provider wins" "Resolved A"
+             first.rcr_runtime.ro_provider;
+           Alcotest.(check (option (float 0.001))) "last success stays typed"
+             (Some 1787566700.0) preferred.rcr_preferred_at_ts;
+           (match failed.rcr_probe with
+            | Some row ->
+                Alcotest.(check string) "failure kind" "network_error"
+                  (Tui_decode.runtime_provider_status_to_string row.rpp_status)
+            | None -> Alcotest.fail "network failure became unobserved");
+           Alcotest.(check bool) "stale absence is unobserved" true
+             (Option.is_none unobserved.rcr_probe)
+       | rows -> Alcotest.failf "expected four candidate rows, got %d" (List.length rows))
+
+let test_runtime_probe_rejects_unknown_status () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~first_status:"ok" ())
+  with
+  | Ok _ -> Alcotest.fail "unknown provider status decoded"
+  | Error _ -> ()
+
+let test_runtime_probe_rejects_status_reachability_disagreement () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~first_reachable:(`Bool false) ())
+  with
+  | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
+  | Error _ -> ()
+
+let test_runtime_resolved_rejects_half_preference () =
+  match
+    Tui_decode.decode_runtime_resolved_snapshot
+      (runtime_resolved_surface_json ~broken_preference:true ())
+  with
+  | Ok _ -> Alcotest.fail "preferred candidate without its timestamp decoded"
+  | Error _ -> ()
+
+let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
+  match
+    Tui_decode.decode_runtime_resolved_snapshot (runtime_resolved_surface_json ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok resolved ->
+      (match
+         Tui_decode.join_runtime_surface ~probe:None
+           ~probe_error:(Some "probe permission denied") ~resolved
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok snapshot ->
+           Alcotest.(check int) "all resolved candidates remain" 4
+             (List.length snapshot.rss_candidates);
+           Alcotest.(check (option string)) "probe failure remains visible"
+             (Some "probe permission denied") snapshot.rss_probe_error;
+           Alcotest.(check bool) "every candidate is unobserved" true
+             (List.for_all
+                (fun row -> Option.is_none row.Tui_decode.rcr_probe)
+                snapshot.rss_candidates))
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_runtime_surface",
+      [ Alcotest.test_case "joins projection and observation in lane order" `Quick
+          test_decode_and_join_runtime_surface
+      ; Alcotest.test_case "rejects an unknown provider status" `Quick
+          test_runtime_probe_rejects_unknown_status
+      ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
+          test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "rejects half a sticky preference" `Quick
+          test_runtime_resolved_rejects_half_preference
+      ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
+          test_runtime_surface_keeps_resolved_rows_without_a_probe
+      ] );
+    ( "decode_runtime_resolved",
+      [ Alcotest.test_case "carries runtimes and assignments" `Quick
+          test_decode_runtime_resolved
+      ] );
+    ( "decode_keeper_tool_approvals",
+      [ Alcotest.test_case "carries the whole ask" `Quick
+          test_decode_keeper_tool_approvals
+      ; Alcotest.test_case "rejects a thin row" `Quick
+          test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ] );
     ( "decode_tools",
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_tool_snapshot_reads_the_live_shape;
+        Alcotest.test_case "keeps the warming flag" `Quick
+          test_decode_tool_snapshot_keeps_the_warming_flag;
         Alcotest.test_case "a tool projected nowhere" `Quick
           test_decode_tool_projected_nowhere;
         Alcotest.test_case "absent direct-call is off" `Quick
@@ -1784,6 +2462,19 @@ let () =
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
       ] );
+    ( "decode_keeper_lanes",
+      [
+        Alcotest.test_case "reads the live shape and keeps unknown values"
+          `Quick
+          test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
+        Alcotest.test_case "requires the table fields" `Quick
+          test_decode_keeper_lanes_requires_the_table_fields;
+      ] );
+    ( "decode_fusion",
+      [
+        Alcotest.test_case "keeps typed origin and panel-to-judge order" `Quick
+          test_decode_fusion_list_and_exact_detail;
+      ] );
     ( "decode_harness",
       [
         Alcotest.test_case "reads the live shape" `Quick
@@ -1792,19 +2483,6 @@ let () =
           test_decode_harness_keeps_the_fallback_reason;
         Alcotest.test_case "an empty harness is a reading" `Quick
           test_decode_harness_with_no_verdicts_is_not_an_error;
-      ] );
-    ( "decode_autonomy",
-      [
-        Alcotest.test_case "reads the live shape" `Quick
-          test_decode_autonomy_reads_the_live_shape;
-        Alcotest.test_case "an unreadable record is not a missing keeper"
-          `Quick test_decode_autonomy_keeps_read_errors_apart_from_missing;
-        Alcotest.test_case "an unknown status counts as a gap" `Quick
-          test_decode_autonomy_unknown_status_is_a_gap;
-        Alcotest.test_case "a report with no keeper evidence is an error"
-          `Quick test_decode_autonomy_missing_evidence_block_is_an_error;
-        Alcotest.test_case "the window the report used survives" `Quick
-          test_autonomy_window_hours_survives;
       ] );
     ( "decode_verification",
       [
@@ -1890,6 +2568,15 @@ let () =
       ; Alcotest.test_case "sanitizes timestamp slices after selection" `Quick
           test_timestamp_slices_are_sanitized_after_selection
       ] );
+    ( "keeper_calls",
+      [
+        Alcotest.test_case "rejects rows naming another keeper" `Quick
+          test_keeper_calls_reject_rows_naming_another_keeper
+      ; Alcotest.test_case "requires the envelope" `Quick
+          test_keeper_calls_require_the_envelope
+      ; Alcotest.test_case "carries what the call answered" `Quick
+          test_keeper_calls_carry_what_the_call_answered
+      ] );
     ( "parse_log_entry",
       [
         Alcotest.test_case "current turn contract" `Quick
@@ -1939,6 +2626,27 @@ let () =
           test_tool_envelope_outcome_rejection_carries_message;
         Alcotest.test_case "tool envelope rejects unexpected shapes" `Quick
           test_tool_envelope_outcome_rejects_unexpected_shapes;
+      ] );
+    ( "sgr_mouse",
+      [
+        Alcotest.test_case "wheel up claims its own key" `Quick
+          test_sgr_wheel_up_is_its_own_key;
+        Alcotest.test_case "wheel down claims its own key" `Quick
+          test_sgr_wheel_down_is_its_own_key;
+        Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
+          `Quick
+          test_sgr_click_and_horizontal_wheel_stay_unclaimed;
+      ] );
+    ( "x10_mouse",
+      [
+        Alcotest.test_case "wheel up claims its own key" `Quick
+          test_x10_wheel_up_is_its_own_key;
+        Alcotest.test_case "wheel down claims its own key" `Quick
+          test_x10_wheel_down_is_its_own_key;
+        Alcotest.test_case "clicks and drags stay unclaimed" `Quick
+          test_x10_clicks_and_drags_stay_unclaimed;
+        Alcotest.test_case "agrees with the SGR decoder" `Quick
+          test_x10_and_sgr_agree_on_the_wheel;
       ] );
     ( "bounded_parent_depth",
       [

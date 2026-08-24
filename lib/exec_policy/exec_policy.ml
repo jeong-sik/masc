@@ -102,6 +102,9 @@ let block_reason_of_exec_too_complex
       | `Function_def
       | `Glob_brace
       | `Background
+      (* A separated list, not a redirect: it used to land in the arm above
+         because the classifier found a supported [2>/dev/null] first. *)
+      | `Command_separator
       | `Unknown_construct _ ) -> Injection
 ;;
 
@@ -241,7 +244,9 @@ let validate_shell_ir_paths ?workdir shell_ir =
           (match validate_path_value ~requires_existing_dir:false target with
            | Ok () -> validate_redirects rest
            | Error _ as err -> err)
-        | Masc_exec.Redirect_scope.Fd_to_fd _ :: rest -> validate_redirects rest
+        (* A literal names no path, so there is no path boundary to check. *)
+        | (Masc_exec.Redirect_scope.Fd_to_fd _ | Masc_exec.Redirect_scope.Literal _)
+          :: rest -> validate_redirects rest
       in
       let validate_cwd = function
         | None -> Ok ()

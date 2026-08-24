@@ -14,15 +14,118 @@ let message_fingerprint (m : Types.message) : Yojson.Safe.t =
     ]
 ;;
 
+let opt_json f = function
+  | None -> `Null
+  | Some v -> f v
+;;
+
+(* The key decides whether a stored response may answer a later request, so
+   every field that changes what the provider is asked must reach it. The
+   record is destructured field by field with warning 9 on: a field added to
+   [Provider_config.t] stops the build here until someone decides which side
+   it is on. Over-separating only costs a cache hit; under-separating returns
+   a response produced under a different request (#27906). *)
 let request_fingerprint
       ~(config : Provider_config.t)
       ~(messages : Types.message list)
       ?(tools = [])
       ()
   =
+  let[@warning "+9"] { Provider_config.kind
+                     ; provider_id
+                     ; model_id
+                     ; base_url
+                     ; api_key
+                     ; headers
+                     ; request_path
+                     ; max_tokens
+                     ; max_context
+                     ; max_request_body_bytes
+                     ; temperature
+                     ; top_p
+                     ; top_k
+                     ; min_p
+                     ; system_prompt
+                     ; enable_thinking
+                     ; preserve_thinking
+                     ; thinking_budget
+                     ; reasoning_effort
+                     ; clear_thinking
+                     ; tool_stream
+                     ; tool_choice
+                     ; disable_parallel_tool_use
+                     ; response_format
+                     ; cache_system_prompt
+                     ; cache_extended_ttl
+                     ; supports_tool_choice_override
+                     ; supports_structured_output_override
+                     ; model_capabilities_override
+                     ; keep_alive
+                     ; return_progress
+                     ; internal_model_rotation_count
+                     ; num_ctx
+                     ; seed
+                     ; previous_response_id
+                     ; connect_timeout_s
+                     ; max_concurrent_requests
+                     ; repeat_penalty
+                     ; repeat_last_n
+                     }
+    =
+    config
+  in
+  (* Excluded, and why. These do not change what the provider is asked:
+     [max_request_body_bytes], [connect_timeout_s] and
+     [max_concurrent_requests] are transport limits enforced on this side;
+     [return_progress] and [tool_stream] select how the answer is delivered,
+     not what is asked; [internal_model_rotation_count] is a local attempt
+     counter; [supports_*_override] and [model_capabilities_override] gate
+     which of the fields below may be sent at all, and those fields are
+     already in the key. *)
+  ignore max_request_body_bytes;
+  ignore connect_timeout_s;
+  ignore max_concurrent_requests;
+  ignore return_progress;
+  ignore tool_stream;
+  ignore internal_model_rotation_count;
+  ignore supports_tool_choice_override;
+  ignore supports_structured_output_override;
+  ignore model_capabilities_override;
   let json =
     `Assoc
-      [ "model_id", `String config.model_id
+      [ "kind", `String (Provider_config.string_of_provider_kind kind)
+      ; "provider_id", opt_json (fun s -> `String s) provider_id
+      ; "model_id", `String model_id
+      ; "base_url", `String base_url
+      ; ( "api_key_identity"
+        , opt_json (fun id -> `Int (Secret.hash_identity id)) (Secret.identity api_key) )
+      ; ( "headers"
+        , `List
+            (headers
+             |> List.map (fun (k, v) -> `List [ `String k; `String v ])) )
+      ; "request_path", `String request_path
+      ; "max_tokens", opt_json (fun n -> `Int n) max_tokens
+      ; "max_context", opt_json (fun n -> `Int n) max_context
+      ; "temperature", opt_json (fun f -> `Float f) temperature
+      ; "top_p", opt_json (fun f -> `Float f) top_p
+      ; "top_k", opt_json (fun n -> `Int n) top_k
+      ; "min_p", opt_json (fun f -> `Float f) min_p
+      ; "system_prompt", opt_json (fun s -> `String s) system_prompt
+      ; "enable_thinking", opt_json (fun b -> `Bool b) enable_thinking
+      ; "preserve_thinking", opt_json (fun b -> `Bool b) preserve_thinking
+      ; "thinking_budget", opt_json (fun n -> `Int n) thinking_budget
+      ; ( "reasoning_effort"
+        , opt_json (fun e -> `String (Reasoning_effort.to_string e)) reasoning_effort )
+      ; "clear_thinking", opt_json (fun b -> `Bool b) clear_thinking
+      ; "tool_choice", opt_json Types.tool_choice_to_json tool_choice
+      ; "disable_parallel_tool_use", `Bool disable_parallel_tool_use
+      ; "response_format", Types.response_format_to_json response_format
+      ; "cache_system_prompt", `Bool cache_system_prompt
+      ; "cache_extended_ttl", `Bool cache_extended_ttl
+      ; "keep_alive", opt_json (fun s -> `String s) keep_alive
+      ; "num_ctx", opt_json (fun n -> `Int n) num_ctx
+      ; "seed", opt_json (fun n -> `Int n) seed
+      ; "previous_response_id", opt_json (fun s -> `String s) previous_response_id
       ; "messages", `List (List.map message_fingerprint messages)
       ; "tools", `List tools
       ]

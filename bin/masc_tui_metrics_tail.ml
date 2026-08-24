@@ -119,19 +119,19 @@ let content_height ~terminal_rows ~error =
   let diagnostic_rows = if Option.is_some error then 2 else 0 in
   max 0 (terminal_rows - 8 - diagnostic_rows)
 
+(* The arithmetic is the same for every scrolled list; what is particular to
+   the log tail is [content_height] above, which knows this surface's chrome. *)
 let maximum_scroll ~entry_count ~content_height =
-  max 0 (entry_count - content_height)
+  Masc_tui_scroll.maximum ~count:entry_count ~height:content_height
 
 let normalize_scroll ~entry_count ~content_height scroll =
-  max 0 (min scroll (maximum_scroll ~entry_count ~content_height))
+  Masc_tui_scroll.normalize ~count:entry_count ~height:content_height scroll
 
 let scroll_up ~entry_count ~content_height scroll =
-  max 0 (normalize_scroll ~entry_count ~content_height scroll - 1)
+  Masc_tui_scroll.up ~count:entry_count ~height:content_height scroll
 
 let scroll_down ~entry_count ~content_height scroll =
-  min
-    (maximum_scroll ~entry_count ~content_height)
-    (normalize_scroll ~entry_count ~content_height scroll + 1)
+  Masc_tui_scroll.down ~count:entry_count ~height:content_height scroll
 
 let empty_message = function
   | None -> "(no log entries found)"

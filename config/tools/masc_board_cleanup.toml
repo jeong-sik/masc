@@ -1,0 +1,40 @@
+name = "masc_board_cleanup"
+description = """
+Scan board posts matching filter criteria and delete or report them. \
+Defaults to dry_run=true (report only). Set dry_run=false to delete. Safety: \
+never deletes posts with comments or votes unless filters are overridden."""
+
+[[params]]
+name = "max_age_hours"
+type = "integer"
+description = "Only target posts older than this (default: 24)"
+
+[[params]]
+name = "require_no_comments"
+type = "boolean"
+description = "Only target posts with 0 replies (default: true)"
+
+[[params]]
+name = "require_no_votes"
+type = "boolean"
+description = "Only target posts with 0 votes (default: true)"
+
+[[params]]
+name = "title_pattern"
+type = "string"
+description = "Substring filter on post title (case-insensitive)"
+
+[[params]]
+name = "author_pattern"
+type = "string"
+description = "Substring filter on post author (case-insensitive)"
+
+[[params]]
+name = "dry_run"
+type = "boolean"
+description = "If true (default), only report candidates without deleting"
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max posts to process (default: 10, max: 50)"

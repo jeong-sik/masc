@@ -10,7 +10,6 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -61,6 +60,25 @@ let assemble_extra_system_context
   ; blocks
   }
 
+(* See the mli: a position question about the last message, deliberately not
+   [Hooks.last_tool_results], which answers containment over the whole
+   history. *)
+let ends_with_tool_results (messages : Agent_core.Types.message list) =
+  let rec last = function
+    | [] -> None
+    | [ message ] -> Some message
+    | _ :: rest -> last rest
+  in
+  match last messages with
+  | Some { Agent_core.Types.role = Agent_core.Types.Tool; _ } -> true
+  | Some
+      { Agent_core.Types.role =
+          Agent_core.Types.User | Agent_core.Types.System
+          | Agent_core.Types.Assistant
+      ; _
+      }
+  | None -> false
+
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :
@@ -88,7 +106,6 @@ let build_turn_context
       ~base_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
-  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""
@@ -143,7 +160,6 @@ let build_turn_context
    | Record_user_turn, true | Skip_already_checkpointed_user_turn, _ -> ());
   { turn_system_prompt
   ; dynamic_context
-  ; memory_context
   ; temporal_context
   ; prompt_metrics
   ; history_messages

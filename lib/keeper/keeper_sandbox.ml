@@ -89,13 +89,18 @@ let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
+(* The Local/Docker split of the playground root is spelled once, in
+   [Keeper_sandbox_config]. It used to be written here as well, so the two
+   roots a keeper can own ([.masc/playground/<k>/] and
+   [.masc/playground/docker/<k>/]) were constructed in two places (#21837).
+   The match stays exhaustive, so a new backend still has to declare its
+   root. *)
 let host_root_rel_of_backend ~(backend : backend) name =
-  match backend with
-  | Local -> Playground_paths.bundle_root name
-  | Docker ->
-      Printf.sprintf "%s/docker/%s/"
-        Playground_paths.all_playgrounds_prefix
-        (Playground_paths.sanitize_keeper_name name)
+  Keeper_sandbox_config.host_root_rel_of_profile
+    (match backend with
+     | Local -> Keeper_sandbox_config.Local
+     | Docker -> Keeper_sandbox_config.Docker)
+    name
 
 let host_root_rel_of_profile sandbox_profile name =
   host_root_rel_of_backend

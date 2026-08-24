@@ -16,9 +16,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Overflowed
-    (* Retired (#26546): never derived anymore; kept so historical durable
-       lifecycle records ("overflowed") still decode via [phase_of_string]. *)
   | Compacting
   | HandingOff
   | Draining
@@ -31,7 +28,6 @@ let phase_to_string = function
   | Offline -> "offline"
   | Running -> "running"
   | Failing -> "failing"
-  | Overflowed -> "overflowed"
   | Compacting -> "compacting"
   | HandingOff -> "handing_off"
   | Draining -> "draining"
@@ -45,7 +41,6 @@ let phase_of_string = function
   | "offline" -> Some Offline
   | "running" -> Some Running
   | "failing" -> Some Failing
-  | "overflowed" -> Some Overflowed
   | "compacting" -> Some Compacting
   | "handing_off" -> Some HandingOff
   | "draining" -> Some Draining
@@ -60,7 +55,6 @@ let all_phases =
   [ Offline
   ; Running
   ; Failing
-  ; Overflowed
   ; Compacting
   ; HandingOff
   ; Draining

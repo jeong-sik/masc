@@ -136,16 +136,35 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            let context_metrics_unavailable =
              member_assoc "context_metrics_unavailable" keeper
            in
+           (* Parsed once into the closed surface vocabulary rather than
+              compared as text twice. keeper_status_runtime's comment on that
+              type names this ranker as one of the two sites that re-classified
+              the string; the producer builds it exhaustively, so a status this
+              parser does not know is a producer/consumer mismatch, not a rank
+              to guess at (#29350). *)
+           let health =
+             Keeper_status_runtime.keeper_health_of_string_opt
+               (string_field "health_state" (member_assoc "diagnostic" keeper))
+           in
            let pressure_rank =
-             if Dashboard_utils.is_keeper_offline status then 3
-             else if
-               Option.exists
-                 (fun ratio -> ratio >= lane_pressure_ctx_ratio)
-                 context_ratio
-             then
-               2
-             else if status = "idle" then 1
-             else 0
+             match health with
+             (* Ranked by health rather than by the status word, which folded
+                stale, degraded and zombie together and then folded that into
+                offline here. A late heartbeat and a dead fiber are different
+                amounts of trouble. *)
+             | Some (Keeper_types.KH_offline | KH_zombie) -> 3
+             | Some (KH_healthy | KH_idle | KH_stale | KH_degraded)
+             | None ->
+               if
+                 Option.exists
+                   (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                   context_ratio
+               then 2
+               else (
+                 match health with
+                 | Some Keeper_types.KH_idle -> 1
+                 | Some (KH_healthy | KH_stale | KH_degraded | KH_zombie | KH_offline)
+                 | None -> 0)
            in
            Some
              {
@@ -153,7 +172,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                last_seen_ts =
                  Dashboard_utils.parse_iso_opt
                    (String_util.trim_nonempty
-                      (match String_util.trim_nonempty (string_field "last_autonomous_action_at" keeper) with
+                      (match String_util.trim_nonempty (string_field "tool_audit_at" keeper) with
                       | Some value -> value
                       | None -> string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
@@ -167,9 +186,21 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ("current_work", member_assoc "current_task_id" keeper);
-                      ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
+                      ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
+                      (* The rank above is computed from [health], but the row it
+                         ranks did not carry it, so no reader could reproduce or
+                         explain the order -- and [status] was the only liveness
+                         word on this row, which is the fold this axis replaces.
+                         [phase] travels with it because operator surfaces ask
+                         two different questions: "is it running" (health) and
+                         "did an operator stop it" (phase). *)
+                      ("health",
+                       Json_util.option_to_yojson
+                         (fun value -> `String (Keeper_status_runtime.keeper_health_to_string value))
+                         health);
+                      ("phase", member_assoc "phase" keeper);
                       ("exclusion_reason",
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));

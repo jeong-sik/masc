@@ -1,21 +1,14 @@
 ---
 status: runbook
-last_verified: 2026-08-23
-code_refs:
-  - bin/masc_tui.ml
-  - bin/masc_tui_render.ml
-  - bin/masc_tui_loader.ml
-  - bin/masc_tui_http.ml
-  - bin/masc_tui_types.ml
-  - bin/masc_tui_keeper_chat_recovery.ml
 ---
 
 # MASC TUI Guide
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
-server is reachable, adds the surfaces that only exist over HTTP. Five surfaces
-rotate with `Tab`: Overview, Keepers, Approvals, Board, Planning, System
-Logs.
+server is reachable, adds the surfaces that only exist over HTTP. Surfaces
+rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
+Board, Planning, Schedules, Verification, Harness, Fusion, Repositories,
+Connectors, Runtime, Tools, System Logs.
 
 ## Quick Start
 
@@ -53,9 +46,13 @@ decides whether launching one is worth it.
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
+| Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation` |
+| Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
+| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -71,6 +68,43 @@ lands in Recent Events:
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
 
+## Navigation
+
+Every surface draws the Tab ring on its top row with the active surface
+highlighted; narrow terminals window the strip around the active entry and
+show how many entries hide past each edge (`‹4`, `5›`).
+
+| Key | Effect |
+|-----|--------|
+| `Tab` / `Shift-Tab` | next / previous surface in the strip's order |
+| `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `Esc` closes |
+| `:` | command palette -- type to filter `go <surface>` and `keeper <name>` jumps, `Enter` runs the highlighted one |
+
+On the keeper roster, `/` searches names: typing moves the cursor to the
+first match live, `Enter` keeps the query for `n`/`N` cycling, `Esc` keeps
+nothing. The list itself never narrows, so every action still acts on the
+row it shows.
+
+`NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
+reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
+
+Keeper sub-views spell their position as a breadcrumb in the header:
+`Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
+
+The keeper detail pane has tabs, cycled with `[` and `]`: Info, the
+keeper's declared instructions with its effective system prompt, and its
+GitHub CLI identity observation.
+
+The Config surface shows `runtime.toml` as the server reads it; `e` opens
+it in `$EDITOR` and the server's preview validation gates the write. The
+Resources surface lists every MCP resource; `Enter` reads one beside the
+list. On Connectors, `b`/`u` open an editor form that binds or unbinds a
+channel.
+
+At 110 columns and wider, the keeper detail view keeps a roster pane on its
+left with the cursor marked; keys keep their detail meaning. Narrower
+terminals use the single-pane layout.
+
 ## Surfaces
 
 ### Overview
@@ -80,7 +114,7 @@ list, Recent Events, and active tasks.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Agents: 2  Approvals: 0  Incidents: 4
+   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
    Cluster: default          Project: me      websocket/steady  sse 3  ws 1  grpc :8936
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started
@@ -109,9 +143,71 @@ spelled out - a steady queue that drops is not a healthy transport.
 
 This tail is read only while Overview is the current surface.
 
+The same row ends with the runtime event feed: `feed: live 1240` while the
+TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
+has received, `feed: opening` while the MCP session and the subscription are
+being set up, and `feed: closed after N` once the stream has ended (the
+reason is in Recent Events and on the Acting status row) -
+the count stays so a stream that dropped after a thousand events and one that
+never opened do not read alike. The feed is opened after the first refresh
+that reaches the server and reopened on the refresh cadence after it closes;
+both transitions land in Recent Events. Every keeper's tool calls, turn
+boundaries, heartbeats, and turn settlements arrive on it; this build keeps
+the last 1,000 and counts what falls off the end.
+
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
+
+### Acting
+
+Every keeper's actions as the runtime event feed delivers them, newest first:
+tool calls and their returns, turn boundaries and settlements, chat rows
+landing. This is the surface for watching ten keepers at once without
+opening ten chats.
+
+```
+ MASC Acting (212 of 640 held, actions)  01:12:04  [connected]
+   feed: live 640  dropped 0
+   Time     Keeper             Event            Detail
+   01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
+   01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
+   01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
+   01:11:51 taskmaster       ● turn start       turn 1738
+  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
+```
+
+The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
+started, `✓` a call returned, `✗` a failure, `●` a turn boundary, `■` a turn
+settled, `?` something needing attention, `·` the quiet kinds. A returned
+call shows how long it took when its start is among the events held; a
+call that began before the feed opened shows none.
+
+`f` switches between `actions` - what keepers did - and `everything`, which
+adds heartbeats, composite and snapshot pushes, and telemetry. On the live
+runtime those were more than half of the feed and said nothing a row could
+act on, so `actions` is the default. An event kind this build was not taught
+draws under both, by its name, so a new kind is noticed rather than hidden.
+
+Scrolling down into older rows (`j`) freezes the view: new events count up
+in `N new above (g)` on the status row instead of pushing the rows you are
+reading. `g` returns to the newest row and clears the count; `G` goes to the
+oldest held. The TUI holds the last 1,000 events; `dropped N` says how many
+fell off the end while it ran.
+
+### The composer and /task
+
+The input row at the bottom of every surface sends text to the keeper it
+names. A line that starts with `/` is a command for the TUI instead:
+
+- `/task <title>` — followed by any further lines as the body — creates a
+  task over the server's `masc_add_task` tool and then messages the keeper
+  the operator's own words with the new id in front: `[task-512] <title>`.
+  The keeper claims that exact task. The events row records the creation;
+  a failure puts the typed text back into the input, unsent.
+- Any other `/word` is reported as unknown and sent nowhere - a mistyped
+  command must not become an instruction the keeper acts on. Text that
+  merely contains a slash later in the line is a message.
 
 ### Keepers
 
@@ -119,14 +215,43 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-      Name                   Gen  Paused        Turns  Current Task
- >  adm-race-cf-001            1  no              498  -
-    analyst                    1  no              237  task-464
-    sangsu                     1  yes             182  task-317
-  j/k:move  Enter:detail  Tab:next  q:quit  r:refresh
+    STATUS       KEEPER             A P TURNS PHASE / MODEL       TASK
+ >  ● active     adm-race-cf-001    A P   498 running claude-opus task-471
+    ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
+  j/k move  p pause  w wake  s shutdown  c chat  enter detail
 ```
 
-This surface needs no server, so it stays readable while the runtime is down.
+The metadata list needs no server, so names, turn counts, and tasks stay
+readable while the runtime is down. `STATUS`, `PHASE / MODEL`, and lifecycle
+actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
+`- unread` rather than guessed from metadata. The status glyph is the primary
+colour cue. Phase and model stay neutral so an ordinary row does not turn into
+a strip of competing colours.
+
+### Lanes
+
+The current composite lifecycle and turn-cycle reading for every Keeper. Open
+it with `Tab` immediately after Keepers.
+
+```
+ MASC Lanes (10 keepers)  17:02:53  [connected]
+  KEEPER             PHASE       TURN        IDLE   LAST OUTCOME         DIAGNOSIS
+  taskmaster         ● running   executing   7m     done · deepseek-v4   running_fiber_alive
+  kidsnote           × failing   executing   59m    done                 failing_unhealthy
+```
+
+The rows come from `GET /api/v1/keepers/composite`. `PHASE` is the Keeper
+lifecycle, `TURN` is the current turn step, and `IDLE` is the producer's idle
+duration in seconds rendered as seconds, minutes, hours, or days. `LAST
+OUTCOME` keeps the latest runtime state and model when one exists.
+`DIAGNOSIS` is the condition the producer says determined the lifecycle
+phase. A phase or turn value this TUI does not know is shown verbatim with a
+`?`; it is never changed into a familiar state.
+
+Before the first response the page says `(not loaded yet)`. A successful empty
+response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
+rows on screen, adds the error in red, and says that an empty body is not a
+reading.
 
 ### Keeper detail
 
@@ -185,64 +310,149 @@ rather than skipped. Rejected rows consume the 200-row window and are never
 backfilled with older data. A current-schema row whose `name` does not match the
 selected keeper is rejected instead of being attributed to it by file location.
 
+### Keeper calls
+
+`t` from the roster or from detail. The keeper's durable tool-call log, the
+newest page of `GET /api/v1/keepers/<name>/tool-calls`: one row per call
+with the finished glyph or `✗` for one that returned an error, the tool,
+its duration, the turn it ran in, and the subject the call is known by -
+the same naming the chat rows use. The header carries the server's own
+freshness verdict (`ok · latest 12s ago`), so a stale page does not read
+as a quiet keeper, and a row naming another keeper is counted and not
+drawn rather than attributed by file position.
+
+```
+ Keeper Calls: rondo (100)  ok · latest 8s ago  02:51:40  [connected]
+   Time     Tool                     Dur      Turn   Subject
+   11:36:57 ✓ Read                   28ms     2143   keeper_owner_reducer.ml
+   11:36:38 ✗ tool_execute           14.5s    2142   dune build
+  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: 8935
+```
+
 ### Keeper message
 
-`m` from detail. Sends to the keeper over `POST /api/v1/keepers/chat/stream`
-with a durable UUIDv7 request ID. The send runs in the background, so refresh
-and navigation stay responsive while the turn runs.
+`c` (or `m`) from the roster or detail. Sends to the keeper over
+`POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
+runs in the background, so refresh and navigation stay responsive while the
+turn runs. `Esc` returns to the roster when chat opened there, and to detail
+when chat opened from detail.
 
 ```
- Message to: sangsu  (port 8935)
-   [14:35:01] you:    hello, how are you?  [tui-019...]
-   [14:35:03] sangsu: ...reply text...     [tui-019...]
+ Message to: sangsu  ● active · running claude-opus-5  (port 8935)
+   [14:35:01] From [you             ] tui-019...
+     hello, how are you?
+   [14:35:03] From [sangsu          ] tui-019...
+     ...reply text...
    > type here_
-  Enter:send  Esc:back  Ctrl-U:clear line
+  Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
+
+The header joins the selected Keeper's published status with its typed runtime
+phase and model, using the same roster reading as the Keepers table. While no
+turn is starting or running, `Ctrl-G` selects the next readable Keeper and
+wraps at the end of the roster. Each Keeper keeps its own draft. Every history
+GET carries a load generation, so a response that finishes after the operator
+switched away or left and returned is discarded instead of replacing the
+newer transcript. The shortcut is withdrawn while a turn is in flight or the
+roster cannot be read.
+
+`From` is a fixed-width reverse-video badge: operator sources are cyan,
+Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is
+the colour pointer; ordinary operator and Keeper prose uses the terminal's
+default foreground so Markdown, code, links, and emphasis keep their own
+hierarchy. Connector and agent origins remain in the badge label (`vincent ·
+slack`, `taskmaster · agent`) instead of being inferred from row position.
+
+The pane opens on the keeper's durable transcript. A turn the keeper ran on
+its own is drawn as what it did, not as a blank line: a `thinking` row with
+the reasoning the server kept and a count of the steps it withheld, then a
+`tools` block with one row per call - the finished glyph for a call that
+returned, `✗` for one that returned an error, `·` for one the trace never
+saw finish, `?` for one whose outcome the trace did not record - and then
+whatever the turn said. A call that finished carries its duration, in
+milliseconds as the server records it; a call still open when the trace
+closed has none.
+
+```
+ [21:41:34] thinking
+   (2 reasoning steps, content withheld)
+ [21:41:34] tools
+   ✓ masc_task_history · 32ms
+   ✗ tool_execute · 1200ms
+```
+
+Only rows the server marks as autonomous turns are read this way. A turn
+in the conversation itself already has its calls in the transcript as tool
+rows, so its trace block is not drawn a second time.
 
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
-promoted to a successful reply. One request may be in flight at a time. Drafts
-are retained per keeper while navigating.
+promoted to a successful reply. Requests are tracked per keeper, so a turn
+running for one keeper does not decide what `Enter` does in another's window;
+sends going elsewhere show as `(also sending to X)`. Drafts are retained per
+keeper while navigating.
+
+#### Pasting
+
+The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a
+terminal delivers a paste as the keys it looks like, and the line break in
+pasted text is the same byte Return sends: a three-line paste becomes three
+messages, and during a turn, three queued fragments. With it the payload
+arrives as text and lands in the draft whole, so Markdown blocks, URLs, and
+log excerpts keep the shape they were copied in.
+
+A paste while the composer row is idle takes focus for it, so pasted text
+always lands somewhere visible and addressed to the keeper the row named. With
+no keeper to send to, the paste is refused out loud in Recent Events rather
+than dropped.
+
+Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
+was copied; all three become one LF in the draft. Everything else that is not
+printable becomes a space - a paste is the one way a terminal escape sequence
+could reach a message, since typed keys are filtered one scalar at a time.
+
+A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
+has to be consumed, or the tail of the paste arrives as keystrokes - and
+counted, and Recent Events says how many bytes are not in the draft.
+
+#### Lines typed during a turn
+
+Enter during a running turn holds the line for the next one rather than
+refusing it. The pane draws every waiting line in full, oldest first, under the
+sending rows:
+
+```
+   (sending tui-..d3530056 · 12s…)
+   queued 1: check the CI run too
+   queued 2 -> polisher: and the rebase
+   > _
+  Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
+```
+
+A count on its own is not enough - an operator who typed three lines during a
+turn needs to see which three. Only the first line of a queued message is
+shown, with `…` where it was cut; the rest goes with it when it is sent.
+
+A queued line travels with the keeper it was written to, so switching keepers
+mid-turn cannot redirect it; a line addressed elsewhere names its keeper after
+the number. `Ctrl-K` drops the newest waiting line and `Ctrl-P` pulls it back
+into the composer. Nothing has been dispatched, so both are local.
+
+Each waiting line takes its row from the conversation above it, never from the
+terminal: the pane ends on the same row whether the queue is empty or full.
+
+The arrows walk what the operator typed for this keeper, newest first, and the
+waiting lines come before the sent ones. `Up` on a fresh composer therefore
+hands back the line that is waiting rather than stepping over it into what was
+already delivered. The draft is put aside on the first step back and returned
+on the way forward past the newest.
 
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders
 `Keeper roster is unavailable` and the footer reads
 `Enter:disabled (roster unavailable)`.
-
-#### Dispatch fence
-
-Before any POST the TUI writes a `prepared` recovery fence and requires the new
-directory chain, the file, and the parent directory entry to be durably synced.
-`prepared` means no process has durably claimed a POST. The sender then acquires
-the cross-process dispatch lock, rechecks the exact identity, and advances the
-fence to `dispatching` before crossing the network boundary. Only that lock
-holder may POST, and it holds the lock until the main TUI has applied the result
-and acknowledged its recovery mutation.
-
-`dispatching` never authorizes a later POST. After a crash, cancellation, or
-failed result-phase write, recovery only reads the exact operation. Only an
-outcome-unverified result durably advanced to `replayable` may be claimed for
-another exact-ID POST, and that replay claim first returns the fence to
-fail-closed `dispatching`. A stale retry never recreates a missing `prepared`
-fence: it goes through the serialized claim and stops if the fence was already
-removed.
-
-Once the stream proves server acceptance the fence becomes `accepted`. If
-delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the
-exact durable operation until it settles - it does not mint a fresh ID or issue
-another chat POST. A definitive pre-acceptance rejection advances the fence to
-`rejected`, which is cleanup-only. Only the current pre-handler statuses `400`,
-`401`, `403`, and `404` qualify as definitive; timeouts, conflicts, rate limits,
-`5xx`, and unknown statuses stay outcome-unverified because an intermediary may
-have forwarded the POST before returning them.
-
-If a fail-closed `dispatching` fence repeatedly returns operation `404`, the TUI
-stays blocked on purpose: it cannot prove whether the POST crossed the boundary,
-and it offers no force-replay or force-clear shortcut. Verify the exact
-operation and the runtime logs before an operator removes that fence. Clearing
-it without that proof can permit overlapping work.
 
 ### Approvals
 
@@ -308,6 +518,102 @@ would send, any other key disarms - and the server owns the phase rules: a
 transition the current phase does not allow comes back as the server's
 rejection on the detail, not a local guess.
 
+### Schedules
+
+The scheduled-automation list: every wake the runtime has queued, active rows
+first by due time. This is the surface that answers "why is this keeper about
+to wake up".
+
+```
+ MASC Schedules  [me]  10:44:57  [connected]
+   Requests: 34  (page shows first 20)
+   Next due: 2026-08-24T09:57:00
+ >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
+     [running  ] 2026-08-24T09:12:00  sangsu       one-shot
+  j/k:move  x:cancel  r:refresh  Tab:next  | Port: 8935
+```
+
+The header count and the page are different things: the server sorts the whole
+store active-first and serves the first twenty rows, so `(page shows first
+20)` names what is held back. A store that could not be read is
+`data unreliable` with the failing call, not an empty list - "the ledger is
+unreadable" and "nothing is scheduled" are different facts.
+
+`x` cancels the row under the cursor. Like every irreversible action here it
+is armed: the first press names the schedule, the same press again sends it,
+and the cursor moving between presses re-arms for the new row. Whether a row
+is still cancellable is the server's store rule to decide - cancelling a row
+that already ran comes back as the server's rejection on the surface, not a
+local guess from the status column. The payload target column names who the
+wake reaches (a keeper, for keeper wakes); rows without one fall back to the
+payload summary.
+
+### Fusion
+
+The retained Fusion run registry is the list. It shows only facts that list
+actually owns: start time, lifecycle status, keeper, preset, topology, and run
+id. The cursor follows run id across refreshes, so a newly sorted row cannot
+silently change what `Enter` opens.
+
+```
+ MASC Fusion (19 runs)  18:31:04  [connected]
+   TIME     STATUS    KEEPER           PRESET     TOPOLOGY   RUN
+ > 16:42:11 completed rw-e0-r9         trio       simple     kmsg-386bed...
+   16:40:07 failed    analyst          trio       simple     kmsg-942ab1...
+  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
+```
+
+The detail is a separate exact read. Lifecycle remains the Registry fact;
+evidence comes only from a Board post whose typed origin is
+`source=fusion` with the same `fusion_run_id`. `recorded` draws every panel
+answer or failure in server order, followed by the judge decision, resolved
+answer, and reason. It does not calculate a majority, minimum answer count,
+timeout verdict, cost verdict, or any other local conclusion.
+
+`pending` is legal only while the Registry row is running. `absent` means the
+retained completed/failed run has no current Board projection; it does not
+claim the post was never written, that the sink failed, or that retention
+expired. A failed refresh leaves the prior reading visible under an explicit
+error instead of redrawing it as an empty result.
+
+### Runtime
+
+Runtime lanes and their ordered candidates, joined to the latest provider
+metadata reachability reading by exact `runtime_id`.
+
+```
+ MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
+   SSOT: runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
+   LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
+   primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
+   local          1/1 local.codex            Codex / codex           ready / CLI not probed
+```
+
+The authority is `runtime.toml`, read through two server-owned views.
+`GET /api/v1/runtime/resolved` projects lane order, candidate identity,
+provider/model labels, dispatchability, and sticky preference. The sticky
+timestamp means **last successful
+candidate**, so the row says `last success`; it is never presented as failure
+history. `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
+metadata-endpoint reachability reading. It does not send a completion, execute a CLI
+runtime, or report lane failover history.
+
+`CLI not probed` is neutral, and a candidate absent from a stale probe is
+`unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
+provider, and ordinary row text use the terminal foreground. A blocked route,
+probe failure, and missing authentication remain distinct typed states.
+
+The freshness badge is the server's closed value: `fresh`, `recent`, `stale`
+(`served_stale` on the wire), or `warming` (`warming_up`). `r` sends
+`force=1`, but the route remains non-blocking: a stale or warming response
+means background work was scheduled and a later poll carries the new value.
+Only one joined load may be in flight, so a slow authenticated request cannot
+stack every two-second refresh tick. A manual refresh pressed during a periodic
+read is coalesced into one force request when that read settles. If only the
+probe read fails, resolved lanes still render: a last-good probe is retained,
+or cold candidates are `unobserved`. If the resolved identity read fails, the
+last joined rows stay visible under the error.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.
@@ -338,7 +644,7 @@ Global, outside message input:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Keepers -> Approvals -> Board -> Planning -> System Logs -> Overview |
+| `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
 | `q` | Quit |
@@ -348,45 +654,49 @@ Per surface:
 | Key | Surface | Action |
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
-| `j` / `k` | Keepers, Approvals, Board, Planning | Move cursor |
-| `j` / `k` | System Logs | Scroll the page |
-| `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
+| `j` / `k` | Keepers, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
+| `j` / `k` | Lanes, Runtime, System Logs | Scroll the page |
+| `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
 | `Enter` | Planning | Open goal detail |
+| `Enter` | Fusion | Open exact run evidence detail |
 | `l` | Keeper detail | Open logs |
-| `m` | Keeper detail | Open message input |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
+| `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
+| `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
+| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
-| `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed fence, replay only a replayable fence, or remove a rejected or settled fence by exact durable ID |
+| `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
-
-`Ctrl-R` stays available even when extra status rows leave the terminal too
-small for normal message input.
 
 ## Navigation
 
 ```
-Tab cycles the five surfaces:
+Tab cycles the surfaces:
 
-  Overview -> Keepers -> Approvals -> Board -> Planning -> Overview
+  Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
+           -> Schedules -> Verification -> Harness -> Fusion -> Repositories
+           -> Connectors -> Runtime -> Tools -> System Logs -> Overview
 
 Within a surface:
 
   Keepers   --Enter-->  Keeper detail  --l-->  Keeper logs
-                              |
-                              m
-                              v
-                        Message input
+      |                       |
+      c                       c
+      v                       v
+  Message input          Message input
 
   Board     --Enter-->  Board read
   Planning  --Enter-->  Goal detail
+  Fusion    --Enter-->  Run evidence detail
 ```
 
 `2` reaches Keepers from any surface. `Esc` returns one level within Keepers,
-Board, and Planning.
+Board, Planning, and Fusion.
 
 ## Requirements
 
@@ -412,7 +722,7 @@ a clipped frame, and message editing is suppressed until the terminal grows.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,
-Planning, and messaging do not. Check the port with `--port`.
+Planning, Fusion, and messaging do not. Check the port with `--port`.
 
 **Keepers list is empty but the runtime is running.** The base path is probably
 wrong. The list reads `.masc/keepers/` below `--base-path`, with no server
@@ -424,6 +734,18 @@ missing key currently reads back as an empty JSON object, so an absent
 `.masc/tasks/backlog.json` surfaces as the schema complaint
 `backlog must contain exactly one tasks list, last_updated string, and positive
 version`. Check that the path exists before treating it as a schema problem.
+
+**A surface says `(not loaded yet)`.** Nothing has been read for it: the
+request is still out, or the surface was opened before a server was reachable.
+It is not an empty result. A read that came back with nothing says so in its
+own words - `(nothing waiting on a verdict)`, `(no verdicts recorded)` - and
+only after the header has stopped saying `(not loaded)`.
+
+**Keepers shows `- unread` in the STATUS column.** The live roster at
+`GET /api/v1/gate/keepers` has not been read for that keeper - the first load
+is still out, the read failed (the reason is printed above the list), or the
+roster came back short and did not carry that keeper. It is not a status the
+keeper is in. The header's `N unread` counts the same rows.
 
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and

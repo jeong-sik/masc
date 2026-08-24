@@ -19,10 +19,6 @@ let curl_write_out =
   curl_meta_marker
   ^ "%{http_code}\n%{url_effective}\n%{redirect_url}\n%{content_type}\n%{size_download}"
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
-
 let find_last_substring ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -52,9 +48,9 @@ let response_of_payload_and_meta payload meta =
   match lines with
   | status_raw :: effective_url_raw :: redirect_url_raw :: content_type_raw :: size_raw :: _ ->
       { http_status = parse_int_opt (String.trim status_raw)
-      ; effective_url = trim_to_option effective_url_raw
-      ; redirect_url = trim_to_option redirect_url_raw
-      ; content_type = trim_to_option content_type_raw
+      ; effective_url = String_util.trim_nonempty effective_url_raw
+      ; redirect_url = String_util.trim_nonempty redirect_url_raw
+      ; content_type = String_util.trim_nonempty content_type_raw
       ; downloaded_bytes = parse_downloaded_bytes size_raw
       ; body = payload
       }

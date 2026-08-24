@@ -29,7 +29,6 @@ const ALL_PHASES: readonly KeeperPhase[] = [
   'Compacting',
   'HandingOff',
   'Failing',
-  'Overflowed',
   'Draining',
   'Paused',
   'Stopped',
@@ -40,7 +39,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
   it('FSM_STATES matches the canonical phase set', () => {
     expect(new Set(FSM_STATES)).toEqual(new Set([
       'Offline', 'Restarting', 'Running', 'Compacting', 'HandingOff',
-      'Failing', 'Overflowed', 'Draining', 'Paused', 'Stopped',
+      'Failing', 'Draining', 'Paused', 'Stopped',
       'Crashed',
     ]))
   })

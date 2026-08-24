@@ -80,6 +80,14 @@ count_exception_catchall_swallow() {
   )
 }
 
+count_byte_sliced_text() {
+  ( set +o pipefail
+    cd "$REPO_ROOT"
+    rg -c 'String\.sub\s+\w+\s+0\s+\(min\b' "${RG_SCOPE[@]}" 2>/dev/null \
+      | awk -F: '{s+=$NF} END {print s+0}'
+  )
+}
+
 count_variant_catchall_default() {
   ( set +o pipefail
     cd "$REPO_ROOT"
@@ -95,6 +103,7 @@ METRICS=(
   "error_to_ok_silence|Error arm collapsed into Ok promotes failure to success silently. Propagate the error or wrap in a typed envelope."
   "error_result_silence|Error arm collapsed into a constant default Ok/None/empty-list/true/false/unit. Propagate the error or extract via a guarded helper."
   "exception_catchall_swallow|try with underscore catches every exception including Eio.Cancel.Cancelled. Match concrete exception constructors instead."
+  "byte_sliced_text|String.sub with a byte count cuts a multi-byte character in half, and the partial byte stops the text decoding as UTF-8 downstream. Issue #7690 fixed one site and the shape returned. Use String_util.utf8_prefix or String_util.utf8_safe."
 )
 
 DESCRIPTIVE_METRICS=(
@@ -106,6 +115,7 @@ current_value() {
     error_to_ok_silence)         count_error_to_ok_silence ;;
     error_result_silence)        count_error_result_silence ;;
     exception_catchall_swallow)  count_exception_catchall_swallow ;;
+    byte_sliced_text)            count_byte_sliced_text ;;
     variant_catchall_default)    count_variant_catchall_default ;;
     *) echo "unknown metric: $1" >&2; exit 1 ;;
   esac

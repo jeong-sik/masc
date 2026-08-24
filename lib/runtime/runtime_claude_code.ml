@@ -753,13 +753,21 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
            rate_limit
     in
     let terminal_failure_detail () =
+      (* [terminal_reason] decides whether an overflow is typed as one, and it
+         used to be absent from what a reader sees. A live failure carrying
+         "Prompt is too long" that did not reach the overflow path was
+         indistinguishable from one where the sentence never appeared: both
+         printed the same line, and the field that separates them was not in
+         it (one keeper, 2026-08-24). Naming it costs one field and answers the
+         question the next reader will have. *)
       Printf.sprintf
-        "terminal subtype=%s api_status=%s%s"
+        "terminal subtype=%s api_status=%s reason=%s%s"
         subtype
         (Option.fold
            ~none:"unknown"
            ~some:string_of_int
            api_error_status)
+        (Option.value terminal_reason ~default:"none")
         (match result with
          | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
          | Some _ | None -> "")

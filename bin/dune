@@ -123,6 +123,11 @@
   masc.agent_core.llm_provider))
 
 (executable
+ (name keeper_store_layout_manifest)
+ (modules keeper_store_layout_manifest)
+ (libraries masc.masc_core yojson))
+
+(executable
  (name public_tool_manifest)
  (modules public_tool_manifest)
  (libraries
@@ -144,16 +149,6 @@
  (public_name masc-checkpoint-purge)
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
-
-;; Read-only keeper feature proof CLI: renders the same JSON as
-;; /api/v1/dashboard/keeper-feature-proof without starting a server.
-
-(executable
- (name keeper_feature_proof_report)
- (modules keeper_feature_proof_report)
- (public_name masc-keeper-feature-proof)
- (package masc)
- (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
 
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
@@ -192,6 +187,7 @@
   masc.masc_tool_blob_store
   masc.fusion_core
   masc.run_registry_core
+  masc.masc_types
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
@@ -230,6 +226,7 @@
  (modules masc_tui_keeper_chat_projection)
  (libraries
   masc
+  masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
   masc.masc_core
@@ -241,6 +238,29 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_observer)
+ (wrapped false)
+ (modules masc_tui_observer)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_command)
+ (wrapped false)
+ (modules masc_tui_command))
+
+(library
+ (name masc_tui_mcp)
+ (wrapped false)
+ (modules masc_tui_mcp)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_acting)
+ (wrapped false)
+ (modules masc_tui_acting)
+ (libraries masc_tui_observer))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -261,7 +281,18 @@
  (libraries
   masc
   masc_tui_keeper_chat_live
-  masc_tui_keeper_chat_projection))
+  masc_tui_keeper_chat_projection
+  masc_tui_message_layout))
+
+(library
+ (name masc_tui_scroll)
+ (wrapped false)
+ (modules masc_tui_scroll))
+
+(library
+ (name masc_tui_paste)
+ (wrapped false)
+ (modules masc_tui_paste))
 
 (library
  (name masc_tui_message_layout)
@@ -270,19 +301,9 @@
  (libraries uucp uuseg))
 
 (library
- (name masc_tui_keeper_chat_recovery)
+ (name masc_tui_send_disposition)
  (wrapped false)
- (modules masc_tui_keeper_chat_recovery)
- (libraries
-  masc.masc_core
-  masc.masc_process
-  masc.masc_random_id
-  masc
-  masc_tui_keeper_chat_projection
-  eio
-  fs_compat
-  yojson
-  unix))
+ (modules masc_tui_send_disposition))
 
 (library
  (name masc_tui_frame_presenter)
@@ -299,7 +320,7 @@
  (name masc_tui_metrics_tail)
  (wrapped false)
  (modules masc_tui_metrics_tail)
- (libraries masc dated_jsonl))
+ (libraries masc dated_jsonl masc_tui_scroll))
 
 (library
  (name masc_tui_context_state)
@@ -319,6 +340,11 @@
  (modules masc_tui_render_schedule))
 
 (library
+ (name masc_tui_footer)
+ (wrapped false)
+ (modules masc_tui_footer))
+
+(library
  (name masc_tui_board_selection)
  (wrapped false)
  (modules masc_tui_board_selection))
@@ -327,6 +353,12 @@
  (name masc_tui_planning_selection)
  (wrapped false)
  (modules masc_tui_planning_selection))
+
+(library
+ (name masc_tui_tool_tree)
+ (wrapped false)
+ (modules masc_tui_tool_tree)
+ (libraries masc))
 
 (library
  (name masc_tui_markdown)
@@ -344,7 +376,7 @@
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
- (libraries masc yojson))
+ (libraries masc masc_tui_credential yojson))
 
 (library
  (name masc_tui_keeper_selection)
@@ -362,11 +394,47 @@
  (modules masc_tui_terminal_write_repair)
  (libraries masc_tui_render_schedule unix))
 
+(library
+ (name masc_tui_editor)
+ (wrapped false)
+ (modules masc_tui_editor)
+ (libraries unix))
+
+(library
+ (name masc_tui_credential)
+ (modules masc_tui_credential))
+
+; Carved out so a test can read it. surface_needs decides what a refresh tick
+; fetches for the surface on screen, and the chat pane having no field there
+; is why it read its history once and never again.
+(library
+ (name masc_tui_types)
+ (wrapped false)
+ (modules masc_tui_types)
+ (libraries
+  masc
+  masc.masc_goal
+  masc.masc_types
+  masc_tui_acting
+  masc_tui_board_detail
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc_tui_keeper_selection
+  masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observer
+  masc_tui_operator_projection
+  masc_tui_paste
+  masc_tui_send_disposition
+  unix
+  yojson))
+
 (executable
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_types
   masc_tui_ansi
   masc_tui_render
   masc_tui_loader
@@ -376,6 +444,15 @@
  (libraries
   masc
   masc.auth
+  terminal_size
+  masc_tui_credential
+  masc_tui_types
+  masc.runtime
+  ;; masc_tui_render names Fusion_types directly to label a run's topology.
+  ;; Tui_decode carries the type through fur_topology, but dune does not open a
+  ;; transitive library's module names, so masc_tui lists masc.fusion_core.
+  masc.fusion_core
+  masc_tui_footer
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity
@@ -383,12 +460,18 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
-  masc_tui_keeper_chat_recovery
+  masc_tui_observer
+  masc_tui_acting
+  masc_tui_command
+  masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_message_layout
+  masc_tui_paste
+  masc_tui_scroll
+  masc_tui_send_disposition
   masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection
@@ -398,7 +481,9 @@
   masc_tui_planning_selection
   masc_tui_task_selection
   masc_tui_render_schedule
+  masc_tui_tool_tree
   masc_tui_terminal_write_repair
+  masc_tui_editor
   masc.dashboard
   masc.server
   masc.config
@@ -435,11 +520,6 @@
 ; Depends on tool_schemas_specs (types-only sibling library) to share
 ; spec records with future schema-lint / doc-gen tooling. The cycle is
 ; avoided because tool_schemas_specs does not depend on masc_tool_schemas.
-
-(executable
- (name gen_tool_descriptors)
- (modules gen_tool_descriptors)
- (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —

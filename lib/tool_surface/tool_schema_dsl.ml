@@ -7,11 +7,6 @@
 let string_prop description =
   `Assoc [ ("type", `String "string"); ("description", `String description) ]
 
-let integer_prop ?default description =
-  `Assoc
-    ([ ("type", `String "integer"); ("description", `String description) ]
-    @ (match default with Some v -> [ ("default", `Int v) ] | None -> []))
-
 let boolean_prop ?default description =
   `Assoc
     ([ ("type", `String "boolean"); ("description", `String description) ]
@@ -25,11 +20,16 @@ let string_array_prop description =
       ("items", `Assoc [ ("type", `String "string") ]);
     ]
 
+  (* An empty ["required"] says nothing an absent one does not, and both
+     readers already fold them together: llm_provider/types.ml answers [None]
+     and [`Null] with [Ok []], and tool_input_validation.ml treats a
+     non-matching key the same way. Emitting it spends bytes in every turn's
+     tool list to say nothing, and twenty-six of the eighty-two published
+     tools already omit it. *)
 let object_schema ?(required = []) properties =
   `Assoc
-    [
-      ("type", `String "object");
-      ("properties", `Assoc properties);
-      ("required", `List (List.map (fun k -> `String k) required));
-      ("additionalProperties", `Bool false);
-    ]
+    ([ ("type", `String "object"); ("properties", `Assoc properties) ]
+     @ (match required with
+        | [] -> []
+        | _ :: _ -> [ ("required", `List (List.map (fun k -> `String k) required)) ])
+     @ [ ("additionalProperties", `Bool false) ])

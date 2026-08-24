@@ -338,10 +338,6 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     proactive_visible_count_total: 0, last_visible_proactive_ts: 0.0,
     last_proactive_outcome: "never_started", last_proactive_reason: "",
     last_proactive_preview: "", consecutive_noop_count: 0,
-    last_autonomous_action_at: "", autonomous_action_count: 0,
-    autonomous_turn_count: 0, autonomous_text_turn_count: 0,
-    autonomous_tool_turn_count: 0, board_reactive_turn_count: 0,
-    mention_reactive_turn_count: 0, noop_turn_count: 0,
     message_scope_ack_id: null, last_runtime_attempt: null, paused: false,
     latched_reason: null, current_task_id: null, keeper_id: null,
     agent_core_env: {}

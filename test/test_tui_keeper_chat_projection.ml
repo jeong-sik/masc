@@ -498,21 +498,44 @@ let test_reconciliation_failure_detail () =
       ; body = {|{"error":"[AuthError] Unauthorized","auth_error_code":"missing_token"}|}
       }
   in
-  let detail = Chat.reconciliation_failure_detail refused in
-  check bool "a refused read names the missing token" true
-    (String_util.string_contains_substring ~needle:"MASC_TOKEN" detail);
-  check bool "a refused read says the operation survives" true
-    (String_util.string_contains_substring ~needle:"untouched on the server" detail);
-  check bool "a refused read does not paste the server body" false
-    (String_util.string_contains_substring ~needle:"auth_error_code" detail);
+  let has needle detail =
+    String_util.string_contains_substring ~needle detail
+  in
+  (* Without a bearer the operator has none to present. *)
+  let absent = Chat.reconciliation_failure_detail ~credential_sent:false refused in
+  check bool "an absent credential is named as absent" true
+    (has "holds no operator token" absent);
+  check bool "an absent credential is not called refused" false
+    (has "was refused" absent);
+  (* With one, the server rejected what it was given -- telling the operator to
+     provide a token would be advice they have already followed. *)
+  let rejected = Chat.reconciliation_failure_detail ~credential_sent:true refused in
+  check bool "a rejected credential is named as rejected" true
+    (has "was refused" rejected);
+  check bool "a rejected credential is not called absent" false
+    (has "holds no operator token" rejected);
+  List.iter
+    (fun (label, detail) ->
+      check bool (label ^ " names the command that mints one") true
+        (has "masc login" detail);
+      check bool (label ^ " says the operation survives") true
+        (has "untouched on the server" detail);
+      check bool (label ^ " does not paste the server body") false
+        (has "auth_error_code" detail))
+    [ ("absent", absent); ("rejected", rejected) ];
   let upstream : Chat.error =
     Chat.Http_error { status = 503; body = "owner_stopping" }
   in
-  let detail = Chat.reconciliation_failure_detail upstream in
-  check bool "every other failure keeps the server words" true
-    (String_util.string_contains_substring ~needle:"owner_stopping" detail);
-  check bool "every other failure does not claim a missing token" false
-    (String_util.string_contains_substring ~needle:"MASC_TOKEN" detail)
+  List.iter
+    (fun credential_sent ->
+      let detail =
+        Chat.reconciliation_failure_detail ~credential_sent upstream
+      in
+      check bool "every other failure keeps the server words" true
+        (has "owner_stopping" detail);
+      check bool "every other failure does not blame the credential" false
+        (has "masc login" detail))
+    [ true; false ]
 
 let operation_json state fields =
   let input =

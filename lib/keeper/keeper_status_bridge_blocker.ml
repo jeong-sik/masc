@@ -64,7 +64,12 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
      | Agent_core.Error.Agent
          ( HookExecutionFailed _
          | TerminalToolEffectFailed _
-         | TerminalToolDurabilityFailed _ ) ->
+         | TerminalToolDurabilityFailed _
+         (* Hitting the declared round ceiling is not a blocked keeper: the
+            next turn starts normally against the same history. The turn's
+            terminal reason code carries it, which is the visibility this
+            needs. *)
+         | ToolRoundLimitExceeded _ ) ->
        None
      | Agent_core.Error.Agent (UnrecognizedStopReason _) ->
        Some Agent_core_unrecognized_stop_reason

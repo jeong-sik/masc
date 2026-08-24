@@ -13,7 +13,6 @@ const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'handoff', label: 'handoff' },
   { key: 'offline', label: 'offline' },
   { key: 'failing', label: 'fail' },
-  { key: 'overflowed', label: 'overflow' },
   { key: 'draining', label: 'drain' },
   { key: 'paused', label: 'pause' },
   { key: 'crashed', label: 'crash' },

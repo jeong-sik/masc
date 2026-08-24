@@ -23,10 +23,18 @@ let mk_stage ?(stdin = Execute_input.Inherit_input)
 let mk_program ?cwd ?(env = []) ?timeout_sec head tail
   : Execute_input.execute_input
   =
-  { program = { head; tail }; next = []; cwd; env; timeout_sec }
+  { source = Staged { program = { head; tail }; next = [] }; cwd; env; timeout_sec }
 ;;
 
 let mk_exec executable argv = mk_program (mk_stage (executable :: argv)) []
+;;
+
+(* Every staged assertion below wants the same thing: the stages, or a clear
+   failure when the input turned out to be a script. Stated once. *)
+let staged_exn (input : Execute_input.execute_input) =
+  match input.Execute_input.source with
+  | Execute_input.Staged { program = { head; tail }; _ } -> head :: tail
+  | Execute_input.Script _ -> Alcotest.fail "expected the staged form"
 ;;
 
 let parse_json_exn json =
@@ -231,12 +239,19 @@ let test_of_json_exec () =
           ])
   in
   match input with
-  | { Execute_input.program = { head = { argv; _ }; tail = [] }; cwd; env; _ } ->
+  | { Execute_input.source =
+        Staged { program = { head = { argv; _ }; tail = [] }; _ }
+    ; cwd
+    ; env
+    ; _
+    } ->
     Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
-  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+  | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
     Alcotest.fail "expected a single-stage program"
+  | { Execute_input.source = Script _; _ } ->
+    Alcotest.fail "expected the staged form"
 ;;
 
 let test_of_json_timeout_is_optional_and_preserved () =
@@ -291,12 +306,12 @@ let test_of_json_accepts_single_argv_ssot () =
           ])
   in
   match input with
-  | { Execute_input.program = { head = { argv; _ }; tail = [] }; _ } ->
+  | { Execute_input.source = Staged { program = { head = { argv; _ }; tail = [] }; _ }; _ } ->
     Alcotest.(check (list string))
       "one argv owns program and arguments"
       [ "git"; "status"; "--short" ]
       argv
-  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+  | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } | { Execute_input.source = Script _; _ } ->
     Alcotest.fail "expected a single-stage program"
 ;;
 
@@ -324,12 +339,12 @@ let test_of_json_preserves_repeated_argument () =
           ])
   in
   match input with
-  | { Execute_input.program = { head = { argv; _ }; tail = [] }; _ } ->
+  | { Execute_input.source = Staged { program = { head = { argv; _ }; tail = [] }; _ }; _ } ->
     Alcotest.(check (list string))
       "argv remains caller-authored"
       [ "cat"; "cat"; "repos/masc/README.md" ]
       argv
-  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+  | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } | { Execute_input.source = Script _; _ } ->
     Alcotest.fail "expected a single-stage program"
 ;;
 
@@ -368,14 +383,14 @@ let test_of_json_keeps_empty_exec_for_validation () =
           ])
   in
   match input with
-  | { Execute_input.program = { head = { argv; _ }; tail = [] }; cwd; env; _ } ->
+  | { Execute_input.source = Staged { program = { head = { argv; _ }; tail = [] }; _ }; cwd; env; _ } ->
     Alcotest.(check (list string))
       "argv0 command remains caller-authored"
       [ ""; "gh"; "pr"; "list" ]
       argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
-  | { Execute_input.program = { tail = _ :: _; _ }; _ } ->
+  | { Execute_input.source = Staged { program = { tail = _ :: _; _ }; _ }; _ } | { Execute_input.source = Script _; _ } ->
     Alcotest.fail "expected a single-stage program"
 ;;
 
@@ -393,17 +408,15 @@ let test_of_json_pipeline () =
           ; "cwd", `String "/tmp"
           ])
   in
-  match input with
-  | { Execute_input.program = { head; tail }; cwd; env; timeout_sec = _ } ->
-    let stages = head :: tail in
-    Alcotest.(check int) "stage count" 2 (List.length stages);
-    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
-    Alcotest.(check (list (pair string string))) "env" [] env;
-    (match stages with
-     | [ first; second ] ->
-       Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
-       Alcotest.(check (list string)) "second argv" [ "wc"; "-c" ] second.argv
-     | _ -> Alcotest.fail "expected exactly two stages")
+  let stages = staged_exn input in
+  Alcotest.(check int) "stage count" 2 (List.length stages);
+  Alcotest.(check (option string)) "cwd" (Some "/tmp") input.Execute_input.cwd;
+  Alcotest.(check (list (pair string string))) "env" [] input.Execute_input.env;
+  (match stages with
+   | [ first; second ] ->
+     Alcotest.(check (list string)) "first argv" [ "printf"; "hello" ] first.argv;
+     Alcotest.(check (list string)) "second argv" [ "wc"; "-c" ] second.argv
+   | _ -> Alcotest.fail "expected exactly two stages")
 ;;
 
 let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
@@ -421,10 +434,8 @@ let test_of_json_pipeline_preserves_duplicate_stage_argv0 () =
                 ] )
           ])
   in
-  match input with
-  | { Execute_input.program = { head; tail }; _ } ->
-    let stages = head :: tail in
-    (match stages with
+  let stages = staged_exn input in
+  (match stages with
      | [ first; second ] ->
        Alcotest.(check (list string))
          "first argv remains caller-authored"
@@ -454,12 +465,10 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
           ; "cwd", `String "/tmp"
           ])
   in
-  match input with
-  | { Execute_input.program = { head; tail }; cwd; env; timeout_sec = _ } ->
-    let stages = head :: tail in
-    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
-    Alcotest.(check (list (pair string string))) "env" [] env;
-    (match stages with
+  let stages = staged_exn input in
+  Alcotest.(check (option string)) "cwd" (Some "/tmp") input.Execute_input.cwd;
+  Alcotest.(check (list (pair string string))) "env" [] input.Execute_input.env;
+  (match stages with
      | [ first; second ] ->
        Alcotest.(check (list string))
          "first argv0 command remains caller-authored"
@@ -469,14 +478,168 @@ let test_of_json_keeps_empty_pipeline_stage_for_validation () =
      | _ -> Alcotest.fail "expected exactly two stages")
 ;;
 
+(* The shell form. What a keeper actually wrote over 2026-08-21..23 was
+   [argv:["bash";"-c";"..."]] on 30% of its Execute calls, where the body was
+   an opaque argument the gate could not read. The same line as [script] is a
+   [Shell_ir.t]. *)
+let test_script_lowers_a_pipeline () =
+  let input = parse_json_exn (`Assoc [ "script", `String "cat a.txt | wc -l" ]) in
+  match input.Execute_input.source with
+  | Execute_input.Script text ->
+    Alcotest.(check string) "carried verbatim" "cat a.txt | wc -l" text;
+    (match Execute_input.to_shell_ir input with
+     | Ok (Masc_exec.Shell_ir.Pipeline stages) ->
+       Alcotest.(check int) "two stages" 2 (List.length stages)
+     | Ok _ -> Alcotest.fail "a pipe must lower to Pipeline"
+     | Error e ->
+       Alcotest.failf "%a" Execute_input.pp_validation_error e)
+  | Execute_input.Staged _ -> Alcotest.fail "expected the script form"
+;;
+
+let test_script_carries_cwd_onto_every_stage () =
+  let input =
+    parse_json_exn
+      (`Assoc
+        [ "script", `String "cat a.txt | wc -l"; "cwd", `String "/tmp" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Pipeline stages) ->
+    Alcotest.(check bool)
+      "every stage received the call's cwd"
+      true
+      (List.for_all
+         (function
+           | Masc_exec.Shell_ir.Simple s -> Option.is_some s.cwd
+           | _ -> false)
+         stages)
+  | Ok _ -> Alcotest.fail "a pipe must lower to Pipeline"
+  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+;;
+
+(* 83% of the shell escapes measured over 2026-08-21..23 used a logic
+   operator. It lowers to the Sequence the IR already had. *)
+let test_script_lowers_a_guarded_run () =
+  let input =
+    parse_json_exn (`Assoc [ "script", `String "test -w /tmp && echo ok" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (And_if, _) ]; _ }) -> ()
+  | Ok _ -> Alcotest.fail "&& must lower to a Sequence guarded on success"
+  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+;;
+
+let test_script_lowers_an_alternative_run () =
+  let input =
+    parse_json_exn (`Assoc [ "script", `String "grep x f || echo none" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Sequence { tail = [ (Or_if, _) ]; _ }) -> ()
+  | Ok _ -> Alcotest.fail "|| must lower to a Sequence guarded on failure"
+  | Error e -> Alcotest.failf "%a" Execute_input.pp_validation_error e
+;;
+
+(* A construct outside the subset is refused by name rather than run. The name
+   is the point: inside [bash -c] it was counted as nothing. *)
+let test_script_outside_the_subset_is_named () =
+  let input =
+    parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok _ -> Alcotest.fail "command substitution is outside the subset"
+  | Error (Execute_input.Script_outside_the_subset `Cmd_subst) -> ()
+  | Error e ->
+    Alcotest.failf "expected a named subset refusal, got %a"
+      Execute_input.pp_validation_error e
+;;
+
+(* A separated list carries a redirect often enough that naming the redirect
+   was the classifier's usual answer. Measured over the 548 command lines the
+   runtime produced 2026-08-21..23, all 31 refusals reported as a redirect
+   were this. *)
+let test_a_separator_is_not_reported_as_a_redirect () =
+  let input =
+    parse_json_exn
+      (`Assoc [ "script", `String "ls docs 2>/dev/null; echo done" ])
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok _ -> Alcotest.fail "; is outside the subset"
+  | Error (Execute_input.Script_outside_the_subset `Command_separator) -> ()
+  | Error e ->
+    Alcotest.failf "expected the separator to be named, got %a"
+      Execute_input.pp_validation_error e
+;;
+
+(* The refusal above is behaviour; this is the sentence the model reads before
+   it decides. They had drifted apart: the description listed ';' among the
+   things read as structure, so a Keeper that believed it sent a line the
+   parser refuses by name, and learned from that the typed form is unreliable.
+   Measured over 2026-08-20..24, ';' is the single largest reason a shell line
+   cannot be said in typed fields — 33% of 1,109 Execute calls that invoked a
+   shell — which makes this the sentence most likely to be acted on. *)
+let script_description () =
+  let rec find = function
+    | `Assoc fields ->
+      (match List.assoc_opt "script" fields with
+       | Some (`Assoc script_fields) ->
+         (match List.assoc_opt "description" script_fields with
+          | Some (`String description) -> Some description
+          | Some _ | None -> None)
+       | Some _ | None ->
+         List.fold_left
+           (fun found (_, value) ->
+              match found with Some _ -> found | None -> find value)
+           None
+           fields)
+    | `List items ->
+      List.fold_left
+        (fun found value ->
+           match found with Some _ -> found | None -> find value)
+        None
+        items
+    | _ -> None
+  in
+  match find Tool_shard_types.tool_execute_schema.input_schema with
+  | Some description -> description
+  | None -> Alcotest.fail "the execute schema has no script description"
+;;
+
+let test_the_script_description_matches_what_the_parser_does () =
+  let description = script_description () in
+  let mentions sub = String_util.contains_substring description sub in
+  Alcotest.(check bool)
+    "the description does not offer ';' as something read as structure"
+    false
+    (mentions "'&&', '||', ';'" || mentions "';' and redirections");
+  Alcotest.(check bool)
+    "the description says what happens to a line using it"
+    true
+    (mentions "';'")
+;;
+
+let test_script_and_argv_together_are_refused () =
+  let msg =
+    parse_json_error
+      (`Assoc
+        [ "script", `String "ls"
+        ; "argv", `List [ `String "ls" ]
+        ])
+  in
+  Alcotest.(check bool)
+    "one call names one form"
+    true
+    (String_util.contains_substring_ci msg "one form")
+;;
+
 let test_of_json_rejects_cmd_string_only () =
   let msg =
     parse_json_error (`Assoc [ "cmd", `String "rg pattern lib/" ])
   in
+  (* [cmd] is still not a field. What changed is why: the shell form exists
+     now and is named [script], so the refusal points at it. *)
   Alcotest.(check bool)
-    "error mentions typed input"
+    "the refusal names the field that does exist"
     true
-    (String_util.contains_substring_ci msg "typed Shell IR input")
+    (String_util.contains_substring_ci msg "script")
 ;;
 
 let test_of_json_rejects_cmd_string_with_argv () =
@@ -487,10 +650,12 @@ let test_of_json_rejects_cmd_string_with_argv () =
         ; "argv", `List [ `String "rg"; `String "pattern"; `String "lib/" ]
         ])
   in
+  (* [cmd] is still not a field. What changed is why: the shell form exists
+     now and is named [script], so the refusal points at it. *)
   Alcotest.(check bool)
-    "error mentions typed input"
+    "the refusal names the field that does exist"
     true
-    (String_util.contains_substring_ci msg "typed Shell IR input")
+    (String_util.contains_substring_ci msg "script")
 ;;
 
 let test_of_json_rejects_non_string_argv () =
@@ -538,8 +703,8 @@ let test_of_json_stage_redirect_beats_the_top_level_one () =
           ; "stdout", `Assoc [ "truncate", `String "/tmp/program.log" ]
           ])
   in
-  match input.Execute_input.program with
-  | { head = _; tail = [ last ] } ->
+  match staged_exn input with
+  | _ :: [ last ] ->
     (match last.stdout with
      | Execute_input.Truncate_file { path } ->
        Alcotest.(check string)
@@ -562,8 +727,8 @@ let test_of_json_pipeline_carries_the_top_level_redirect () =
           ; "stdout", `Assoc [ "truncate", `String "/tmp/out.log" ]
           ])
   in
-  match input.Execute_input.program with
-  | { head; tail = [ last ] } ->
+  match staged_exn input with
+  | head :: [ last ] ->
     Alcotest.(check bool)
       "first stage keeps the pipe"
       true
@@ -1054,7 +1219,7 @@ let test_json_pipeline_with_stage_redirect_parses () =
       ]
   in
   match Execute_input.of_json json with
-  | Ok { program = { head = _; tail = [ tail_stage ] }; _ } ->
+  | Ok { source = Staged { program = { head = _; tail = [ tail_stage ] }; _ }; _ } ->
     (match tail_stage.stdout with
      | Execute_input.Append_file { path } ->
        Alcotest.(check string) "append target" "/tmp/out.log" path
@@ -1189,7 +1354,7 @@ let test_of_json_parses_discard_stderr_shorthand () =
   in
   let input = parse_json_exn json in
   match input with
-  | { Execute_input.program = { head = { stderr = Execute_input.Discard_output; _ }; _ }; _ } ->
+  | { Execute_input.source = Staged { program = { head = { stderr = Execute_input.Discard_output; _ }; _ }; _ }; _ } ->
     ()
   | _ -> Alcotest.fail "of_json must produce stderr=Discard"
 ;;
@@ -1330,8 +1495,14 @@ let test_of_json_parses_a_conditional_continuation () =
       ]
   in
   match Execute_input.of_json json with
-  | Ok { program = { head = { argv = first; _ }; tail = [] }
-       ; next = [ (Execute_input.And_then, { head = { argv = second; _ }; tail = [] }) ]
+  | Ok { source =
+           Staged
+             { program = { head = { argv = first; _ }; tail = [] }
+             ; next =
+                 [ ( Execute_input.And_then
+                   , { head = { argv = second; _ }; tail = [] } )
+                 ]
+             }
        ; _
        } ->
     Alcotest.(check (list string)) "the first program" [ "test"; "-w"; "/tmp" ] first;
@@ -1422,6 +1593,152 @@ let test_a_program_named_like_cd_still_runs () =
   | Ok () -> ()
   | Error err ->
     Alcotest.failf "cdparanoia is a program: %a" Execute_input.pp_validation_error err
+;;
+
+(* RFC execute-subset-dispositions step 1.  A script inside argv is counted as
+   nothing at all on this path, and these pin that it is now counted. *)
+let host = Masc_exec.Sandbox_target.host ()
+
+let findings_of json =
+  Execute_input.hidden_script_findings ~sandbox:host (parse_json_exn json)
+;;
+
+let test_hidden_script_findings_sees_the_costume () =
+  match
+    findings_of
+      (`Assoc
+          [ "argv", `List [ `String "sh"; `String "-c"; `String "ls {a,b}.txt" ] ])
+  with
+  | [ ("sh", "glob_brace") ] -> ()
+  | other ->
+    Alcotest.failf
+      "expected one sh/glob_brace finding, got [%s]"
+      (String.concat "; " (List.map (fun (s, f) -> s ^ "/" ^ f) other))
+;;
+
+let test_hidden_script_findings_walks_every_stage () =
+  (* Each stage of a pipeline owns its own argv, so a costume in the tail is as
+     invisible as one in the head. *)
+  match
+    findings_of
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc [ "argv", `List [ `String "cat"; `String "f" ] ]
+                ; `Assoc
+                    [ ( "argv"
+                      , `List [ `String "bash"; `String "-c"; `String "sleep 5 &" ] )
+                    ]
+                ] )
+          ])
+  with
+  | [ ("bash", "background") ] -> ()
+  | other ->
+    Alcotest.failf
+      "expected one bash/background finding, got [%s]"
+      (String.concat "; " (List.map (fun (s, f) -> s ^ "/" ^ f) other))
+;;
+
+let test_hidden_script_findings_ignores_what_hides_nothing () =
+  (* An ordinary program is not a costume. *)
+  Alcotest.(check int)
+    "plain argv"
+    0
+    (List.length (findings_of (`Assoc [ "argv", `List [ `String "rg"; `String "x" ] ])));
+  (* A script source already crossed the gate; there is nothing hidden to count,
+     and counting it here would double every script call. *)
+  Alcotest.(check int)
+    "script source"
+    0
+    (List.length (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ])))
+;;
+
+(* A heredoc is stdin, and until [literal] existed the tool could tell a caller
+   so while the stdin field had nowhere to put the bytes. *)
+let test_stdin_takes_a_literal () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "argv", `List [ `String "cat" ]
+          ; "stdin", `Assoc [ "literal", `String "line one\nline two\n" ]
+          ])
+  in
+  match input.Execute_input.source with
+  | Execute_input.Staged { program; next = [] } ->
+    (match program.Execute_input.head.Execute_input.stdin with
+     | Execute_input.Literal_input { bytes } ->
+       Alcotest.(check string) "the bytes survive the decode" "line one\nline two\n" bytes
+     | _ -> Alcotest.fail "stdin must decode to a literal")
+  | _ -> Alcotest.fail "argv must decode to a single staged program"
+;;
+
+let test_stdin_literal_excludes_the_other_shapes () =
+  (* One key names one source. Two would leave the decoder choosing. *)
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "argv", `List [ `String "cat" ]
+          ; "stdin", `Assoc [ "literal", `String "x"; "discard", `Bool true ]
+          ])
+  in
+  Alcotest.(check bool)
+    ("the refusal names literal as an option -- got: " ^ msg)
+    true
+    (Astring.String.is_infix ~affix:"literal" msg)
+;;
+
+(* RFC execute-subset-dispositions §3.7 step 4. A costume whose script the IR
+   can hold is lowered through the gate; everything else keeps today's path,
+   because a blanket flip would refuse calls that run. *)
+let lowered_bin json =
+  match Execute_input.to_shell_ir_unvalidated (parse_json_exn json) with
+  | Error _ -> Alcotest.fail "lowering must not fail for these inputs"
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+  | Ok _ -> "<not a simple>"
+;;
+
+let costume script =
+  `Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String script ] ]
+;;
+
+let test_a_representable_costume_is_lowered () =
+  (* The shell disappears: what runs is the command it would have run. *)
+  Alcotest.(check string) "echo hi" "echo" (lowered_bin (costume "echo hi"))
+;;
+
+let test_what_the_ir_cannot_hold_keeps_todays_path () =
+  (* [;] is the largest refusal in the corpus (252). Lowering it would refuse a
+     call that runs today, so it stays on the shell. *)
+  Alcotest.(check string) "a ; b" "sh" (lowered_bin (costume "false; echo hi"));
+  Alcotest.(check string) "heredoc" "sh" (lowered_bin (costume "cat <<'EOF'\nx\nEOF"))
+;;
+
+let test_a_script_that_names_a_variable_keeps_todays_path () =
+  (* [resolve_arg] answers a variable from this process's environment, and a
+     shell answers it from the child's, which Env_keeper_scrub has filtered.
+     Lowering would change the value, toward the unfiltered one. *)
+  Alcotest.(check string) "echo $HOME" "sh" (lowered_bin (costume "echo $HOME"));
+  Alcotest.(check string) "braced" "sh" (lowered_bin (costume "echo ${HOME}"))
+;;
+
+let test_a_stage_with_its_own_streams_keeps_todays_path () =
+  (* Merging the stage's redirects with the script's is a different question. *)
+  Alcotest.(check string)
+    "stdin declared"
+    "sh"
+    (lowered_bin
+       (`Assoc
+           [ "argv", `List [ `String "sh"; `String "-c"; `String "echo hi" ]
+           ; "stdin", `Assoc [ "discard", `Bool true ]
+           ]))
+;;
+
+let test_an_ordinary_program_is_untouched () =
+  Alcotest.(check string)
+    "rg"
+    "rg"
+    (lowered_bin (`Assoc [ "argv", `List [ `String "rg"; `String "pattern" ] ]))
 ;;
 
 let suite =
@@ -1528,6 +1845,10 @@ let suite =
           `Quick
           test_of_json_timeout_is_optional_and_preserved
       ; Alcotest.test_case
+          "the_script_description_matches_what_the_parser_does"
+          `Quick
+          test_the_script_description_matches_what_the_parser_does
+      ; Alcotest.test_case
           "of_json_rejects_invalid_explicit_timeout"
           `Quick
           test_of_json_rejects_invalid_explicit_timeout
@@ -1565,6 +1886,31 @@ let suite =
           `Quick
           test_of_json_pipeline_preserves_duplicate_stage_argv0
       ; Alcotest.test_case
+          "script_lowers_a_pipeline"
+          `Quick
+          test_script_lowers_a_pipeline
+      ; Alcotest.test_case
+          "script_carries_cwd_onto_every_stage"
+          `Quick
+          test_script_carries_cwd_onto_every_stage
+      ; Alcotest.test_case
+          "script_lowers_a_guarded_run"
+          `Quick
+          test_script_lowers_a_guarded_run
+      ; Alcotest.test_case
+          "script_lowers_an_alternative_run"
+          `Quick
+          test_script_lowers_an_alternative_run      ; Alcotest.test_case
+          "script_outside_the_subset_is_named"
+          `Quick
+          test_script_outside_the_subset_is_named
+      ; Alcotest.test_case
+          "a_separator_is_not_reported_as_a_redirect"
+          `Quick
+          test_a_separator_is_not_reported_as_a_redirect      ; Alcotest.test_case
+          "script_and_argv_together_are_refused"
+          `Quick
+          test_script_and_argv_together_are_refused      ; Alcotest.test_case
           "of_json_rejects_cmd_string_only"
           `Quick
           test_of_json_rejects_cmd_string_only
@@ -1666,6 +2012,43 @@ let suite =
           "rfc_0198_phaseb_of_json_rejects_discard_and_file"
           `Quick
           test_of_json_rejects_redirect_with_both_discard_and_file
+      ; Alcotest.test_case
+          "hidden_script_findings sees the costume"
+          `Quick
+          test_hidden_script_findings_sees_the_costume
+      ; Alcotest.test_case
+          "hidden_script_findings walks every stage"
+          `Quick
+          test_hidden_script_findings_walks_every_stage
+      ; Alcotest.test_case
+          "hidden_script_findings ignores what hides nothing"
+          `Quick
+          test_hidden_script_findings_ignores_what_hides_nothing
+      ; Alcotest.test_case "stdin takes a literal" `Quick test_stdin_takes_a_literal
+      ; Alcotest.test_case
+          "stdin literal excludes the other shapes"
+          `Quick
+          test_stdin_literal_excludes_the_other_shapes
+      ; Alcotest.test_case
+          "a representable costume is lowered"
+          `Quick
+          test_a_representable_costume_is_lowered
+      ; Alcotest.test_case
+          "what the IR cannot hold keeps today's path"
+          `Quick
+          test_what_the_ir_cannot_hold_keeps_todays_path
+      ; Alcotest.test_case
+          "a script that names a variable keeps today's path"
+          `Quick
+          test_a_script_that_names_a_variable_keeps_todays_path
+      ; Alcotest.test_case
+          "a stage with its own streams keeps today's path"
+          `Quick
+          test_a_stage_with_its_own_streams_keeps_todays_path
+      ; Alcotest.test_case
+          "an ordinary program is untouched"
+          `Quick
+          test_an_ordinary_program_is_untouched
       ])
 ;;
 

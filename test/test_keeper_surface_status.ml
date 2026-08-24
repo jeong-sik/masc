@@ -23,8 +23,6 @@ let test_of_string_known () =
       (K.surface_status_of_string_opt label = Some ctor)
   in
   one "active" K.Surface_active;
-  one "busy" K.Surface_busy;
-  one "listening" K.Surface_listening;
   one "inactive" K.Surface_inactive;
   one "offline" K.Surface_offline;
   one "idle" K.Surface_idle;
@@ -50,8 +48,6 @@ let test_to_string_inverse () =
         = Some ctor))
     [
       K.Surface_active;
-      K.Surface_busy;
-      K.Surface_listening;
       K.Surface_inactive;
       K.Surface_offline;
       K.Surface_idle;
@@ -67,6 +63,45 @@ let test_producer_behavior () =
   check string "offline health -> offline" "offline"
     (surface "offline")
 
+(* One keeper is described by four separate readings, and [status] answers only
+   one of them - with three of its values folded into "inactive". A row now
+   publishes [health] beside it. These pin that the two fields answer from
+   different vocabularies, which a row built from a fresh workspace cannot
+   show: an offline keeper spells both fields the same way, legitimately. *)
+let test_health_reader_keeps_what_the_surface_folds () =
+  let one health_word =
+    let d = diag health_word in
+    check string
+      (Printf.sprintf "health reader returns %S unchanged" health_word)
+      health_word
+      (K.keeper_health_to_string
+         (K.keeper_diagnostic_health ~diagnostic:d ~source:"test"));
+    check string
+      (Printf.sprintf "surface folds %S into inactive" health_word)
+      "inactive"
+      (K.keeper_surface_status ~diagnostic:d)
+  in
+  one "stale";
+  one "degraded";
+  one "zombie"
+;;
+
+let test_unreadable_health_is_offline_not_healthy () =
+  (* A diagnostic this build cannot read must not resolve to a word that looks
+     fine. Three shapes: an unknown spelling, a missing field, and a field of
+     the wrong type. *)
+  let reads_offline label d =
+    check string
+      (Printf.sprintf "%s resolves to offline" label)
+      "offline"
+      (K.keeper_health_to_string
+         (K.keeper_diagnostic_health ~diagnostic:d ~source:"test"))
+  in
+  reads_offline "unknown spelling" (diag "sleepy");
+  reads_offline "absent field" (blob []);
+  reads_offline "wrong type" (blob [ ("health_state", `Int 3) ])
+;;
+
 let () =
   run "keeper_surface_status"
     [
@@ -79,4 +114,11 @@ let () =
       ( "keeper_surface_status",
         [ test_case "producer behavior preserved" `Quick test_producer_behavior ]
       );
+      ( "keeper_diagnostic_health",
+        [
+          test_case "keeps what the surface folds" `Quick
+            test_health_reader_keeps_what_the_surface_folds;
+          test_case "unreadable resolves to offline" `Quick
+            test_unreadable_health_is_offline_not_healthy;
+        ] );
     ]

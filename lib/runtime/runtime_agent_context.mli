@@ -22,6 +22,10 @@ type stop_reason =
       tool_name : string;
       repeated_count : int;
     }
+  | Yielded_after_repeated_assistant_text of {
+      turns_used : int;
+      repeated_count : int;
+    }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
@@ -89,6 +93,7 @@ type config = {
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  max_tool_rounds : int option;
   context_injector : Agent_core.Hooks.context_injector option;
   context : Agent_core.Context.t option;
   thinking_budget : int option;

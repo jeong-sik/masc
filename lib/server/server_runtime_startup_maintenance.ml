@@ -20,15 +20,27 @@ let prune_children_dirs ~prune_dir root =
       (Sys.readdir root)
 
 (* Keeper-scoped dated-JSONL stores pruned by BOTH the startup pass and the
-   24h periodic pass. SSOT: both loops fold this exact list via
-   [prune_keeper_scoped_stores] — never reintroduce an inline store list in
-   either caller (the periodic pass once pruned only execution-receipts,
-   letting metrics/crash-events accumulate until restart).
-   turn-records joined 2026-07-31: same [keepers/<name>/<store>/YYYY-MM/DD.jsonl]
-   layout, but absent from every prune list since introduction — ~4 MB/day
-   fleet-wide with no bound. *)
+   24h periodic pass. Both loops fold this via [prune_keeper_scoped_stores] —
+   never reintroduce an inline store list in either caller (the periodic pass
+   once pruned only execution-receipts, letting metrics/crash-events accumulate
+   until restart).
+
+   The list is derived rather than written. It used to be four directory names
+   spelled out here, and turn-records — added to the store table on 2026-07-31
+   with the same dated layout — was absent from it for months at roughly 4 MB a
+   day fleet-wide. [Common.keeper_runtime_store_placement] now answers for each
+   store and the match there is exhaustive, so a new store cannot reach disk
+   without someone saying which pass owns it. *)
 let keeper_scoped_dated_stores =
-  [ "metrics"; "crash-events"; "execution-receipts"; "turn-records" ]
+  List.filter_map
+    (fun store ->
+       match Common.keeper_runtime_store_placement store with
+       | Common.Keeper_scoped_dated ->
+         Some (Common.keeper_runtime_store_dirname store)
+       | Common.Keeper_scoped_versioned
+       | Common.Keeper_scoped_rotated
+       | Common.Workspace_scoped -> None)
+    Common.keeper_runtime_stores
 
 (* Fold [prune_dir] over every keeper-scoped dated store
    ([keepers/<name>/<store>] for each store in [keeper_scoped_dated_stores]).

@@ -719,6 +719,7 @@ let is_input_required_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired _) -> true
   | Agent_core.Error.Agent (UnrecognizedStopReason _)
+  | Agent_core.Error.Agent (ToolRoundLimitExceeded _)
   | Agent_core.Error.Agent (HookExecutionFailed _)
   | Agent_core.Error.Agent (TerminalToolEffectFailed _)
   | Agent_core.Error.Agent (TerminalToolDurabilityFailed _)

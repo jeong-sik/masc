@@ -12,6 +12,7 @@ type endpoint = {
   api_key_env : string option;
   enabled : bool;
   timeout_seconds : float option;
+  default_voice : string option;
 }
 
 type voice_tuning = {
@@ -159,6 +160,9 @@ let parse_endpoint ~ctx json =
     Option.value ~default:true (Json_util.get_bool json "enabled")
   in
   let timeout_seconds = Json_util.get_float json "timeout_seconds" in
+  (* A voice id is provider vocabulary, so it belongs to the endpoint that
+     answers to it rather than to the workspace (#24068). *)
+  let default_voice = Json_util.get_string_nonempty json "default_voice" in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -182,6 +186,7 @@ let parse_endpoint ~ctx json =
       api_key_env;
       enabled;
       timeout_seconds;
+      default_voice;
     }
 
 let rec parse_endpoints ~ctx acc = function
@@ -455,6 +460,12 @@ let voice_for_agent config agent_id =
   match List.assoc_opt agent_id config.tts.agent_voices with
   | Some voice -> voice
   | None -> config.tts.default_voice
+
+let voice_for_agent_at_endpoint config (endpoint : endpoint) agent_id =
+  match endpoint.default_voice with
+  | Some voice -> voice
+  | None -> voice_for_agent config agent_id
+;;
 
 let tuning_for_agent config agent_id =
   match List.assoc_opt agent_id config.tts.agent_voice_settings with

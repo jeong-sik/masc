@@ -604,6 +604,121 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
 
 (* ── Runner ──────────────────────────────────────────── *)
 
+
+(* ── Tool-name admission: the transcript must not replay an unroutable name ──
+
+   masc#29337. A provider returned [Execute-1.1111e1111111] once; the block
+   stayed in the transcript, so every later request carried it as a well-formed
+   example of calling that tool and the model reproduced it 115 times over
+   2h17m. The same byte string survived a lane switch between two unrelated
+   providers, which only the transcript can explain.
+
+   The measurement that matters is therefore not the reject message but the
+   NEXT REQUEST BODY: if the name is absent there, the loop has nothing to copy.
+*)
+
+(* Kept local and dependency-free: the assertions below run against raw request
+   bodies, and pulling [Str] into this suite for one substring scan would be a
+   heavier change than the scan itself. *)
+let string_contains ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  n = 0 || scan 0
+;;
+
+let unroutable_tool_name = "Execute-1.1111e1111111"
+
+let execute_tool =
+  Tool.create ~name:"Execute" ~description:"Run argv" ~parameters:[] (fun _ ->
+    Ok { Types.content = "ran"; _meta = None })
+;;
+
+let second_request_body bodies =
+  match List.rev bodies with
+  | _ :: second :: _ -> second
+  | bodies -> failf "expected at least two requests, got %d" (List.length bodies)
+;;
+
+let test_unroutable_tool_name_never_reaches_the_next_request () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20041
+        [ openai_tool_use_response unroutable_tool_name "{}"
+        ; openai_text_response "done"
+        ]
+    in
+    let agent = make_agent ~net:env#net ~tools:[ execute_tool ] url in
+    (match Agent.run ~sw agent "call a tool" with
+     | Ok _ -> ()
+     | Error error ->
+       (* The turn routed nowhere, but a keeper that cannot route one call is
+          not a keeper that should stop taking turns. *)
+       failf "run must survive an unroutable call: %s" (Error.to_string error));
+    let body = second_request_body !bodies in
+    check
+      bool
+      "next request does not replay the unroutable name"
+      false
+      (string_contains ~needle:unroutable_tool_name body);
+    check
+      bool
+      "model is told the call was dropped"
+      true
+      (string_contains ~needle:"named no registered tool" body);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* The call-number recovery landed in #29999 fixed dispatch but not the
+   transcript: the fused spelling stayed in history and kept being replayed.
+   Recovery is only complete when the next request carries the stem. *)
+let test_recovered_tool_name_is_replayed_as_the_registered_name () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let fused = "Execute1139645993.1" in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20042
+        [ openai_tool_use_response fused "{}"; openai_text_response "done" ]
+    in
+    let agent = make_agent ~net:env#net ~tools:[ execute_tool ] url in
+    (match Agent.run ~sw agent "call a tool" with
+     | Ok _ -> ()
+     | Error error -> failf "run failed: %s" (Error.to_string error));
+    let body = second_request_body !bodies in
+    check
+      bool
+      "next request does not replay the fused spelling"
+      false
+      (string_contains ~needle:fused body);
+    check
+      bool
+      "next request carries the registered name"
+      true
+      (string_contains ~needle:{|"name":"Execute"|} body);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let () =
   run
     "agent_pipeline"
@@ -625,6 +740,16 @@ let () =
              Option A (forced-tool enforcement moved out of agent core). *)
         ; test_case "tool error" `Quick test_agent_run_tool_error
         ; test_case "pre_tool hook" `Quick test_agent_run_pre_tool_hook
+        ] )
+    ; ( "tool name admission"
+      , [ test_case
+            "unroutable name never reaches the next request"
+            `Quick
+            test_unroutable_tool_name_never_reaches_the_next_request
+        ; test_case
+            "recovered name is replayed as the registered name"
+            `Quick
+            test_recovered_tool_name_is_replayed_as_the_registered_name
         ] )
     ; ( "streaming"
       , [ test_case "run_stream" `Quick test_agent_run_stream

@@ -1,0 +1,70 @@
+name = "keeper_surface_read"
+description = """
+Read recent messages from one conversation endpoint (dashboard, discord, \
+slack, or another connector label) with speaker identity and a derived \
+participant roster. With mode='channel', 'messages', 'members', or 'member', \
+the Discord lane can also query its live channel and server read surface \
+within the keeper's bound channels."""
+
+[[params]]
+name = "surface"
+type = "string"
+required = true
+description = """
+Lane label exactly as shown in Connected Surfaces or chat history source: \
+'dashboard', 'discord', 'slack', or another connector's channel label. Rows \
+written before source labelling carry no label and are not returned."""
+
+[[params]]
+name = "limit"
+type = "integer"
+description = """
+Maximum messages or Discord members to return (default 20; messages: 1-100; \
+members: 1-1000). The local participant roster covers the whole loaded lane."""
+
+[[params]]
+name = "before"
+type = "number"
+description = """
+Page backward: return messages strictly older than this ts (a message \
+timestamp from a previous call). Walk history by passing the oldest_ts of \
+the previous response; stop when has_more is false."""
+
+[[params]]
+name = "mode"
+type = "string"
+enum = ["local", "channel", "messages", "members", "member"]
+description = """
+Optional exact read mode. When absent, the request is exactly 'local' for \
+the persisted lane; padded or unknown values are invalid. The other modes \
+query Discord live and require surface='discord'."""
+
+[[params]]
+name = "channel_id"
+type = "string"
+description = """
+Bound Discord channel snowflake. Optional when this keeper has one bound \
+channel; required when it has multiple."""
+
+[[params]]
+name = "user_id"
+type = "string"
+description = "Discord user snowflake, required for mode='member'."
+
+[[params]]
+name = "query"
+type = "string"
+description = "Optional member username/nickname prefix for mode='members'."
+
+[[params]]
+name = "discord_before"
+type = "string"
+description = """
+Discord message snowflake for backward paging in mode='messages'."""
+
+[[params]]
+name = "discord_after"
+type = "string"
+description = """
+Discord message/member snowflake for forward paging. Do not send it together \
+with discord_before."""

@@ -298,11 +298,15 @@ export function App() {
     focusMode,
   })
 
-  // sync volt and theme to document root (skin-v2 voltage + paper theme)
+  // Volt only. The document theme attribute has one owner, theme-switch.ts,
+  // which also holds the storage keys and the URL parameter. This effect used
+  // to write it too, from tweaksTheme, whose vocabulary is 'dark' | 'paper' --
+  // so selecting styleseed and reloading rewrote the attribute to '' and the
+  // theme vanished (#22899). The app element below still carries its own
+  // data-theme; that one is app-scoped and not the document root.
   useEffect(() => {
     document.documentElement.setAttribute('data-volt', tweaksVolt.value)
-    document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
-  }, [tweaksVolt.value, tweaksTheme.value])
+  }, [tweaksVolt.value])
 
   const approvalsBadge =
     gateData.value?.approval_queue_state?.state === 'ready'

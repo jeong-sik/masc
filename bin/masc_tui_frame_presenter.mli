@@ -17,9 +17,16 @@ type t
 
 val create : synchronized_output:bool -> unit -> t
 val invalidate : t -> unit
+val setup : t -> write:(string -> unit) -> flush:(unit -> unit) -> unit
+(** Take the alternate screen and discard the cached screen, so the next
+    [present] paints every row. Call before the first frame, and again after
+    anything that hands the terminal back -- a resumed SIGTSTP re-enters here. *)
+
 val cleanup : t -> write:(string -> unit) -> flush:(unit -> unit) -> unit
 (** Best-effort idempotent terminal recovery: end synchronized output, reset
-    style, show the cursor, restore autowrap, and clear/home the screen. The
+    style, show the cursor, restore autowrap, and give the alternate screen
+    back. Leaving it restores what the shell had, so nothing is cleared here --
+    clearing would take the scrollback the caller is being handed back. The
     synchronized-output end marker follows the presenter's configured policy. *)
 
 val present :

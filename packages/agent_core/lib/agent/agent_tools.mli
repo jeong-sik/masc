@@ -35,12 +35,38 @@ type tool_index
 (** Build a stable lookup index for the current tool set.
 
     Exact tool-name lookups preserve first-match list semantics. AGENT_CORE does not
-    classify or normalize names; any alias must be registered explicitly by
-    the consumer. *)
+    alias or fuzzy-match names; the one normalization it performs is
+    {!strip_registered_suffix}, recovering provider-fused call numbers. *)
 val build_index : Tool.t list -> tool_index
 
 (** [find_in_index index name] resolves only the exact registered name. *)
 val find_in_index : tool_index -> string -> Tool.t option
+
+(** [strip_registered_suffix ~available requested] is [Some registered] when
+    [requested] is exactly one name of [available] extended by [0-9.]
+    characters alone — the shape GLM-family providers emit by fusing a
+    per-call sequence number onto the tool name ([Execute1139645993.1]).
+    Alphabetic and underscore tails, unknown stems, and prefixes matching
+    more than one registered name return [None]; the caller keeps its
+    exact-match answer for those. *)
+val strip_registered_suffix : available:string list -> string -> string option
+
+(** What survives into the conversation history for one provider turn.
+    [admitted] keeps every non-tool block untouched and rewrites each routable
+    tool call to the registered name dispatch will use; [rejected] counts the
+    calls dropped because no registered tool answers their name.
+
+    Dropping is the point. A name the index cannot answer is replayed to the
+    model on every later request as a well-formed example of calling that
+    tool, and the model reproduces it (masc#29337: 115 identical calls over
+    2h17m, unchanged across a provider switch). The raw wire name is still
+    recorded in the raw trace. *)
+type tool_use_admission =
+  { admitted : Types.content_block list
+  ; rejected : int
+  }
+
+val admit_tool_use_names : tool_index -> Types.content_block list -> tool_use_admission
 
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error

@@ -45,6 +45,7 @@ let task ?handoff_context ~status id : Domain.task =
   ; cycle_count = 0
   ; reclaim_policy = None
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 ;;
 

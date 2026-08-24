@@ -65,10 +65,65 @@ let test_to_yojson_projects_joj_preset () =
     Alcotest.(check (list string)) "panel roster flattened in order"
       [ "pa"; "pb"; "pc" ] panel_models
 
+(* The seed config ships in the repository and is copied into a fresh runtime
+   root, but nothing checked that it parses. A copy-if-missing bootstrap then
+   leaves a live root a schema generation behind, and the presence-only load
+   gate admits it, so the failure surfaces at request time rather than at boot
+   (#23443). The fixtures above mirror this file by hand; this reads it. *)
+let repo_root () =
+  (* The test runs from its dune build directory, so walk up to the checkout. *)
+  let rec up dir depth =
+    if depth = 0 then None
+    else if Sys.file_exists (Filename.concat dir "dune-project") then Some dir
+    else up (Filename.dirname dir) (depth - 1)
+  in
+  up (Sys.getcwd ()) 12
+
+let test_seed_runtime_toml_parses () =
+  match repo_root () with
+  | None -> Alcotest.fail "could not locate the repository root from the test cwd"
+  | Some root ->
+    let path = Filename.concat (Filename.concat root "config") "runtime.toml" in
+    Alcotest.(check bool)
+      (Printf.sprintf "%s exists" path)
+      true
+      (Sys.file_exists path);
+    (match Fusion_config.of_toml (Otoml.Parser.from_file path) with
+     | Ok _ -> ()
+     | Error errors ->
+       Alcotest.failf "the seed config does not parse: %d error(s)" (List.length errors))
+;;
+
+let test_seed_runtime_toml_declares_the_presets_it_names () =
+  (* A config that parses but names a default preset it does not define is the
+     same drift one layer down. *)
+  match repo_root () with
+  | None -> Alcotest.fail "could not locate the repository root from the test cwd"
+  | Some root ->
+    let path = Filename.concat (Filename.concat root "config") "runtime.toml" in
+    (match Fusion_config.of_toml (Otoml.Parser.from_file path) with
+     | Error _ -> Alcotest.fail "the seed config must parse before this check"
+     | Ok policy ->
+       let default = policy.Fusion_policy.default_preset in
+       Alcotest.(check bool)
+         (Printf.sprintf "the default preset %S is defined" default)
+         true
+         (List.exists
+            (fun (preset : Fusion_policy.Validated_preset.t) ->
+              String.equal (preset :> Fusion_policy.preset).Fusion_policy.name default)
+            policy.Fusion_policy.presets))
+;;
+
 let () =
   Alcotest.run "fusion_config_json"
     [ ( "to_yojson"
       , [ Alcotest.test_case "projects JoJ preset" `Quick
             test_to_yojson_projects_joj_preset
+        ] )
+    ; ( "seed_config"
+      , [ Alcotest.test_case "config/runtime.toml parses" `Quick
+            test_seed_runtime_toml_parses
+        ; Alcotest.test_case "its default preset is defined" `Quick
+            test_seed_runtime_toml_declares_the_presets_it_names
         ] )
     ]

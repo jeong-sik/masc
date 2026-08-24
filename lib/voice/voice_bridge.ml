@@ -27,6 +27,17 @@ let audio_payload_fields ~audio_file ~audio_device =
   | _ -> []
 ;;
 
+(* Issue #7690 replaced the byte-based [String.sub] in [Audit_log.preview] with
+   a character-boundary cut but left this shape here. A 50-byte cut lands
+   mid-character on Korean (3 bytes per syllable); the trailing partial byte
+   rides the tool result into the codex app-server stdin, which decodes UTF-8
+   and exits on the invalid sequence. *)
+let message_preview_max_bytes = 50
+
+let message_preview message =
+  String_util.utf8_prefix ~max_bytes:message_preview_max_bytes message
+;;
+
 let available_stt_endpoints (config : Voice_config.t) =
   config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
@@ -111,7 +122,10 @@ let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_d
             endpoint
             ~agent_id
             ~message
-            ~voice
+            (* Resolved per endpoint, not once for the chain: a voice id is
+               provider vocabulary, so carrying the first endpoint's id to the
+               next asks for a voice that does not exist there (#24068). *)
+            ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
             ~model
             ~output_file:audio_file
         with
@@ -398,9 +412,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String local_playback_status
                     ; "local_playback_reason", `String reason
                     ]
@@ -414,9 +426,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String "opened"
                     ; "local_playback_reason"
                       , `String
@@ -432,9 +442,7 @@ let attempt_tts_endpoint
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
-                    ; ( "message_preview"
-                      , `String
-                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "message_preview", `String (message_preview message)
                     ; "local_playback_status", `String "played"
                     ; "played_seconds", `Float played_seconds
                     ]
@@ -508,9 +516,9 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
+      ~config
       ~agent_id
       ~message
-      ~voice
       ~model
       ~priority
       ?audio_device
@@ -527,7 +535,8 @@ let try_http_tts_for_browser_audio
          speak_via_http_tts_to_file
            endpoint
            ~message
-           ~voice
+             (* Resolved per endpoint (#24068): see the dashboard chain. *)
+           ~voice:(Voice_config.voice_for_agent_at_endpoint config endpoint agent_id)
            ~model
            ~agent_id
            ~output_file:audio_file
@@ -663,9 +672,9 @@ let agent_speak_json
                ~sw
                ~clock
                ~net
+               ~config
                ~agent_id
                ~message
-               ~voice
                ~model
                ~priority
                ?audio_device

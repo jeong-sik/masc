@@ -17,6 +17,7 @@ val keeper_suffix_secrets : string
 val keeper_suffix_github_identity : string
 val keeper_suffix_github_login : string
 val keeper_suffix_boot : string
+val keeper_suffix_up : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
 val keeper_suffix_clear : string
@@ -26,6 +27,10 @@ val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
 val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
+
+val keeper_suffix_file_changes : string
+(** [GET /api/v1/keepers/<name>/file-changes] — the files this keeper wrote,
+    read back out of the tool-call log. *)
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string
@@ -60,6 +65,7 @@ type keeper_post_route_kind =
   | Keeper_post_secrets
   | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear

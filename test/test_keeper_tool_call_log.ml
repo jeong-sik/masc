@@ -300,6 +300,48 @@ let test_exact_agent_core_occurrence_persisted () =
         (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+(* The ordinary path knows the disposition but not the payload, so it cannot
+   supply [typed_result]. Before this it supplied nothing and the row carried
+   only [success], which cannot tell a policy rejection from a runtime failure
+   and cannot represent [Deferred] at all. *)
+let test_ordinary_path_disposition_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"refused"
+      ~success:false
+      ~duration_ms:3.0
+      ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "the row says which kind of failure"
+        (Some "failed")
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* A row with neither says so by omission rather than by guessing. *)
+let test_row_without_a_typed_outcome_omits_the_field () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "no disposition is written when none was known"
+        None
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let test_composition_action_context_persisted () =
   with_tmp_log (fun () ->
     let typed_result =
@@ -1747,6 +1789,10 @@ let () =
         ; eio_test "unfiltered read is exactly n; filtered still finds n"
             test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
+        ; eio_test "ordinary path disposition"
+            test_ordinary_path_disposition_persisted
+        ; eio_test "no typed outcome omits the field"
+            test_row_without_a_typed_outcome_omits_the_field
         ; eio_test "composition action context"
             test_composition_action_context_persisted
         ; eio_test "composition rows separate submitted from autonomous turn"

@@ -157,7 +157,29 @@ max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
+# "none" here does not mean "no reasoning". With supports-reasoning it declares
+# an inherent-thinking contract: the model reasons on its own and the wire has
+# no toggle, which is what lets a keeper turn carrying enable_thinking=true
+# through admission at all.
+#
+# 2026-08-25: changing it to "reasoning-effort" rejected every turn on this
+# lane. thinking-support = true makes the runtime seed request
+# enable_thinking=true (runtime_inference.ml), and under that dialect an
+# explicit enable is only encodable when a concrete effort accompanies it, so
+# each request died as AcceptRejected(Enable_not_encodable) before dispatch.
+# Measured live: 10 api_error_invalid_request and 0 successes on
+# ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 within one keeper cycle.
+#
+# The endpoint does honour reasoning_effort -- it names its own ladder when it
+# rejects an unknown value ("high", "medium", "low", "max", or "none") -- so
+# the dialect can move here, but only together with a declared effort. "none"
+# additionally needs thinking-support = false, or the enable and the effort
+# contradict each other.
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -456,6 +478,10 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = false
 thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 

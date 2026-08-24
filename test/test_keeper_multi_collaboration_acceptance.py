@@ -113,10 +113,10 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                 require_heterogeneous=False,
             )
 
-    def test_catalog_has_exact_rw19_persistence_projection_mission(self):
+    def test_catalog_has_exact_mission_and_assertion_counts(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 23)
+        self.assertEqual(len(catalog["missions"]), 22)
         self.assertEqual(
             len(
                 {
@@ -125,24 +125,19 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
                     for assertion in mission["assertions"]
                 }
             ),
-            48,
-        )
-        self.assertEqual(catalog["missions"][18]["id"], "RW19")
-        self.assertEqual(
-            catalog["missions"][18]["assertions"],
-            ["persistence_tiers_dashboard_projection_observed"],
+            47,
         )
 
     def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        poc = catalog["missions"][19]
+        poc = catalog["missions"][18]
         self.assertEqual(poc["id"], "RW20")
         self.assertEqual(
             poc["assertions"],
             ["poc_execution_proof_observed", "poc_review_cites_execution"],
         )
-        debate = catalog["missions"][20]
+        debate = catalog["missions"][19]
         self.assertEqual(debate["id"], "RW21")
         self.assertEqual(
             debate["assertions"],
@@ -153,7 +148,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_rw22_coverage_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        coverage = catalog["missions"][21]
+        coverage = catalog["missions"][20]
         self.assertEqual(coverage["id"], "RW22")
         self.assertEqual(
             coverage["assertions"],
@@ -173,7 +168,7 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_rw23_goal_verifier_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        goal_verifier = catalog["missions"][22]
+        goal_verifier = catalog["missions"][21]
         self.assertEqual(goal_verifier["id"], "RW23")
         self.assertEqual(
             goal_verifier["assertions"],
@@ -437,69 +432,6 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         ):
             self.assertIn(forbidden_tool, proven)
         self.assertIn("대체 Task를 만들거나 claim하지 마세요", proven)
-
-    def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
-        expected = {"keeper-a", "keeper-b"}
-        with tempfile.TemporaryDirectory() as tmp_name:
-            screenshot = Path(tmp_name) / "keeper-persistence-proof.png"
-            screenshot.write_bytes(b"png-evidence")
-            digest = hashlib.sha256(screenshot.read_bytes()).hexdigest()
-            proof = {
-                "schema": "masc.keeper_persistence_browser_evidence.v1",
-                "generated_at": "2026-08-14T12:00:00Z",
-                "interaction": "manual_refresh",
-                "tiers": [
-                    self.tier("1h", ["keeper-a", "keeper-b"], []),
-                    self.tier("2h", ["keeper-a"], ["keeper-b"]),
-                    self.tier("4h", ["keeper-a"], ["keeper-b"]),
-                    self.tier("24h", [], ["keeper-a", "keeper-b"]),
-                ],
-                "screenshot_file": screenshot.name,
-                "screenshot_bytes": screenshot.stat().st_size,
-                "screenshot_sha256": digest,
-            }
-
-            valid, detail = acceptance.validate_persistence_browser_evidence(
-                proof,
-                screenshot,
-                expected,
-            )
-            self.assertTrue(valid, detail)
-
-            proof["tiers"][2] = self.tier(
-                "4h",
-                ["keeper-b"],
-                ["keeper-a"],
-            )
-            valid, detail = acceptance.validate_persistence_browser_evidence(
-                proof,
-                screenshot,
-                expected,
-            )
-            self.assertFalse(valid)
-            self.assertIn("duration monotonicity", detail)
-
-    @staticmethod
-    def tier(tier_id, observed, missing):
-        keeper_count = len(observed) + len(missing)
-        observed_count = len(observed)
-        status = (
-            "fail"
-            if keeper_count == 0 or observed_count == 0
-            else "pass"
-            if observed_count == keeper_count
-            else "warn"
-        )
-        return {
-            "id": tier_id,
-            "status": status,
-            "evidence_kind": "durable_turn_span",
-            "keeper_count": keeper_count,
-            "observed_count": observed_count,
-            "missing_count": len(missing),
-            "observed_keepers": observed,
-            "missing_keepers": missing,
-        }
 
     @staticmethod
     def runtime_receipt(runtime_id, *, keeper_name, fallback):

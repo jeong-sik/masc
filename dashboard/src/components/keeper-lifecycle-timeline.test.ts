@@ -14,7 +14,50 @@ vi.mock('../api/keeper', () => ({
   fetchKeeperLifecycle: vi.fn(async () => ({ keeper: '', count: 0, events: [] })),
 }))
 
-import { lifecycleEventTone, lifecycleEventLabel } from './keeper-lifecycle-timeline'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import {
+  lifecycleEventTone,
+  lifecycleEventLabel,
+  LIFECYCLE_VERBS,
+} from './keeper-lifecycle-timeline'
+
+// `Keeper_lifecycle_events.t` is the producer of every custom event name that
+// reaches this timeline. Reading its `to_string` here keeps the TypeScript
+// vocabulary from drifting when a verb is added or renamed on the OCaml side —
+// the compiler already forces the tone and label maps to agree with each other,
+// but it cannot see the wire producer.
+const LIFECYCLE_EVENTS_ML = resolve(
+  __dirname,
+  '../../../lib/keeper_registry/keeper_lifecycle_events.ml',
+)
+
+function ocamlVerbs(): string[] {
+  const source = readFileSync(LIFECYCLE_EVENTS_ML, 'utf-8')
+  const start = source.indexOf('let to_string = function')
+  expect(start).toBeGreaterThan(-1)
+  const body = source.slice(start, source.indexOf('\n\n', start))
+  return [...body.matchAll(/->\s*"([a-z_]+)"/g)].flatMap(m =>
+    m[1] === undefined ? [] : [m[1]],
+  )
+}
+
+describe('lifecycle vocabulary', () => {
+  it('covers exactly the verbs Keeper_lifecycle_events emits', () => {
+    expect([...LIFECYCLE_VERBS].sort()).toEqual(ocamlVerbs().sort())
+  })
+
+  it('gives every verb a label distinct from the raw wire name', () => {
+    for (const verb of LIFECYCLE_VERBS) {
+      expect(lifecycleEventLabel(verb)).not.toBe(verb.replace(/_/g, ' '))
+    }
+  })
+
+  it('renders a refused launch as bad, not as muted info', () => {
+    expect(lifecycleEventTone('admission_denied')).toBe('bad')
+  })
+})
 
 describe('lifecycleEventTone', () => {
   it('started returns ok', () => {
@@ -59,6 +102,10 @@ describe('lifecycleEventLabel', () => {
 
   it('maps supervisor_cleaned to Korean label', () => {
     expect(lifecycleEventLabel('supervisor_cleaned')).toBe('부재 Keeper 정리됨')
+  })
+
+  it('maps admission_denied to Korean label', () => {
+    expect(lifecycleEventLabel('admission_denied')).toBe('기동 거부됨')
   })
 
   it('maps purged to Korean label', () => {

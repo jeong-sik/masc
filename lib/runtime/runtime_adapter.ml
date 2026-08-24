@@ -402,7 +402,8 @@ let model_capabilities_override_of_model_spec
 ;;
 
 (* --- provider × model spec → Provider_config.t --- *)
-let provider_config_from_declared_provider ?keep_alive ?num_ctx ?return_progress
+let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
+    ?repeat_last_n ?return_progress
     ?max_concurrent_requests
     ?max_request_body_bytes
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
@@ -462,8 +463,19 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?return_progress
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
+            (* The declared effort is the only control this dialect has: under
+               [Reasoning_effort] the wire field comes from here, not from
+               [enable_thinking] (reasoning_dialect.ml: Chat_completions,
+               Reasoning_effort -> normalized_effort_field). Without this the
+               model row could name an effort that no HTTP request ever read,
+               which is how a model whose endpoint does honour the control was
+               left reasoning on every turn. Official-client runtimes read the
+               same field through Runtime_inference.resolve_reasoning_effort. *)
+            ?reasoning_effort:spec.reasoning_effort
             ?keep_alive
             ?num_ctx
+            ?repeat_penalty
+            ?repeat_last_n
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
@@ -489,8 +501,19 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?return_progress
             ?top_p:spec.top_p
             ?top_k:spec.top_k
             ?min_p:spec.min_p
+            (* The declared effort is the only control this dialect has: under
+               [Reasoning_effort] the wire field comes from here, not from
+               [enable_thinking] (reasoning_dialect.ml: Chat_completions,
+               Reasoning_effort -> normalized_effort_field). Without this the
+               model row could name an effort that no HTTP request ever read,
+               which is how a model whose endpoint does honour the control was
+               left reasoning on every turn. Official-client runtimes read the
+               same field through Runtime_inference.resolve_reasoning_effort. *)
+            ?reasoning_effort:spec.reasoning_effort
             ?keep_alive
             ?num_ctx
+            ?repeat_penalty
+            ?repeat_last_n
             ?return_progress
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
@@ -520,6 +543,8 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
        provider_config_from_declared_provider
          ?keep_alive:binding.keep_alive
          ?num_ctx:binding.num_ctx
+         ?repeat_penalty:binding.repeat_penalty
+         ?repeat_last_n:binding.repeat_last_n
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
          ?max_request_body_bytes:binding.max_request_body_bytes

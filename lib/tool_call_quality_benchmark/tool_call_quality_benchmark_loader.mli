@@ -93,5 +93,4 @@ val load_runs_from_file :
     | [route_evidence] | [None] |
     | [duration_ms] | [None] |
 
-    [tool_name] is the only accepted key. The [tool] alias it replaced is
-    not read: no fixture in the repo carries it and nothing writes it. *)
+    [tool_name] is the only accepted key. *)

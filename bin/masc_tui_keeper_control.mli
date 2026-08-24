@@ -60,9 +60,14 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-val roster_failure_message : roster_failure -> string
+val roster_failure_message : credential_sent:bool -> roster_failure -> string
 (** One terminal line naming the failure and, where there is one, the action
-    that clears it. *)
+    that clears it.
+
+    [credential_sent] is whether the request carried a bearer at all. A refusal
+    with one is a rejected credential and a refusal without one is a missing
+    credential; only the second is fixed by providing a token, and one line
+    used to give that advice for both. *)
 
 val roster_failure_of_status : status:int -> body:string -> roster_failure
 (** Classify a non-2xx roster read. Decided on the status code, so a server
@@ -80,16 +85,34 @@ type reading = {
   liveness : liveness;
 }
 
-val display_status :
-  reading -> Masc.Keeper_status_runtime.control_plane_status option
-(** The published control-plane status for a reading, composed the way the
-    operator snapshot composes it: operator pause overrides the surface
-    status. [None] when the roster was not observed, because durable metadata
-    cannot answer what a keeper's live status is. *)
+val health : reading -> Masc.Tui_decode.keeper_health option
+(** How the keeper is reporting, or [None] when the roster was not read.
 
-val status_label : reading -> string
-(** Terminal label for {!display_status}, or ["unknown"] when the roster was
-    not observed. *)
+    Kept apart from {!reading.paused}: the function these replaced let an
+    operator pause hide the health underneath it, so a keeper a person stopped
+    and a keeper whose fiber died read the same word. *)
+
+val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path option
+(** What the runtime derived to do about this keeper, or [None] when the
+    roster was not read or named no action.
+
+    A surface colours a row from this rather than from the status word, so
+    every surface shows the same severity for the same keeper instead of each
+    inventing a mapping from the word. *)
+
+val health_label : reading -> string
+(** Terminal label for {!health}, with two words {!health} has no value for:
+    ["unread"] when the roster was never read, and ["absent"] when it answered
+    and left this keeper out. The second is not a health reading but it is not
+    the lack of one either - a complete roster without the keeper means no
+    fiber is running it. *)
+
+val health_tally : reading list -> (string * int) list
+(** How many readings carry each {!health_label}, in first-seen order.
+
+    Counted through {!health_label} on purpose: the roster header and the
+    status column are one reading drawn twice, and a tally that groups the
+    column's own labels cannot report a word the column does not show. *)
 
 (** A lifecycle action the operator can take on one keeper.
 

@@ -229,6 +229,23 @@ open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
 
+(* Names the first field carrying invalid UTF-8 so a refused write points at
+   its producer rather than at a byte offset. *)
+let invalid_utf8_field json =
+  let rec walk path json =
+    match json with
+    | `String s when not (String_util.is_valid_utf8 s) ->
+      Some (if path = "" then "<root>" else path)
+    | `Assoc fields ->
+      List.find_map
+        (fun (k, v) -> walk (if path = "" then k else path ^ "." ^ k) v)
+        fields
+    | `List items -> List.find_map (walk (path ^ "[]")) items
+    | _ -> None
+  in
+  walk "" json
+;;
+
 (* Present and a string, with no constraint on its contents. For payload
    fields whose value this decoder does not read: an emptiness rule there
    ends the turn over a byte nobody looks at. *)
@@ -1042,8 +1059,18 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let active_receive_timeout_s = ref initial_timeout_s in
     let send json =
+      let payload = Yojson.Safe.to_string json in
+      (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
+         which loses every in-flight turn and leaves the producer unnamed.
+         Refuse the write instead: the child survives and the field is named. *)
+      if not (String_util.is_valid_utf8 payload)
+      then
+        failwith
+          (Printf.sprintf
+             "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
+             (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
       with_optional_timeout clock (Some config.admission_timeout_s) (fun () ->
-        Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
+        Eio.Flow.copy_string payload stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =

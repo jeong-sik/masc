@@ -1,4 +1,6 @@
-(** TOML-backed catalog of immutable Keeper tool-composition plans.
+(** Closed grammar for immutable Keeper tool-composition plans. Declared
+    today inside SKILL.md composition fences ({!Keeper_skill_catalog});
+    the standalone tool-compositions.toml path is gone.
 
     The document grammar is closed and explicit. Input templates use tagged
     [literal], [output], [object], and [array] nodes; strings are never scanned
@@ -67,6 +69,23 @@ type error =
       { path : string list
       ; field : string
       }
+  | Invalid_param_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Duplicate_param_name of
+      { name : string
+      ; param : string
+      }
+  | Unknown_param_reference of
+      { name : string
+      ; param : string
+      }
+  | Unused_param of
+      { name : string
+      ; param : string
+      }
+  | Async_composition_with_params of { name : string }
   | Plan_rejected of
       { name : string
       ; error : Keeper_tool_plan.error
@@ -76,10 +95,31 @@ type execution_mode =
   | Inline
   | Async
 
+(** Scalar parameter types a composition can declare. The generated input
+    schema mirrors them, so the provider-side validation the model already
+    gets for every tool applies to composition arguments unchanged. *)
+type param_type =
+  | String_param
+  | Integer_param
+  | Number_param
+  | Boolean_param
+
+type param = private
+  { param_name : string
+  ; param_type : param_type
+  ; param_description : string
+  }
+
 type entry = private
   { name : string
   ; description : string option
   ; execution : execution_mode
+  ; params : param list
+        (** Declared invocation parameters, [[compositions.params]] in the
+            document. Every declared name is referenced by some node input
+            ([kind = "param"]) and vice versa — both directions are load
+            errors. All params are required; async compositions declare
+            none. *)
   ; plan : Keeper_tool_plan.t
   }
 
@@ -107,14 +147,30 @@ val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
 val status_tool_kind : Keeper_tool_descriptor.tool_kind
 val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
 
-val model_tool_names : t -> string list
-(** Exact model-visible composition surface, including the shared status and
-    cancel controls when at least one async composition is declared. *)
-
 val status_tool_name : string
 val cancel_tool_name : string
 
 val error_to_string : error -> string
 
-val path : config_root:string -> string
-(** Dedicated catalog path below the resolved MASC config root. *)
+val param_type_to_string : param_type -> string
+
+val input_schema_of_params : param list -> Yojson.Safe.t
+(** The model-visible input schema for an entry: an object with one required,
+    described property per declared param, closed to extras. The empty list
+    yields the zero-param object schema. *)
+
+type instantiation_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of Keeper_tool_plan.error
+
+val instantiation_error_to_string : instantiation_error -> string
+
+val instantiate
+  :  descriptors:Keeper_tool_descriptor.t list
+  -> args:Yojson.Safe.t
+  -> entry
+  -> (Keeper_tool_plan.t, instantiation_error) result
+(** Bind one invocation's validated arguments into the entry's plan: every
+    [Param] leaf becomes the caller's value and the param-free copy is
+    revalidated by {!Keeper_tool_plan.create}. A zero-param entry returns its
+    declared plan unchanged. *)

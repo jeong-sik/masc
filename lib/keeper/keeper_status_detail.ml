@@ -535,7 +535,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               fragment_count,
               filtered_count )
          in
-        let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
+        (* No tool call log for this keeper means no reading, not a reading of
+           zero. The branch removed here answered "0 calls" whenever lifetime
+           meta counters were non-zero, so a keeper that used a tool once and
+           then had its log rotate away read as "0 calls" rather than as
+           unmeasured. *)
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
           | Some snapshot ->
@@ -543,28 +547,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                 snapshot with
                 tool_audit_at =
                   (match snapshot.tool_audit_source, snapshot.tool_audit_at with
-                   | Some _, None when last_autonomous <> "" -> Some last_autonomous
                    | Some _, None -> Some m.updated_at
-                   | _ -> snapshot.tool_audit_at);
+                   | (Some _ | None), Some _ | None, None -> snapshot.tool_audit_at);
               }
-          | None ->
-              let has_runtime_activity =
-                last_autonomous <> ""
-                || m.runtime.autonomous_turn_count > 0
-                || m.runtime.autonomous_action_count > 0
-              in
-              {
-                empty_tool_audit_snapshot with
-                latest_tool_call_count =
-                  (if has_runtime_activity then Some 0 else None);
-                latest_action_source = None;
-                tool_audit_source =
-                  (if has_runtime_activity then Some "keeper_runtime_meta" else None);
-                tool_audit_at =
-                  (if last_autonomous <> "" then Some last_autonomous
-                   else if has_runtime_activity then Some m.updated_at
-                   else None);
-              }
+          | None -> empty_tool_audit_snapshot
         in
          let sandbox_last_error =
            match Keeper_registry.get ~base_path:config.base_path m.name with
@@ -696,12 +682,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
-           ("autonomy", `Assoc [
-             ("turn_count", `Int m.runtime.autonomous_turn_count);
-             ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
-             ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
-             ("noop_turn_count", `Int m.runtime.noop_turn_count);
-           ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
            ("status_options", `Assoc [
              ("tail_turns", `Int tail_turns);

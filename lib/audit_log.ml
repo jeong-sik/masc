@@ -68,6 +68,13 @@ let preview ?(max_len = 200) (value : string) =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." value
   |> String_util.to_string
 
+(* [audit_summary] renders raw detail fields, so it cannot reuse [preview]'s
+   "..." suffix, but it needs the same character-boundary cut. *)
+let audit_summary_field_max_bytes = 80
+
+let audit_summary_field value =
+  String_util.utf8_prefix ~max_bytes:audit_summary_field_max_bytes value
+
 (** {1 Serialization} *)
 
 let gate_audit_decision_to_string = function
@@ -219,14 +226,6 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     in
     let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
-
-(** Lenient wrapper: logs warning and returns option for backward compat *)
-let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
-  match entry_of_json_r json with
-  | Ok entry -> Some entry
-  | Error reason ->
-      Log.Misc.warn "audit_log: entry parse failed: %s" reason;
-      None
 
 (** {1 File Operations} *)
 
@@ -383,8 +382,14 @@ let append_entry (config : config) (entry : audit_entry) =
     Format: [aud-<16-hex-ms>-<8-hex-content-hash>] *)
 let audit_entry_id ~timestamp ~agent_id ~action =
   let ms = Int64.of_float (timestamp *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string (agent_id ^ action_to_string action
-                                           ^ Printf.sprintf "%.6f" timestamp)) in
+  (* SHA-256, not Stdlib.Digest (MD5): this suffix is the collision boundary
+     for an audit key, and it is truncated to 32 bits on top (#26720). *)
+  let hash =
+    Digestif.SHA256.(
+      digest_string
+        (agent_id ^ action_to_string action ^ Printf.sprintf "%.6f" timestamp)
+      |> to_hex)
+  in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
 
 (** Map outcome + action to O2 severity string. *)
@@ -429,7 +434,7 @@ let audit_summary ~action ~details =
   let extract_str key =
     match details with
     | `Assoc fields -> (match List.assoc_opt key fields with
-      | Some (`String v) -> Some (String.sub v 0 (min (String.length v) 80))
+      | Some (`String v) -> Some (audit_summary_field v)
       | _ -> None)
     | _ -> None
   in
@@ -448,7 +453,7 @@ let audit_summary ~action ~details =
          let rec loop acc = function
            | [] -> Some (List.rev acc)
            | `String v :: rest ->
-             loop (String.sub v 0 (min (String.length v) 80) :: acc) rest
+             loop (audit_summary_field v :: acc) rest
            | _ :: _ -> None
          in
          loop [] values

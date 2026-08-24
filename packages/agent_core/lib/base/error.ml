@@ -35,6 +35,10 @@ let terminal_effect_disposition disposition = disposition
 (** Agent runtime errors. *)
 type agent_error =
   | UnrecognizedStopReason of { reason : string }
+  | ToolRoundLimitExceeded of
+      { rounds : int
+      ; limit : int
+      }
   | HookExecutionFailed of
       { hook_name : string
       ; stage : string
@@ -187,6 +191,12 @@ let category_label : category -> string = function
 let agent_error_to_string = function
   | UnrecognizedStopReason r ->
     Printf.sprintf "Unrecognized stop_reason from API: %s" r.reason
+  | ToolRoundLimitExceeded r ->
+    Printf.sprintf
+      "Run kept continuing after tool execution past its declared ceiling: %d rounds, \
+       limit %d"
+      r.rounds
+      r.limit
   | HookExecutionFailed r ->
     Printf.sprintf
       "Hook %s failed at %s%s: %s"

@@ -1,15 +1,5 @@
 ---
 status: reference
-last_verified: 2026-06-05
-code_refs:
-  - lib/server/
-  - lib/server/masc_grpc_server.ml
-  - lib/server/masc_grpc_service.ml
-  - lib/config/masc_grpc_transport.ml
-  - lib/sse.ml
-  - lib/transport.ml
-  - bin/main_eio.ml
-  - bin/main_stdio_eio.ml
 ---
 
 # Server & Transport

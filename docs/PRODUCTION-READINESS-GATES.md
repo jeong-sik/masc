@@ -1,11 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-05-13
-code_refs:
-  - scripts/keeper-production-readiness-gate.py
-  - scripts/keeper-runtime-truth-gate.sh
-  - docs/RELEASE-EVIDENCE.md
-  - docs/PERFORMANCE-SLO.md
 ---
 
 # Production Readiness Gates
@@ -33,7 +27,7 @@ Threshold:
 | MCP `tools/list` tool count | > 0 |
 | `masc_status` read path | PASS |
 | dashboard `mission` read path | PASS |
-| dashboard `namespace-truth` read path | PASS |
+| dashboard `project-snapshot` read path | PASS |
 
 ## Gate 2: Keeper Turn Evidence Chain
 

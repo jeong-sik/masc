@@ -56,9 +56,11 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-let roster_failure_message = function
+let roster_failure_message ~credential_sent = function
   | Roster_unauthorized ->
-      "live keeper status and lifecycle actions need an operator token — export MASC_TOKEN and restart masc-tui"
+      Printf.sprintf
+        "live keeper status and lifecycle actions are unavailable: %s"
+        (Masc_tui_credential.refusal ~credential_sent)
   | Roster_unreachable detail -> "live keeper status unavailable: " ^ detail
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 
@@ -92,24 +94,56 @@ let liveness_of_roster roster name =
       | None -> Absent)
 
 
-let display_status reading =
-  match reading.liveness with
-  | Unobserved -> None
-  | Absent ->
-      (* The roster answered and left this keeper out, so no fiber is running
-         it. Pause still shows through: an operator who paused a keeper and
-         then stopped it should read "paused", not "offline", or the resume
-         the boot needs looks unnecessary. *)
-      if reading.paused then Some Status.Cp_paused
-      else Some (Status.Cp_surface Status.Surface_offline)
-  | Present runtime ->
-      if reading.paused then Some Status.Cp_paused
-      else Some (Status.Cp_surface runtime.Decode.kr_status)
+(* One keeper, four separate readings, one accessor each. Nothing here folds
+   one axis into another: the function this replaced let operator pause
+   overwrite the surface status, so a keeper a person stopped and a keeper
+   whose fiber died read the same word.
 
-let status_label reading =
-  match display_status reading with
-  | None -> "unknown"
-  | Some status -> Status.control_plane_status_to_string status
+   [None] everywhere means the roster was not read for this keeper - a fact
+   about the reading, not a state the keeper is in. *)
+let health reading =
+  match reading.liveness with
+  | Unobserved | Absent -> None
+  | Present runtime -> Some runtime.Decode.kr_health
+
+let next_action reading =
+  match reading.liveness with
+  | Unobserved | Absent -> None
+  | Present runtime -> runtime.Decode.kr_next_action
+
+(* Three outcomes, not two. A roster that was never read and a roster that
+   answered without this keeper are different facts: the first says nothing
+   about the keeper, the second says no fiber is running it. Spelling both
+   "unread" would fold a reading into the absence of one. *)
+let health_label reading =
+  match reading.liveness with
+  | Unobserved -> "unread"
+  | Absent -> "absent"
+  | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
+
+(* The roster header's tally, counted with the same function that labels the
+   status column so the header and the column cannot disagree. They did: the
+   tally folded [Surface_inactive] into "running", so ten rows reading
+   "inactive" sat under a header reading "10 running". Counting the label
+   itself removes the second spelling of the same reading rather than keeping
+   it in step by hand. *)
+let tally_by label_of readings =
+  List.fold_left
+    (fun counts reading ->
+      let label = label_of reading in
+      let rec bump = function
+        | [] -> [ (label, 1) ]
+        | (name, n) :: rest when String.equal name label -> (name, n + 1) :: rest
+        | entry :: rest -> entry :: bump rest
+      in
+      bump counts)
+    []
+    readings
+
+(* Counted with [health_label] because that is the word the status column now
+   shows. The header and the column are one reading drawn twice; whichever
+   function labels the column has to be the one that counts it. *)
+let health_tally readings = tally_by health_label readings
 
 type action =
   | Pause

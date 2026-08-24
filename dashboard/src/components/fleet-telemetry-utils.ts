@@ -280,10 +280,7 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
 // Fleet offline status tokens — shared by `fleetBand()` and `statusClass()`.
-// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts but
-// excludes `'inactive'`: fleet treats inactive as an attention signal
-// (line below), not a hard offline. This is an intentional semantic
-// divergence, not drift.
+// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts.
 const FLEET_OFFLINE_STATUSES: ReadonlySet<string> = new Set([
   'offline', 'unbooted', 'stopped', 'crashed',
 ])
@@ -296,6 +293,13 @@ export function isOfflineDiagnosticHealthState(state: string | null): boolean {
   return state === 'offline'
 }
 
+// The three health readings that need someone to look. `status` folds all
+// three into the single word 'inactive', which is why this list used to be
+// backed up by a `status === 'inactive'` test below: the fold was the only
+// signal if the diagnostic was missing. The diagnostic carries health for
+// every row, so the fold is no longer read — and reading it cost a keeper
+// that was merely resting an attention badge, because 'inactive' does not
+// distinguish resting from stalled.
 function isAttentionDiagnosticHealthState(state: string | null): boolean {
   return state === 'stale' || state === 'degraded' || state === 'zombie'
 }
@@ -313,7 +317,6 @@ export function fleetBand(row: FleetRow): FleetBand {
   if (normalizedStatus === 'paused') return 'paused'
   if (
     isAttentionDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
@@ -493,7 +496,6 @@ export function statusClass(row: FleetRow): string {
   }
   if (
     isAttentionDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'

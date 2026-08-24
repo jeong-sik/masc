@@ -14,8 +14,21 @@ type entry = {
   body : string;
 }
 
+type metadata =
+  | Origin of {
+      timestamp : string;
+      role_label : string;
+      request_label : string;
+    }
+  | Continued_at of { timestamp : string }
+
+type row_kind =
+  | Metadata of metadata
+  | Body
+
 type row = {
   style : style;
+  kind : row_kind;
   text : string;
 }
 
@@ -78,28 +91,6 @@ let scalar_cell_width scalar =
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else max 0 (Uucp.Break.tty_width_hint scalar)
 
-let grapheme_cell_width grapheme =
-  let rec loop offset width max_width has_hangul_l has_hangul_vt =
-    if offset >= String.length grapheme then
-      if has_hangul_l && has_hangul_vt then max_width else width
-    else
-      let decoded = String.get_utf_8_uchar grapheme offset in
-      let valid = Uchar.utf_decode_is_valid decoded in
-      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
-      if not valid then
-        loop (offset + scalar_length) (width + 1) (max 1 max_width)
-          has_hangul_l has_hangul_vt
-      else
-        let scalar = Uchar.utf_decode_uchar decoded in
-        let scalar_width = scalar_cell_width scalar in
-        let hangul_type = Uucp.Hangul.syllable_type scalar in
-        loop (offset + scalar_length) (width + scalar_width)
-          (max max_width scalar_width)
-          (has_hangul_l || hangul_type = `L)
-          (has_hangul_vt || hangul_type = `V || hangul_type = `T)
-  in
-  loop 0 0 0 false false
-
 type display_piece = {
   start_offset : int;
   end_offset : int;
@@ -128,34 +119,105 @@ let scalar_pieces text start_offset end_offset reversed =
   in
   loop start_offset reversed
 
+(* [String.is_valid_utf_8] wants a string of its own, and taking one meant
+   copying the run before a single width was read. This asks the same question
+   of the range in place. A scalar that would reach past [end_offset] is the
+   truncated tail the copy would have rejected too. *)
+let valid_utf_8_range text start_offset end_offset =
+  let rec loop offset =
+    if offset >= end_offset then true
+    else
+      let decoded = String.get_utf_8_uchar text offset in
+      if not (Uchar.utf_decode_is_valid decoded) then false
+      else
+        let length = Uchar.utf_decode_length decoded in
+        if offset + length > end_offset then false else loop (offset + length)
+  in
+  loop start_offset
+
+(* What a piece needs is a byte span and a width, and neither needs the cluster
+   to exist as a string. Going through [Uuseg_string.fold_utf_8] re-encoded
+   every scalar into a buffer and cut a string out of it at each boundary --
+   one allocation per character on screen, thrown away as soon as it was
+   measured. The segmenter is driven directly here and the spans are read off
+   [text]. The width is the same fold [grapheme_cell_width] did over the
+   cluster, run as the scalars arrive. *)
 let grapheme_pieces text start_offset end_offset reversed =
   if start_offset >= end_offset then reversed
-  else
-    let run = String.sub text start_offset (end_offset - start_offset) in
-    if not (String.is_valid_utf_8 run) then
-      scalar_pieces text start_offset end_offset reversed
-    else
-      Uuseg_string.fold_utf_8 `Grapheme_cluster
-        (fun (offset, reversed) grapheme ->
-          let next = offset + String.length grapheme in
-          ( next
-          , { start_offset = offset;
-              end_offset = next;
-              cell_width = grapheme_cell_width grapheme;
-              ansi = false;
-            }
-            :: reversed ))
-        (start_offset, reversed) run
-      |> snd
+  else if not (valid_utf_8_range text start_offset end_offset) then
+    scalar_pieces text start_offset end_offset reversed
+  else begin
+    let segmenter = Uuseg.create `Grapheme_cluster in
+    let pieces = ref reversed in
+    let cluster_start = ref start_offset in
+    let cluster_end = ref start_offset in
+    let width = ref 0 in
+    let widest = ref 0 in
+    let hangul_l = ref false in
+    let hangul_vt = ref false in
+    let close_cluster () =
+      if !cluster_end > !cluster_start then begin
+        let cells = if !hangul_l && !hangul_vt then !widest else !width in
+        pieces :=
+          { start_offset = !cluster_start;
+            end_offset = !cluster_end;
+            cell_width = cells;
+            ansi = false;
+          }
+          :: !pieces;
+        cluster_start := !cluster_end;
+        width := 0;
+        widest := 0;
+        hangul_l := false;
+        hangul_vt := false
+      end
+    in
+    let take_scalar scalar =
+      cluster_end := !cluster_end + Uchar.utf_8_byte_length scalar;
+      let scalar_width = scalar_cell_width scalar in
+      width := !width + scalar_width;
+      widest := max !widest scalar_width;
+      let hangul_type = Uucp.Hangul.syllable_type scalar in
+      hangul_l := !hangul_l || hangul_type = `L;
+      hangul_vt := !hangul_vt || hangul_type = `V || hangul_type = `T
+    in
+    let rec drain event =
+      match Uuseg.add segmenter event with
+      | `Uchar scalar ->
+          take_scalar scalar;
+          drain `Await
+      | `Boundary ->
+          close_cluster ();
+          drain `Await
+      | `Await | `End -> ()
+    in
+    let rec feed offset =
+      if offset >= end_offset then begin
+        drain `End;
+        close_cluster ()
+      end
+      else
+        let decoded = String.get_utf_8_uchar text offset in
+        drain (`Uchar (Uchar.utf_decode_uchar decoded));
+        feed (offset + Uchar.utf_decode_length decoded)
+    in
+    feed start_offset;
+    !pieces
+  end
 
 let display_pieces text =
   let length = String.length text in
+  (* Only an escape can open a sequence, so the scan jumps to the next escape
+     rather than asking at every byte of every rendered line. *)
   let rec find_ansi offset =
     if offset >= length then None
     else
-      match ansi_csi_end text offset with
-      | Some next -> Some (offset, next)
-      | None -> find_ansi (offset + 1)
+      match String.index_from_opt text offset '\x1B' with
+      | None -> None
+      | Some escape -> (
+          match ansi_csi_end text escape with
+          | Some next -> Some (escape, next)
+          | None -> find_ansi (escape + 1))
   in
   let rec loop offset reversed =
     match find_ansi offset with
@@ -174,11 +236,14 @@ let display_pieces text =
   in
   loop 0 []
 
-let display_width text =
-  display_pieces text
-  |> List.fold_left (fun width piece -> width + piece.cell_width) 0
+let pieces_width pieces =
+  List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces
 
-let cell_prefix text max_cells =
+(* Segmenting the text is what these cost, so the callers below that need both
+   a measurement and a cut take the pieces once and pass them along. Measuring
+   through [display_width] and then cutting through [cell_prefix] segmented
+   every rendered line twice. *)
+let cell_prefix_of_pieces text pieces max_cells =
   let buffer = Buffer.create (String.length text) in
   let rec loop used_cells saw_ansi = function
     | [] -> Buffer.contents buffer, used_cells, saw_ansi
@@ -192,26 +257,15 @@ let cell_prefix text max_cells =
         loop (used_cells + piece.cell_width) saw_ansi rest
     | _ -> Buffer.contents buffer, used_cells, saw_ansi
   in
-  loop 0 false (display_pieces text)
+  loop 0 false pieces
 
-let fit_width text width =
-  if width <= 0 then ""
-  else
-    let cells = display_width text in
-    if cells > width then
-      let prefix, prefix_cells, saw_ansi = cell_prefix text (width - 1) in
-      let reset = if saw_ansi then "\x1B[0m" else "" in
-      prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
-    else text ^ String.make (width - cells) ' '
-
-let cell_suffix text max_cells =
+let cell_suffix_of_pieces text pieces max_cells =
   let rec start_offset used current_start = function
     | [] -> current_start
     | piece :: rest when used + piece.cell_width <= max_cells ->
         start_offset (used + piece.cell_width) piece.start_offset rest
     | _ -> current_start
   in
-  let pieces = display_pieces text in
   let start =
     start_offset 0 (String.length text) (List.rev pieces)
   in
@@ -226,6 +280,56 @@ let cell_suffix text max_cells =
   let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
+let display_width text = pieces_width (display_pieces text)
+
+let cell_prefix text max_cells =
+  cell_prefix_of_pieces text (display_pieces text) max_cells
+
+let fit_width text width =
+  if width <= 0 then ""
+  else
+    let pieces = display_pieces text in
+    let cells = pieces_width pieces in
+    if cells > width then
+      let prefix, prefix_cells, saw_ansi =
+        cell_prefix_of_pieces text pieces (width - 1)
+      in
+      let reset = if saw_ansi then "\x1B[0m" else "" in
+      prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
+    else text ^ String.make (width - cells) ' '
+
+let dress_bare_links ~open_style ~close_style text =
+  let is_url_end ch =
+    match ch with
+    | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
+    | _ -> Char.code ch < 0x20
+  in
+  let length = String.length text in
+  let buffer = Buffer.create (length + 16) in
+  let starts_at index prefix =
+    let plen = String.length prefix in
+    index + plen <= length && String.equal (String.sub text index plen) prefix
+  in
+  let rec loop index =
+    if index >= length then ()
+    else if starts_at index "http://" || starts_at index "https://" then begin
+      let rec url_end i =
+        if i < length && not (is_url_end text.[i]) then url_end (i + 1) else i
+      in
+      let stop = url_end index in
+      Buffer.add_string buffer open_style;
+      Buffer.add_string buffer (String.sub text index (stop - index));
+      Buffer.add_string buffer close_style;
+      loop stop
+    end
+    else begin
+      Buffer.add_char buffer text.[index];
+      loop (index + 1)
+    end
+  in
+  loop 0;
+  Buffer.contents buffer
+
 let composer_max_rows = 5
 
 let composer_lines ~max_rows input =
@@ -236,18 +340,62 @@ let composer_lines ~max_rows input =
 
 let input_viewport ~max_cells input =
   let max_cells = max 0 max_cells in
-  if display_width input <= max_cells then input
+  let pieces = display_pieces input in
+  if pieces_width pieces <= max_cells then input
   else if max_cells = 0 then ""
-  else "~" ^ cell_suffix input (max_cells - 1)
+  else "~" ^ cell_suffix_of_pieces input pieces (max_cells - 1)
 
-let input_cursor_row ~terminal_rows ~history_height ~status_rows =
-  let last_row = max 1 terminal_rows in
-  let candidate = 5 + max 0 history_height + max 0 status_rows in
-  min last_row (max 1 candidate)
+(* The chat pane draws the composer's first line with this prefix and wraps
+   continuation lines to the same width, so the caret column is measured from
+   the prefix the pane actually renders — not from a hand-copied constant that
+   drifts the moment the prefix changes. *)
+let chat_input_prompt_prefix = "  > "
+
+let chat_input_prompt_cells = display_width chat_input_prompt_prefix
+
+(* The pane draws its rows inside the box, which spends its border and the
+   space after it before any content starts. *)
+let chat_input_box_cells = 2
+
+(* The arrows answer the composer's own history now, so the hint names what
+   still scrolls. Saying "up" here sent an operator to a key that replaces what
+   they typed. *)
+let scroll_hint ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then "PgUp:scroll back"
+  else if older_exist then
+    Printf.sprintf "PgUp/PgDn:scroll  Ctrl-E:newest  (%d back)" scrolled_back
+  else
+    (* At the oldest row with nothing more to fetch that is the more useful
+       fact than the distance: an operator pressing up against a pane that will
+       not move should know it is the start of the conversation rather than a
+       stuck key, and at the start the distance says what "start" already
+       says. Saying both is also what would have made this hint wider than the
+       one it replaced. *)
+    "PgUp/PgDn:scroll  Ctrl-E:newest  (start of conversation)"
 
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
-  min last_column (7 + display_width input)
+  (* Three things sit left of the caret: the box, the prompt, and what was
+     typed -- and the caret goes one cell past the last of them. Deriving this
+     from the prompt alone put it on the prompt's own ">" instead of after the
+     text, because the constant it replaced was all three added up rather than
+     the prompt's width. *)
+  min last_column
+    (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
+
+(* Metadata rows read down the pane as a column: [timestamp] From [origin]
+   request. Origins vary in width, so every label is padded to one fixed badge
+   and a too-long label truncates with an ellipsis rather than pushing the
+   request column out for everyone else. *)
+let chat_role_label_column = 16
+
+let align_role_label label =
+  let pieces = display_pieces label in
+  let cells = pieces_width pieces in
+  if cells > chat_role_label_column then
+    let prefix, _, _ = cell_prefix_of_pieces label pieces (chat_role_label_column - 1) in
+    prefix ^ "…"
+  else label ^ String.make (chat_role_label_column - cells) ' '
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
@@ -275,36 +423,129 @@ let split_cells ~max_cells text =
     in
     loop 0 0 0 [] (display_pieces text)
 
+(* A row is built by adding each word's own width to the row so far. That
+   holds while no escape is left open across the join: an escape missing its
+   final byte swallows the space after it, so the row and its parts disagree
+   (pinned in the layout tests). A row carrying an escape therefore measures
+   itself whole, the way this used to for every word of every row -- which
+   made a row cost grow with the square of the words in it. *)
 let wrap_words ~max_cells text =
   let max_cells = max 1 max_cells in
-  let rec loop rows current = function
-    | [] -> List.rev (if String.equal current "" then rows else current :: rows)
-    | word :: rest as words ->
-        let candidate =
-          if String.equal current "" then word else current ^ " " ^ word
+  let current = Buffer.create 128 in
+  let current_cells = ref 0 in
+  let current_holds_escape = ref false in
+  let holds_escape word = String.contains word '\x1B' in
+  let take_row () =
+    let row = Buffer.contents current in
+    Buffer.clear current;
+    current_cells := 0;
+    current_holds_escape := false;
+    row
+  in
+  let rec loop rows = function
+    | [] ->
+        let rows =
+          if Buffer.length current = 0 then rows else take_row () :: rows
         in
-        if display_width candidate <= max_cells then loop rows candidate rest
-        else if not (String.equal current "") then
-          loop (current :: rows) "" words
+        List.rev rows
+    | word :: rest as words ->
+        let addition = if Buffer.length current = 0 then word else " " ^ word in
+        let candidate_cells =
+          if !current_holds_escape then
+            display_width (Buffer.contents current ^ addition)
+          else !current_cells + display_width addition
+        in
+        if candidate_cells <= max_cells then begin
+          Buffer.add_string current addition;
+          current_cells := candidate_cells;
+          if holds_escape word then current_holds_escape := true;
+          loop rows rest
+        end
+        else if Buffer.length current > 0 then loop (take_row () :: rows) words
         else
           let chunks = split_cells ~max_cells word in
           (match List.rev chunks with
-           | [] -> loop rows "" rest
+           | [] -> loop rows rest
            | last :: reversed_completed ->
                let completed = List.rev reversed_completed in
                let rows =
                  List.fold_left (fun rows chunk -> chunk :: rows) rows completed
                in
-               loop rows last rest)
+               Buffer.add_string current last;
+               current_cells := display_width last;
+               current_holds_escape := holds_escape last;
+               loop rows rest)
   in
-  loop [] "" (String.split_on_char ' ' text)
+  loop [] (String.split_on_char ' ' text)
 
-let rows_of_entry ?markdown ~inner_width entry =
-  let metadata, _, _ =
-    Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label
-      entry.request_label
-    |> fun text -> cell_prefix text inner_width
+(* Consecutive messages from one speaker share a heading. Repeating
+   "[time] speaker request" on each of them spent a row per message saying who
+   was talking, and a keeper answering in four parts said it four times.
+
+   What a continuation keeps depends on what changed. A different moment is
+   worth a row -- it says the pause between two things the same keeper said --
+   but repeating an empty origin badge would look like an unnamed source, so
+   that continuation carries only its timestamp. Two messages stamped the
+   same second have nothing left to say, so they get no heading and read as
+   the one message they look like. *)
+let continues_previous ~(previous : entry option) (entry : entry) =
+  match previous with
+  | None -> false
+  | Some previous ->
+      previous.style = entry.style
+      && String.equal previous.role_label entry.role_label
+      && String.equal previous.request_label entry.request_label
+
+let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+  let metadata =
+    if not (continues_previous ~previous entry) then
+      Some
+        ( Origin
+            { timestamp = entry.timestamp;
+              role_label = entry.role_label;
+              request_label = entry.request_label;
+            }
+        , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
+            entry.request_label )
+    else
+      match previous with
+      | Some previous when String.equal previous.timestamp entry.timestamp -> None
+      | Some _ | None ->
+          Some
+            ( Continued_at { timestamp = entry.timestamp }
+            , Printf.sprintf "[%s]" entry.timestamp )
   in
+  match metadata with
+  | None -> None
+  | Some (metadata, text) ->
+    let fitted, _, _ = cell_prefix text inner_width in
+    Some { style = entry.style; kind = Metadata metadata; text = fitted }
+
+(* A body is a document, not a row. [sanitize] is applied to each line rather
+   than to the whole, because escaping a newline the way a terminal escape is
+   escaped turns the document into one unbroken run with the escape printed
+   where each break belonged. Per line the escape still covers what it is there
+   for -- a line cannot carry a control sequence into the terminal -- and the
+   breaks the author wrote survive. A line that wraps to nothing is a blank
+   line: a paragraph break, not an absence. The caller supplies [sanitize] so
+   this module keeps no terminal vocabulary of its own. *)
+let wrap_body ?markdown ~max_cells ~sanitize text =
+  let safe_lines = text |> String.split_on_char '\n' |> List.map sanitize in
+  match markdown with
+  | Some render ->
+    (* Rendering happens after the escaping, not before: markdown is written in
+       printable ASCII, so escaping a control byte first takes nothing the
+       renderer reads, and the renderer never sees a byte that could reach the
+       terminal as a sequence. It owns the wrapping from there -- fenced code
+       keeps its own breaks, which a word wrap would ruin. *)
+    render ~width:max_cells (String.concat "\n" safe_lines)
+  | None ->
+    List.concat_map
+      (fun line ->
+         match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
+      safe_lines
+
+let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
@@ -327,9 +568,12 @@ let rows_of_entry ?markdown ~inner_width entry =
   in
   let body_rows =
     body_chunks
-    |> List.map (fun chunk -> { style = entry.style; text = "  " ^ chunk })
+    |> List.map (fun chunk ->
+      { style = entry.style; kind = Body; text = "  " ^ chunk })
   in
-  { style = entry.style; text = metadata } :: body_rows
+  match metadata_row ~previous ~inner_width entry with
+  | None -> body_rows
+  | Some metadata -> metadata :: body_rows
 
 let visible_rows ?markdown ~inner_width ~height entries =
   let inner_width = max 1 inner_width in
@@ -338,7 +582,10 @@ let visible_rows ?markdown ~inner_width ~height entries =
     | [] -> selected
     | _ when remaining = 0 -> selected
     | entry :: older ->
-        let rows = rows_of_entry ?markdown ~inner_width entry in
+        let rows =
+          rows_of_entry ?markdown ~inner_width
+            ~previous:(List.nth_opt older 0) entry
+        in
         let chosen =
           if List.length rows <= remaining then rows
           else if selected = [] then
@@ -355,20 +602,90 @@ let visible_rows ?markdown ~inner_width ~height entries =
 let total_rows ?markdown ~inner_width entries =
   let inner_width = max 1 inner_width in
   List.fold_left
-    (fun total entry ->
-       total + List.length (rows_of_entry ?markdown ~inner_width entry))
-    0 entries
+    (fun (previous, total) entry ->
+       ( Some entry
+       , total
+         + List.length (rows_of_entry ?markdown ~inner_width ~previous entry) ))
+    (None, 0) entries
+  |> snd
 
 let max_scroll ?markdown ~inner_width ~height entries =
   max 0 (total_rows ?markdown ~inner_width entries - max 1 height)
 
+(* Nothing older than the newest [from_bottom + height] rows can reach the
+   window, so the walk stops once it holds them. Laying out the whole
+   transcript to slice a screenful out of the end made every scrolled frame
+   cost what the conversation had accumulated. *)
 let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
   if from_bottom <= 0 then visible_rows ?markdown ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
     let height = max 0 height in
-    let all = List.concat_map (rows_of_entry ?markdown ~inner_width) entries in
-    let bottom = max 0 (List.length all - from_bottom) in
+    let wanted = from_bottom + height in
+    let rec collect gathered gathered_count = function
+      | [] -> gathered, gathered_count
+      | _ when gathered_count >= wanted -> gathered, gathered_count
+      | entry :: older ->
+          let rows =
+            rows_of_entry ?markdown ~inner_width
+              ~previous:(List.nth_opt older 0) entry
+          in
+          collect (rows @ gathered) (gathered_count + List.length rows) older
+    in
+    let newest, newest_count = collect [] 0 (List.rev entries) in
+    let bottom = max 0 (newest_count - from_bottom) in
     let first = max 0 (bottom - height) in
-    List.filteri (fun index _ -> index >= first && index < bottom) all
+    List.filteri (fun index _ -> index >= first && index < bottom) newest
   end
+
+(* A clamp needs the row count only up to where the answer stops moving: once
+   [requested + height] rows exist the limit is at least [requested], and what
+   lies further back cannot change the result. Reaching that through
+   {!max_scroll} counted the whole transcript on every frame, including the
+   frames where nobody had scrolled at all. *)
+let clamp_scroll ?markdown ~inner_width ~height requested entries =
+  if requested <= 0 then requested
+  else begin
+    let inner_width = max 1 inner_width in
+    (* {!max_scroll} measures against at least one row, and this has to answer
+       the same as it does. *)
+    let height = max 1 height in
+    let enough = requested + height in
+    let rec count total = function
+      | [] -> total
+      | _ when total >= enough -> total
+      | entry :: older ->
+          count
+            (total
+             + List.length
+                 (rows_of_entry ?markdown ~inner_width
+                    ~previous:(List.nth_opt older 0) entry))
+            older
+    in
+    min requested (max 0 (count 0 (List.rev entries) - height))
+  end
+
+let last_page_start ~height row_costs =
+  let costs = Array.of_list row_costs in
+  let count = Array.length costs in
+  if count = 0 then 0
+  else begin
+    let height = max 1 height in
+    let rec walk index used =
+      if index < 0 then 0
+      else
+        (* A row is the least an item can cost; a zero would let the walk
+           claim the whole list fits in any height. *)
+        let cost = max 1 costs.(index) in
+        if used + cost > height then index + 1 else walk (index - 1) (used + cost)
+    in
+    min (count - 1) (walk (count - 1) 0)
+  end
+
+let age_text ~now ~since =
+  let seconds = now -. since in
+  if seconds < 0. then None
+  else
+    let whole = int_of_float seconds in
+    if whole < 60 then Some (Printf.sprintf "%ds" whole)
+    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))

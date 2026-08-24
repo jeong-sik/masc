@@ -307,12 +307,27 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })
 
-  it('classifies inactive keepalive rows as attention, not offline', () => {
-    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('attention')
+  // `status` answers with a vocabulary that folds stale, degraded and zombie
+  // into one word, so it cannot say which of the three a row is in — or
+  // whether the keeper is simply resting. The band reads the health the
+  // diagnostic carries instead, and each of the three still raises attention.
+  it.each(['stale', 'degraded', 'zombie'])(
+    'classifies attention for %s diagnostic health state',
+    state => {
+      expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: state })))
+        .toBe('attention')
+    },
+  )
+
+  it('does not raise attention on the folded status word alone', () => {
+    // A resting keeper and a stalled one both reach the wire as 'inactive'.
+    // Badging the word made every resting keeper look like it needed a look.
+    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('active')
   })
 
-  it('classifies attention for stale diagnostic health state', () => {
-    expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toBe('attention')
+  it('still raises attention for an idle keeper the diagnostic calls stale', () => {
+    expect(fleetBand(makeRow({ status: 'idle', diagnostic_health_state: 'stale' })))
+      .toBe('attention')
   })
 
   it('classifies attention for runtime blocker', () => {

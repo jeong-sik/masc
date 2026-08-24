@@ -1,0 +1,14 @@
+name = "keeper_voice_listen"
+description = """
+Record user speech via microphone and transcribe to text. Starts recording, \
+waits for speech, stops on silence (2s), then returns transcribed text."""
+
+[[params]]
+name = "timeout_seconds"
+type = "number"
+description = "Max recording duration in seconds (default 15)"
+
+[[params]]
+name = "language_code"
+type = "string"
+description = "ISO language hint, e.g. ko, en"

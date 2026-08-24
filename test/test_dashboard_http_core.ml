@@ -150,6 +150,21 @@ let test_keeper_paused_work_route_is_admin_exact () =
     false
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
 
+let test_keeper_up_route_classifies_and_extracts () =
+  let path = "/api/v1/keepers/fixture-keeper/up" in
+  check bool
+    "up POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_up);
+  check string
+    "up keeper name"
+    "fixture-keeper"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_post
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_up)
+;;
+
 let test_keeper_sensitive_get_permissions_are_exact () =
   let permission path =
     Server_dashboard_http_keeper_api.keeper_get_permission path
@@ -161,7 +176,10 @@ let test_keeper_sensitive_get_permissions_are_exact () =
          (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
-    [ "raw-traces"; "raw-trace"; "memory-journal" ];
+    (* file-changes returns the exact text a keeper wrote to a file, which is
+       part of what raw-trace already holds. Same data, same gate — a lighter
+       one here would be a second door onto the first door's content. *)
+    [ "raw-traces"; "raw-trace"; "memory-journal"; "file-changes" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true
@@ -1080,11 +1098,43 @@ let test_dashboard_query_cache_key_partitions_route_params () =
         (not (String.equal session_a session_b));
       check bool "actor partitions route cache" true
         (not (String.equal session_a actor_b));
+      (* The partition is the directory the cached state lives in, so a
+         scope switch cannot serve the previous workspace's projection
+         (#24504). It used to be the constant "default". *)
       check string "deterministic key shape"
         (Printf.sprintf
-           "session:%s:default:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
-           config.base_path)
+           "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
+           (Workspace_utils.masc_root_dir config))
         session_a)
+
+(* Two clusters can share a base path — the store separates them under
+   .masc/clusters/<name>. The cache partition was the constant "default", so
+   the keys did not, and a scope switch could serve the previous workspace's
+   projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_cluster () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let other_cluster =
+        { config with
+          backend_config =
+            { config.Workspace_utils.backend_config with
+              Backend_types.cluster_name = "cluster-b"
+            }
+        }
+      in
+      check bool "the two configs share a base path" true
+        (String.equal config.Workspace_utils.base_path
+           other_cluster.Workspace_utils.base_path);
+      check bool "but their cache keys differ" true
+        (not
+           (String.equal
+              (Server_dashboard_http_core_cache.dashboard_cache_key config
+                 "session" "s")
+              (Server_dashboard_http_core_cache.dashboard_cache_key
+                 other_cluster "session" "s"))))
 
 let test_dashboard_query_cache_key_encodes_delimiter_values () =
   let dir = test_dir () in
@@ -2783,14 +2833,28 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
            ; "keeper_id", `String ("k-" ^ keeper_name)
            ; "status", `String "active"
+             (* #30084 moved [continuity_row_of_keeper] off the folded [status]
+                word onto two fields this row never carried: [health_state] and
+                the last action time. An absent diagnostic reads as health "",
+                which the builder refuses by design -- and the refusal took the
+                whole continuity list down with it, because it is raised inside
+                the [filter_map] that builds every brief.
+
+                The row now says in the new vocabulary what it always meant in
+                the old one: a live keeper that has taken its turn. Both fields
+                are ones the live producer always writes
+                ([keeper_status_runtime.ml] stamps [health_state] on every
+                diagnostic), so this is the fixture catching up, not the
+                builder being loosened. *)
+           ; ( "diagnostic"
+             , `Assoc [ "health_state", `String "healthy" ] )
            ; "keepalive_running", `Bool false
            ; "turn_count", `Int 1
-           ; "autonomous_turn_count", `Int 1
-           ; "autonomous_action_count", `Int 1
-           ; "noop_turn_count", `Int 0
-           ; "last_autonomous_action_at", `String now
            ; "updated_at", `String now
-           ; "tool_audit_at", `String ""
+             (* [tool_audit_at] is where the builder reads "has this keeper
+                acted"; empty means never, and never is [Lc_idle]. The row
+                claims [turn_count = 1], so it has. *)
+           ; "tool_audit_at", `String now
            ; "recent_tool_names", `List []
            ; "latest_tool_names", `List []
            ]
@@ -3329,6 +3393,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "cache key partitions by cluster" `Quick
+            test_dashboard_cache_key_partitions_by_cluster;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick
@@ -3391,6 +3457,8 @@ let () =
             test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
+          test_case "keeper up route classifies and extracts" `Quick
+            test_keeper_up_route_classifies_and_extracts;
           test_case "keeper sensitive GET permissions are exact" `Quick
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick

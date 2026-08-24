@@ -22,12 +22,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_autonomous_turn_count : int;
-  k_autonomous_text_turn_count : int;
-  k_autonomous_tool_turn_count : int;
-  k_board_reactive_turn_count : int;
-  k_mention_reactive_turn_count : int;
-  k_noop_turn_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
@@ -44,10 +38,14 @@ val short_timestamp_for_terminal : string -> string
     before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
     raw C1 byte. Empty timestamps render as [(never)]. *)
 
-val clock_timestamp_for_terminal : string -> string
-(** Select the conventional eight-byte clock portion of a timestamp when it is
-    present, then sanitize the result. The final sanitizer makes arbitrary
-    external timestamp bytes safe even when the byte slice splits UTF-8. *)
+val clock_timestamp_for_terminal :
+  localtime:(float -> Unix.tm) -> string -> string
+(** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
+    converts to - [Unix.localtime] on a screen, [Unix.gmtime] or a fixed
+    offset in a test - then sanitized. A timestamp the codec cannot read
+    keeps the conventional eight-byte slice, so the result is still one
+    clock-shaped row fragment; the final sanitizer makes arbitrary external
+    bytes safe even when the slice splits UTF-8. *)
 
 
 (** Where a goal stands with the completion judge.
@@ -129,6 +127,38 @@ type system_log_entry = {
   sl_message : string;
 }
 
+(** One tool call from a keeper's durable call log
+    ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
+    checked against the keeper that was asked for; a row naming another is
+    rejected rather than attributed by envelope position. *)
+type keeper_call = {
+  kc_at : float;  (** [ts], unix seconds *)
+  kc_tool : string;
+  kc_input : string;  (** the call's argument text as served, may be truncated *)
+  kc_output : string option;
+      (** what the call answered, as served and already bounded by the server.
+          [None] means the row carried no result, which is not the same as a
+          call that returned an empty one. *)
+  kc_success : bool;
+  kc_duration_ms : float option;
+  kc_turn : int option;
+  kc_task_id : string option;
+  kc_model : string option;
+}
+
+type keeper_calls_snapshot = {
+  kcs_keeper : string;
+  kcs_entries : keeper_call list;  (** in the server's order, newest last *)
+  kcs_count : int;
+  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_latest_age_s : float option;
+  kcs_stale_reason : string option;
+  kcs_mismatched : int;  (** rows naming another keeper, rejected *)
+}
+
+val decode_keeper_calls_snapshot :
+  requested_keeper:string -> Yojson.Safe.t -> (keeper_calls_snapshot, string) result
+
 type system_log_snapshot = {
   sys_entries : system_log_entry list;  (** newest last, as the server returns *)
   sys_total : int;  (** lines the ring has seen, not lines returned *)
@@ -145,9 +175,20 @@ type tool_entry = {
   tl_direct_call : bool;
 }
 
+type inventory_freshness =
+  | Warming
+      (** The server answered with its warming placeholder: it has not built
+          the inventory yet, so the empty list beside this is not an answer
+          about how many tools exist. *)
+  | Settled
+      (** The server answered from a built inventory. An empty list here does
+          mean no tools. *)
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
+  ts_freshness : inventory_freshness;
+      (** Whether the count above is an answer. *)
 }
 
 (** A connector the gate can deliver through. *)
@@ -168,6 +209,135 @@ type connector_snapshot = {
   cs_total : int;
   cs_active : int;  (** How many the server counted as available. *)
 }
+
+(** Whether the non-blocking runtime-probe route served a cached reading or
+    scheduled background work. The wire vocabulary is closed so a producer
+    change cannot silently look fresh. *)
+type runtime_probe_refresh_state =
+  | Runtime_probe_fresh
+  | Runtime_probe_recent
+  | Runtime_probe_served_stale
+  | Runtime_probe_warming_up
+
+(** Fleet-level reachability verdict published by the runtime inventory
+    projection. This is provider metadata reachability, not a completion or
+    lane failover verdict. *)
+type runtime_probe_status =
+  | Runtime_probe_reachable
+  | Runtime_probe_no_http_runtimes
+  | Runtime_probe_degraded
+  | Runtime_probe_unreachable
+  | Runtime_probe_warming
+
+type runtime_provider_status =
+  | Runtime_provider_reachable
+  | Runtime_provider_missing_auth
+  | Runtime_provider_auth_failed
+  | Runtime_provider_network_error
+  | Runtime_provider_server_error
+  | Runtime_provider_endpoint_not_found
+  | Runtime_provider_http_error
+  | Runtime_provider_unknown_http_status
+  | Runtime_provider_skipped_cli
+  | Runtime_provider_invalid_endpoint
+  | Runtime_provider_invalid_execution_transport
+
+type runtime_probe_transport =
+  | Runtime_probe_http
+  | Runtime_probe_cli
+
+type runtime_provider_probe = {
+  rpp_runtime_id : string;
+  rpp_transport : runtime_probe_transport;
+  rpp_status : runtime_provider_status;
+  rpp_reachable : bool option;
+  rpp_http_status : int option;
+  rpp_latency_ms : float option;
+  rpp_error : string option;
+  rpp_checked_at : string;
+}
+
+type runtime_probe_summary = {
+  rpsu_runtimes : int;
+  rpsu_probed : int;
+  rpsu_reachable : int;
+  rpsu_failed : int;
+  rpsu_skipped : int;
+  rpsu_default_runtime_id : string option;
+}
+
+type runtime_probe_snapshot = {
+  rps_generated_at : string;
+  rps_refreshed_at_unix : float option;
+  rps_cache_ttl_sec : float;
+  rps_cache_age_sec : float option;
+  rps_cache_hit : bool;
+  rps_refresh_state : runtime_probe_refresh_state;
+  rps_status : runtime_probe_status;
+  rps_probe_ok : bool;
+  rps_checked_at : string;
+  rps_summary : runtime_probe_summary;
+  rps_providers : runtime_provider_probe list;
+  rps_errors : string list;
+  rps_observations : string list;
+  rps_limitations : string list;
+}
+
+(** One runtime row shared by the Keeper picker and Runtime surface.
+    [ro_is_default] is derived from the document's top-level
+    [default_runtime], not the row's independent binding flag. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_blocked_reason : string option;
+  ro_is_default : bool;
+}
+
+type runtime_resolved_lane = {
+  rrl_id : string;
+  rrl_runtime_ids : string list;
+  rrl_preferred_candidate : string option;
+  rrl_preferred_at_ts : float option;
+      (** Sticky last-success observation, not a failure timestamp. *)
+}
+
+type runtime_resolved_snapshot = {
+  rrs_generated_at_iso : string;
+  rrs_config_path : string option;
+  rrs_default_runtime_id : string option;
+  rrs_runtimes : runtime_option list;
+  rrs_lanes : runtime_resolved_lane list;
+}
+
+(** One lane candidate after an exact [runtime_id] join. Resolved inventory
+    owns provider/model identity; the probe owns only its optional observation.
+    A missing probe is unobserved, never inferred unhealthy. *)
+type runtime_candidate_row = {
+  rcr_lane_id : string;
+  rcr_position : int;
+  rcr_candidate_count : int;
+  rcr_runtime : runtime_option;
+  rcr_preferred_at_ts : float option;
+  rcr_probe : runtime_provider_probe option;
+}
+
+type runtime_surface_snapshot = {
+  rss_probe : runtime_probe_snapshot option;
+      (** Current or last-good optional observation. [None] means no provider
+          probe has been read; resolved lane identity remains usable. *)
+  rss_probe_error : string option;
+      (** Why the latest probe read failed. May coexist with [rss_probe] when
+          a last-good observation was preserved. *)
+  rss_resolved : runtime_resolved_snapshot;
+  rss_candidates : runtime_candidate_row list;
+  rss_unassigned_probe_count : int;
+}
+
+val runtime_probe_refresh_state_to_string : runtime_probe_refresh_state -> string
+val runtime_probe_status_to_string : runtime_probe_status -> string
+val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
 type repository = {
@@ -228,67 +398,236 @@ type verification_snapshot = {
   vs_total : int;  (** Requests the server holds, not the number returned. *)
 }
 
-type feature_proof_status =
-  | Fp_pass
-  | Fp_warn
-  | Fp_fail
-  | Fp_unreadable of string
-      (** A status word this build was not taught. Kept rather than folded
-          into a neighbour: the operator asked whether the feature is proven,
-          and "I cannot read the answer" is not "yes". It counts as a gap. *)
+type keeper_phase
+(** A validated Keeper lifecycle phase from the live roster. The underlying
+    state-machine type stays behind this decoder boundary so TUI executables do
+    not need a second dependency on the Keeper runtime library. *)
 
-type feature_proof = {
-  fp_id : string;
-  fp_label : string;
-  fp_status : feature_proof_status;
-  fp_summary : string;  (** The server's one-line reading, e.g. "3/9 keepers". *)
-  fp_next_action : string;  (** What would turn the gap into evidence. *)
-  fp_keeper_count : int;
-  fp_observed : string list;  (** Keepers with behaviour evidence for it. *)
-  fp_missing : string list;  (** Keepers with none. *)
-  fp_read_errors : string list;
-      (** Keepers whose evidence could not be read at all. Kept apart from
-          [fp_missing]: a keeper that failed to exercise the feature and a
-          keeper whose record would not open are different problems, and
-          counting the second as the first blames the keeper for a read
-          failure. *)
-}
+val keeper_phase_of_string : string -> keeper_phase option
+val keeper_phase_to_string : keeper_phase -> string
 
-type autonomy_snapshot = {
-  au_generated_at : string;
-  au_status : feature_proof_status;  (** The worst status among the features. *)
-  au_features : feature_proof list;
-  au_feature_count : int;
-  au_pass_count : int;
-  au_gap_count : int;  (** Features the server counted as warn or fail. *)
-  au_keeper_count : int;
-  au_window_hours : float option;
-      (** The window the report was computed over, when it was given one.
-          [None] means the report looked at everything it holds. *)
-}
+type keeper_health
+(** A validated keeper health reading — whether the keeper is reporting on
+    time. Behind the decoder boundary for the same reason as {!keeper_phase}:
+    a TUI executable should not need a second dependency on the Keeper runtime
+    library to name one. *)
+
+val keeper_health_of_string : string -> keeper_health option
+val keeper_health_to_string : keeper_health -> string
+
 
 type keeper_runtime = {
   kr_name : string;
-  kr_status : Keeper_status_runtime.surface_status;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
+  kr_phase : keeper_phase;
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
 
-    [kr_status] is the six-member surface vocabulary. It carries no "paused"
-    member: operator pause is durable metadata and reaches the TUI on
-    {!keeper} instead. A reader that wants the published control-plane status
-    composes the two the way the operator snapshot does. *)
+    One keeper is described by four separate readings and each has its own
+    field here: [kr_phase] is the lifecycle cell, [kr_health] is whether the
+    keeper is reporting on time, [kr_paused] is whether a person stopped it,
+    and [kr_next_action] is what the runtime derived to do about it.
+
+    [kr_next_action] is [None] when the runtime named no action, which is not
+    the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, truncated, total)]. A row whose [status] is outside the surface
-    vocabulary fails the whole reading rather than defaulting, so producer
+    [(rows, truncated, total)]. A row whose [status] or lifecycle [phase] is
+    outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph. *)
+
+(** Lifecycle value shown by the Lanes surface. The composite endpoint is an
+    operator projection whose vocabulary can grow before this binary does, so
+    an unknown value remains visible instead of becoming a familiar phase. *)
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+val keeper_lane_phase_to_string : keeper_lane_phase -> string
+
+(** Turn-cycle value shown beside {!keeper_lane_phase}. *)
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+val keeper_lane_turn_phase_to_string : keeper_lane_turn_phase -> string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+      (** The producer's determining condition, or [None] when no condition
+          currently determines the phase. *)
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
+}
+
+val decode_keeper_lanes_snapshot :
+  Yojson.Safe.t -> (keeper_lanes_snapshot, string) result
+(** Decode the fields the Lanes table reads from
+    [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
+    the reading; additional producer fields are outside this light
+    projection and do not. *)
+
+(** Closed lifecycle vocabulary emitted by the Fusion run registry. A failed
+    run carries the registry's typed failure fields rather than flattening
+    them into a display string. *)
+type fusion_run_status =
+  | Fusion_running
+  | Fusion_completed
+  | Fusion_failed of {
+      frs_failure_code : string;
+      frs_error : string;
+    }
+
+val fusion_run_status_to_string : fusion_run_status -> string
+
+type fusion_run = {
+  fur_run_id : string;
+  fur_keeper : string;
+  fur_preset : string;
+  fur_topology : Fusion_types.fusion_topology;
+  fur_started_at : float;
+  fur_status : fusion_run_status;
+}
+
+type fusion_snapshot = {
+  fus_generated_at : string;
+  fus_runs : fusion_run list;
+}
+
+type fusion_panel_answer = {
+  fpa_model : string;
+  fpa_answer : string;
+  fpa_input_tokens : int;
+  fpa_output_tokens : int;
+}
+
+type fusion_panel_failure = {
+  fpf_model : string;
+  fpf_reason_code : string;
+  fpf_reason_detail : string;
+}
+
+type fusion_panel_result =
+  | Fusion_panel_answered of fusion_panel_answer
+  | Fusion_panel_failed of fusion_panel_failure
+
+type fusion_judge =
+  | Fusion_judge_synthesized of {
+      fj_decision : string;
+      fj_resolved_answer : string;
+      fj_reason : string;
+    }
+  | Fusion_judge_failed of {
+      fj_failure_code : string;
+      fj_error : string;
+    }
+
+type fusion_evidence = {
+  fe_post_id : string;
+  fe_title : string;
+  fe_question : string;
+  fe_panel : fusion_panel_result list;
+  fe_judge : fusion_judge;
+}
+
+type fusion_evidence_status =
+  | Fusion_evidence_recorded
+  | Fusion_evidence_pending
+  | Fusion_evidence_absent
+
+type fusion_detail = {
+  fud_generated_at : string;
+  fud_run : fusion_run;
+  fud_evidence_status : fusion_evidence_status;
+  fud_evidence : fusion_evidence option;
+}
+
+val decode_fusion_snapshot : Yojson.Safe.t -> (fusion_snapshot, string) result
+(** Decode the retained registry list from
+    [GET /api/v1/dashboard/fusion-runs]. The published count must equal the
+    decoded row count; unknown lifecycle labels reject the reading. *)
+
+val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
+(** Decode one exact run/evidence projection. [recorded] requires a Board post
+    whose typed origin is exactly [source=fusion] and whose [fusion_run_id]
+    matches the registry row. [pending] and [absent] require [post:null], and
+    only a running row may be pending. Panel array order is retained. *)
+
+(** One tool call a keeper is holding for an operator's answer, from
+    [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
+    clock's epoch reading when the wait opened. *)
+type keeper_tool_approval = {
+  kta_keeper : string;
+  kta_tool_call_id : string;
+  kta_tool : string;
+  kta_args : string;
+  kta_question : string;
+  kta_asked_at : float;
+  kta_timeout_sec : float;
+}
+
+val decode_tool_approval_mode_overrides :
+  Yojson.Safe.t -> ((string * string) list, string) result
+(** Decode [GET /api/v1/keepers/tool-approval-mode]'s
+    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+
+val decode_keeper_tool_approvals :
+  Yojson.Safe.t -> (keeper_tool_approval list, string) result
+(** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with
+    missing or mistyped fields rather than dropping them. *)
+
+(** Where one keeper points today. [ra_source] is the server's word:
+    ["default"] rides the fleet default, ["explicit"] was assigned. *)
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;
+  ra_target_id : string option;
+      (** Resolved lane id, or [None] when the assignment is missing. *)
+}
+
+val decode_runtime_resolved :
+  Yojson.Safe.t ->
+  (runtime_option list * runtime_assignment list, string) result
+(** Decode the shared resolved-runtime document once, then project its runtime
+    catalogue and keeper assignments for the picker, both in server order. *)
 
 type fleet_safety = {
   fs_status : string;
@@ -388,6 +727,39 @@ val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 val decode_connector_snapshot :
   Yojson.Safe.t -> (connector_snapshot, string) result
 
+val decode_runtime_probe_snapshot :
+  Yojson.Safe.t -> (runtime_probe_snapshot, string) result
+(** Strict decoder for [GET /api/v1/dashboard/runtime-probe]. It accepts only
+    the producer's closed status vocabularies, requires the cache and provider
+    fields the Runtime surface draws, and rejects count/reachability/default
+    identity contradictions instead of repairing them locally. *)
+
+val decode_runtime_resolved_snapshot :
+  Yojson.Safe.t -> (runtime_resolved_snapshot, string) result
+(** Strict Runtime-surface slice of [GET /api/v1/runtime/resolved]. Runtime and
+    lane identities must be unique, lane candidates must exist, and sticky
+    preferred candidate/time fields must be present or absent together.
+    Assignment and max-context fields belong to other consumers and are not
+    duplicated into this light projection. *)
+
+val decode_runtime_surface_snapshot :
+  probe_json:Yojson.Safe.t ->
+  resolved_json:Yojson.Safe.t ->
+  (runtime_surface_snapshot, string) result
+(** Decode and join the two server-owned projections by exact [runtime_id],
+    preserving lane and candidate order. Extra probe rows are counted; a lane
+    candidate absent from a stale probe remains [None]. *)
+
+val join_runtime_surface :
+  probe:runtime_probe_snapshot option ->
+  probe_error:string option ->
+  resolved:runtime_resolved_snapshot ->
+  (runtime_surface_snapshot, string) result
+(** Join a decoded resolved document to a current or last-good optional probe.
+    A probe error has a smaller failure radius than resolved identity: it is
+    carried beside unobserved or preserved probe rows rather than erasing the
+    lane table. *)
+
 val decode_repository_snapshot :
   Yojson.Safe.t -> (repository_snapshot, string) result
 
@@ -396,19 +768,6 @@ val decode_harness_snapshot :
 
 val decode_verification_snapshot :
   Yojson.Safe.t -> (verification_snapshot, string) result
-
-val decode_autonomy_snapshot :
-  Yojson.Safe.t -> (autonomy_snapshot, string) result
-(** Reads [GET /api/v1/dashboard/keeper-feature-proof]: which autonomy
-    features have current behaviour evidence and which still need it. *)
-
-val feature_proof_status_label : feature_proof_status -> string
-(** Fixed-width label for the status column. *)
-
-val feature_proof_is_gap : feature_proof_status -> bool
-(** Whether the status leaves the feature unproven. An unreadable status
-    counts as a gap, so a status word this build does not know can never be
-    drawn as evidence that the feature works. *)
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result
@@ -439,11 +798,26 @@ val decode_json_response_body :
     outcome; a shape the endpoints never send is an error, not a guessed
     success. *)
 val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
+
+(** Decode one SGR mouse report into the [up]/[down] key a wheel turns
+    into, or [None] for reports nothing consumes (clicks, releases,
+    horizontal wheel). [parameters] is the raw CSI parameter span
+    (["<64;10;5"]), [final] the CSI final byte. *)
+val sgr_wheel_key : string -> char -> string option
+
+(** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
+    bytes) into [wheel-up] / [wheel-down].
+
+    Terminals without SGR ([?1006]) support answer the tracking request in this
+    older shape; Apple Terminal, the macOS default, is one. The three bytes
+    after [CSI M] must be consumed whatever this returns — left in the stream
+    they are read as ordinary text. Buttons other than the two wheel ones
+    return [None]. *)
+val x10_wheel_key : char -> string option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
-val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result

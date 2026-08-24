@@ -6,12 +6,26 @@
     composition catalog exists. *)
 val plan_execute_tool_name : string
 
+val plan_execute_input_schema : Yojson.Safe.t
+(** The plan's input schema, beside its name because it is the same kind of
+    fact: what the tool publishes, not how it is built.
+
+    The four input template shapes are stated here as well as in the
+    description. That tells the model the shape; it does not hold it to one --
+    [Tool_input_validation.validate_args] reads [oneOf] and [properties] off
+    the top-level schema only, and these sit inside [nodes.items]. The refusal
+    still comes from [Keeper_tool_plan]. *)
+
 (** Execution-semantics kind (RFC-0386) of the model-defined plan tool:
     [Keeper_tool_descriptor.Batch_plan_tool]. *)
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 val make_tools
-  :  ?catalog:Keeper_tool_composition_catalog.t
+  :  ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
+       (** Composition entries declared by skills
+           ({!Keeper_skill_catalog.composition_entries}). Same validated type
+           as catalog entries; materialized by the same closure. The caller
+           that loaded both catalogs refuses cross-source name collisions. *)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

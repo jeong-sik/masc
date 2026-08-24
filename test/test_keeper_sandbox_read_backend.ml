@@ -849,7 +849,7 @@ case \"$1\" in\n\
         exit 1\n\
         ;;\n\
       rm-gone)\n\
-        printf '\\t100.000\\tfalse\\t600\\n'\n\
+        printf '4242\\t100.000\\tfalse\\t600\\n'\n\
         exit 0\n\
         ;;\n\
     esac\n\

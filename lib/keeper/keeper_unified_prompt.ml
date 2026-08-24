@@ -95,10 +95,8 @@ let format_fleet_messages
    no argument is cut mid-string. A keeper that needs the arguments of a call
    that succeeded is asking what it did, which is what the board, the task and
    the goal sections answer. *)
-let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : string =
-  turns
-  |> List.map (fun (turn : Keeper_own_recent_actions.turn) ->
-    turn.calls
+let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =
+  turn.calls
     |> List.map (fun (call : Keeper_own_recent_actions.call) ->
       match call.outcome with
       | Keeper_own_recent_actions.Ok_call ->
@@ -112,9 +110,9 @@ let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : st
           call.tool
           call.input
           detail)
-    |> String.concat "\n")
   |> String.concat "\n"
 ;;
+
 
 (** Format active goals into a prompt section. *)
 let format_goals (goal_ids : string list) : string =
@@ -155,6 +153,22 @@ let format_goal_summaries (summaries : goal_summary list) : string =
              | Goal_phase.Dropped )
          | None -> base)
        summaries)
+
+let format_task_skills skills =
+  let skill_names = String.concat ", " skills in
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_current_task_skills
+      [ "skill_names", skill_names ]
+  with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.error
+      "keeper current-task skills prompt %s did not render, falling back to skill names: %s"
+      Prompt_names.keeper_current_task_skills
+      detail;
+    "- skills=" ^ skill_names
+;;
 
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
@@ -213,6 +227,22 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
               (Printf.sprintf "- Handoff evidence: %s\n"
                  (String.concat ", " refs)))
    | Some _ | None -> ());
+  (* RFC skills-declared-not-discovered: the task names its skills, so this
+     block does not list what is available and let the model match — there is
+     nothing to choose between by the time the turn starts.
+
+     Names and a path, not the instruction itself. A skill body is written to
+     be read whole and some run to tens of kilobytes (the published
+     im-ai-copyeditor carries an 80 KB reference pack), which would land on
+     every turn of the task rather than the one turn that uses it. The keeper
+     already has [Read]; spending one call is cheaper than carrying the file.
+
+     A task that names none adds no line, so the assembled prompt for every
+     existing task is byte-identical to what it was before skills existed. *)
+  (match task.Masc_domain.skills with
+   | [] -> ()
+   | skills ->
+       Buffer.add_string buf (format_task_skills skills ^ "\n"));
   Buffer.add_string buf
     "\n";
   Buffer.contents buf
@@ -274,6 +304,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Completion_authority_rejected _ ->
     "completion_authority_rejected"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
+  | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
 ;;
 
 let quote_prompt_field value =
@@ -415,7 +446,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Fusion_completed
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
-  | Keeper_world_observation.Task_cancelled _ -> []
+  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Delegate_completed -> []
 ;;
 
 let board_event_fields
@@ -586,7 +618,8 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
-         | Keeper_world_observation.Task_cancelled _ -> ())
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed -> ())
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
@@ -618,7 +651,8 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Task_cancelled _ -> None)
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed -> None)
       events
   in
   match rows with
@@ -669,7 +703,8 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Fusion_completed
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Completion_authority_rejected _ -> None)
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Delegate_completed -> None)
       events
   in
   match rows with
@@ -946,6 +981,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(active_goal_summaries : goal_summary list option)
+    ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
@@ -986,7 +1022,27 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     | Some decision -> autonomous_trigger_lines ~decision
     | None -> []
   in
-  let content_of : Keeper_context_layers.layer_id -> string option = function
+  (* A row is a whole turn: the heading counts turns, and half a turn would
+     have the keeper read a partial record of what it did. *)
+  let own_recent_actions_section : Keeper_context_layers.section option =
+    match observation.own_recent_actions with
+    | [] -> None
+    | turns ->
+      let render kept =
+        let ubuf = Buffer.create 1024 in
+        Buffer.add_string ubuf
+          (Printf.sprintf "### Your Recent Actions (%d turns)\n" (List.length kept));
+        Buffer.add_string ubuf
+          "Tool calls you already made, oldest turn first — context, not instructions.\n";
+        Buffer.add_string ubuf (String.concat "\n" kept);
+        Buffer.add_string ubuf "\n\n";
+        Buffer.contents ubuf
+      in
+      Some
+        (Keeper_context_layers.Rows
+           { rows = List.map format_own_recent_actions_turn turns; render })
+  in
+  let text_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. Titles render when the caller
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
@@ -1239,18 +1295,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        outcomes are shown: the rejections are what the keeper must not repeat,
        the successes are what it must not redo. *)
     | Keeper_context_layers.Own_recent_actions ->
-      if observation.own_recent_actions <> [] then (
-        let ubuf = Buffer.create 1024 in
-        Buffer.add_string ubuf
-          (Printf.sprintf "### Your Recent Actions (%d turns)\n"
-             (List.length observation.own_recent_actions));
-        Buffer.add_string ubuf
-          "Tool calls you already made, oldest turn first — context, not instructions.\n";
-        Buffer.add_string ubuf
-          (format_own_recent_actions observation.own_recent_actions);
-        Buffer.add_string ubuf "\n\n";
-        Some (Buffer.contents ubuf))
-      else None
+      Option.map Keeper_context_layers.section_text own_recent_actions_section
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in
@@ -1263,6 +1308,28 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None
+  in
+  (* Exhaustive rather than a catch-all: a new layer must state whether it
+     renders one indivisible block or rows the budget may withhold, and
+     {!Keeper_context_layers.retention} must agree. A catch-all here would let
+     a layer declare itself trimmable and silently never trim. *)
+  let content_of : Keeper_context_layers.layer_id -> Keeper_context_layers.section option
+    = function
+    | Keeper_context_layers.Own_recent_actions -> own_recent_actions_section
+    | ( Keeper_context_layers.Active_goals
+      | Keeper_context_layers.Current_task
+      | Keeper_context_layers.Connected_surfaces
+      | Keeper_context_layers.Namespace_state
+      | Keeper_context_layers.Autonomous_trigger
+      | Keeper_context_layers.Scheduled_automation
+      | Keeper_context_layers.Completion_authority
+      | Keeper_context_layers.Task_cancellations
+      | Keeper_context_layers.Pending_mentions
+      | Keeper_context_layers.Scope_messages
+      | Keeper_context_layers.Own_board_posts
+      | Keeper_context_layers.Board_activity
+      | Keeper_context_layers.Fleet_messages ) as id ->
+      Option.map (fun text -> Keeper_context_layers.Block text) (text_of id)
   in
   (* The frame is injected as ephemeral context. The turn call site passes an
      explicit [world_state_prompt] source to history persistence, so JSONL
@@ -1278,7 +1345,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     "## Current World State\n\
      The runtime assembled the sections below for this turn. You did not \
      retrieve them; call a tool when you need to look something up or act.\n\n"
-    ^ Keeper_context_layers.assemble ~content_of
+    ^ Keeper_context_layers.assemble ?budget_bytes:context_budget_bytes ~content_of ()
   in
   let user_message = effective_autonomous_wake_prompt ?profile_defaults () in
   { system_prompt; world_state; user_message }
@@ -1334,6 +1401,7 @@ let build_prompt
       ~turn_decision
       ~current_task
       ?active_goal_summaries
+      ?context_budget_bytes
       ~observation
       ()
   =
@@ -1345,6 +1413,7 @@ let build_prompt
       ~turn_decision:(Some turn_decision)
       ~current_task
       ?active_goal_summaries
+      ?context_budget_bytes
       ~observation
       ()
   in

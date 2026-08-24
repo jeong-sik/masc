@@ -24,10 +24,6 @@ end
 
 (** {1 String / JSON helpers} *)
 
-(** [trim_to_option raw] returns [Some s] iff [s = String.trim raw]
-    is non-empty, else [None].  Used for "treat empty string as
-    missing" semantics on JSON / shell inputs. *)
-
 val int_member : Yojson.Safe.t -> string -> int option
 (** [int_member json key] reads [json.key] as an int.  Accepts both
     [\`Int n] and [\`Intlit s] (parsed via [parse_int_opt]).  Returns

@@ -81,6 +81,82 @@ let save_ok ~session_dir ckpt label =
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
+(* Three writers reach this store. Only one ran the structural check first --
+   the mid-run sink and finalize assemble a checkpoint directly and called the
+   store straight -- so a history with an orphan tool result was admitted by
+   the two hottest paths and reloaded later (#25561). The check now lives at
+   the boundary all three pass through. *)
+let checkpoint_with_orphan_tool_result ~session_id =
+  let messages =
+    [ Agent_core.Types.
+        { role = User
+        ; content = [ Text "hello" ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      (* A result for a tool call that was never requested. *)
+    ; Agent_core.Types.
+        { role = Tool
+        ; content = [ ToolResult { tool_use_id = "tu-never-requested"; content = "x"; outcome = Tool_succeeded; json = None; content_blocks = None } ]
+        ; name = None
+        ; tool_call_id = Some "tu-never-requested"
+        ; metadata = []
+        }
+    ]
+  in
+  { (make_checkpoint ~session_id ~turn_count:1 ~marker:"orphan") with
+    Agent_core.Checkpoint.messages
+  }
+;;
+
+let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "structural-guard" in
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~session_dir
+      (checkpoint_with_orphan_tool_result ~session_id:sid)
+  with
+  | Ok _ -> fail "a checkpoint with an orphan tool result must not be saved"
+  | Error message ->
+    check
+      bool
+      "the refusal names the structural contract"
+      true
+      (let needle = "structurally invalid" in
+       let n = String.length needle in
+       let rec at i =
+         i + n <= String.length message
+         && (String.equal (String.sub message i n) needle || at (i + 1))
+       in
+       at 0);
+    (* Nothing was written: a refused checkpoint must not leave a partial file
+       the next load would read. *)
+    let path =
+      Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+    in
+    check bool "no checkpoint file was created" false (Sys.file_exists path)
+;;
+
+let test_valid_checkpoint_still_saves () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "structural-guard-ok" in
+  save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"ok") "valid save";
+  let path =
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid
+  in
+  check bool "a valid checkpoint is written" true (Sys.file_exists path)
+;;
+
 let test_run_context_binds_generation_before_agent_core_checkpoint () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1003,5 +1079,9 @@ let () =
             test_post_commit_unwind_is_installed;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
+          test_case "structurally invalid checkpoint is refused at the store" `Quick
+            test_structurally_invalid_checkpoint_is_refused_at_the_store;
+          test_case "a valid checkpoint still saves" `Quick
+            test_valid_checkpoint_still_saves;
         ] );
     ]

@@ -275,6 +275,17 @@ let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
 
+let is_valid_utf8 s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len then true
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then loop (i + dlen) else false
+  in
+  loop 0
+
 let utf8_prefix ~max_bytes s =
   if max_bytes <= 0 then ""
   else
@@ -286,11 +297,10 @@ let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v
 
-let option_trim = function
-  | None -> None
-  | Some s ->
-    let v = String.trim s in
-    if v = "" then None else Some v
+(* The .mli says this maps trim_nonempty over an option, and it now does.
+   Written out a second time, the two could drift apart under a one-sided
+   edit -- which is the shape #26618 was filed about. *)
+let option_trim opt = Option.bind opt trim_nonempty
 
 let strip_trailing_cr s =
   let len = String.length s in

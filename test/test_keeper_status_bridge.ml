@@ -88,6 +88,49 @@ let test_shutdown_phase_names_are_pinned () =
   check "joined_idle" Keeper_shutdown_types.Joined_idle
 ;;
 
+(* [quiet_reason] and [next_action_path] cross into the dashboard as bare
+   strings. There the union is checked by membership: an unlisted
+   [next_action_path] makes normalizeKeeperDiagnostic drop the whole
+   diagnostic, and an unlisted [quiet_reason] silently erases the reason. The
+   compiler cannot see a TypeScript union, so the match below pins each
+   constructor's wire form — adding one is a compile error here, and the list
+   it must be added to is the same list dashboard/src/types/core.ts mirrors. *)
+let quiet_reason_wire =
+  let open Keeper_status_runtime in
+  [ Proactive_disabled; Keepalive_not_running; Starting_up; Never_started ]
+  |> List.map (fun reason ->
+       ( match reason with
+         | Proactive_disabled -> "disabled"
+         | Keepalive_not_running -> "not_running"
+         | Starting_up -> "startup"
+         | Never_started -> "never_started" )
+       , keeper_quiet_reason_to_string reason )
+;;
+
+let next_action_path_wire =
+  let open Keeper_status_runtime in
+  [ Auto_restart; Recover; Probe; Direct_message ]
+  |> List.map (fun path ->
+       ( match path with
+         | Auto_restart -> "auto_restart"
+         | Recover -> "recover"
+         | Probe -> "probe"
+         | Direct_message -> "direct_message" )
+       , keeper_next_action_path_to_string path )
+;;
+
+let test_quiet_reason_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    quiet_reason_wire
+;;
+
+let test_next_action_path_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    next_action_path_wire
+;;
+
 let shutdown_operation_with_phase phase =
   let trace_id =
     match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
@@ -294,6 +337,93 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
         (latest_tool_names ()))
 ;;
 
+(* Every failure_reason the registry can hold, so a new variant lands here
+   rather than reaching the trust snapshot as an undecodable string. The
+   producer emits blocker_class as a string and the consumer parses it with
+   Keeper_meta_contract.blocker_class_of_serialized_string; the two
+   vocabularies are not the same set (#25797). *)
+let every_failure_reason : Keeper_registry.failure_reason list =
+  [ Keeper_registry.Heartbeat_consecutive_failures 3
+  ; Keeper_registry.Turn_consecutive_failures 2
+  ; Keeper_registry.Stale_termination_storm { count = 4 }
+  ; Keeper_registry.Provider_runtime_error
+      { code = "api_error_500"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = Some 500
+      ; runtime_id = None
+      ; agent_core_timeout = None
+      ; reason = None
+      }
+  ; Keeper_registry.Turn_overflow_failure
+  ; Keeper_registry.Operator_interrupt
+  ; Keeper_registry.Exception "boom"
+  ]
+;;
+
+let test_undecodable_blocker_classes_are_named_not_counted () =
+  let undecodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> None
+           | None -> Some surface.Keeper_status_bridge.blocker_class))
+      every_failure_reason
+  in
+  (* This is the gap the issue reports, pinned as a list rather than a count:
+     when a class is taught to the decoder it leaves this list, and when a new
+     producer class appears it joins it. Either way the diff names it. *)
+  Alcotest.(check (slist string String.compare))
+    "classes the trust-snapshot decoder does not know"
+    [ "exception"
+    ; "heartbeat_failures"
+    ; "operator_interrupt"
+    ; "provider_runtime_error"
+    ; "stale_termination_storm"
+    ; "turn_failures"
+    ; "turn_overflow_failure"
+    ]
+    undecodable
+;;
+
+let test_decodable_blocker_classes_stay_decodable () =
+  let decodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> Some surface.Keeper_status_bridge.blocker_class
+           | None -> None))
+      every_failure_reason
+  in
+  (* Today every producer class is undecodable, so this list is empty. The
+     assertion is that the complement is computed at all: when a class is
+     taught to the decoder it has to appear here, and a run where the producer
+     stopped emitting anything would show up as both lists empty. *)
+  Alcotest.(check int)
+    "producer classes that decode today"
+    0
+    (List.length decodable);
+  Alcotest.(check bool)
+    "the producer does emit classes"
+    true
+    (List.exists
+       (fun reason ->
+         Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason <> None)
+       every_failure_reason)
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
@@ -336,5 +466,26 @@ let () =
             `Quick
             test_admission_fence_is_any_not_latest;
         ] );
+      ( "keeper diagnostic wire vocabulary",
+        [
+          Alcotest.test_case
+            "quiet_reason strings are pinned for the dashboard union"
+            `Quick
+            test_quiet_reason_wire_strings_are_pinned;
+          Alcotest.test_case
+            "next_action_path strings are pinned for the dashboard union"
+            `Quick
+            test_next_action_path_wire_strings_are_pinned;
+        ] );
+    ( "blocker_class_vocabulary"
+    , [ Alcotest.test_case
+          "undecodable producer classes are named"
+          `Quick
+          test_undecodable_blocker_classes_are_named_not_counted
+      ; Alcotest.test_case
+          "decodable classes still decode"
+          `Quick
+          test_decodable_blocker_classes_stay_decodable
+      ] );
     ]
 ;;

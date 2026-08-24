@@ -1200,6 +1200,74 @@ let%test "build_request serializes disabled thinking for deepseek-v4-pro" =
   && json |> member "reasoning_effort" = `Null
 ;;
 
+(* ollama.com/v1 serves deepseek-v4-flash:0731 over chat/completions, and a
+   live probe (2026-08-24) shows the endpoint honours reasoning_effort: "none"
+   returns an empty reasoning field and 2 completion tokens where an
+   uncontrolled request returns 54 reasoning characters and 17. Declaring
+   No_thinking_control instead leaves masc with nothing to emit, so the model
+   reasons on every turn with no way to stop it. These two tests hold the
+   difference between the two declarations. *)
+let ollama_cloud_reasoning_effort_capabilities =
+  { Capabilities.openai_compat_chat_capabilities with
+    supports_reasoning = true
+  ; supports_extended_thinking = true
+  ; supports_reasoning_budget = false
+  ; thinking_control_format = Capabilities.Reasoning_effort
+  ; accepted_reasoning_efforts = Some [ Reasoning_effort.None_; Reasoning_effort.High ]
+  }
+;;
+
+let ollama_cloud_no_thinking_control_capabilities =
+  { ollama_cloud_reasoning_effort_capabilities with
+    thinking_control_format = Capabilities.No_thinking_control
+  }
+;;
+
+let[@warning "-32"] ollama_cloud_config ~capabilities ?reasoning_effort () =
+  Provider_config.make
+    ~kind:OpenAI_compat
+    ~model_id:"deepseek-v4-flash:0731"
+    ~base_url:"https://ollama.com/v1"
+    ?reasoning_effort
+    ~model_capabilities_override:capabilities
+    ()
+;;
+
+let%test "reasoning-effort none reaches the wire under the Reasoning_effort dialect" =
+  let config =
+    ollama_cloud_config
+      ~capabilities:ollama_cloud_reasoning_effort_capabilities
+      ~reasoning_effort:Reasoning_effort.None_
+      ()
+  in
+  let body = build_request ~config ~messages:[] () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  json |> member "reasoning_effort" |> to_string = "none"
+;;
+
+let%test "No_thinking_control leaves the effort unexpressible, not merely unsent" =
+  let config =
+    ollama_cloud_config
+      ~capabilities:ollama_cloud_no_thinking_control_capabilities
+      ~reasoning_effort:Reasoning_effort.None_
+      ()
+  in
+  match build_request ~config ~messages:[] () with
+  | _ -> false
+  | exception Invalid_argument message ->
+    (* The declaration, not the endpoint, is what refuses. Declaring
+       No_thinking_control for a model whose wire does accept the control
+       means the request cannot carry it at all. *)
+    let needle = "reasoning_effort is unsupported" in
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length message
+      && (String.equal (String.sub message i n) needle || scan (i + 1))
+    in
+    scan 0
+;;
+
 let%test "openai compat does not infer ZAI thinking from bare GLM model or URL" =
   let config =
     Provider_config.make

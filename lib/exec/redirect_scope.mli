@@ -25,6 +25,15 @@ type target =
 type t =
   | File of { fd : int; target : target; mode : mode }
   | Fd_to_fd of { src : int; dst : int }
+  | Literal of { bytes : string }
+      (** bytes handed to the child's stdin directly, with no file anywhere. A
+          heredoc is this: bash spells [<<] as a redirection operator, and what
+          it redirects from is content rather than a path.
+
+          There is no descriptor field because bash has no operator that hands
+          bytes to any descriptor but stdin. Carrying one would have made a
+          state the caller cannot mean, answered at run time with a fabricated
+          exit status for a process that never ran. *)
 
 val on_this_host : Path_scope.t -> string -> target
 (** [on_this_host as_written path] marks [path] as openable here. *)

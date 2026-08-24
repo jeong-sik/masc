@@ -10,9 +10,7 @@ type call =
   ; route_evidence : Yojson.Safe.t option
   }
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
+let trim_nonempty = String_util.trim_nonempty
 
 let label = function
   | Tool_name value -> "tool_name:" ^ value
@@ -44,51 +42,32 @@ let string_field json key =
 
 let errorf fmt = Printf.ksprintf (fun msg -> Error msg) fmt
 
+(* The accepted spellings are exactly the ones [to_yojson] writes. *)
 let of_kind_value ~kind ~value =
   match String.lowercase_ascii (String.trim kind), trim_nonempty value with
   | _, None -> errorf "tool selector %S has empty value" kind
-  | ("tool_name" | "tool" | "name"), Some value -> Ok (Tool_name value)
-  | ("descriptor_id" | "descriptor"), Some value -> Ok (Descriptor_id value)
-  | ("runtime_handler" | "handler"), Some value -> Ok (Runtime_handler value)
-  | ("eval_tag" | "tag"), Some value -> Ok (Eval_tag value)
+  | "tool_name", Some value -> Ok (Tool_name value)
+  | "descriptor_id", Some value -> Ok (Descriptor_id value)
+  | "runtime_handler", Some value -> Ok (Runtime_handler value)
+  | "eval_tag", Some value -> Ok (Eval_tag value)
   | other, Some _ -> errorf "unknown tool selector type: %s" other
 
+(* [to_yojson] writes a ["type"]-tagged object, and that is the only shape
+   read back. Every other JSON is a decode error. *)
 let of_yojson = function
-  | `String value -> (
-      match trim_nonempty value with
-      | Some value -> Ok (Tool_name value)
-      | None -> Error "tool selector string must be non-empty")
   | `Assoc _ as json -> (
-      match string_field json "type", string_field json "kind" with
-      | Some "receipt_label", _ | _, Some "receipt_label" -> (
+      match string_field json "type" with
+      | Some "receipt_label" -> (
           match string_field json "key", string_field json "value" with
           | Some key, Some value -> Ok (Receipt_label (key, value))
           | _ -> Error "receipt_label selector requires non-empty key and value")
-      | Some kind, _ -> (
+      | Some kind -> (
           match string_field json "value" with
           | Some value -> of_kind_value ~kind ~value
           | None -> errorf "tool selector %S requires non-empty value" kind)
-      | None, Some kind -> (
-          match string_field json "value" with
-          | Some value -> of_kind_value ~kind ~value
-          | None -> errorf "tool selector %S requires non-empty value" kind)
-      | None, None -> (
-          match
-            string_field json "tool_name",
-            string_field json "descriptor_id",
-            string_field json "runtime_handler",
-            string_field json "eval_tag"
-          with
-          | Some value, _, _, _ -> Ok (Tool_name value)
-          | _, Some value, _, _ -> Ok (Descriptor_id value)
-          | _, _, Some value, _ -> Ok (Runtime_handler value)
-          | _, _, _, Some value -> Ok (Eval_tag value)
-          | None, None, None, None ->
-              Error
-                "tool selector object requires type/value or one selector field"))
+      | None -> Error "tool selector object requires a non-empty \"type\"")
   | other ->
-      errorf "tool selector must be string or object, got %s"
-        (Json_util.kind_name other)
+      errorf "tool selector must be an object, got %s" (Json_util.kind_name other)
 
 let route_string_field field route_evidence =
   match route_evidence with

@@ -12,7 +12,31 @@
 
 module Binding = Runtime_provider_binding
 
-let default_registry = Llm_provider.Provider_registry.default ()
+(* Built on first use rather than at link time. Building it reads the embedded
+   model catalog, and that read reports through the provider layer's
+   diagnostics -- at link time, which is before any program has said where its
+   diagnostics should go. Every binary that links this paid for that: the line
+   landed on the TUI's own terminal, between two frames, and the frame
+   presenter's picture of the screen was no longer the screen.
+
+   Memoised through an atomic rather than [lazy], which two domains cannot
+   safely force, and published with compare-and-set so a race leaves one
+   registry rather than two that can be registered into separately. *)
+let default_registry_cell :
+    Llm_provider.Provider_registry.t option Atomic.t =
+  Atomic.make None
+
+let default_registry () =
+  match Atomic.get default_registry_cell with
+  | Some registry -> registry
+  | None ->
+      let built = Llm_provider.Provider_registry.default () in
+      if Atomic.compare_and_set default_registry_cell None (Some built)
+      then built
+      else (
+        match Atomic.get default_registry_cell with
+        | Some registry -> registry
+        | None -> built)
 
 (** Split a ["provider:model_id"] string at the first colon. Delegates to the
     canonical leaf {!Runtime_model_id_split}. *)
@@ -181,7 +205,7 @@ let parse_model_string
      | Unknown _ -> None
      | Custom_url _ -> None
      | Registered { provider_name; model_id; kind = resolved_kind } ->
-       (match Llm_provider.Provider_registry.find default_registry provider_name with
+       (match Llm_provider.Provider_registry.find (default_registry ()) provider_name with
         | None -> None
         | Some entry when not (entry.is_available ()) -> None
         | Some entry ->

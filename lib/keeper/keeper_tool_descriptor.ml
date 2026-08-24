@@ -327,111 +327,8 @@ let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false) ()
   }
 ;;
 
-let property name typ description =
-  name, `Assoc [ "type", `String typ; "description", `String description ]
-;;
-
-let string_enum_property name values description =
-  ( name
-  , `Assoc
-      [ "type", `String "string"
-      ; "enum", `List (List.map (fun value -> `String value) values)
-      ; "description", `String description
-      ] )
-;;
-
-let object_schema ?(required = []) properties =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc properties
-    ; "required", `List (List.map (fun n -> `String n) required)
-    ]
-;;
-
-let closed_object_schema ?(required = []) properties =
-  match object_schema ~required properties with
-  | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
-  | schema -> schema
-;;
-
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
-let read_file_schema =
-  closed_object_schema
-    ~required:[ "file_path" ]
-    [ property
-        "file_path"
-        "string"
-        "Existing file path to read. Relative paths resolve against cwd when cwd is \
-         provided, otherwise against your workspace root. Read does not inherit Execute \
-         cwd implicitly; pass cwd explicitly or give a path relative to the workspace \
-         root."
-    ; property
-        "cwd"
-        "string"
-        "Optional directory, relative to your workspace root, to resolve file_path \
-         from. This is explicit only; Read never inherits the previous Execute cwd."
-    ; property
-        "offset"
-        "integer"
-        "1-based line number to start reading from (default 1). To continue a \
-         truncated read, pass the next_offset value from the previous response."
-    ; property
-        "limit"
-        "integer"
-        "Maximum number of LINES to return, counted from offset. The response \
-         is additionally bounded by a byte budget; when more content remains, \
-         the payload sets truncated=true and next_offset for the follow-up \
-         call."
-    ]
-;;
-
-let edit_file_schema =
-  object_schema
-    ~required:[ "file_path"; "old_string"; "new_string" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or sandbox-relative file path to edit. The file must exist."
-    ; property
-        "old_string"
-        "string"
-        "Exact substring to replace. Must occur exactly once unless replace_all=true."
-    ; property
-        "new_string"
-        "string"
-        "Replacement substring. Pass an empty string to delete old_string."
-    ; property
-        "replace_all"
-        "boolean"
-        "Default false. When true, replaces every occurrence of old_string."
-    ]
-;;
-
-let write_file_schema =
-  object_schema
-    ~required:[ "file_path"; "content" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or sandbox-relative file path. Parent directories are created as needed."
-    ; property "content" "string" "Full file content. Overwrites the existing file."
-    ]
-;;
-
-let search_files_schema =
-  object_schema
-    ~required:[ "pattern" ]
-    [ property "pattern" "string" "Regular expression to search file contents for (ripgrep)."
-    ; property
-        "path"
-        "string"
-        "Directory or file to search in. Defaults to the keeper sandbox when omitted."
-    ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
-    ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
-    ; property "-i" "boolean" "Case-insensitive search."
-    ]
-;;
 
 (* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
    line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
@@ -780,18 +677,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.search_files"
       ~public_name:"Grep"
       ~internal_name:"tool_search_files"
-      ~description:
-        "Search file contents with ripgrep: provide a regex `pattern` (and \
-         optionally path/glob/type). To list a directory, read a file, or run \
-         git status/log/diff, use the Execute tool (e.g. \
-         argv=['ls','-la','<path>']). Patterns match within a single line; a \
-         literal newline in `pattern` is rejected. To match across lines, run \
-         `rg -U` through the Execute tool."
-      ~input_schema:search_files_schema
+      ~description:Tool_schemas_filesystem_files.search_files.description
+      ~input_schema:Tool_schemas_filesystem_files.search_files.input_schema
       (* Concurrent: each call spawns its own rg process through the sandbox
          backend; the only shared write is the bash-history audit line, a
          single O_APPEND write with no fiber yield inside it. *)
@@ -815,16 +706,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.read_file"
       ~public_name:"Read"
       ~internal_name:"tool_read_file"
-      ~description:
-        "Read one existing file from the keeper sandbox or an allowed path with no \
-         implicit cwd. Read targets a single FILE; to list a directory use the \
-         Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
-         never inherits Execute cwd."
-      ~input_schema:read_file_schema
+      ~description:Tool_schemas_filesystem_files.read_file.description
+      ~input_schema:Tool_schemas_filesystem_files.read_file.input_schema
       (* Concurrent: a pure read — containment check plus either a host
          file read (Safe_ops.read_file_result) or a per-call backend read
          runner process; no shared mutable state on the path. *)
@@ -847,17 +734,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.edit_file"
       ~public_name:"Edit"
       ~internal_name:"tool_edit_file"
-      ~description:
-        "Patch an existing file by replacing an exact string. Read the file \
-         first and copy old_string verbatim from its current bytes, including \
-         leading whitespace, indentation, and newlines; the match is exact and \
-         byte-sensitive. On 'old_string not found', re-Read the file to get the \
-         current text instead of retrying the same string."
-      ~input_schema:edit_file_schema
+      ~description:Tool_schemas_filesystem_files.edit_file.description
+      ~input_schema:Tool_schemas_filesystem_files.edit_file.input_schema
       ~policy:
         (policy
            ~readonly:false
@@ -876,15 +758,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.write_file"
       ~public_name:"Write"
       ~internal_name:"tool_write_file"
-      ~description:
-        "Write full file content into the keeper sandbox or an allowed path. Missing \
-         parent directories are created safely; call Write directly instead of using \
-         Execute mkdir."
-      ~input_schema:write_file_schema
+      ~description:Tool_schemas_filesystem_files.write_file.description
+      ~input_schema:Tool_schemas_filesystem_files.write_file.input_schema
       ~policy:
         (policy
            ~readonly:false
@@ -1028,8 +907,10 @@ let find_masc_schema_opt name =
 let find_cluster_schema_opt name =
   (* Keeper taskboard tools are checked before voice, misc, and public
      aggregates. Board descriptors use their typed registry directly.
-     The namespaces are expected to be disjoint; this order is not a conflict
-     resolver. Control descriptors use their dedicated typed schema projection
+     The namespaces are disjoint because every registry reached here is also
+     concatenated into [Config.raw_all_tool_schemas], whose module initialiser
+     runs [Config.validate_schemas] and raises on a repeated name. This order
+     is therefore not a conflict resolver. Control descriptors use their dedicated typed schema projection
      and do not enter this name-based lookup. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
@@ -1048,141 +929,30 @@ let base_schema_input name =
     Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
-let library_search_schema =
-  object_schema
-    [ property
-        "query"
-        "string"
-        "Search query string; empty or missing returns a workflow error."
-    ]
+(* Declared twice until now: here and in the library shard, whose file is
+   config/tools/keeper_library_*.toml. The parameters agreed to a full stop,
+   but the tool descriptions did not -- this side said "Search the keeper
+   library catalog." while the shard said what the tool returns (titles,
+   relevance scores, snippets) and what to pair it with. The model received
+   the thin one. The shard is now the one declaration. *)
+let shard_library_schema name =
+  match find_schema_opt Tool_shard_types.library_tools name with
+  | Some schema -> schema
+  | None -> failwith (Printf.sprintf "library shard is missing %s" name)
 ;;
 
-let library_read_schema =
-  object_schema
-    ~required:[ "topic" ]
-    [ property
-        "topic"
-        "string"
-        "Exact document topic name from search results or known context."
-    ]
+let library_search = shard_library_schema "keeper_library_search"
+let library_read = shard_library_schema "keeper_library_read"
+
+let shard_surface_schema name =
+  match find_schema_opt Tool_shard_types.surface_tools name with
+  | Some schema -> schema.Masc_domain.input_schema
+  | None -> failwith (Printf.sprintf "surface shard is missing %s" name)
 ;;
 
-let surface_read_schema =
-  object_schema
-    ~required:[ "surface" ]
-    [ property
-        "surface"
-        "string"
-        "Lane label exactly as shown in Connected Surfaces or chat history \
-         source: 'dashboard', 'discord', 'slack', or another connector's \
-         channel label. Rows written before source labelling carry no label \
-         and are not returned."
-    ; string_enum_property
-        "mode"
-        [ "local"; "channel"; "messages"; "members"; "member" ]
-        "Optional exact read mode. When absent, the request is exactly 'local' \
-         for the persisted lane; padded or unknown values are invalid. The \
-         other modes query Discord live and require surface='discord'."
-    ; property
-        "limit"
-        "integer"
-        "Maximum messages or Discord members to return (default 20; messages: \
-         1-100; members: 1-1000). The local participant roster covers the \
-         whole loaded lane."
-    ; property
-        "channel_id"
-        "string"
-        "Bound Discord channel snowflake. Optional when this keeper has one \
-         bound channel; required when it has multiple."
-    ; property
-        "user_id"
-        "string"
-        "Discord user snowflake, required for mode='member'."
-    ; property
-        "query"
-        "string"
-        "Optional member username/nickname prefix for mode='members'."
-    ; property
-        "discord_before"
-        "string"
-        "Discord message snowflake for backward paging in mode='messages'."
-    ; property
-        "discord_after"
-        "string"
-        "Discord message/member snowflake for forward paging. Do not send it \
-         together with discord_before."
-    ]
-;;
-
-let surface_post_schema =
-  object_schema
-    ~required:[ "surface"; "content" ]
-    [ property
-        "surface"
-        "string"
-        "Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
-         this keeper is not bound to is an error, not a no-op."
-    ; property
-        "content"
-        "string"
-        "Standard Markdown message to deliver. Discord renders it natively; \
-         Slack renders it through the official Block Kit markdown block. \
-         When blocks is provided, content is only the Slack notification \
-         fallback text."
-    ; property
-        "channel_id"
-        "string"
-        "Bound Discord or Slack channel id. Required only when more than one \
-         channel is bound for the selected surface; must be one of those \
-         bindings."
-    ; property
-        "thread_ts"
-        "string"
-        "Slack timestamp of an existing thread's root message (from \
-         keeper_surface_read). Posts this message as a reply inside that \
-         thread. Slack surface only; when both this and a continuation \
-         thread exist, this value wins."
-    ; ( "blocks"
-      , `Assoc
-          [ "type", `String "array"
-          ; "items", `Assoc [ "type", `String "object" ]
-          ; "maxItems", `Int Keeper_surface_post.max_rich_blocks
-          ; ( "description"
-            , `String
-                "Slack Block Kit blocks for chat.postMessage (at most 50, \
-                 each a block object with a \"type\" member). Slack surface \
-                 only. content stays the notification fallback text; when \
-                 omitted, content renders as one markdown block. Rendering \
-                 mentions inside custom blocks is the author's \
-                 responsibility; mention_user_ids are still roster-validated." )
-          ] )
-    ; ( "mention_user_ids"
-      , `Assoc
-          [ "type", `String "array"
-          ; "items", `Assoc [ "type", `String "string" ]
-          ; "maxItems", `Int Keeper_surface_post.max_user_mentions
-          ; ( "description"
-            , `String
-                "Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Never guess an id from a display name; plain @name text is not an API mention." )
-          ] )
-    ]
-;;
-
-let person_note_set_schema =
-  object_schema
-    ~required:[ "speaker_id"; "note" ]
-    [ property
-        "speaker_id"
-        "string"
-        "Stable speaker id from the roster (Discord snowflake). Notes \
-         attach to ids, never to display names."
-    ; property
-        "note"
-        "string"
-        "What to remember about this person. Blank clears the note \
-         (tombstone)."
-    ]
-;;
+let surface_read_schema = shard_surface_schema "keeper_surface_read"
+let surface_post_schema = shard_surface_schema "keeper_surface_post"
+let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let memory_search_schema_source, memory_search_schema =
   base_schema_input "keeper_memory_search"
@@ -2087,8 +1857,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.search"
       ~name:"keeper_library_search"
-      ~description:"Search the keeper library catalog."
-      ~input_schema:library_search_schema
+      ~description:library_search.Masc_domain.description
+      ~input_schema:library_search.Masc_domain.input_schema
       (* Concurrent: directory listing + whole-file reads in
          Tool_library; no shared mutable state on the search path. *)
       ~ordinary_execution_mode:Concurrent
@@ -2099,8 +1869,8 @@ let internal_descriptors : t list =
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.read"
       ~name:"keeper_library_read"
-      ~description:"Read a library entry by id."
-      ~input_schema:library_read_schema
+      ~description:library_read.Masc_domain.description
+      ~input_schema:library_read.Masc_domain.input_schema
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read

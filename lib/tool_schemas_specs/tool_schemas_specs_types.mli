@@ -26,6 +26,19 @@ type param =
 
 (** Behavior contract — Issue #15257 C축. 자세한 rationale은 .ml 참조. *)
 
+type dashboard_scope =
+  | Dashboard_scope_all
+  | Dashboard_scope_current
+(** The dashboard tool's [scope] argument. One owner for the JSON Schema enum
+    and the runtime parser, which sit on opposite sides of the generator's
+    dependency cut (#27069). *)
+
+val dashboard_scope_to_string : dashboard_scope -> string
+val dashboard_scope_of_string_opt : string -> dashboard_scope option
+
+val dashboard_scope_strings : string list
+(** The enum, in the order the schema lists it. *)
+
 type tool_name_ref = string
 
 type usage_hint =

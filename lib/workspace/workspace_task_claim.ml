@@ -196,6 +196,7 @@ let claim_task_r config ~agent_name ~task_id ()
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name ~task_id ~status:claimed_task.task_status
                  ~module_name:"claim_task_r.claimed_ok")
              config new_backlog;

@@ -277,6 +277,7 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
                 ("name", `String keeper_name);
                 ("agent_name", `String keeper_name);
                 ("status", `String "offline");
+                ("diagnostic", `Assoc [ ("health_state", `String "offline") ]);
                 ("updated_at", `String (Masc_domain.now_iso ()));
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
@@ -401,6 +402,7 @@ let test_dashboard_keeper_unknown_context_is_informational () =
             ("name", `String name);
             ("agent_name", `String name);
             ("status", `String "active");
+            ("diagnostic", `Assoc [ ("health_state", `String "healthy") ]);
             ("updated_at", `String updated_at);
             ("context_ratio", context_ratio);
             ( "context_metrics_unavailable",
@@ -412,7 +414,6 @@ let test_dashboard_keeper_unknown_context_is_informational () =
                     ("reason", `String "context_measurement_missing");
                   ]
               | _ -> `Null );
-            ("autonomous_turn_count", `Int 1);
             ("turn_count", `Int 1);
           ]
       in
@@ -529,6 +530,82 @@ let test_latest_message_to_prefers_latest_mention () =
       Alcotest.(check int) "latest non-self mention" 7 m.seq
   | None -> Alcotest.fail "expected a mention to match"
 
+(* The pressure ranker used to compare the status string twice — a membership
+   list for offline/inactive and an equality for idle. keeper_status_runtime
+   names this ranker in the comment on [surface_status], which is the closed
+   vocabulary the producer builds. Ranks are pinned here through the ordering
+   so parsing into that type cannot quietly change which keeper surfaces first
+   (#29350). *)
+let test_pressure_rank_orders_by_surface_status () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name health =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let names rows =
+        Dashboard_briefing_assembly.build_keeper_briefs config rows
+        |> List.map (fun row -> row |> member "name" |> to_string)
+      in
+      (* Ranked by health. The status word this used to read spelled stale,
+         degraded and zombie all "inactive", so a keeper with a late heartbeat
+         sorted level with one whose fiber had died. *)
+      Alcotest.(check (list string))
+        "zombie and offline outrank idle, which outranks healthy"
+        [ "k-zombie"; "k-offline"; "k-idle"; "k-healthy"; "k-stale" ]
+        (names
+           [ row "k-healthy" "healthy"
+           ; row "k-idle" "idle"
+           ; row "k-stale" "stale"
+           ; row "k-zombie" "zombie"
+           ; row "k-offline" "offline"
+           ]))
+;;
+
+let test_keeper_brief_publishes_health_and_phase () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let open Yojson.Safe.Util in
+      let brief =
+        Dashboard_briefing_assembly.build_keeper_briefs config
+          [ `Assoc
+              [ ("name", `String "k-stale")
+              ; ("agent_name", `String "k-stale")
+              ; ("status", `String "inactive")
+              ; ("phase", `String "Running")
+              ; ("paused", `Bool false)
+              ; ("diagnostic", `Assoc [ ("health_state", `String "stale") ])
+              ; ("updated_at", `String (Masc_domain.now_iso ()))
+              ; ("latest_tool_names", `List [])
+              ]
+          ]
+        |> List.hd
+      in
+      (* The rank this row is sorted by comes from health, so the row has to
+         carry health -- otherwise a reader sees only the status word, which
+         spells stale, degraded and zombie alike as "inactive". *)
+      let field name = Yojson.Safe.to_string (brief |> member name) in
+      Alcotest.(check string) "health travels with the row" {|"stale"|} (field "health");
+      (* An operator asks two questions the fold answered with one word:
+         is it running (health), and did someone stop it (phase). *)
+      Alcotest.(check string) "phase travels with the row" {|"Running"|} (field "phase"))
+;;
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -558,6 +635,10 @@ let () =
             test_dashboard_keeper_unknown_context_is_informational;
           Alcotest.test_case "internal signals rank critical above bad" `Quick
             test_internal_signals_rank_critical_above_bad;
+          Alcotest.test_case "pressure rank orders by health" `Quick
+            test_pressure_rank_orders_by_surface_status;
+          Alcotest.test_case "keeper brief publishes health and phase" `Quick
+            test_keeper_brief_publishes_health_and_phase;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;
         ] );

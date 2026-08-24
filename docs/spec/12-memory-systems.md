@@ -1,13 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-13
-code_refs:
-  - lib/keeper/keeper_librarian.ml
-  - lib/keeper/keeper_agent_run_post_turn_memory.ml
-  - lib/keeper/keeper_counterpart_observation.ml
-  - lib/keeper/keeper_external_attention.ml
-  - lib/keeper/keeper_memory_os_current.ml
-  - lib/keeper/keeper_memory_os_recall.ml
 ---
 
 # Memory Systems

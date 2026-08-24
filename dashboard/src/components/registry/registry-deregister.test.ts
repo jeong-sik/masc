@@ -40,7 +40,7 @@ describe('deregisterNeedsDrain', () => {
     expect(deregisterNeedsDrain(stateFor(keeper()))).toBe(true)
     expect(deregisterNeedsDrain(stateFor(keeper({ runtime_blocker_class: 'runtime_exhausted' })))).toBe(true)
     expect(deregisterNeedsDrain(stateFor(keeper({ paused: true })))).toBe(false)
-    expect(deregisterNeedsDrain(stateFor(keeper({ status: 'unbooted' })))).toBe(false)
+    expect(deregisterNeedsDrain(stateFor(keeper({ phase: 'Offline' })))).toBe(false)
   })
 })
 
@@ -65,7 +65,7 @@ describe('RegistryDeregister', () => {
   })
 
   it('purges a stopped keeper directly without drain', async () => {
-    const k = keeper({ status: 'unbooted' })
+    const k = keeper({ phase: 'Offline' })
     render(h(RegistryDeregister, { keeper: k, state: stateFor(k), onClose }), container)
 
     expect(container.querySelector('.reg-confirm-warn')).toBeNull()
@@ -109,7 +109,7 @@ describe('RegistryDeregister', () => {
   })
 
   it('closes on Escape and on the dismiss button', async () => {
-    const k = keeper({ status: 'unbooted' })
+    const k = keeper({ phase: 'Offline' })
     render(h(RegistryDeregister, { keeper: k, state: stateFor(k), onClose }), container)
     await flush()
 

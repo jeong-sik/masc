@@ -27,7 +27,7 @@ describe('mission keeper runtime helpers', () => {
       keepalive_running: true,
       last_blocker: 'missing social headers',
       last_heartbeat: '2026-04-04T14:43:49Z',
-      last_autonomous_action_at: '2026-04-04T14:08:35Z',
+      tool_audit_at: '2026-04-04T14:08:35Z',
     } as Keeper
 
     expect(keeperDisplayStatus(keeper, 'idle')).toBe('paused')

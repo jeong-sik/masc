@@ -662,6 +662,50 @@ let test_memory_backend_fallback_keys_by_backend_base_path () =
    Test Runners
    ============================================================ *)
 
+(* The previous fold replaced every unsafe character with '-', so "a.b",
+   "a/b" and "a b" all landed on "a-b" and two keepers wrote one file
+   (#24342); nothing bounded the length either, so a name past the
+   filesystem's component limit produced a path the OS rejects (#24343). *)
+let segment = Workspace_utils_backend_setup.sanitize_namespace_segment
+
+let test_namespace_segment_is_injective () =
+  let names =
+    [ "alpha.beta"; "alpha/beta"; "alpha beta"; "alpha-beta"
+    ; "ALPHA"; "alpha"; "a:b"; "a*b"; ""; " "; String.make 300 'a'
+    ; String.make 300 'a' ^ "x"
+    ]
+  in
+  let table = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      match Hashtbl.find_opt table seg with
+      | Some other when not (String.equal other name) ->
+        Alcotest.failf "%S and %S share the segment %S" other name seg
+      | Some _ | None -> Hashtbl.replace table seg name)
+    names
+;;
+
+let test_namespace_segment_is_bounded () =
+  let bound = Workspace_utils_backend_setup.namespace_segment_max_length + 17 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      Alcotest.(check bool)
+        (Printf.sprintf "a %d-char name yields %d chars" (String.length name)
+           (String.length seg))
+        true
+        (String.length seg <= bound && String.length seg > 0))
+    [ ""; "a"; String.make 300 'a'; String.make 300 '/'; String.make 1000 'z' ]
+;;
+
+let test_canonical_names_are_unchanged () =
+  (* Every name in this workspace is already canonical, so no path moves. *)
+  List.iter
+    (fun name -> Alcotest.(check string) name name (segment name))
+    [ "alpha"; "keeper-1"; "a_b-c"; "orbiter"; "rw-e0-r9-20260820-coord" ]
+;;
+
 let () =
   run "Workspace_utils Coverage" [
     "parse_gitdir_to_main_root", [
@@ -769,5 +813,13 @@ let () =
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick
         test_memory_backend_fallback_keys_by_backend_base_path;
+    ];
+    "namespace_segment", [
+      test_case "distinct names get distinct segments" `Quick
+        test_namespace_segment_is_injective;
+      test_case "segments stay inside a path component" `Quick
+        test_namespace_segment_is_bounded;
+      test_case "canonical names are unchanged" `Quick
+        test_canonical_names_are_unchanged;
     ];
   ]

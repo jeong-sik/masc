@@ -20,7 +20,7 @@
     prompts with no declared [template_variables] (see
     [unexpected_template_variables]) — so manually-edited
     or stale entries are dropped with an error log and a
-    fallback to the file/default value instead of silently
+    fallback to the file value instead of silently
     accepted.
 
     Concurrency: override and prompt-contract mutations first take the
@@ -37,10 +37,9 @@
     ([parse_frontmatter], [parse_list_value],
     [extract_variables], [store],
     [version_index], [meta_tbl], [prompts_dir],
-    [markdown_dir], [make_key], [is_valid_prompt_key],
+    [markdown_dir], [is_valid_prompt_key],
     [prompt_markdown_path], [read_file_if_exists],
     [replace_substring_all], [render_template],
-    [default_prompt_value_unlocked],
     [build_resolved_from_snapshot], [resolved_of_snapshot],
     [unexpected_template_variables],
     [prompt_item_json_of_resolved], [compare_prompt_items],
@@ -72,7 +71,6 @@ type prompt_resolution = Prompt_registry_types.prompt_resolution = {
   source : string;
   file_value : string option;
   override_value : string option;
-  default_value : string option;
   file_path : string option;
   file_exists : bool;
   has_override : bool;
@@ -120,7 +118,7 @@ val get_prompt : string -> string
 
 val prompt_source : string -> string
 (** [(resolve_prompt key).source]: ["override"] /
-    ["file"] / ["default"] / ["missing"]. *)
+    ["file"] / ["missing"]. *)
 
 (** {1 Rendering} *)
 
@@ -172,7 +170,7 @@ val restore_overrides : string -> unit
     in one mutex transaction, so rejected entries cannot leave stale live
     overrides behind.  Legacy envelopes, malformed entries, and stale or
     manually-edited entries are rejected with an observable error and fallback
-    to file/default content. *)
+    to file content. *)
 
 val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override

@@ -9,12 +9,14 @@ let keeper_chat_timeout_sec = 180.0
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)
 let keeper_chat_stream_path = "/api/v1/keepers/chat/stream"
+let mcp_path = "/mcp"
+let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
+let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
+let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let trim_nonempty = String_util.trim_nonempty
 
 let first_nonempty_env names =
   List.find_map
@@ -28,7 +30,7 @@ let sanitize_header_value value =
        | c -> c)
   |> String.trim
 
-let default_agent_name = "masc-tui"
+let default_agent_name = Masc_tui_credential.agent_name
 
 (* One name for the bearer the write routes require, so the header builder and
    the surfaces that report its absence cannot disagree about whether this
@@ -40,16 +42,68 @@ let default_agent_name = "masc-tui"
    workspace other than the one on screen. *)
 let operator_token_cell = ref None
 
-(* [MASC_TOKEN] wins so a single run can be pointed at a different credential.
-   Its absence is no longer a failure: [masc login] already wrote this agent's
-   bearer under the workspace, and that file outlives the shell. *)
-let install_operator_token ~base_path =
-  operator_token_cell
-  := (match first_nonempty_env [ "MASC_TOKEN" ] with
-      | Some _ as token -> token
-      | None ->
-          Auth_login.read_persisted_token ~base_path
-            ~agent_name:default_agent_name)
+(* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
+   can be pointed at a different credential; otherwise the bearer comes from the
+   workspace, and a workspace that demands one but holds none gets one minted.
+
+   Minting grants nothing this process did not already have: the credential
+   store is a directory under the workspace, so anything that can read the
+   bearer masc login wrote can equally write another. The trust boundary is
+   filesystem access to the workspace, not possession of the token. What it
+   does remove is the operator's obligation to carry a secret from shell to
+   shell, which is where every refusal in this file started.
+
+   Admin because that is the role [masc login] issues for this agent, and the
+   keeper lifecycle routes the TUI already offers require it -- minting a
+   narrower role would leave working surfaces failing. *)
+let install_operator_token ~base_path ~host ~port =
+  let cfg = Auth.load_auth_config base_path in
+  (* The auth directory, not the config file: a missing config reads as the
+     default, so its absence proves nothing about whether a workspace is here.
+     The directory holds the credential store, so a workspace a server has ever
+     served has one.
+
+     Read before anything else in startup can create it. Other startup steps do
+     make directories under .masc for a base path that names nothing -- a
+     mistyped flag gets an empty .masc/keepers -- and a check that ran after
+     one of those had made .masc/auth would read its own footprint as evidence
+     of a workspace. *)
+  let workspace_initialized = Sys.file_exists (Auth.auth_dir base_path) in
+  let outcome =
+    match
+      Masc_tui_credential.plan
+        ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
+        ~workspace_token:
+          (Auth_login.read_persisted_token ~base_path
+             ~agent_name:default_agent_name)
+        ~workspace_requires_token:(cfg.enabled && cfg.require_token)
+        ~workspace_initialized
+    with
+    | Masc_tui_credential.Use token ->
+        operator_token_cell := Some token;
+        Masc_tui_credential.Held
+    | Masc_tui_credential.Go_without ->
+        operator_token_cell := None;
+        Masc_tui_credential.Not_required
+    | Masc_tui_credential.No_workspace ->
+        operator_token_cell := None;
+        Masc_tui_credential.Unavailable Masc_tui_credential.no_workspace_detail
+    | Masc_tui_credential.Mint -> (
+        match
+          Auth_login.mint ~base_path ~host ~port
+            ~agent_name:default_agent_name ~role:Masc_domain.Admin
+            ~token_env_var:Masc_tui_credential.token_env_var
+            ~token_lifetime:Auth_login.Long_lived ()
+        with
+        | Ok report ->
+            operator_token_cell := Some report.bearer_token;
+            Masc_tui_credential.Minted
+        | Error err ->
+            operator_token_cell := None;
+            Masc_tui_credential.Unavailable
+              (Masc_domain.masc_error_to_string err))
+  in
+  outcome
 
 let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
@@ -99,21 +153,33 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
   | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "POST failed" e)
 
+(* A refusal is about this client's credential, not about the surface that
+   asked for the data. Every surface used to paste the server's auth JSON into
+   the terminal -- "HTTP 401: {\"error\":\"[AuthError] Invalid token..." -- which
+   names neither what is wrong nor what clears it. Answered here because this
+   is the one place that knows what was presented. Other statuses keep the
+   server's own words: those are about the request, and the surface is right to
+   show them. *)
+let decode_json ~allow_empty ~status_code ~body =
+  match status_code with
+  | 401 | 403 ->
+      Error
+        (Masc_tui_credential.refusal
+           ~credential_sent:(operator_token_present ()))
+  | _ ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
   match http_get ~host ~port ~path with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:false ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
-  | Ok (status_code, body) ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty:true ~status_code
-        ~body
+  | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
 let post_keeper_chat ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -179,6 +245,102 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
         response.Masc_http_client.Pool.body
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
+
+(** Fetch a keeper's durable tool-call log
+    ([GET /api/v1/keepers/:name/tool-calls]). *)
+let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(limit : int) : (Masc.Tui_decode.keeper_calls_snapshot, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/tool-calls?limit=%d"
+      (percent_encode_path_segment keeper_name)
+      (max 1 limit)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "tool calls returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json ->
+          Masc.Tui_decode.decode_keeper_calls_snapshot
+            ~requested_keeper:keeper_name json
+      | exception Yojson.Json_error detail ->
+          Error ("tool calls were not JSON: " ^ detail))
+
+(** Open the MCP session the observer feed is registered under.
+
+    The transport registers an SSE observer only for a session it has seen
+    [initialize]; the id of the new session comes back in the
+    [Mcp-Session-Id] response header. *)
+let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
+    : (string, string) result =
+  let url = url_of ~host ~port ~path:mcp_path in
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream") :: auth_headers ())
+  in
+  let body = Masc_tui_observer.initialize_request_body ~client_version in
+  match
+    Masc_http_client.post_response_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers ~body ()
+  with
+  | Error detail -> Error (report_err "MCP initialize failed" detail)
+  | Ok { Masc_http_client.status; body; _ }
+    when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "MCP initialize returned %d: %s" status body)
+  | Ok { Masc_http_client.headers; _ } ->
+      Masc_tui_observer.session_id_of_headers headers
+
+(** Read the runtime's event feed until it ends.
+
+    Blocks on the calling fiber for the life of the stream and hands every
+    body chunk to [on_chunk] as it arrives. The silence bound is the one
+    the keeper chat stream uses: a feed from a runtime with keepers turning
+    that says nothing for that long has gone quiet, and the caller reopens
+    it on its own schedule. [Ok ()] is the server closing the stream; a
+    refusal and a transport failure both come back as [Error]. *)
+let observe_runtime_events ~clock ~(host : string) ~(port : int)
+    ~(session_id : string) ~(on_chunk : string -> unit) : (unit, string) result
+    =
+  let url = url_of ~host ~port ~path:observer_stream_path in
+  let headers =
+    ("Accept", "text/event-stream")
+    :: ("Mcp-Session-Id", sanitize_header_value session_id)
+    :: auth_headers ()
+  in
+  match
+    Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
+      ~url ~headers ~on_chunk ()
+  with
+  | Error detail -> Error (report_err "observer stream failed" detail)
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Printf.sprintf "observer stream refused with %d: %s" status body)
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
+(** One MCP [tools/call] under an existing session.
+
+    The task tools ([masc_add_task], [masc_transition]) have no REST route;
+    this is how the dashboard calls them and now how the TUI does. The
+    session is the one the observer feed opened, or one the caller opened
+    for this call; the server keeps sessions across requests. *)
+let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
+    ~(request_id : string) ~(tool : string)
+    ~(arguments : (string * Yojson.Safe.t) list) :
+    (Masc_tui_mcp.outcome, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.request_body ~request_id ~tool ~arguments in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "tools/call returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.outcome_of_body ~request_id body
 
 (** Fetch a keeper's durable chat transcript.
 
@@ -394,6 +556,62 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
   get_json ~host ~port
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
+(** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+let fetch_runtime_resolved ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/resolved"
+
+(** GET /api/v1/dashboard/runtime-probe — cached provider metadata
+    reachability. [force] schedules a background refresh past the route's
+    recent-value window; the returned [refresh_state] remains authoritative. *)
+let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
+    (Yojson.Safe.t, string) result =
+  let path = if force then runtime_probe_path ^ "?force=1" else runtime_probe_path in
+  get_json ~host ~port ~path
+
+(** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
+    [runtime_id = None] clears the explicit assignment back to the default. *)
+let post_runtime_assignment ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(runtime_id : string option) :
+    (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         (("keeper_name", `String keeper_name)
+          ::
+          (match runtime_id with
+           | Some id -> [ ("runtime_id", `String id) ]
+           | None -> [])))
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
+(** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
+let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
+
+(** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
+let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode"
+
+(** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
+let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
 (** POST /api/v1/operator/confirm to approve/deny a pending confirmation. *)
 let operator_confirm_body ~(token : string)
     ~(decision : Masc_tui_operator_projection.approval_decision) =
@@ -479,6 +697,53 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
       (Printf.sprintf "/api/v1/board/%s?format=flat"
          (percent_encode_path_segment post_id))
 
+(** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
+    The server sorts active-first by due time and caps rows at its own limit,
+    so the path alone is the whole request. *)
+let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
+
+(** POST /api/v1/tools/masc_schedule_cancel. The payload is the tool's own
+    argument contract, so validation is the tool's, not duplicated here.
+    [cancelled_by_kind] is omitted: the tool defaults it to human operator,
+    which is what a terminal operator is. The reason is a fixed audit phrase --
+    the arm display already named which schedule the second press cancels. *)
+let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
+    : (Yojson.Safe.t, string) result =
+  let payload =
+    `Assoc
+      [ ("schedule_id", `String schedule_id)
+      ; ("cancelled_by_id", `String default_agent_name)
+      ; ("reason", `String "cancelled from the TUI")
+      ]
+  in
+  post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
+    ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
+    exactly the fields the operator left in $EDITOR; a field absent from the
+    body is absent from the patch, so the editor round-trip cannot blank a
+    setting it never showed. Validation is the route's (it re-uses
+    masc_keeper_up's arg parsing), not duplicated here. *)
+let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(patch_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/config"
+         (percent_encode_path_segment keeper_name))
+    ~body:patch_json
+
+(** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
+    contract. The keeper name in the path is the row the operator launched
+    from; the body carries the rest of the declaration. *)
+let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(declaration_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/up"
+         (percent_encode_path_segment keeper_name))
+    ~body:declaration_json
+
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
 let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
@@ -496,6 +761,11 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+(** Fetch the current composite lane snapshot for every registered Keeper. *)
+let fetch_keeper_lanes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/composite"
+
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
@@ -508,13 +778,16 @@ let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
 
-(** Fetch /api/v1/dashboard/keeper-feature-proof. No [window_hours] is passed:
-    the surface asks whether a feature has ever been shown to work, and a
-    window turns that into "not lately", which is a narrower question than the
-    one the operator opened the screen with. *)
-let fetch_keeper_feature_proof ~(host : string) ~(port : int) :
+(** Fetch the retained Fusion run registry list. *)
+let fetch_fusion_runs ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-feature-proof"
+  get_json ~host ~port ~path:fusion_runs_path
+
+(** Fetch one run joined to its exact typed-origin Board evidence. *)
+let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:(fusion_runs_path ^ "/" ^ percent_encode_path_segment run_id)
 
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)
@@ -539,3 +812,97 @@ let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, st
     view rather than on every tick. *)
 let fetch_fleet_safety ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/health?full=1"
+
+(** GET /api/v1/keepers/:name/config — name, instructions, effective_config,
+    sources. Read here for the detail pane's Instructions tab. *)
+let fetch_keeper_config_snapshot ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/config"
+         (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/keepers/:name/github-identity — the keeper's GitHub CLI
+    identity observation (config dir, projected token env, stored and
+    effective auth). *)
+let fetch_keeper_github_identity ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/github-identity"
+         (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/runtime/config/raw — runtime.toml's path and text as the
+    server reads them. *)
+let fetch_runtime_config_raw ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/config/raw"
+
+(** POST /api/v1/runtime/config/raw/preview — validate edited text without
+    writing it. The body names the one field the route reads. *)
+let post_runtime_config_preview ~(host : string) ~(port : int)
+    ~(source_text : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/runtime/config/raw/preview"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+
+(** POST /api/v1/runtime/config/raw — write the edited text. Callers go
+    through the preview first; this route also validates, so a race still
+    fails closed. *)
+let post_runtime_config_raw ~(host : string) ~(port : int)
+    ~(source_text : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+
+(** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
+let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
+    ~(body_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/connector/bind?name=%s"
+         (percent_encode_path_segment connector))
+    ~body:body_json
+
+(** POST /api/v1/gate/connector/unbind?name= — body {channel_id}. *)
+let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
+    ~(body_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+         (percent_encode_path_segment connector))
+    ~body:body_json
+
+(** One [resources/list] over the MCP endpoint, on an open session. *)
+let call_mcp_resources_list ~(host : string) ~(port : int)
+    ~(session_id : string) ~(request_id : string) :
+    ((string * string) list, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.resources_list_request_body ~request_id in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "resources/list returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.resources_of_body ~request_id body
+
+(** One [resources/read] over the MCP endpoint, on an open session. *)
+let call_mcp_resources_read ~(host : string) ~(port : int)
+    ~(session_id : string) ~(request_id : string) ~(uri : string) :
+    (string, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.resources_read_request_body ~request_id ~uri in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "resources/read returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.resource_text_of_body ~request_id body

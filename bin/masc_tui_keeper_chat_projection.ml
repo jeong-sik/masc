@@ -190,7 +190,10 @@ let stream_error_to_string = function
   | Missing_text_end ->
       "Keeper chat run finished without the current text-message terminal"
   | Run_failed { accepted; message; code } ->
-      let phase = if accepted then "accepted Keeper turn failed" else "Keeper chat rejected" in
+      (* "accepted" was in this label to mark the phase, which the other arm
+         already carries: a rejected request never became a turn. Saying it
+         twice spent the row's first words on protocol vocabulary. *)
+      let phase = if accepted then "Keeper turn failed" else "Keeper chat rejected" in
       let code = Option.fold ~none:"" ~some:(Printf.sprintf " (%s)") code in
       Printf.sprintf "%s%s: %s" phase code message
   | Replayed_failed -> "Keeper chat request already has a failed terminal operation"
@@ -215,18 +218,19 @@ let reader_unauthenticated = function
   | Http_error { status = 401 | 403; _ } -> true
   | Http_error _ | Transport_error _ | Protocol_error _ -> false
 
-(* The bearer lives in the environment of the process, so a masc-tui started
-   before MASC_TOKEN was exported carries none and every write route refuses it.
-   Naming the remedy keeps the operator from reading a raw server error body and
-   guessing which side is broken. *)
-let unauthenticated_reader_remedy =
-  "This masc-tui holds no operator token, so it cannot read the operation \
-   back; the operation itself is untouched on the server. Run \
-   'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
-   then press Ctrl-R to settle this request."
+(* The sentence itself belongs to Masc_tui_credential, which every refusal
+   surface shares. What is specific here is the consequence: a refused read
+   says nothing about the operation, so the operator needs to know it survived
+   and how to come back to it. *)
+let refused_reader_remedy ~credential_sent =
+  Printf.sprintf
+    "the operation could not be read back: %s. The operation itself is \
+     untouched on the server, so %s, then press Ctrl-R to settle this request."
+    (Masc_tui_credential.refusal_cause ~credential_sent)
+    Masc_tui_credential.remedy
 
-let reconciliation_failure_detail error =
-  if reader_unauthenticated error then unauthenticated_reader_remedy
+let reconciliation_failure_detail ~credential_sent error =
+  if reader_unauthenticated error then refused_reader_remedy ~credential_sent
   else error_to_string error |> terminal_safe_text
 
 let stream_error_acceptance_observed = function

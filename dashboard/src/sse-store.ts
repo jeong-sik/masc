@@ -58,6 +58,7 @@ import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseAgentCorePayloadOrNull } from './schemas/sse-event-payload'
 import { hydrateAgentCoreTelemetrySample } from './agent-core-telemetry-store'
+import { sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
 import {
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
@@ -181,6 +182,18 @@ export function registerBoardHearthsRefresh(fn: () => void): () => void {
   }
 }
 
+// The fusion detail browser reads the board-sink posts, not the run registry,
+// and post_created carries only a 200-char preview with no meta — so the run's
+// panels and judge cannot be built from the event. Refetch instead, which is
+// what the surface's manual Refresh does (#21822).
+let _refreshFusionBoardFn: (() => void) | null = null
+export function registerFusionBoardRefresh(fn: () => void): () => void {
+  _refreshFusionBoardFn = fn
+  return () => {
+    if (_refreshFusionBoardFn === fn) _refreshFusionBoardFn = null
+  }
+}
+
 // --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
@@ -291,6 +304,14 @@ function scheduleTargetRefresh(
   scheduleRefresh(target, fn, delayMs)
 }
 
+function scheduleFusionBoardRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
+  if (!_refreshFusionBoardFn) return
+  if (!routeWantsRefreshTarget(route.value, 'fusion')) return
+  scheduleRefresh('fusion-board', () => {
+    _refreshFusionBoardFn?.()
+  }, delayMs)
+}
+
 function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
   if (!_refreshBoardHearthsFn) return
   if (!routeWantsRefreshTarget(route.value, 'board')) return
@@ -338,7 +359,7 @@ const KEEPER_LIFECYCLE_EVENTS = new Set([
 ])
 
 function normalizeMascEventType(type: string): string {
-  return type.startsWith('masc/') ? type.slice('masc/'.length) : type
+  return withoutMascNamespace(type)
 }
 
 /** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
@@ -710,7 +731,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
   }
 
   if (
-    event.type.startsWith('decision_')
+    sseEventFamily(event.type) === 'decision'
     || event.type === 'runtime_param_changed'
     || approvalRefreshEvent
   ) {
@@ -899,8 +920,11 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-    return true
+  if (event.type === 'post_created') {
+    // Before the board branch: the fusion surface needs the refetch whether or
+    // not the board could prepend, and the prepend path returns early.
+    scheduleFusionBoardRefresh()
+    if (handleBoardPostCreated(event)) return true
   }
 
   return false

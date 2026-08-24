@@ -48,14 +48,6 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_autonomous_action_at
-  | Autonomous_action_count
-  | Autonomous_turn_count
-  | Autonomous_text_turn_count
-  | Autonomous_tool_turn_count
-  | Board_reactive_turn_count
-  | Mention_reactive_turn_count
-  | Noop_turn_count
   | Message_scope_ack_id
   | Last_runtime_attempt
   | Paused
@@ -98,14 +90,6 @@ let all_fields =
   ; Last_proactive_reason
   ; Last_proactive_preview
   ; Consecutive_noop_count
-  ; Last_autonomous_action_at
-  ; Autonomous_action_count
-  ; Autonomous_turn_count
-  ; Autonomous_text_turn_count
-  ; Autonomous_tool_turn_count
-  ; Board_reactive_turn_count
-  ; Mention_reactive_turn_count
-  ; Noop_turn_count
   ; Message_scope_ack_id
   ; Last_runtime_attempt
   ; Paused
@@ -149,14 +133,6 @@ let field_name = function
   | Last_proactive_reason -> "last_proactive_reason"
   | Last_proactive_preview -> "last_proactive_preview"
   | Consecutive_noop_count -> "consecutive_noop_count"
-  | Last_autonomous_action_at -> "last_autonomous_action_at"
-  | Autonomous_action_count -> "autonomous_action_count"
-  | Autonomous_turn_count -> "autonomous_turn_count"
-  | Autonomous_text_turn_count -> "autonomous_text_turn_count"
-  | Autonomous_tool_turn_count -> "autonomous_tool_turn_count"
-  | Board_reactive_turn_count -> "board_reactive_turn_count"
-  | Mention_reactive_turn_count -> "mention_reactive_turn_count"
-  | Noop_turn_count -> "noop_turn_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"

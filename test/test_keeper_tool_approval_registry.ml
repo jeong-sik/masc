@@ -38,7 +38,8 @@ let test_an_answer_releases_the_wait () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~keeper_name:keeper
+            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
             settled :=
@@ -57,7 +58,8 @@ let test_a_denial_is_carried_as_itself () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~keeper_name:keeper
+            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
               ~tool_call_id:"call-2" ~timeout_sec:5.0)
           (fun () ->
             ignore
@@ -72,7 +74,8 @@ let test_a_wait_nobody_answers_times_out () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let result =
-        Registry.await registry ~clock ~keeper_name:keeper
+        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
           ~tool_call_id:"call-3" ~timeout_sec:0.05
       in
       check outcome "the turn is released rather than parked forever"
@@ -86,7 +89,8 @@ let test_answering_a_wait_that_already_timed_out_reports_it () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let timed_out =
-        Registry.await registry ~clock ~keeper_name:keeper
+        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
           ~tool_call_id:"call-4" ~timeout_sec:0.02
       in
       check outcome "the wait ended on its own" Registry.Timed_out timed_out;
@@ -110,7 +114,8 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
       let first, second =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~keeper_name:keeper
+            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
               ~tool_call_id:"call-5" ~timeout_sec:5.0)
           (fun () ->
             let rec wait_for_first attempts =
@@ -122,7 +127,8 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
             wait_for_first 100;
             Eio.Fiber.pair
               (fun () ->
-                Registry.await registry ~clock ~keeper_name:keeper
+                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
                   ~tool_call_id:"call-5" ~timeout_sec:5.0)
               (fun () ->
                 Eio.Time.sleep clock 0.02;
@@ -142,7 +148,8 @@ let test_waits_are_scoped_to_their_keeper () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~keeper_name:"keeper.one"
+            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:"keeper.one"
               ~tool_call_id:"shared-id" ~timeout_sec:0.15)
           (fun () ->
             let rec wait_for_registration attempts =
@@ -167,19 +174,34 @@ let test_pending_lists_open_waits_oldest_first () =
       Eio.Fiber.all
         [ (fun () ->
             ignore
-              (Registry.await registry ~clock ~keeper_name:keeper
+              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
                  ~tool_call_id:"call-a" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.01;
             ignore
-              (Registry.await registry ~clock ~keeper_name:keeper
+              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
                  ~tool_call_id:"call-b" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.05;
             check (list string) "both waits are listed, in the order they opened"
               [ "call-a"; "call-b" ]
               (Registry.pending registry
-               |> List.map (fun (p : Registry.pending) -> p.tool_call_id)))
+               |> List.map (fun (p : Registry.pending) -> p.tool_call_id));
+            (* The listing describes the ask, so an operator who is not the
+               owning stream can still decide (masc#30034). *)
+            match Registry.pending registry with
+            | first :: _ ->
+                check string "the listing carries the tool" "Execute"
+                  first.tool_name;
+                check string "the listing carries the question" "run?"
+                  first.question;
+                check bool "the listing carries when it was asked" true
+                  (first.asked_at > 0.);
+                check (float 0.0001) "the listing carries the wait's budget"
+                  0.2 first.timeout_sec
+            | [] -> fail "expected a pending wait to describe")
         ])
 
 let test_a_cancelled_wait_leaves_nothing_behind () =
@@ -191,11 +213,40 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
       Eio.Fiber.first
         (fun () ->
           ignore
-            (Registry.await registry ~clock ~keeper_name:keeper
+            (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                ~question:"run?" ~keeper_name:keeper
                ~tool_call_id:"call-cancel" ~timeout_sec:5.0))
         (fun () -> Eio.Time.sleep clock 0.02);
       check int "the cancelled wait is not still registered" 0
         (List.length (Registry.pending registry)))
+
+(* The per-keeper stance the gate consults. Auto is the absent default, so
+   setting it back removes the override rather than storing a synonym. *)
+module Mode = Masc.Keeper_tool_approval_mode
+
+let test_mode_defaults_to_auto_and_yolo_is_an_override () =
+  let modes = Mode.create () in
+  check bool "unspoken keeper is auto" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto);
+  Mode.set modes ~keeper_name:"alpha" Mode.Yolo;
+  check bool "set stance resolves" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Yolo);
+  check (list string) "only moved keepers are listed" [ "alpha" ]
+    (List.map fst (Mode.overrides modes));
+  Mode.set modes ~keeper_name:"alpha" Mode.Auto;
+  check bool "auto removes the override" true (Mode.overrides modes = []);
+  check bool "and resolves as the default again" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto)
+
+let test_mode_labels_round_trip () =
+  List.iter
+    (fun mode ->
+      match Mode.mode_of_string (Mode.mode_to_string mode) with
+      | Some decoded -> check bool "round trip" true (decoded = mode)
+      | None -> fail "mode label failed to decode")
+    [ Mode.Auto; Mode.Yolo ];
+  check bool "unknown label is refused" true
+    (Mode.mode_of_string "chaotic" = None)
 
 let test_decision_labels_round_trip () =
   List.iter
@@ -217,6 +268,12 @@ let () =
             test_a_denial_is_carried_as_itself
         ; test_case "decision labels round-trip" `Quick
             test_decision_labels_round_trip
+        ] )
+    ; ( "gate stance"
+      , [ test_case "auto is the absent default; yolo is an override" `Quick
+            test_mode_defaults_to_auto_and_yolo_is_an_override
+        ; test_case "mode labels round-trip" `Quick
+            test_mode_labels_round_trip
         ] )
     ; ( "nobody answers"
       , [ test_case "a wait nobody answers times out" `Quick

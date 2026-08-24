@@ -148,6 +148,35 @@ let test_post_append_failure_commits_nothing () =
     "posts WAL has exactly the retried row, no ghost from the failure" 1
     (List.length (Fs_compat.load_jsonl (Board.persist_path ())))
 
+(* An edit that cannot reach disk used to report success: the rewrite carrying
+   the new content and the new updated_at discarded its failure and the call
+   returned Ok. A restart showed the old post, and a keeper board cursor rides
+   updated_at, so nothing said the edit was gone (#26168). *)
+let test_post_edit_failure_is_reported () =
+  let working_base =
+    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
+  in
+  let post =
+    match
+      Board_dispatch.create_post ~author:"edit-author" ~content:"original"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e ->
+      Alcotest.fail ("setup create must succeed, got " ^ Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.Board.id in
+  ignore (block_board_masc_dir_with_file ());
+  (match
+     Board_dispatch.update_post ~post_id ~editor:"edit-author"
+       ~content:"edit that cannot reach disk" ()
+   with
+   | Ok _ -> Alcotest.fail "an edit that cannot be persisted must not report success"
+   | Error (Board.Io_error _) -> ()
+   | Error e ->
+     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Unix.putenv "MASC_BASE_PATH" working_base
+
 let test_restart_recomputes_reply_count_from_comment_wal () =
   let post =
     create_post_exn ~author:"restart-wa-author"
@@ -182,6 +211,48 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
      | Error e -> Alcotest.fail (Board.show_board_error e))
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+(* Adding a comment bumps the post's [updated_at] in memory and marks it
+   dirty; only [flush_dirty] carries that to the posts file. That flush
+   cleared the dirty flags before writing, so a failed write dropped the bump
+   from the file and from the queue at once -- nothing would retry, and a
+   keeper cursor already past the old [updated_at] would not rescan the post
+   (#26168). The flags now survive the failure. *)
+let test_flush_failure_keeps_the_post_bump_scheduled () =
+  let post = create_post_exn ~author:"flush-retry-author" ~content:"flush retry body" in
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let working_base = Sys.getenv "MASC_BASE_PATH" in
+  flush ();
+  Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
+  (match
+     Board_dispatch.add_comment
+       ~post_id:(Board.Post_id.to_string post.Board.id)
+       ~author:"flush-retry-commenter"
+       ~content:"a reply that bumps updated_at"
+       ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail ("comment must succeed: " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "the comment marked the post dirty"
+    true
+    store.Board.dirty_posts;
+  let before = Board.persist_error_count () in
+  ignore (block_board_masc_dir_with_file ());
+  flush ();
+  Alcotest.(check bool)
+    "the failed flush was counted"
+    true
+    (Board.persist_error_count () > before);
+  Alcotest.(check bool)
+    "the bump is still scheduled after the write failed"
+    true
+    store.Board.dirty_posts;
+  Unix.putenv "MASC_BASE_PATH" working_base
+;;
+
 let () =
   Alcotest.run "board_comment_post_write_ahead"
     [
@@ -193,8 +264,14 @@ let () =
           Alcotest.test_case "post: failed append leaves nothing committed"
             `Quick
             (with_eio test_post_append_failure_commits_nothing);
+          Alcotest.test_case "post: an edit that cannot be persisted fails"
+            `Quick
+            (with_eio test_post_edit_failure_is_reported);
           Alcotest.test_case "restart derives reply_count from comment WAL"
             `Quick
             (with_eio test_restart_recomputes_reply_count_from_comment_wal);
+          Alcotest.test_case "a failed flush keeps the post bump scheduled"
+            `Quick
+            (with_eio test_flush_failure_keeps_the_post_bump_scheduled);
         ] );
     ]

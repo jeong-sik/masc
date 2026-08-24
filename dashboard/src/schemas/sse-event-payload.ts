@@ -9,7 +9,7 @@
 // Unknown event types and malformed payloads are rejected with a structured
 // error; the caller decides whether to drop the event or fall back.
 
-import { AGENT_CORE_EVENT_PREFIX } from '../config/constants'
+import { agentCoreEventSuffix } from '../lib/sse-event-type'
 import { assertExhaustive } from '../lib/exhaustive'
 
 import {
@@ -168,9 +168,7 @@ export function parseAgentCorePayload(
   eventType: string,
   raw: unknown,
 ): AgentCorePayloadParseResult<TypedAgentCorePayload> {
-  const suffix = eventType.startsWith(AGENT_CORE_EVENT_PREFIX)
-    ? eventType.slice(AGENT_CORE_EVENT_PREFIX.length)
-    : eventType
+  const suffix = agentCoreEventSuffix(eventType)
   if (!isAgentCorePayloadEventType(suffix)) {
     return fail(eventType, `No typed payload reader for event type "${eventType}"`)
   }

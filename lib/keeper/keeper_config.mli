@@ -85,6 +85,11 @@ val keeper_board_own_recent_max : unit -> int
     the world observation carries per turn. Cursor-independent — no watermark. *)
 val keeper_fleet_messages_max : unit -> int
 
+val keeper_context_briefing_share_percent : unit -> int
+(** Share (percent) of the runtime's declared request-body cap that the
+    world-state briefing may occupy. The briefing is pinned, so this is what
+    stops it from crowding out the turn it briefs. *)
+
 val keeper_own_recent_turns_max : unit -> int
 (** Past turns of this keeper's own tool calls replayed into the world
     observation. Autonomous turns carried no record of what the keeper had
@@ -107,6 +112,13 @@ val keeper_unified_temperature : unit -> float
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool
+
+(** Ceiling on tool-continuation rounds in one keeper turn. [None] leaves the
+    AGENT_CORE run loop unbounded, which is what it was. Reaching the ceiling
+    fails the run with [ToolRoundLimitExceeded] rather than returning a
+    truncated run as a finished one. Hot-reloadable via
+    [keeper.turn.max_tool_rounds]; 0 means unbounded. *)
+val keeper_max_tool_rounds : unit -> int option
 
 (** {1 Runtime Param Handles}
 

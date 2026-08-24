@@ -21,8 +21,10 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
-  'KEEPER_TOOL_APPROVAL_REQUESTED',
-  'KEEPER_TOOL_APPROVAL_SETTLED',
+  // #29742 and #29744 both registered the two approval events for the same
+  // main-red and both merged, leaving them listed twice. A duplicate entry
+  // makes the contract array longer than the OCaml codec's vocabulary and
+  // fails the cross-language parity test the other way.
 ] as const
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]
@@ -73,6 +75,24 @@ export type KeeperTurnOutcome =
 
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
+  // #29650 added these two to the name list above and to the SSE field table,
+  // but not here, so a decoded frame could not be handed to a handler that
+  // takes a KeeperChatStreamEvent. The fields match sse.ts's allowedFields.
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_TOOL_APPROVAL_REQUESTED'
+      value: {
+        tool_call_id: string
+        tool_call_name: string
+        args: string
+        question: string
+      }
+    }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_TOOL_APPROVAL_SETTLED'
+      value: { tool_call_id: string; outcome: string }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_CHAT_OPERATION_ACCEPTED'

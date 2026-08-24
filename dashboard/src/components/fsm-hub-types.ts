@@ -188,7 +188,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KSM
   running: PHASE_LABEL_KO.running,
   failing: PHASE_LABEL_KO.failing,
-  overflowed: PHASE_LABEL_KO.overflowed,
   handing_off: PHASE_LABEL_KO.handoff,
   draining: PHASE_LABEL_KO.draining,
   offline: '오프라인',
@@ -197,7 +196,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   crashed: PHASE_LABEL_KO.crashed,
   restarting: PHASE_LABEL_KO.restarting,
   Running: PHASE_LABEL_KO.running,
-  Overflowed: PHASE_LABEL_KO.overflowed,
   Compacting: PHASE_LABEL_KO.compacting,
   HandingOff: PHASE_LABEL_KO.handoff,
   Failing: PHASE_LABEL_KO.failing,
@@ -403,6 +401,11 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   phase_skipped: 'phase 건너뜀',
   transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
+  // tool_correction_lost has been a backend reason since #29038 and was
+  // missing here, so the table fell back to printing the raw wire string.
+  tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',
+  accept_rejected: '응답에 쓸 내용이 없어 거절 - 출력 예산 확인',
+  terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

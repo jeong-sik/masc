@@ -21,7 +21,6 @@ describe('normalizeKeeperBrief', () => {
       context_ratio: null,
       last_turn_ago_s: null,
       current_work: null,
-      last_autonomous_action_at: null,
       latest_tool_names: ['observed_tool'],
       latest_tool_call_count: 3,
       tool_audit_source: 'heartbeat_result',

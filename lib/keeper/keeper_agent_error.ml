@@ -1,51 +1,48 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-let network_error_kind_user_label = function
-  | Llm_provider.Http_client.Connection_refused -> "connection refused"
-  | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"
-  | Llm_provider.Http_client.Tls_error -> "TLS handshake failed"
-  | Llm_provider.Http_client.Timeout -> "network timeout"
-  | Llm_provider.Http_client.Local_resource_exhaustion ->
-    "local network resources exhausted"
-  | Llm_provider.Http_client.End_of_file -> "connection closed"
-  | Llm_provider.Http_client.Unknown -> "network error"
-;;
-
-let network_error_kind_user_action = function
-  | Llm_provider.Http_client.Dns_failure ->
-    "Check network/DNS or select another runtime."
-  | Llm_provider.Http_client.Connection_refused ->
-    "Check that the runtime endpoint is running or select another runtime."
-  | Llm_provider.Http_client.Tls_error ->
-    "Check the provider TLS endpoint or select another runtime."
-  | Llm_provider.Http_client.Timeout ->
-    "Check provider health or select another runtime."
-  | Llm_provider.Http_client.Local_resource_exhaustion ->
-    "Reduce concurrent requests or select another runtime."
-  | Llm_provider.Http_client.End_of_file
-  | Llm_provider.Http_client.Unknown ->
-    "Check provider health or select another runtime."
-;;
-
 let runtime_provider_label provider =
   match Option.map String.trim provider with
   | Some provider when provider <> "" -> Printf.sprintf "Runtime provider '%s'" provider
   | _ -> "Runtime provider"
 ;;
 
-let detail_suffix detail =
-  match String.trim detail with
-  | "" -> ""
-  | detail -> " Detail: " ^ detail
-;;
+(* One sentence, naming the failure once.
 
+   The stacked form read "Runtime provider unavailable: connection closed.
+   Check provider health or select another runtime. Detail: End_of_file" --
+   the same failure named four times at decreasing abstraction, ending in
+   OCaml's vocabulary rather than the operator's. Each layer prepended its own
+   framing without reading what the layer below had already said.
+
+   Two kinds let the detail speak instead of a condition phrase: a name
+   resolution failure is about one host, and [Unknown] has no label worth the
+   name. Writing both would repeat the fact -- "could not be resolved: failed
+   to resolve hostname" -- which is the shape being removed. Every other kind
+   states the condition and drops the exception, which restates it in OCaml's
+   words ([End_of_file] renders exactly the constructor the kind already is)
+   and stays in the typed error for logs regardless.
+
+   Guidance stays only where the action is specific and not implied by the
+   condition. A refused connection means nothing is listening; exhausted local
+   resources mean too many requests at once. "Check provider health" after a
+   dropped connection is not an instruction. *)
 let provider_network_user_message ?provider ~kind ~detail () =
-  Printf.sprintf
-    "%s unavailable: %s. %s%s"
-    (runtime_provider_label provider)
-    (network_error_kind_user_label kind)
-    (network_error_kind_user_action kind)
-    (detail_suffix detail)
+  let who = runtime_provider_label provider in
+  let detail_speaks fallback =
+    match String.trim detail with
+    | "" -> who ^ " " ^ fallback
+    | detail -> who ^ ": " ^ detail
+  in
+  match kind with
+  | Llm_provider.Http_client.Connection_refused ->
+    who ^ " refused the connection; nothing is listening on the runtime endpoint"
+  | Llm_provider.Http_client.Dns_failure -> detail_speaks "could not be resolved"
+  | Llm_provider.Http_client.Tls_error -> who ^ " failed the TLS handshake"
+  | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
+  | Llm_provider.Http_client.Local_resource_exhaustion ->
+    "Local network resources are exhausted; fewer requests at once are needed"
+  | Llm_provider.Http_client.End_of_file -> who ^ " closed the connection"
+  | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;
 
 let structured_internal_error_user_message err =
@@ -110,6 +107,7 @@ let core_termination_semantics = function
     Agent_core_tripwire_violation
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired _) -> Agent_core_input_required
   | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _)
+  | Agent_core.Error.Agent (Agent_core.Error.ToolRoundLimitExceeded _)
   | Agent_core.Error.Agent (Agent_core.Error.HookExecutionFailed _)
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolEffectFailed _)
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
@@ -178,6 +176,8 @@ let terminal_effect_disposition_to_wire effect_disposition =
 let agent_error_terminal_reason_code = function
   | Agent_core.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
+  | Agent_core.Error.ToolRoundLimitExceeded { rounds; limit } ->
+    Printf.sprintf "agent_error_tool_round_limit_exceeded:rounds=%d,limit=%d" rounds limit
   | Agent_core.Error.HookExecutionFailed { hook_name; stage; _ } ->
     Printf.sprintf
       "agent_error_hook_execution_failed:hook=%s,stage=%s"
@@ -214,7 +214,7 @@ let provider_timeout_suffix = function
 let provider_error_terminal_reason_code = function
   | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
   | Llm_provider.Error.InvalidConfig { field; _ } ->
-    Printf.sprintf "provider_error_invalid_config:%s" field
+    Keeper_terminal_reason.wire_provider_error_invalid_config_prefix ^ field
   | Llm_provider.Error.ParseError _ -> "provider_error_parse"
   | Llm_provider.Error.ProviderWireError { format; kind; _ } ->
     Printf.sprintf
@@ -234,9 +234,9 @@ let provider_error_terminal_reason_code = function
     Printf.sprintf
       "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
-  | Llm_provider.Error.AuthError _ -> "provider_error_auth"
+  | Llm_provider.Error.AuthError _ -> Keeper_terminal_reason.wire_provider_error_auth
   | Llm_provider.Error.AuthorizationError _ ->
-    "provider_error_authorization"
+    Keeper_terminal_reason.wire_provider_error_authorization
   | Llm_provider.Error.ServerError { code; _ } ->
     Printf.sprintf "provider_error_server:%d" code
   | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->
@@ -245,7 +245,8 @@ let provider_error_terminal_reason_code = function
       (network_error_kind_to_wire kind)
       (provider_timeout_suffix timeout_phase)
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
-    "provider_error_timeout" ^ provider_timeout_suffix timeout_phase
+    Keeper_terminal_reason.wire_provider_error_timeout
+    ^ provider_timeout_suffix timeout_phase
   | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
   | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
   | Llm_provider.Error.ProviderTerminal { reason; _ } ->

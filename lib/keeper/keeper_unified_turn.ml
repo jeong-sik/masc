@@ -117,7 +117,8 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Turn_checkpointed meta
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
@@ -169,7 +170,8 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _ ->
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ ->
     false
 ;;
 
@@ -257,7 +259,8 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
-         | Keeper_event_queue.Workspace_message _ -> false)
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _ -> false)
       stimuli
   with
   | None -> None
@@ -424,7 +427,7 @@ let run_keeper_cycle
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_runtime remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
-     phases like Overflowed. *)
+     phases. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
   (* Quota expiry is wall-clock provider evidence. Freeze this observation so
@@ -572,10 +575,19 @@ let run_keeper_cycle
                    (fun consume -> consume ())
                    on_deferred_runtime_consumed)
               deferred_runtime_lane;
+            (* The wire code stays exactly what the typed encoder produced.
+               [record_pre_dispatch_terminal_observation] already records that
+               the turn never dispatched, in three typed fields:
+               [completion_contract_result = Completion_not_dispatched],
+               [runtime_outcome = Runtime_not_dispatched] and
+               [runtime_attempt_count = 0]. A "pre_dispatch_" prefix on top of
+               those said nothing new, and it broke the one consumer that
+               reads this field: [Keeper_terminal_reason.of_wire] compares
+               against ["config_error"] by equality, so the decorated form
+               fell through to [Unknown] and every pre-dispatch config failure
+               reached the operator as an unmapped runtime state (#29929). *)
             let terminal_reason_code =
-              Printf.sprintf
-                "pre_dispatch_%s"
-                (Keeper_agent_error.terminal_reason_code_of_core_error err)
+              Keeper_agent_error.terminal_reason_code_of_core_error err
             in
             let error_message = Agent_core.Error.to_string err in
             Log.Keeper.error
@@ -668,6 +680,17 @@ let run_keeper_cycle
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_of_store ~config
                in
+               (* The briefing is pinned, so it is bounded here rather than
+                  left to the model input projection, which can only cut the
+                  conversation window. Sized from the runtime's own declared
+                  input ceiling: a runtime that declares none gets no bound,
+                  the same answer its projection gives it. Rotation to a larger
+                  lane only makes this conservative. *)
+               let context_budget_bytes =
+                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
+                 |> Option.map (fun cap ->
+                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+               in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
                    ~meta
@@ -676,6 +699,7 @@ let run_keeper_cycle
                    ~turn_decision
                    ~current_task
                    ~active_goal_summaries
+                   ?context_budget_bytes
                    ~observation
                    ()
                in

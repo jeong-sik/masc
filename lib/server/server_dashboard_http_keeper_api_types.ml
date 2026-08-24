@@ -9,6 +9,7 @@ let keeper_suffix_secrets = "/secrets"
 let keeper_suffix_github_identity = "/github-identity"
 let keeper_suffix_github_login = "/github-login"
 let keeper_suffix_boot = "/boot"
+let keeper_suffix_up = "/up"
 let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
@@ -20,6 +21,7 @@ let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_turn_records = "/turn-records"
+let keeper_suffix_file_changes = "/file-changes"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
 let keeper_suffix_trajectory = "/trajectory"
@@ -74,6 +76,7 @@ type keeper_post_route_kind =
   | Keeper_post_secrets
   | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear
@@ -127,6 +130,7 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_secrets then Keeper_post_secrets
     else if ends_with keeper_suffix_github_login then Keeper_post_github_login
     else if ends_with keeper_suffix_boot then Keeper_post_boot
+    else if ends_with keeper_suffix_up then Keeper_post_up
     else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
     else if ends_with keeper_suffix_reset then Keeper_post_reset
     else if ends_with keeper_suffix_clear then Keeper_post_clear
@@ -184,6 +188,11 @@ let keeper_get_permission ?(include_thinking = false) req_path =
     keeper_path_ends_with req_path keeper_suffix_raw_traces
     || keeper_path_ends_with req_path keeper_suffix_raw_trace
     || keeper_path_ends_with req_path keeper_suffix_memory_journal
+    (* Same data, same gate: [/file-changes] returns the exact text a keeper
+       wrote to a file, which is part of what the raw trace above already
+       holds. A lighter gate here would be a second door onto the first
+       door's content. *)
+    || keeper_path_ends_with req_path keeper_suffix_file_changes
   then Some Masc_domain.CanAdmin
   else None
 

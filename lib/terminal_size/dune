@@ -1,0 +1,9 @@
+(include_subdirs no)
+
+(library
+ (name terminal_size)
+ (package masc)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names terminal_size_stubs)))

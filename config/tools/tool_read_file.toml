@@ -1,0 +1,17 @@
+name = "tool_read_file"
+description = """
+Read a file as text (truncated at max_bytes). path is REQUIRED. Paths \
+resolve relative to your workspace root, or to the typed `cwd` when you pass \
+one — never a host path like '.masc/playground/your-name/...'. Good: \
+path='lib/foo.ml'. Bad: path=''. For multi-file search, use Grep."""
+
+[[params]]
+name = "path"
+type = "string"
+required = true
+description = "Relative or absolute file path"
+
+[[params]]
+name = "max_bytes"
+type = "integer"
+description = "Max bytes to return (default: 20000)"

@@ -65,8 +65,9 @@ let producer_vocabulary =
   ; "healthy", Some Health_status.Ok
   ; "failing", Some Health_status.Error
   ; "degraded", Some Health_status.Degraded
-    (* keeper_reaction_ledger *)
-  ; "empty", None
+    (* keeper_reaction_ledger: the fleet summary reader turns an
+       unrecognized word into unavailable, so this one is decided. *)
+  ; "empty", Some Health_status.Ok
     (* keeper_manual_compaction *)
   ; "compacted", None
     (* server_dashboard_http_runtime_info *)
@@ -112,6 +113,25 @@ let test_initializing_is_not_at_risk () =
     (Health_status.of_string "initializing" = Health_status.of_string "warming")
 ;;
 
+(* Keeper_reaction_ledger keeps "read it and found nothing" ([Summary_empty])
+   apart from "could not reach it" ([Summary_unavailable]). The fleet health
+   reader in server_routes_http_runtime_health_fleet folds an unrecognized
+   status into source_unavailable, which drives both storage_status and
+   work_status to "unavailable", so an undeclared "empty" erased the producer's
+   own distinction and a quiet fleet read as unreachable (#27560). *)
+let test_empty_ledger_is_not_unreachable () =
+  Alcotest.(check bool)
+    "an empty ledger is not at risk"
+    false
+    (Health_status.rank (Health_status.of_string "empty") >= 2);
+  Alcotest.(check bool)
+    "empty and unavailable stay different statuses"
+    false
+    (Health_status.equal
+       (Health_status.of_string "empty")
+       (Health_status.of_string "unavailable"))
+;;
+
 let test_unknown_word_is_distinguishable () =
   Alcotest.(check bool)
     "an undeclared word is not an explicit unknown"
@@ -126,6 +146,8 @@ let () =
       ( "rank",
         [
           test_case "rank contract" `Quick test_rank_contract;
+          test_case "an empty ledger is not unreachable" `Quick
+            test_empty_ledger_is_not_unreachable;
           test_case "max string" `Quick test_max_string_canonicalizes_through_ssot;
         ] );
       ( "dashboard compat",

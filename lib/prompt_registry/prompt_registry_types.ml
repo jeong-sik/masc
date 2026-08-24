@@ -18,7 +18,6 @@ type prompt_resolution = {
   source : string;
   file_value : string option;
   override_value : string option;
-  default_value : string option;
   file_path : string option;
   file_exists : bool;
   has_override : bool;

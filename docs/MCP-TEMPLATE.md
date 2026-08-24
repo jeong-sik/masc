@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-21
-code_refs:
-  - quickstart.sh
-  - bin/main_eio.ml
-  - lib/auth/auth_login.ml
-  - lib/server/server_auth.ml
 ---
 
 # MCP 클라이언트 연결

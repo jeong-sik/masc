@@ -795,9 +795,6 @@ function fmtFixed(v: number | undefined, digits = 3): string {
 }
 
 // Helper: format an integer count or '-'
-function fmtCount(v: number | undefined): string | number {
-  return v != null ? v : '-'
-}
 
 interface SignalGroup {
   title: string
@@ -841,7 +838,6 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '자율 행동 & 반응',
       rows: [
-        { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
         { label: '개입 비중', value: formatPct1(mw?.intervention_share) },
         { label: '턴당 개입', value: fmtFixed(mw?.intervention_per_turn, 2) },
       ],

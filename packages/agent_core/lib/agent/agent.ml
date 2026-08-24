@@ -154,6 +154,14 @@ let run_loop_turns_detailed
   =
   let yield_enabled = agent.state.config.yield_on_tool in
   let run_start = Unix.gettimeofday () in
+  (* Rounds the model has continued after executing tools. The loop used to
+     recurse on [`ToolsExecuted] without counting, so a run ended by exhausting
+     wall clock or context rather than by any bound the config declared. When a
+     ceiling is declared, exceeding it fails the run with a typed error instead
+     of returning the last response as if the model had finished: a truncated
+     run that reads as a completed one is the worse outcome. [None] keeps the
+     old unbounded behaviour. *)
+  let tool_rounds = ref 0 in
   let rec loop lease =
     let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
     let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
@@ -192,7 +200,13 @@ let run_loop_turns_detailed
         ~turn_index
         ~model:agent.state.config.model
         ~stop:"tools_executed";
-      loop (release.after ())
+      incr tool_rounds;
+      (match agent.state.config.max_tool_rounds with
+       | Some limit when !tool_rounds >= limit ->
+         Error
+           (detailed_error_of_core_error
+              (Error.Agent (Error.ToolRoundLimitExceeded { rounds = !tool_rounds; limit })))
+       | Some _ | None -> loop (release.after ()))
     | Ok (`TerminalToolCompleted completion) ->
       log_turn
         ~run_start

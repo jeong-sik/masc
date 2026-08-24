@@ -232,6 +232,100 @@ let test_latest_user_turn_policy_keeps_only_current_tool_reasoning () =
       (content_has_reasoning current_assistant.content)
 ;;
 
+(* Live incident 2026-08-24 (task-514): every keeper provider round appends the
+   extra-system-context carrier as a trailing User-role message, so the
+   "latest user turn" anchored on the carrier and every reasoning block in the
+   request was dropped, every round. The carrier must be invisible to the
+   latest-user boundary while a real trailing user message still resets it. *)
+let extra_context_carrier () =
+  message
+    ~metadata:Types.Extra_system_context_provenance.metadata
+    User
+    [ Text "[system context] world state" ]
+;;
+
+let test_latest_user_turn_policy_ignores_extra_context_carrier () =
+  let target = source Tool_call_assistant_messages_latest_user_turn in
+  let messages =
+    [ message User [ Text "current request" ]
+    ; with_source
+        target
+        Assistant
+        [ Thinking { content = "current tool reasoning"; signature = None }
+        ; ToolUse { id = "current-call"; name = "inspect"; input = `Assoc [] }
+        ]
+    ; message Tool [ tool_result "current-call" ]
+    ; extra_context_carrier ()
+    ]
+  in
+  match
+    project ~target ~policy:Tool_call_assistant_messages_latest_user_turn messages
+  with
+  | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+  | Ok projection ->
+    check_int "no reasoning dropped" 0 (List.length projection.reasoning_replay_drops);
+    let assistant = List.nth projection.messages 1 in
+    check_bool
+      "reasoning after the real user turn survives the trailing carrier"
+      true
+      (content_has_reasoning assistant.content)
+;;
+
+let test_latest_user_turn_policy_real_trailing_user_still_resets () =
+  let target = source Tool_call_assistant_messages_latest_user_turn in
+  let messages =
+    [ message User [ Text "first request" ]
+    ; with_source
+        target
+        Assistant
+        [ Thinking { content = "old tool reasoning"; signature = None }
+        ; ToolUse { id = "old-call"; name = "lookup"; input = `Assoc [] }
+        ]
+    ; message Tool [ tool_result "old-call" ]
+    ; message User [ Text "a person actually speaking" ]
+    ]
+  in
+  match
+    project ~target ~policy:Tool_call_assistant_messages_latest_user_turn messages
+  with
+  | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+  | Ok projection ->
+    check_int
+      "reasoning before the real user turn is dropped"
+      1
+      (List.length projection.reasoning_replay_drops);
+    let assistant = List.nth projection.messages 1 in
+    check_bool
+      "old reasoning is removed"
+      false
+      (content_has_reasoning assistant.content)
+;;
+
+let test_carrier_only_history_replays_none () =
+  let target = source Tool_call_assistant_messages_latest_user_turn in
+  let messages =
+    [ extra_context_carrier ()
+    ; with_source
+        target
+        Assistant
+        [ Thinking { content = "unscoped reasoning"; signature = None }
+        ; ToolUse { id = "call"; name = "lookup"; input = `Assoc [] }
+        ]
+    ; message Tool [ tool_result "call" ]
+    ]
+  in
+  match
+    project ~target ~policy:Tool_call_assistant_messages_latest_user_turn messages
+  with
+  | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+  | Ok projection ->
+    let assistant = List.nth projection.messages 1 in
+    check_bool
+      "with no real user turn the policy still replays none"
+      false
+      (content_has_reasoning assistant.content)
+;;
+
 let test_latest_user_turn_policy_without_user_replays_none () =
   let target = source Tool_call_assistant_messages_latest_user_turn in
   let messages =
@@ -548,6 +642,48 @@ let test_openai_chat_request_uses_whole_history_projection () =
     "visible answer remains distinct"
     true
     Yojson.Safe.Util.(assistant |> member "content" |> to_string = "answer")
+;;
+
+(* Ollama's OpenAI-compat layer reads incoming assistant [reasoning] into the
+   template's thinking slot and ignores unknown members, so replay emitted as
+   a fixed "reasoning_content" never reached the model there. The request-side
+   field must mirror the dialect's declared streaming field. *)
+let test_openai_chat_replay_field_mirrors_streaming_field () =
+  let capabilities =
+    { preserving_capabilities with
+      reasoning_streaming_format = Capabilities.Delta_reasoning_field "reasoning"
+    }
+  in
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:capabilities
+      ()
+  in
+  let source = source_for_config config in
+  let body =
+    Backend_openai.build_request
+      ~config
+      ~messages:
+        [ with_source
+            source
+            Assistant
+            [ Thinking { content = "replayed"; signature = None }; Text "answer" ]
+        ]
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let assistant = Yojson.Safe.Util.(body |> member "messages" |> to_list |> List.hd) in
+  check_bool
+    "reasoning replays into the dialect's own field"
+    true
+    Yojson.Safe.Util.(assistant |> member "reasoning" |> to_string = "replayed");
+  check_bool
+    "the fixed field name is not emitted alongside"
+    true
+    Yojson.Safe.Util.(assistant |> member "reasoning_content" = `Null)
 ;;
 
 let test_ollama_request_replays_native_thinking_field () =
@@ -1072,6 +1208,56 @@ let test_rotation_policy_drives_incompatible_drop () =
        (run ~rotation:Reasoning_replay_contract.Allow_endpoint_rotation other_contract))
 ;;
 
+(* One request is serialized twice: exact-output planning runs with
+   [stream:false], then admission runs with the transport's real flag. Both
+   project the same history, so this summary fires twice with what used to be
+   byte-identical payloads -- a pair that said nothing about which stage
+   produced it (#28636). The flag is what tells them apart. *)
+let test_drop_summary_names_its_serialization () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:non_replaying_capabilities
+      ()
+  in
+  let messages = history_with_reasoning (source_for_config config) in
+  let captured = ref [] in
+  Diag.set_sink (fun _level ~ctx:_ line -> captured := line :: !captured);
+  let build stream =
+    ignore (Backend_openai.build_request ~stream ~config ~messages ~tools:[] () : string)
+  in
+  build false;
+  build true;
+  Diag.set_sink (fun _ ~ctx:_ _ -> ());
+  let drop_payloads =
+    !captured
+    |> List.filter (fun line ->
+      match String.index_opt line '{' with
+      | None -> false
+      | Some i ->
+        (match Yojson.Safe.from_string (String.sub line i (String.length line - i)) with
+         | `Assoc fields ->
+           List.assoc_opt "event" fields = Some (`String "reasoning_replay_dropped")
+         | _ | (exception _) -> false))
+  in
+  check_int "both serializations reported a drop" 2 (List.length drop_payloads);
+  let stream_flags =
+    drop_payloads
+    |> List.filter_map (fun line ->
+      let i = String.index line '{' in
+      match Yojson.Safe.from_string (String.sub line i (String.length line - i)) with
+      | `Assoc fields -> List.assoc_opt "stream" fields
+      | _ | (exception _) -> None)
+    |> List.sort compare
+  in
+  check_bool
+    "the pair is distinguishable by its stream flag"
+    true
+    (stream_flags = [ `Bool false; `Bool true ])
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
@@ -1113,6 +1299,18 @@ let () =
             `Quick
             test_latest_user_turn_policy_without_user_replays_none
         ; Alcotest.test_case
+            "latest user turn policy ignores the extra-context carrier"
+            `Quick
+            test_latest_user_turn_policy_ignores_extra_context_carrier
+        ; Alcotest.test_case
+            "a real trailing user message still resets the boundary"
+            `Quick
+            test_latest_user_turn_policy_real_trailing_user_still_resets
+        ; Alcotest.test_case
+            "carrier-only history replays none"
+            `Quick
+            test_carrier_only_history_replays_none
+        ; Alcotest.test_case
             "explicit preserve promotes latest-user policy"
             `Quick
             test_explicit_preserve_promotes_latest_user_policy_to_full_history
@@ -1128,6 +1326,10 @@ let () =
             "OpenAI chat boundary"
             `Quick
             test_openai_chat_request_uses_whole_history_projection
+        ; Alcotest.test_case
+            "replay field mirrors the streaming field"
+            `Quick
+            test_openai_chat_replay_field_mirrors_streaming_field
         ; Alcotest.test_case
             "Ollama native boundary"
             `Quick
@@ -1160,6 +1362,10 @@ let () =
             "every codec answers its own contract"
             `Quick
             test_every_codec_answers_its_own_contract
+        ; Alcotest.test_case
+            "the drop summary names its serialization"
+            `Quick
+            test_drop_summary_names_its_serialization
         ] )
     ]
 ;;

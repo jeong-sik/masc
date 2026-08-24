@@ -49,17 +49,21 @@ let make_tool_bundle_for_descriptors
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
-      ?composition_catalog
+      ?(skill_catalog = Keeper_skill_catalog.empty)
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
   =
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
-     instances with a factory.  in_playground/cwd are unknown at
-     turn-start, so the factory defers
-     [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
-     each tool call site that already knows its [cwd]. *)
+     instances with a factory. in_playground and the runtime cache key need
+     the call site's [cwd], which is unknown at turn start, so the factory
+     defers creating the runtime until a call site supplies it.
+
+     The profile itself is not deferred in any meaningful sense:
+     [Keeper_sandbox_runner.effective_sandbox_profile] takes only [~meta] and
+     projects [meta.sandbox_profile], so every call in this turn gets the same
+     answer from the [meta] captured here. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
@@ -362,7 +366,8 @@ let make_tool_bundle_for_descriptors
   in
   let composition_tools =
     Keeper_tool_composition_surface.make_tools
-        ?catalog:composition_catalog
+        ~skill_composition_entries:
+          (Keeper_skill_catalog.composition_entries skill_catalog)
         ~config
         ~meta
         ~publication_recovery
@@ -408,7 +413,7 @@ let make_tool_bundle
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
-      ?composition_catalog
+      ?skill_catalog
       ?turn_ctx_cell
       ()
   =
@@ -421,7 +426,7 @@ let make_tool_bundle
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
-    ?composition_catalog
+    ?skill_catalog
     ?turn_ctx_cell
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
@@ -434,7 +439,7 @@ let make_tools
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
-      ?composition_catalog
+      ?skill_catalog
       ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
@@ -445,7 +450,7 @@ let make_tools
      ~publication_recovery
      ~ctx_snapshot
      ?clock
-     ?composition_catalog
+     ?skill_catalog
      ?turn_ctx_cell
      ())
     .tools

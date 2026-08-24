@@ -404,7 +404,7 @@ let test_reconcile_predicate_stopped_resolved () =
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -425,7 +425,7 @@ let test_reconcile_predicate_stopped_unresolved () =
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -656,7 +656,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
 
-let test_direct_start_terminalizes_fork_rejection_under_launch_reservation () =
+let test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   R.For_testing.clear ();
@@ -693,22 +693,29 @@ let test_direct_start_terminalizes_fork_rejection_under_launch_reservation () =
          launch_outcome := Some (Masc.Keeper_keepalive.start_keepalive ctx meta)
        with
        | Cancel_direct_keepalive_parent -> ());
+      (* The launch transaction re-raises [Eio.Cancel.Cancelled] instead of
+         folding it into a launch outcome, so a caller can never keep working
+         inside a context its owner already tore down. KeeperOASAdvanced.tla
+         checks exactly that with [CancelledNeverAbsorbed]. *)
       (match !launch_outcome with
-       | Some (Masc.Keeper_keepalive.Keepalive_fork_rejected _) -> ()
+       | None -> ()
        | Some outcome ->
          failf
-           "cancelled parent returned unexpected launch outcome: %s"
-           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome)
-       | None -> fail "cancelled parent did not return a launch outcome");
+           "cancelled launch owner produced an outcome instead of propagating: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      (* Rollback runs before the re-raise, so nothing is left behind. A
+         registry entry here would tell operators a Keeper crashed when it
+         never started. *)
       match R.get ~base_path:config.base_path keeper_name with
-      | None -> fail "fork-rejected direct lane disappeared"
+      | None -> ()
       | Some entry ->
-        check string "fork rejection is durably crashed" "crashed"
-          (KSM.phase_to_string entry.phase);
-        (match Eio.Promise.peek entry.done_p with
-         | Some (`Crashed _) -> ()
-         | Some `Stopped -> fail "fork rejection resolved as stopped"
-         | None -> fail "fork rejection left the terminal promise unresolved"))
+        failf
+          "cancelled launch left a registry entry: phase=%s done=%s"
+          (KSM.phase_to_string entry.phase)
+          (match Eio.Promise.peek entry.done_p with
+           | None -> "unresolved"
+           | Some `Stopped -> "stopped"
+           | Some (`Crashed reason) -> "crashed:" ^ reason))
 
 let test_direct_stop_resolves_done_after_librarian_drain_failure () =
   Eio_main.run @@ fun env ->
@@ -4373,8 +4380,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
-      test_case "fork rejection terminalizes under launch reservation" `Quick
-        test_direct_start_terminalizes_fork_rejection_under_launch_reservation;
+      test_case "cancelled launch owner rolls back under launch reservation" `Quick
+        test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop resolves done after Librarian drain failure" `Quick
         test_direct_stop_resolves_done_after_librarian_drain_failure;
       test_case "lane join waits for children and cleanup" `Quick

@@ -30,13 +30,37 @@ type request_error =
 
 let ( let* ) = Result.bind
 
+(* [expected] is read by a model deciding what to send next, so it is written
+   in the vocabulary [Agent_core.Tool_input_validation] already uses on the
+   schema layer: MISSING names an absent field and its type, "wrong type"
+   names what arrived. A payload that clears the schema and fails here used to
+   answer in a second vocabulary ("must be required field"), which named the
+   rule rather than the correction -- live logs carry a Keeper trying
+   target.agent, target.keeper_name, then target.keeper, one call each. *)
 let invalid_wire_value ~field ~expected =
   Error (Invalid_wire_value { field; expected })
 ;;
 
+let wrong_type ~field ~expected ~got =
+  invalid_wire_value
+    ~field
+    ~expected:(Printf.sprintf "wrong type - expected: %s, got: %s" expected got)
+;;
+
+let received_kind (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `String value -> Printf.sprintf "string(%S)" value
+  | `Int _ | `Intlit _ -> "integer"
+  | `Float _ -> "number"
+  | `Bool _ -> "boolean"
+  | `Null -> "null"
+;;
+
 let object_fields ~field = function
   | `Assoc fields -> Ok fields
-  | _ -> invalid_wire_value ~field ~expected:"object"
+  | other -> wrong_type ~field ~expected:"object" ~got:(received_kind other)
 ;;
 
 let exact_fields ~field ~allowed fields =
@@ -55,19 +79,22 @@ let exact_fields ~field ~allowed fields =
       invalid_wire_value
         ~field:(field ^ "." ^ key)
         ~expected:
-          (Printf.sprintf "no undeclared field; accepted: %s"
+          (Printf.sprintf "UNKNOWN FIELD (accepted: %s)"
              (String.concat ", " allowed))
 ;;
 
-let required_field ~field name fields =
+let required_field ?(kind = "string") ~field name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
-  | None -> invalid_wire_value ~field:(field ^ "." ^ name) ~expected:"required field"
+  | None ->
+    invalid_wire_value
+      ~field:(field ^ "." ^ name)
+      ~expected:(Printf.sprintf "MISSING (required: %s)" kind)
 ;;
 
 let string_value ~field = function
   | `String value -> Ok value
-  | _ -> invalid_wire_value ~field ~expected:"string"
+  | other -> wrong_type ~field ~expected:"string" ~got:(received_kind other)
 ;;
 
 let target_of_json json =
@@ -219,7 +246,7 @@ let request_error_to_string = function
   | Empty_prompt -> "message is required"
   | Invalid_multimodal_input reason -> reason
   | Invalid_wire_value { field; expected } ->
-    Printf.sprintf "%s must be %s" field expected
+    Printf.sprintf "%S: %s" field expected
 ;;
 
 let target_name_of_target = function

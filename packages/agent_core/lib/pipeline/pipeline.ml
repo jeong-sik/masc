@@ -158,6 +158,25 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
           set_lifecycle agent ~last_progress_at:ts Running
         | _ -> set_lifecycle agent ~first_progress_at:ts ~last_progress_at:ts Running);
        let* () = trace_assistant_blocks raw_trace_run response.content in
+       (* Admission runs after the raw trace and before anything derives from
+          the response, because history and tool dispatch read [response.content]
+          separately: normalizing only one of them would leave a tool_result
+          whose tool_use is absent from the transcript. The raw trace above
+          keeps the wire text, so no evidence is lost by narrowing what the
+          transcript replays. *)
+       let admission =
+         Agent_tools.admit_tool_use_names
+           (Agent_tools.build_index (Tool_set.to_list agent.tools))
+           response.content
+       in
+       let response = { response with content = admission.Agent_tools.admitted } in
+       (match admission.Agent_tools.rejected with
+        | 0 -> ()
+        | rejected ->
+          Log.warn
+            _log
+            "tool calls dropped before history"
+            [ Log.I ("rejected", rejected); Log.I ("turn", turn) ]);
        let usage =
          Agent_turn.accumulate_usage
            ~current_usage:agent.state.usage
@@ -202,9 +221,56 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
                  ^ Types.show_assistant_message_error error))
        in
        let next_turn = turn + 1 in
+       (* A dropped call leaves no tool_use for a tool_result to answer, so the
+          model would otherwise see its turn vanish without a reason. The note
+          states the shape of the mistake and never the name that caused it:
+          echoing that name back is the replay this whole path exists to stop.
+          It is appended only when nothing was admitted, because a surviving
+          call's tool_result has to follow its tool_use with nothing between. *)
+       let admission_note =
+         let admitted_any_call =
+           List.exists
+             (function
+               | Types.ToolUse _ -> true
+               | Types.Text _
+               | Types.Thinking _
+               | Types.ReasoningDetails _
+               | Types.RedactedThinking _
+               | Types.ToolResult _
+               | Types.Image _
+               | Types.Document _
+               | Types.Audio _ -> false)
+             response.content
+         in
+         match admission.Agent_tools.rejected with
+         | 0 -> None
+         | _ when admitted_any_call -> None
+         | rejected ->
+           Some
+             { Types.role = User
+             ; content =
+                 [ Types.Text
+                     (Printf.sprintf
+                        "%d tool call(s) in your previous message named no \
+                         registered tool and were not run. Send a registered \
+                         tool name on its own and put every argument in the \
+                         input object."
+                        rejected)
+                 ]
+             ; name = None
+             ; tool_call_id = None
+             ; metadata = []
+             }
+       in
+       let collected_messages base =
+         let with_assistant = Util.snoc base assistant_message in
+         match admission_note with
+         | None -> with_assistant
+         | Some note -> Util.snoc with_assistant note
+       in
        let checkpoint_state =
          { agent.state with
-           messages = Util.snoc agent.state.messages assistant_message
+           messages = collected_messages agent.state.messages
          ; turn_count = next_turn
          ; usage
          }
@@ -217,7 +283,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
        in
        update_state agent (fun state ->
          { state with
-           messages = Util.snoc state.messages assistant_message
+           messages = collected_messages state.messages
          ; turn_count = next_turn
          ; usage
          });
@@ -290,7 +356,10 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
                ; timestamp = Pipeline_common.timestamp_now ?clock ()
                })
         | None -> ());
-       Ok ())
+       (* The admitted response, not the wire one, is what the output stage must
+          route: dispatch reads [response.content] on its own, so handing back
+          the original here would run a call the transcript no longer records. *)
+       Ok (response, admission.Agent_tools.rejected))
 ;;
 
 (* ── Stage 5: Execute ────────────────────────────────────── *)
@@ -391,7 +460,7 @@ let replay_settled_before_checkpoint agent =
 ;;
 
 (** Map stop_reason to turn_outcome. *)
-let stage_output ?raw_trace_run ?before_tool_execution ~turn agent response =
+let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_calls agent response =
   Tracing.with_span
     agent.options.tracer
     { kind = Hook_invoke
@@ -420,6 +489,14 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn agent response =
              response.content
          in
          (match Nonempty.of_list tool_uses with
+          | None when rejected_tool_calls > 0 ->
+            (* Every call this turn named no registered tool, so admission kept
+               none of them (see [Agent_tools.admit_tool_use_names]). The turn
+               did reach a decision — it just routed nowhere — and the note
+               appended in [stage_collect] tells the model so. Continuing here
+               is what separates a dropped call from a dead keeper: the Gate
+               below exists for a turn that never had a tool block at all. *)
+            Ok (ToolsExecuted After_tool_results_appended)
           | None ->
             (* Provider parsers reconcile this shape, but public injected
                transports return [api_response] directly. This driver Gate
@@ -643,16 +720,28 @@ let run_new_turn
              Pipeline_execution_scope.record_provider_response execution response
              |> tag_error "response"
            in
-           let* () =
+           let* response, rejected_tool_calls =
              stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response
              |> tag_error "collect"
            in
            (match Pipeline_execution_scope.provider execution with
             | None ->
-              stage_output ?raw_trace_run ?before_tool_execution ~turn agent response
+              stage_output
+                ?raw_trace_run
+                ?before_tool_execution
+                ~turn
+                ~rejected_tool_calls
+                agent
+                response
             | Some provider ->
               Execution_context.with_provider_attempt provider (fun () ->
-                stage_output ?raw_trace_run ?before_tool_execution ~turn agent response))
+                stage_output
+                  ?raw_trace_run
+                  ?before_tool_execution
+                  ~turn
+                  ~rejected_tool_calls
+                  agent
+                  response))
            |> tag_error "output")
     in
     (match outcome with

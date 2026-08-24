@@ -758,13 +758,57 @@ let parse_table_array toml key parse =
            results)
 ;;
 
+let normalize_label value = String.lowercase_ascii (String.trim value)
+
+let model_row_key (entry : model_entry) =
+  Option.map normalize_label entry.provider_name, normalize_label entry.id_prefix
+;;
+
+let provider_entry_key (entry : provider_entry) = normalize_label entry.id
+
+(* Two rows under one key make the winner a property of declaration order,
+   which is what [merge]'s "order-independent" note says lookups are not. An
+   overlay is a file somebody writes by hand, so the two can differ by a
+   factor of 900 in price and nothing says which one is charging. *)
+let duplicate_model_label (entry : model_entry) =
+  match entry.provider_name with
+  | None -> Printf.sprintf "model row %S" entry.id_prefix
+  | Some provider -> Printf.sprintf "model row %S for provider %S" entry.id_prefix provider
+;;
+
+let reject_duplicate_rows models providers =
+  let rec first_dup seen = function
+    | [] -> None
+    | (key, label) :: rest ->
+      if List.mem key seen then Some label else first_dup (key :: seen) rest
+  in
+  match
+    first_dup [] (List.map (fun e -> model_row_key e, duplicate_model_label e) models)
+  with
+  | Some label -> Error (Printf.sprintf "model catalog declares %s twice" label)
+  | None ->
+    (match
+       first_dup
+         []
+         (List.map
+            (fun (e : provider_entry) ->
+               provider_entry_key e, Printf.sprintf "provider row %S" e.id)
+            providers)
+     with
+     | Some label -> Error (Printf.sprintf "model catalog declares %s twice" label)
+     | None -> Ok ())
+;;
+
 let catalog_of_toml toml =
   match parse_table_array toml "models" parse_entry with
   | Error _ as e -> e
   | Ok models ->
     (match parse_table_array toml "providers" Model_provider_catalog.parse_entry with
      | Error _ as e -> e
-     | Ok providers -> Ok { models; providers })
+     | Ok providers ->
+       (match reject_duplicate_rows models providers with
+        | Error _ as e -> e
+        | Ok () -> Ok { models; providers }))
 ;;
 
 let parse_catalog ~source parse =
@@ -812,7 +856,6 @@ let lookup t model_id =
   |> fun entries -> lookup_entries entries model_id
 ;;
 
-let normalize_label value = String.lowercase_ascii (String.trim value)
 
 (* Wire-kind labels ("openai_compat", "gemini", ...) are what
    [capability_provider_label] synthesizes when a config declares no
@@ -873,12 +916,6 @@ let lookup_for_provider t ~provider_name ~model_id =
    rows replace same-identity base rows; everything else is kept from both
    sides. This is the deployment-delta alternative to forking the whole
    catalog through [set_global]. *)
-let model_row_key (entry : model_entry) =
-  Option.map normalize_label entry.provider_name, normalize_label entry.id_prefix
-;;
-
-let provider_entry_key (entry : provider_entry) = normalize_label entry.id
-
 let merge ~base ~overlay =
   let overlay_model_keys = List.map model_row_key overlay.models in
   let overlay_provider_keys = List.map provider_entry_key overlay.providers in
@@ -922,13 +959,7 @@ type default_cache =
 
 let load_embedded_catalog () =
   match load_default () with
-  | Ok catalog ->
-    Diag.info
-      "model_catalog"
-      "loaded %d default model entries and %d provider entries from embedded catalog"
-      (List.length catalog.models)
-      (List.length catalog.providers);
-    catalog
+  | Ok catalog -> catalog
   | Error msg ->
     raise
       (Invalid_embedded_catalog

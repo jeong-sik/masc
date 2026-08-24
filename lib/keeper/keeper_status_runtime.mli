@@ -2,6 +2,37 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
+
+val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
+(** Wire form of the keeper diagnostic's [quiet_reason]. The dashboard's
+    [KeeperQuietReason] union must list exactly these strings; an unlisted one
+    is dropped when the diagnostic is normalised. *)
+
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
+
+val keeper_next_action_path_to_string : keeper_next_action_path -> string
+
+val keeper_next_action_path_of_string_opt :
+  string -> keeper_next_action_path option
+(** Strict inverse of {!keeper_next_action_path_to_string}.
+
+    [None] outside the published vocabulary: a reader that cannot spell an
+    action says so rather than resolving it to whichever action happens to be
+    first, which would paint an operator's screen for work that was never
+    asked for. *)
+(** Wire form of the keeper diagnostic's [next_action_path]. The dashboard's
+    [KeeperNextActionPath] union must list exactly these strings; an unlisted
+    one makes it reject the whole diagnostic. *)
+
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string
@@ -59,8 +90,6 @@ val augment_keeper_diagnostic_json :
     above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
-  | Surface_busy
-  | Surface_listening
   | Surface_inactive
   | Surface_offline
   | Surface_idle
@@ -85,6 +114,23 @@ val control_plane_status_to_string : control_plane_status -> string
 (** [None] when the value is outside the published vocabulary. Producer drift
     stays a rejected parse rather than an accepted default. *)
 val control_plane_status_of_string_opt : string -> control_plane_status option
+
+val keeper_health_to_string : keeper_health -> string
+
+val keeper_health_of_string_opt : string -> keeper_health option
+(** Strict inverse of {!keeper_health_to_string}; [None] outside the published
+    vocabulary. Callers that must resolve a value anyway go through
+    {!keeper_diagnostic_health}, which falls to [KH_offline] with a warning. *)
+(** Wire spelling of a health reading. *)
+
+val keeper_diagnostic_health :
+  diagnostic:Yojson.Safe.t -> source:string -> keeper_health
+(** Health as the diagnostic reports it.
+
+    An unreadable [health_state] resolves to [KH_offline] with a warning, not
+    to a healthy-looking value: the reader could not tell, and a keeper that
+    cannot be read is not a keeper that is fine. [source] names the caller in
+    that warning. *)
 
 val keeper_surface_status :
   diagnostic:Yojson.Safe.t ->

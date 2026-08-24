@@ -30,9 +30,9 @@ import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
 import type * as AgentCoreRuntimeStore from './agent-core-runtime-store'
 
+import { isAgentCoreEventType, sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
 import {
   MAX_JOURNAL_ENTRIES,
-  AGENT_CORE_EVENT_PREFIX,
 } from './config/constants'
 
 let agentCoreRuntimeStorePromise: Promise<typeof AgentCoreRuntimeStore> | null = null
@@ -241,11 +241,9 @@ export function normalizeSSEDispatchType(rawType: string): string {
   ) {
     return 'audit_event'
   }
-  const mascPrefix = 'masc/'
-  return rawType.startsWith(mascPrefix)
-    && !rawType.startsWith('masc/board_')
-    ? rawType.slice(mascPrefix.length)
-    : rawType
+  // Board events keep their namespace: the bare `board_*` names mean something
+  // else to the dispatcher.
+  return sseEventFamily(rawType) === 'board' ? rawType : withoutMascNamespace(rawType)
 }
 
 /** Apply one typed event delivered by the dashboard WebSocket. */
@@ -260,13 +258,13 @@ function handleEvent(event: SSEEvent): void {
   // MASC Custom("masc.*") payloads as agent_core:masc:* events; audit ledger
   // events still belong to the dashboard audit stream.
   const rawType = event.type
-  if (pauseAgentCoreRuntimeIngress && rawType.startsWith(AGENT_CORE_EVENT_PREFIX)) {
+  if (pauseAgentCoreRuntimeIngress && isAgentCoreEventType(rawType)) {
     queuedAgentCoreEvents.push(event)
     return
   }
   const type = normalizeSSEDispatchType(rawType)
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
-  if (rawType.startsWith(AGENT_CORE_EVENT_PREFIX)) {
+  if (isAgentCoreEventType(rawType)) {
     void loadAgentCoreRuntimeStore()
       .then(({ applyAgentCoreRuntimeEvent }) => {
         applyAgentCoreRuntimeEvent(event, { includeLiveTrace: true })

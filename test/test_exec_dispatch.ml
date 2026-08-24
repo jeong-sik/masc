@@ -1001,5 +1001,45 @@ let () =
     assert (String.trim result.stdout = "adapter")
   | Error _ -> assert false
 
+(* Witness, not inference. A redirect surface has advertised something its
+   executor could not do before -- a file mode that errored out before the
+   process was ever spawned -- so a literal stdin is proved by a child that
+   read it and said so. [cat] with no arguments reads stdin: if the bytes do
+   not reach it, the output is empty or the read blocks, and either fails. *)
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let content = "hello from a heredoc\n" in
+  let ir =
+    Simple
+      { bin
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = [ Masc_exec.Redirect_scope.Literal { bytes = content } ]
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  match
+    Keeper_tooling.Execute_shell_ir.dispatch
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      ~timeout_sec:10.
+      ir
+  with
+  | Ok result ->
+    if result.status <> Unix.WEXITED 0
+    then failwith "cat must exit zero when its stdin is a literal";
+    if result.stdout <> content
+    then
+      failwith
+        (Printf.sprintf
+           "the literal must reach the child verbatim: wanted %S, got %S"
+           content
+           result.stdout)
+  | Error _ -> failwith "a literal stdin must not be refused"
+;;
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

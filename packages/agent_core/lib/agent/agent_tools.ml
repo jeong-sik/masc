@@ -93,6 +93,46 @@ let identifier_prefix requested =
   if stop = length then None else Some (String.sub requested 0 stop)
 ;;
 
+(* The exact-match-then-reject contract above assumes the model can repair a
+   wrong name from the reject message. GLM-family providers break that
+   assumption from the server side: they fuse a per-call sequence number onto
+   the tool name (live shape 2026-08-24, keeper/polisher turns 3042-3044:
+   [Execute1139645993.1], [Execute1248182267.1], [Execute1349427591.2] — a
+   fresh number every turn, so every retry misses again and the model never
+   chose the digits). Recovery belongs where the registered names are known:
+   [Some registered] when [requested] is exactly one registered name extended
+   by [0-9.] characters alone — every observed shape was digits and dots, and
+   admitting [_] would let an underscore registered name such as masc_board_*
+   recover a different stem's underscore tail, so an underscore tail stays a
+   reject until a live shape asks for it. Alphabetic tails, unknown stems,
+   and names matching more than one registered prefix all stay [None] — the
+   exact-match answer below is unchanged for them. *)
+let is_call_suffix_char = function
+  | '0' .. '9' | '.' -> true
+  | _ -> false
+;;
+
+let strip_registered_suffix ~available requested =
+  let matches =
+    List.filter_map
+      (fun registered ->
+         let rlen = String.length registered in
+         let tlen = String.length requested in
+         if
+           tlen > rlen
+           && String.starts_with ~prefix:registered requested
+           && String.for_all
+                is_call_suffix_char
+                (String.sub requested rlen (tlen - rlen))
+         then Some registered
+         else None)
+      available
+  in
+  match matches with
+  | [ sole ] -> Some sole
+  | [] | _ :: _ :: _ -> None
+;;
+
 let levenshtein a b =
   let la = String.length a
   and lb = String.length b in
@@ -173,15 +213,82 @@ let unknown_tool_failure ~requested ~available =
   String.concat ". " (base :: extras), Validation_error
 ;;
 
-let resolve_tool_call tool_index name input = name, input, find_in_index tool_index name
+let resolve_tool_call tool_index name input =
+  match find_in_index tool_index name with
+  | Some _ as found -> name, input, found
+  | None -> (
+    (* GLM fuses a call sequence number onto the name; strip it before the
+       miss becomes a tool-not-found turn. [strip_registered_suffix] only
+       accepts a sole registered stem with a [0-9.] tail, so a genuine
+       unknown name still reaches the reject path unchanged. *)
+    match strip_registered_suffix ~available:(tool_names_of_index tool_index) name with
+    | Some corrected -> corrected, input, find_in_index tool_index corrected
+    | None -> name, input, None)
+;;
+
+(* The transcript is what the next request replays to the model, so a tool name
+   that never routed must not survive in it. Live shape 2026-08-24 (masc#29337):
+   a keeper emitted [Execute-1.1111e1111111] once, the block stayed in history,
+   and the same byte string came back 115 times over 2h17m. The same string also
+   survived a lane switch from glm-5-turbo to deepseek-v4-flash, which is only
+   possible if the source is the transcript rather than either model.
+
+   History therefore carries what dispatch resolved, not what the wire carried:
+   a recovered name is stored under its registered spelling (so the call-number
+   recovery above stops teaching the fused shape), and an unroutable call is
+   stored not at all. The wire text stays intact in the raw trace, which is the
+   evidence authority for what the provider actually sent. *)
+type tool_use_admission =
+  { admitted : Types.content_block list
+  ; rejected : int
+  }
+
+let admit_tool_use_names tool_index blocks =
+  let rejected = ref 0 in
+  let admitted =
+    List.filter_map
+      (fun (block : Types.content_block) ->
+         match block with
+         | Types.ToolUse { id; name; input } ->
+           (match resolve_tool_call tool_index name input with
+            | resolved, resolved_input, Some _ ->
+              Some (Types.ToolUse { id; name = resolved; input = resolved_input })
+            | _, _, None ->
+              incr rejected;
+              None)
+         | Types.Text _
+         | Types.Thinking _
+         | Types.ReasoningDetails _
+         | Types.RedactedThinking _
+         | Types.ToolResult _
+         | Types.Image _
+         | Types.Document _
+         | Types.Audio _ -> Some block)
+      blocks
+  in
+  { admitted; rejected = !rejected }
+;;
 
 let schedule_tool_use ~tool_index index (id, name, input) =
+  (* Resolving through [resolve_tool_call] (not a bare [find_in_index]) keeps
+     the scheduled name, execution_mode, and completion consistent with what
+     execution will look up: without the strip here, a suffixed name would
+     schedule as the Serial fallback and silently serialize tools whose
+     contract is Concurrent. *)
+  let resolved, _, tool_opt = resolve_tool_call tool_index name input in
   let execution_mode, completion =
-    match find_in_index tool_index name with
+    match tool_opt with
     | Some tool -> Tool.execution_mode tool ~input, Tool.completion tool
     | None -> Tool_contract.Serial, Tool_contract.Continue_after_success
   in
-  { index; id; name; input; execution_mode; completion }
+  (match tool_opt with
+   | Some _ when not (String.equal resolved name) ->
+     Log.warn
+       _log
+       "tool name suffix normalized"
+       [ Log.S ("requested", name); Log.S ("resolved", resolved) ]
+   | _ -> ());
+  { index; id; name = resolved; input; execution_mode; completion }
 ;;
 
 let hook_schedule_of_tool_use ~batch_index ~batch_size (tool_use : scheduled_tool_use)
@@ -337,6 +444,17 @@ let find_and_execute_tool_with_index
   let id = Tool_contract.Invocation.tool_use_id invocation in
   let requested_name = name in
   let name, input, tool_opt = resolve_tool_call tool_index name input in
+  (* Callers that reach execution without going through [schedule_tool_use]
+     (keeper official-client host passes the registered name verbatim, so it
+     never trips this) still normalize here; a suffixed name that resolves
+     must be visible in the log, not silently recovered. *)
+  (match tool_opt with
+   | Some _ when not (String.equal requested_name name) ->
+     Log.warn
+       _log
+       "tool name suffix normalized"
+       [ Log.S ("requested", requested_name); Log.S ("resolved", name) ]
+   | _ -> ());
   let first_deferred_failure = ref None in
   let post_effect_observers = ref [] in
   let defer_observer observer =

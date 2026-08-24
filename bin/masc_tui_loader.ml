@@ -3,6 +3,7 @@
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
@@ -31,6 +32,42 @@ let summarize_errors label errors =
 
 (** Load keepers through the canonical metadata classifier and typed store.
     The classifier preserves valid dotted names and excludes sidecars. *)
+(* Every refresh read all ten meta files whole, and in a thirty-second sample
+   not one of them changed. A file nothing has written to since the last read
+   still decodes to what it decoded then, so the read is skipped and that value
+   reused -- the same size-and-modification-time test [Workspace_backlog]
+   already applies to the backlog. [Unix.stat] carries sub-second times here, so
+   a write cannot land inside one without moving it. *)
+type cached_keeper_meta = {
+  cached_mtime : float;
+  cached_size : int;
+  cached_keeper : keeper;
+}
+
+let keeper_meta_cache : (string, cached_keeper_meta) Hashtbl.t =
+  Hashtbl.create 16
+
+let stat_opt path =
+  try Some (Unix.stat path) with Unix.Unix_error _ | Sys_error _ -> None
+
+let cached_keeper_for name stat =
+  match stat, Hashtbl.find_opt keeper_meta_cache name with
+  | Some (st : Unix.stats), Some entry
+    when st.Unix.st_mtime = entry.cached_mtime
+         && st.Unix.st_size = entry.cached_size ->
+      Some entry.cached_keeper
+  | (Some _ | None), (Some _ | None) -> None
+
+let remember_keeper name stat keeper =
+  match stat with
+  | None -> ()
+  | Some (st : Unix.stats) ->
+      Hashtbl.replace keeper_meta_cache name
+        { cached_mtime = st.Unix.st_mtime;
+          cached_size = st.Unix.st_size;
+          cached_keeper = keeper;
+        }
+
 let load_keepers (base_path : string) : keeper list * string option =
   let config = Workspace_core.default_config base_path in
   match Keeper_meta_store.persisted_keeper_names_result config with
@@ -38,17 +75,37 @@ let load_keepers (base_path : string) : keeper list * string option =
       report (Keeper_types_profile.keeper_dir config) err;
       [], Some ("keeper metadata unavailable: " ^ err)
   | Ok names ->
+      (* A keeper that is gone keeps nothing behind it. *)
+      Hashtbl.filter_map_inplace
+        (fun name entry -> if List.mem name names then Some entry else None)
+        keeper_meta_cache;
+      (* [keeper_meta_path] resolves the directory again for every name it is
+         handed, and resolving it takes a lock and a stat each time. The
+         directory is the same for all of them, so it is resolved once and the
+         file names hung off it. *)
+      let keepers_dir = Keeper_types_profile.keeper_dir config in
+      let meta_path name =
+        Filename.concat keepers_dir
+          (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name
+             Keeper_runtime_root_entry.Metadata)
+      in
       let keepers, errors =
         List.fold_left
           (fun (keepers, errors) name ->
-             let path = Keeper_types_profile.keeper_meta_path config name in
-             match Keeper_meta_store.read_meta config name with
-             | Ok (Some meta) ->
-                 Tui_decode.keeper_of_meta meta :: keepers, errors
-             | Ok None -> keepers, errors
-             | Error err ->
-                 report path err;
-                 keepers, (Printf.sprintf "%s: %s" name err :: errors))
+             let path = meta_path name in
+             let stat = stat_opt path in
+             match cached_keeper_for name stat with
+             | Some keeper -> keeper :: keepers, errors
+             | None -> (
+                 match Keeper_meta_store.read_meta config name with
+                 | Ok (Some meta) ->
+                     let keeper = Tui_decode.keeper_of_meta meta in
+                     remember_keeper name stat keeper;
+                     keeper :: keepers, errors
+                 | Ok None -> keepers, errors
+                 | Error err ->
+                     report path err;
+                     keepers, (Printf.sprintf "%s: %s" name err :: errors)))
           ([], []) names
       in
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) keepers
@@ -166,8 +223,10 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning | Verification | Harness
-    | Repositories | Connectors | Tools | Autonomy | System_logs -> None
+    | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
+    | Verification | Harness | Fusion | Repositories | Connectors | Runtime
+    | Config | Resources | Tools
+    | System_logs -> None
   in
   let current_navigation =
     match current_keeper_mode with
@@ -183,13 +242,23 @@ let load_from_masc_dir (state : state) (base_path : string) =
              Keeper_selection.Logs_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_calls ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Calls_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
     | Some Keeper_message ->
         (match state.msg_target_keeper_name with
          | Some keeper_name ->
              Keeper_selection.Message_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
-    | Some Keeper_list | None ->
+    | Some Keeper_list
+    (* The picker rides the list cursor: its own cursor points into the
+       runtime catalogue, not the roster. *)
+    | Some Keeper_runtime_pick
+    | None ->
         Keeper_selection.List_cursor state.keeper_cursor
   in
 
@@ -197,7 +266,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs) ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls
+                   | Keeper_runtime_pick) ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
@@ -219,17 +289,23 @@ let load_from_masc_dir (state : state) (base_path : string) =
    | Keeper_selection.List_cursor cursor ->
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with
-        | Some (Keeper_detail | Keeper_logs | Keeper_message) ->
+        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
             state.view <- Keepers Keeper_list;
             state.detail_scroll <- 0;
-            state.log_scroll <- 0
-        | Some Keeper_list | None -> ())
+            state.log_scroll <- 0;
+            state.keeper_calls_scroll <- 0
+        (* The picker rides the list cursor, so a reconciled cursor is not a
+           lost focus: it stays open across refreshes. *)
+        | Some Keeper_runtime_pick | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_detail
    | Keeper_selection.Logs_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_logs
+   | Keeper_selection.Calls_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_calls
    | Keeper_selection.Message_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_message);
@@ -365,6 +441,88 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
 
+let decode_schedule_row json =
+  let* sch_schedule_id = required_string_field json "schedule_id" in
+  let* sch_status = required_string_field json "status" in
+  let* sch_source = required_string_field json "source" in
+  let* sch_due_at_iso = optional_string_field json "due_at_iso" in
+  let* sch_recurrence_summary =
+    required_string_field json "recurrence_summary"
+  in
+  let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_summary = optional_string_field json "payload_summary" in
+  Ok
+    { sch_schedule_id
+    ; sch_status
+    ; sch_source
+    ; sch_due_at_iso
+    ; sch_recurrence_summary
+    ; sch_payload_target
+    ; sch_payload_summary
+    }
+
+let decode_schedule_rows json_list =
+  decode_list "requests" decode_schedule_row json_list
+
+(* The snapshot keeps the server's ok/unknown split: on a store read failure
+   the route reports [status = "unknown"] with a null [request_count] and an
+   empty row list, and the pane must not draw that as "no schedules". *)
+let decode_schedule_snapshot json =
+  let* scs_status = required_string_field json "status" in
+  let* scs_read_error =
+    optional_string_field json "schedule_store_read_error"
+  in
+  let* scs_request_count =
+    match Yojson.Safe.Util.member "request_count" json with
+    | `Int value -> Ok (Some value)
+    | `Null -> Ok None
+    | other ->
+        Error
+          (Printf.sprintf "schedules request_count must be an integer: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_truncated =
+    match Yojson.Safe.Util.member "truncated" json with
+    | `Bool value -> Ok value
+    | other ->
+        Error
+          (Printf.sprintf "schedules truncated must be a boolean: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* scs_next_due_iso =
+    match Yojson.Safe.Util.member "fsm" json with
+    | `Assoc fields ->
+        (match List.assoc_opt "next_due_at_iso" fields with
+         | Some (`String value) -> Ok (Some value)
+         | Some `Null | None -> Ok None
+         | Some other ->
+             Error
+               (Printf.sprintf
+                  "schedules fsm next_due_at_iso must be a string: %s"
+                  (Yojson.Safe.to_string other)))
+    | other ->
+        Error
+          (Printf.sprintf "schedules fsm must be an object: %s"
+             (Yojson.Safe.to_string other))
+  in
+  let* rows = required_list_field json "requests" in
+  let* scs_rows = decode_schedule_rows rows in
+  Ok
+    { scs_status
+    ; scs_read_error
+    ; scs_request_count
+    ; scs_truncated
+    ; scs_next_due_iso
+    ; scs_rows
+    }
+
+(** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
+let load_schedules ~(host : string) ~(port : int) :
+    (schedule_snapshot, string) result =
+  match fetch_schedules ~host ~port with
+  | Error err -> Error ("schedule load failed: " ^ err)
+  | Ok json -> decode_schedule_snapshot json
+
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int) :
     (board_post list, string) result =
@@ -398,6 +556,68 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
+(** Load the runtime catalogue and keeper assignments for the picker. *)
+let load_runtime_resolved ~(host : string) ~(port : int) :
+    ( Tui_decode.runtime_option list * Tui_decode.runtime_assignment list,
+      string )
+    result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err -> Error ("runtime catalogue load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_runtime_resolved json
+
+type runtime_surface_load = {
+  rsl_resolved : Tui_decode.runtime_resolved_snapshot;
+  rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
+}
+
+(** Load the Runtime operator surface from its identity projection and optional
+    probe observation. The requests run together when an Eio switch is
+    available. A resolved failure rejects the load; a probe failure remains an
+    inner result so lane identity can still be drawn as unobserved. *)
+let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
+    (runtime_surface_load, string) result =
+  let requests =
+    [ (fun () -> fetch_runtime_probe ~host ~port ~force)
+    ; (fun () -> fetch_runtime_resolved ~host ~port)
+    ]
+  in
+  let results =
+    match Eio_context.get_switch_opt () with
+    | Some _ -> Eio.Fiber.List.map ~max_fibers:2 (fun request -> request ()) requests
+    | None -> List.map (fun request -> request ()) requests
+  in
+  match results with
+  | [ _; Error detail ] -> Error ("runtime resolved load failed: " ^ detail)
+  | [ probe_result; Ok resolved_json ] ->
+      (match Tui_decode.decode_runtime_resolved_snapshot resolved_json with
+       | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
+       | Ok rsl_resolved ->
+           let rsl_probe =
+             match probe_result with
+             | Error detail -> Error ("runtime probe load failed: " ^ detail)
+             | Ok probe_json ->
+                 (match Tui_decode.decode_runtime_probe_snapshot probe_json with
+                  | Ok probe -> Ok probe
+                  | Error detail ->
+                      Error ("runtime probe decode failed: " ^ detail))
+           in
+           Ok { rsl_resolved; rsl_probe })
+  | _ -> Error "runtime surface loader lost one of its two projection reads"
+
+(** Load the tool calls keepers are holding, for the Approvals surface. *)
+let load_keeper_tool_approvals ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_tool_approval list, string) result =
+  match fetch_keeper_tool_approvals ~host ~port with
+  | Error err -> Error ("tool approvals load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_tool_approvals json
+
+(** Load the keepers whose approval gate is moved off [auto]. *)
+let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    ((string * string) list, string) result =
+  match fetch_keeper_tool_approval_modes ~host ~port with
+  | Error err -> Error ("tool approval modes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json
+
 (** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
 let load_transport_health ~(host : string) ~(port : int) :
     (Tui_decode.transport_health, string) result =
@@ -426,6 +646,7 @@ let load_overview ~(host : string) ~(port : int) :
         decode_attention_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
+      let* keeper_briefs = optional_list_field json "keeper_briefs" in
       let* top_attention =
         let fallback =
           match incidents with
@@ -446,21 +667,36 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* ov_cluster = required_string_field summary "cluster" in
       let* ov_project = required_string_field summary "project" in
-      let* ov_active_agents =
-        int_field_or summary "active_agents" ~default:(List.length agent_briefs)
-      in
-      let* ov_incident_count =
-        int_field_or summary "incident_count" ~default:(List.length incidents)
-      in
+      (* Counted from the lists the briefing carries. The summary object
+         holds workspace_health, cluster, and project and nothing else --
+         [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
+         a count read from there was a default dressed as a reading. *)
+      let ov_keepers = List.length keeper_briefs in
+      let ov_mcp_agents = List.length agent_briefs in
+      let ov_incident_count = List.length incidents in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
         {
           ov_workspace_health;
           ov_cluster;
           ov_project;
-          ov_active_agents;
+          ov_keepers;
+          ov_mcp_agents;
           ov_incident_count;
-          ov_attention_items = incidents @ attention_queue @ attention_items;
+          (* The briefing projects one fact onto two lists: an incident is
+             also queued for operator attention, as the same JSON row. On the
+             live runtime all three incidents came back on both lists and the
+             panel drew each twice. One fact, one row: a later item
+             structurally equal to an earlier one is the same projection
+             again, not a second fact. Items that differ in any field keep
+             both rows. *)
+          ov_attention_items =
+            (incidents @ attention_queue @ attention_items
+            |> List.fold_left
+                 (fun kept item ->
+                   if List.mem item kept then kept else item :: kept)
+                 []
+            |> List.rev);
           ov_top_attention = top_attention;
           ov_generated_at;
         }
@@ -486,6 +722,13 @@ let load_connectors ~(host : string) ~(port : int) :
   | Error err -> Error ("connector load failed: " ^ err)
   | Ok json -> Tui_decode.decode_connector_snapshot json
 
+(** Load the light Lanes projection from /api/v1/keepers/composite. *)
+let load_keeper_lanes ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_lanes_snapshot, string) result =
+  match fetch_keeper_lanes ~host ~port with
+  | Error err -> Error ("keeper lanes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_lanes_snapshot json
+
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :
     (Tui_decode.repository_snapshot, string) result =
@@ -500,13 +743,19 @@ let load_harness ~(host : string) ~(port : int) :
   | Error err -> Error ("harness load failed: " ^ err)
   | Ok json -> Tui_decode.decode_harness_snapshot json
 
-(** Load the autonomy feature-proof report from
-    /api/v1/dashboard/keeper-feature-proof *)
-let load_autonomy ~(host : string) ~(port : int) :
-    (Tui_decode.autonomy_snapshot, string) result =
-  match fetch_keeper_feature_proof ~host ~port with
-  | Error err -> Error ("autonomy load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_autonomy_snapshot json
+(** Load the retained Fusion registry list. *)
+let load_fusion_runs ~(host : string) ~(port : int) :
+    (Tui_decode.fusion_snapshot, string) result =
+  match fetch_fusion_runs ~host ~port with
+  | Error err -> Error ("fusion runs load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_snapshot json
+
+(** Load one exact Fusion run/evidence projection. *)
+let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
+    (Tui_decode.fusion_detail, string) result =
+  match fetch_fusion_detail ~host ~port ~run_id with
+  | Error err -> Error ("fusion detail load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_detail json
 
 (** Load the verification queue from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int) :
@@ -553,3 +802,76 @@ let load_keeper_roster ~(host : string) ~(port : int) :
               Error (Masc_tui_keeper_control.Roster_malformed detail)
           | Ok (rows, truncated, total) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~rows ~truncated ~total)))
+
+(* The two detail-pane tab reads. Lines are built here so the renderer draws
+   what one place formatted; a decode that only feeds a read-only pane keeps
+   the JSON generic instead of growing a typed mirror of the config shape. *)
+let json_block_lines (json : Yojson.Safe.t) =
+  Yojson.Safe.pretty_to_string json |> String.split_on_char '\n'
+
+let load_keeper_config_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (string list, string) result =
+  match
+    Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper config load failed: " ^ err)
+  | Ok json ->
+    let member key =
+      match json with
+      | `Assoc fields -> List.assoc_opt key fields
+      | _ -> None
+    in
+    (* The projection nests the prompt facts under [prompt]; the flat
+       spelling was an older shape and stays as a fallback so a downlevel
+       server still answers. *)
+    let prompt_member key =
+      match member "prompt" with
+      | Some (`Assoc fields) -> List.assoc_opt key fields
+      | _ -> member key
+    in
+    let instructions_lines =
+      match prompt_member "instructions" with
+      | Some (`String text) when String.trim text <> "" ->
+        String.split_on_char '\n' text
+      | Some _ | None -> [ "(no instructions declared)" ]
+    in
+    let effective_lines =
+      match prompt_member "effective_system_prompt" with
+      | Some (`String text) when String.trim text <> "" ->
+        String.split_on_char '\n' text
+      | Some _ | None -> [ "(no effective system prompt)" ]
+    in
+    let sources_lines =
+      match member "sources" with
+      | Some value -> json_block_lines value
+      | None -> []
+    in
+    Ok
+      (("# instructions" :: instructions_lines)
+       @ ("" :: "# effective system prompt" :: effective_lines)
+       @ (match sources_lines with
+          | [] -> []
+          | lines -> "" :: "# sources" :: lines))
+
+let load_keeper_github_identity_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (string list, string) result =
+  match
+    Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("github identity load failed: " ^ err)
+  | Ok json -> Ok (json_block_lines json)
+
+let load_runtime_config_view ~(host : string) ~(port : int) :
+    (string * string list, string) result =
+  match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
+  | Error err -> Error ("runtime config load failed: " ^ err)
+  | Ok json ->
+    let member key =
+      match json with
+      | `Assoc fields -> List.assoc_opt key fields
+      | _ -> None
+    in
+    (match member "path", member "source_text" with
+     | Some (`String path), Some (`String text) ->
+       Ok (path, String.split_on_char '\n' text)
+     | _ -> Error "runtime config response missing path/source_text")

@@ -29,6 +29,7 @@ let normalize_response_text_for_finalization
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _
   | Runtime_agent.Completed
   | Runtime_agent.InputRequired _ ->
   if
@@ -146,6 +147,19 @@ let runtime_yield_reason request =
    provider alternating between two stalled calls is the same loop. *)
 let repeated_tool_call_yield_threshold = 3
 
+(* Constitution exception (named bound + rationale): same shape as
+   [repeated_tool_call_yield_threshold] — loop detection is inherently a
+   repetition count, and what counts as "the same text" is already typed
+   (byte equality on the turn's accumulated [Text] blocks, no normalization).
+   3 = the first emission plus two identical repeats: a single repeat can be a
+   legitimate restatement after new tool evidence, but a second byte-identical
+   repeat means the model is narrating the same plan without acting on it.
+   Unlike the tool axis, the repeats must be the trailing consecutive turns:
+   the text axis has no output fingerprint proving "the world did not change",
+   so a non-adjacent recurrence (a deliberate re-summary several turns later)
+   is not loop evidence. Blank text never counts; it only breaks a streak. *)
+let repeated_assistant_text_yield_threshold = 3
+
 let same_present_fingerprint left right =
   match left, right with
   | Some left, Some right -> String.equal left right
@@ -171,7 +185,7 @@ let repeated_exact_tool_call ~threshold tool_calls =
     (* Every earlier identical call counts, not only the ones immediately
        before [latest]. The old fold stopped at the first different call, so it
        measured a run rather than a total, and a provider alternating between
-       two stalled calls never reached the threshold: sangsu ran
+       two stalled calls never reached the threshold: one keeper ran
        [git status --short --branch] 48 times with identical input in one
        dispatch, always with a Read or a git diff in between, and the count
        never left 1. That dispatch made 279 tool calls over 31 minutes and
@@ -193,6 +207,35 @@ let repeated_exact_tool_call ~threshold tool_calls =
     if threshold > 1 && repeated_count >= threshold
     then Some (latest.tool_name, repeated_count)
     else None
+;;
+
+let assistant_text_is_blank text =
+  String.for_all
+    (fun ch -> ch = ' ' || ch = '\t' || ch = '\n' || ch = '\r')
+    text
+;;
+
+(* [assistant_turn_texts] is newest-first with one entry per completed
+   provider turn ("" for a turn without a [Text] block), so a streak from the
+   head is exactly "the last N consecutive turns". Comparison is
+   [String.equal] on the accumulated text — byte equality, no trimming or
+   other normalization; blankness only gates entry, it never rewrites the
+   compared text. *)
+let repeated_assistant_text ~threshold assistant_turn_texts =
+  match assistant_turn_texts with
+  | [] -> None
+  | latest :: previous ->
+    if assistant_text_is_blank latest
+    then None
+    else (
+      let rec streak count = function
+        | text :: rest when String.equal text latest -> streak (count + 1) rest
+        | _ :: _ | [] -> count
+      in
+      let repeated_count = streak 1 previous in
+      if threshold > 1 && repeated_count >= threshold
+      then Some repeated_count
+      else None)
 ;;
 
 let keeper_raw_trace_sink
@@ -372,6 +415,7 @@ module For_testing = struct
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
   let runtime_yield_reason = runtime_yield_reason
   let repeated_exact_tool_call = repeated_exact_tool_call
+  let repeated_assistant_text = repeated_assistant_text
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
@@ -567,7 +611,6 @@ let run_turn
   in
   let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
-  let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let resume_agent_core_checkpoint =
@@ -644,7 +687,7 @@ let run_turn
     let context_digest =
       digest_text
         (base_system_prompt ^ turn_system_prompt ^ dynamic_context
-         ^ memory_context ^ temporal_context ^ user_message
+         ^ temporal_context ^ user_message
          ^ history_messages_digest)
     in
     append_manifest
@@ -662,7 +705,6 @@ let run_turn
                 , `String (digest_text turn_system_prompt) )
               ; ( "dynamic_context_digest"
                 , `String (digest_text dynamic_context) )
-              ; "memory_context_digest", `String (digest_text memory_context)
               ; ( "temporal_context_digest"
                 , `String (digest_text temporal_context) )
               ; "user_message_digest", `String (digest_text user_message)
@@ -793,13 +835,17 @@ let run_turn
                    | Error _ as error -> error
                    | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
                    | Ok Runtime_agent.Continue ->
-                     let repeated_tool_call_decision () =
+                     (* Tool axis first: its input+output fingerprints are the
+                        stronger no-progress proof and carry the tool name.
+                        The text axis runs only when tool fingerprints still
+                        move — the observed loop shape, where every turn's tool
+                        batch differed but the plan sentence never did. *)
+                     let repeated_loop_decision () =
                            (match
                               repeated_exact_tool_call
                                 ~threshold:repeated_tool_call_yield_threshold
                                 s.acc.tool_calls
                             with
-                            | None -> Ok Runtime_agent.Continue
                             | Some (tool_name, repeated_count) ->
                               Log.Keeper.warn
                                 ~keeper_name:meta.name
@@ -810,15 +856,32 @@ let run_turn
                               Ok
                                 (Runtime_agent.Yield
                                    (Runtime_agent.Repeated_tool_call
-                                      { tool_name; repeated_count })))
+                                      { tool_name; repeated_count }))
+                            | None ->
+                              (match
+                                 repeated_assistant_text
+                                   ~threshold:
+                                     repeated_assistant_text_yield_threshold
+                                   s.acc.assistant_turn_texts
+                               with
+                               | None -> Ok Runtime_agent.Continue
+                               | Some repeated_count ->
+                                 Log.Keeper.warn
+                                   ~keeper_name:meta.name
+                                   "yielding repeated assistant text count=%d"
+                                   repeated_count;
+                                 Ok
+                                   (Runtime_agent.Yield
+                                      (Runtime_agent.Repeated_assistant_text
+                                         { repeated_count }))))
                      in
                      (match autonomous_yield_requested with
-                      | None -> repeated_tool_call_decision ()
+                      | None -> repeated_loop_decision ()
                       | Some requested ->
                         (match requested () with
                          | Ok (Some request) ->
                            Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                         | Ok None -> repeated_tool_call_decision ()
+                         | Ok None -> repeated_loop_decision ()
                          | Error detail ->
                            Error
                              (Agent_core.Error.Internal

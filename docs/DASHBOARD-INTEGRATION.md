@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-05-20
-code_refs:
-  - dashboard/src/config/navigation.ts
-  - dashboard/src/components/status.ts
-  - dashboard/src/components/work.ts
-  - dashboard/src/components/lab.ts
 ---
 
 # Dashboard Integration Spec (v1 Shell)
@@ -121,8 +115,8 @@ code_refs:
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
   - overview + runtime shell metadata
-- `GET /api/v1/dashboard/namespace-truth`
-  - journey / agents / shared namespace truth
+- `GET /api/v1/dashboard/project-snapshot`
+  - journey / agents / shared project snapshot
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
@@ -136,10 +130,6 @@ code_refs:
   - fleet-health attribution view
 - `GET /api/v1/dashboard/transport-health`
   - runtime transport health + connection freshness view
-- `GET /api/v1/dashboard/keeper-feature-proof`
-  - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
-  - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs
-  - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
 - `GET /api/v1/dashboard/keeper-decisions`

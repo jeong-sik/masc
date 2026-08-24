@@ -73,4 +73,4 @@ val project_for_provider_config
 (** Emit bounded aggregate diagnostics. Exact per-message evidence remains in
     the immutable projection value; payload size is independent of history
     length and endpoint URLs are never logged. *)
-val observe : component:string -> t -> unit
+val observe : component:string -> stream:bool -> t -> unit

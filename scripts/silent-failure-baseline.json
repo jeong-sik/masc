@@ -5,5 +5,6 @@
   "error_to_ok_silence": 6,
   "error_result_silence": 137,
   "exception_catchall_swallow": 4,
+  "byte_sliced_text": 2,
   "variant_catchall_default": 1619
 }

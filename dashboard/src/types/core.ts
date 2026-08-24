@@ -576,21 +576,19 @@ export interface Goal {
 
 type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
 
+// Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
 type KeeperQuietReason =
-  | 'quiet_hours'
-  | 'min_gap'
-  | 'no_recent_activity'
   | 'disabled'
+  | 'not_running'
   | 'startup'
-  | 'model_error'
-  | 'graphql_error'
   | 'never_started'
-  | 'unknown'
 
+// Exactly what Keeper_status_runtime.keeper_next_action_path serializes.
 type KeeperNextActionPath =
-  | 'direct_message'
-  | 'probe'
+  | 'auto_restart'
   | 'recover'
+  | 'probe'
+  | 'direct_message'
 
 type KeeperReplyStatus =
   | 'never'
@@ -990,15 +988,13 @@ export interface KeeperStatusDetail {
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
 // `thinking` / `tool_use` (= trajectory content_type, never
 // pipeline_stage) and `scheduled_autonomous` (= turn channel, never
-// pipeline_stage). Added `overflowed` which the backend emits but
-// the type previously rejected.
+// pipeline_stage).
 export type PipelineStage =
   | 'idle'
   | 'compacting'
   | 'handoff'
   | 'offline'
   | 'failing'
-  | 'overflowed'
   | 'draining'
   | 'paused'
   | 'crashed'
@@ -1054,7 +1050,6 @@ export type KeeperPhase =
   | 'Offline'
   | 'Running'
   | 'Failing'
-  | 'Overflowed'
   | 'Compacting'
   | 'HandingOff'
   | 'Draining'
@@ -1180,14 +1175,6 @@ export interface Keeper {
     blocked_task_count?: number
     convergence?: number | null
   } | null
-  last_autonomous_action_at?: string | null
-  autonomous_action_count?: number
-  autonomous_turn_count?: number
-  autonomous_text_turn_count?: number
-  autonomous_tool_turn_count?: number
-  board_reactive_turn_count?: number
-  mention_reactive_turn_count?: number
-  noop_turn_count?: number
   created_at?: string
   updated_at?: string
   last_heartbeat?: string

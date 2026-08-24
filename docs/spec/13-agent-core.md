@@ -1,11 +1,5 @@
 ---
 status: Active
-last_verified: 2026-08-12
-code_refs:
-  - packages/agent_core/lib
-  - lib/runtime/runtime_agent.ml
-  - lib/keeper/keeper_event_bridge.ml
-  - lib/tool_bridge.ml
 ---
 
 # Agent Core Integration

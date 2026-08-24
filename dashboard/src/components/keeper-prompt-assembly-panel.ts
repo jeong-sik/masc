@@ -243,7 +243,7 @@ function shortFingerprint(value: string): string {
 
 function promptText(prompt: DashboardPromptItem | undefined): string {
   if (!prompt) return ''
-  return prompt.effective ?? prompt.file_value ?? prompt.default ?? ''
+  return prompt.effective ?? prompt.file_value ?? ''
 }
 
 function promptDisplayText(row: KeeperPromptAssemblyRow): string {
@@ -257,7 +257,6 @@ function sourceLabel(source: KeeperPromptAssemblyRow['source']): string {
   if (source === 'computed') return 'computed'
   if (source === 'override') return 'saved override'
   if (source === 'file') return 'prompt file'
-  if (source === 'default') return 'default'
   return 'missing'
 }
 

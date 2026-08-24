@@ -124,11 +124,20 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
         || thread_ts <> surface_thread
       then Error "Slack Keeper chat operation surface does not match continuation"
       else Ok ()
+    (* A Keeper reply route is internal by construction: it is created only
+       when one Keeper asks another to run a turn, which is the Agent
+       surface. There is no external speaker to attribute, so one carried
+       here would name a person nobody routes the reply to. *)
+    | Keeper_continuation_channel.Keeper _, Surface_ref.Agent ->
+      if String.trim channel_user_id = ""
+      then Ok ()
+      else Error "Keeper-routed chat operation cannot carry an external speaker"
     | Keeper_continuation_channel.Unrouted _, _ ->
       Error "Keeper chat operation continuation must be routable"
     | (Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _
-      | Keeper_continuation_channel.Slack _), _ ->
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Keeper _), _ ->
       Error "Keeper chat operation surface kind does not match continuation"
 ;;
 

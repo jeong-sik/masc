@@ -21,14 +21,33 @@ type palette = {
   strong : span;
   emphasis : span;
   code : span;
-  heading : span;
+  heading : int -> span;
+      (** The codes for a heading of the given level, 1 for [#] through 6.
+          A function rather than one span because the level is the only thing
+          that says which heading is inside which, and dropping it drew a
+          document's every heading the same. Which levels differ, and how, is
+          terminal vocabulary and stays with the caller. *)
   quote : span;
   link_text : span;
   link_target : span;
   rule : span;
   bullet : string;  (** Drawn in place of the source's [-], [*] or [+]. *)
   code_gutter : string;  (** Drawn left of every fenced-code row. *)
+  code_header : span;
+      (** Style for the width-filling header of a language-tagged fence. *)
+  code_border : span;  (** Style for that fence's closing border. *)
   quote_gutter : string;
+  table_header : span;
+  table_gutter : string;
+  (** Drawn between a table's columns. *)
+  (* Styles for fenced code that names a language this module lexes
+     (ocaml, bash/sh, json). A fence with no tag, or one naming anything
+     else, keeps the single [code] span for the whole body. *)
+  code_keyword : span;
+  code_string : span;
+  code_comment : span;
+  code_number : span;
+  code_type : span;  (** Also JSON object keys: a field name reads as one. *)
 }
 
 val plain_palette : palette
@@ -40,7 +59,17 @@ val render : palette:palette -> width:int -> string -> string list
 
     Fenced code keeps its own line breaks — wrapping a diff at a word boundary
     destroys the alignment that made it worth fencing — and is hard-split only
-    where a line is wider than the row. Everything else wraps at spaces.
+    where a line is wider than the row. Every split chunk is a separate terminal
+    row; concatenating them recovers the complete source line. A tagged fence
+    also draws a header containing its language, and a closed tagged fence draws
+    a closing border. Everything else wraps at spaces.
+
+    A fence whose tag names a language this module lexes — [ocaml], [ml],
+    [bash] or friends, [json] — has its body tokenised whole: reserved words
+    as keywords, string and char literals as strings, OCaml comments (nested,
+    multi-row included) as comments, numbers as numbers, and capitalised
+    identifiers or JSON object keys as types. Any other tag, or none, keeps
+    the single code span for the whole body.
 
     Styling that spans a wrap is reopened on the next row, so a bold sentence
     stays bold past the break instead of ending at it. *)

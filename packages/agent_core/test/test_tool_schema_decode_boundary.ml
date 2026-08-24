@@ -78,6 +78,53 @@ let test_duplicate_root_key_is_rejected () =
      | Ok _ -> failf "expected a duplicate-key rejection")
 ;;
 
+(* The params conversion used to skip this gate, so the same document that
+   input_schema_of_json refused converted here with List.assoc quietly taking
+   the first entry (#27841). Both readers answer the same way now. *)
+let test_params_conversion_rejects_a_duplicate_key () =
+  let schema : Yojson.Safe.t =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "city", `Assoc [ "type", `String "string" ]
+            ; "city", `Assoc [ "type", `String "integer" ]
+            ] )
+      ]
+  in
+  check
+    bool
+    "storage path refuses the schema"
+    true
+    (Result.is_error (Types.input_schema_of_json schema));
+  check
+    bool
+    "params path refuses the same schema"
+    true
+    (Result.is_error (Types.json_schema_to_params_result schema))
+;;
+
+let test_params_conversion_keeps_a_unique_key () =
+  let schema : Yojson.Safe.t =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc [ "city", `Assoc [ "type", `String "string" ] ]
+      ; "required", `List [ `String "city" ]
+      ]
+  in
+  match Types.json_schema_to_params_result schema with
+  | Error detail -> failf "expected a unique-key schema to convert: %s" detail
+  | Ok params ->
+    check int "one param" 1 (List.length params);
+    check
+      bool
+      "the param is required"
+      true
+      (match params with
+       | [ param ] -> param.Types.required
+       | _ -> false)
+;;
+
 let test_duplicate_nested_key_is_rejected () =
   let schema : Yojson.Safe.t =
     `Assoc
@@ -573,6 +620,16 @@ let () =
             "duplicate and unknown fields"
             `Quick
             test_derived_decoders_reject_duplicate_and_unknown_fields
+        ] )
+    ; ( "params conversion shares the key gate"
+      , [ test_case
+            "duplicate key"
+            `Quick
+            test_params_conversion_rejects_a_duplicate_key
+        ; test_case
+            "unique key still converts"
+            `Quick
+            test_params_conversion_keeps_a_unique_key
         ] )
     ]
 ;;

@@ -40,6 +40,10 @@ type agent_error =
   | `Terminal_tool_durability_failed of
       Tool_contract.Invocation.t * Error.closed_terminal_effect * string
   | `Unrecognized_stop_reason of string
+  | `Tool_round_limit_exceeded of int * int
+    (** rounds executed, declared ceiling. The run kept continuing after tool
+        execution past the ceiling its config declared. Reported instead of a
+        quiet stop so a truncated run is never mistaken for a finished one. *)
   ]
 
 type config_error =
@@ -155,6 +159,8 @@ let of_core_error (err : Error.t) : core_error_poly =
   | Error.Agent (TerminalToolDurabilityFailed r) ->
     `Terminal_tool_durability_failed (r.invocation, r.effect_disposition, r.detail)
   | Error.Agent (UnrecognizedStopReason r) -> `Unrecognized_stop_reason r.reason
+  | Error.Agent (ToolRoundLimitExceeded r) ->
+    `Tool_round_limit_exceeded (r.rounds, r.limit)
   | Error.Config (MissingEnvVar r) -> `Missing_env_var r.var_name
   | Error.Config (UnsupportedProvider r) -> `Unsupported_provider r.detail
   | Error.Config (InvalidConfig r) -> `Invalid_config (r.field, r.detail)
@@ -240,6 +246,8 @@ let to_core_error (err : core_error_poly) : Error.t =
   | `Terminal_tool_durability_failed (invocation, effect_disposition, detail) ->
     Error.Agent (TerminalToolDurabilityFailed { invocation; effect_disposition; detail })
   | `Unrecognized_stop_reason reason -> Error.Agent (UnrecognizedStopReason { reason })
+  | `Tool_round_limit_exceeded (rounds, limit) ->
+    Error.Agent (ToolRoundLimitExceeded { rounds; limit })
   | `Missing_env_var var -> Error.Config (MissingEnvVar { var_name = var })
   | `Unsupported_provider detail -> Error.Config (UnsupportedProvider { detail })
   | `Invalid_config (field, detail) -> Error.Config (InvalidConfig { field; detail })
@@ -312,6 +320,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Terminal_tool_effect_failed _
   | `Terminal_tool_durability_failed _
   | `Unrecognized_stop_reason _
+  | `Tool_round_limit_exceeded _
   | `Missing_env_var _
   | `Unsupported_provider _
   | `Invalid_config _

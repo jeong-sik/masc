@@ -89,6 +89,23 @@ val thinking_lines : t -> string list
 val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 
+(** One stretch of the turn, in arrival order. A tool-call round interleaves
+    reasoning, calls and reply text; {!text}, {!thinking_lines} and
+    {!tool_rows} answer the totals, this answers the order, which is what a
+    reader follows a long turn by. Strings are already terminal-safe and
+    formatted the way the flat accessors format them. *)
+type trail_item =
+  | Trail_thinking of string list
+      (** Non-blank reasoning lines of one contiguous stretch. *)
+  | Trail_tools of string list
+      (** Rendered rows of one contiguous run of tool calls, aligned within
+          the run. A call keeps updating its row (arguments, result) after
+          later stretches open. *)
+  | Trail_text of string  (** One contiguous stretch of reply text. *)
+
+val trail : t -> trail_item list
+(** Empty stretches are dropped, so every item draws at least one row. *)
+
 val completed_tool_rows : (string * string) list -> string list
 (** Rows for tool calls read back from the durable transcript, given as
     (tool name, argument text) pairs in the order they were made.
@@ -98,6 +115,7 @@ val completed_tool_rows : (string * string) list -> string list
     always carry the finished marker: a persisted call is one that returned. *)
 
 val tool_rows : t -> string list
+
 (** One line per tool call, in stream order, the way the pane draws them: a
     marker for how far the call got, the tool's name, and the argument it is
     known by.
@@ -106,6 +124,29 @@ val tool_rows : t -> string list
     the transcript once the turn ends, so what an operator watched and what
     they scroll back to are not formatted by two different functions. *)
 
+(** How a tool step recorded in an autonomous turn's trace ended. The server
+    writes one of [ok], [err], [pending]; a step with no status at all is the
+    fourth case, kept apart from [pending] because "the trace closed with the
+    call open" and "the trace did not say" are different facts. *)
+type persisted_tool_outcome =
+  | Returned  (** [status: "ok"] *)
+  | Failed  (** [status: "err"] *)
+  | Never_returned  (** [status: "pending"] *)
+  | Outcome_unrecorded  (** no [status] field *)
+
+val persisted_tool_rows :
+  (persisted_tool_outcome * string * string * string option) list -> string list
+(** Rows for the tool steps of one autonomous turn read back from the
+    transcript's trace block, given as (outcome, tool name, argument text,
+    duration label) in the order the turn made them.
+
+    Formatted by the same function {!tool_rows} uses, so a turn the keeper
+    ran on its own reads like one watched live: the finished glyph for a call
+    that returned, a distinct one for a call that returned an error, and the
+    open glyph for a call the trace never saw finish, and [?] for a step
+    whose outcome the trace did not record. The duration follows the subject
+    only when the server recorded one, which it does for a call that
+    finished. *)
 (** How a status row reads. *)
 type status_kind =
   | Progress  (** How the turn is going. *)

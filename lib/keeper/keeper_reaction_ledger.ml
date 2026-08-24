@@ -10,6 +10,7 @@ type stimulus_kind =
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message
+  | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
 
 type reaction_kind =
   | Turn_started
@@ -22,7 +23,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v6"
+let storage_generation = "v7"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -36,6 +37,7 @@ let stimulus_kind_to_string = function
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
+  | Delegate_completed -> "keeper_delegate_completed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -53,6 +55,7 @@ let stimulus_kind_of_string = function
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
+  | "keeper_delegate_completed" -> Some Delegate_completed
   | _ -> None
 ;;
 
@@ -71,7 +74,15 @@ let reaction_kind_of_string = function
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
-let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
+(* The event id is recomputed on read and compared, so a collision is a replay
+   decision, not a display artefact -- two stimuli landing on one id make the
+   second read as the first. Stdlib.Digest is MD5; the schedule, auth and
+   cache identities in this repository already use Digestif.SHA256 (#26720).
+   The digest feeds the id readers compare, so the storage generation advances
+   with it: rows written under v6 stay in the v6 namespace and are not read. *)
+let digest_id prefix payload =
+  prefix ^ ":" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+;;
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -88,6 +99,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
   | Keeper_event_queue.Workspace_message _ -> Workspace_message
+  | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -205,6 +217,15 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "workspace_message request_id=%s from=%s"
       message.wmsg_request_id
       message.wmsg_from
+  | Keeper_event_queue.Delegate_completed dc ->
+    Printf.sprintf
+      "keeper_delegate_completed operation_id=%s keeper=%s outcome=%s"
+      dc.dc_operation_id
+      dc.dc_keeper
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_replied _ -> "replied"
+       | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+       | Keeper_event_queue.Delegate_failed _ -> "failed")
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -224,6 +245,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
+    | Keeper_event_queue.Delegate_completed _ -> None
   in
   `Assoc
     (base_fields
@@ -835,7 +857,8 @@ let decode_current_row ~keeper_name row =
         | Manual_compaction
         | Completion_authority_rejected
         | Task_cancelled
-        | Workspace_message ),
+        | Workspace_message
+        | Delegate_completed ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1304,7 +1327,33 @@ let board_stimulus_token metadata stimulus_kind =
   | Manual_compaction
   | Completion_authority_rejected
   | Task_cancelled
-  | Workspace_message -> None
+  | Workspace_message
+  | Delegate_completed -> None
+;;
+
+(* The per-keeper status this module publishes. The fleet roll-up used to
+   recover it by reading back the JSON it had just written and comparing the
+   string, so a renamed value or a missing field read as "not degraded" with
+   nothing to fail the build (#27560). The value travels beside the JSON now
+   and the string exists only at the boundary. *)
+type keeper_summary_status =
+  | Summary_empty
+  | Summary_ok
+  | Summary_degraded
+  | Summary_unknown
+  | Summary_unavailable
+      (** The store could not be reached at all, which is not the same as
+          reaching it and finding nothing ([Summary_empty]) or reading it and
+          finding trouble ([Summary_degraded]). It was emitted as a bare
+          string beside a four-case type, so the vocabulary a reader had to
+          handle was one wider than anything in the code said (#27560). *)
+
+let keeper_summary_status_to_string = function
+  | Summary_empty -> "empty"
+  | Summary_ok -> "ok"
+  | Summary_degraded -> "degraded"
+  | Summary_unknown -> "unknown"
+  | Summary_unavailable -> "unavailable"
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =
@@ -1409,14 +1458,15 @@ let summarize_rows ~keeper_name ~limit rows =
   let pending_stimulus_count = List.length pending_stimulus_ids in
   let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
   let status =
-    if !row_count = 0 && !quarantined_row_count = 0 then "empty"
-    else if degraded_signal_count = 0 then "ok"
-    else "degraded"
+    if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
+    else if degraded_signal_count = 0 then Summary_ok
+    else Summary_degraded
   in
-  `Assoc
+  ( status
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "operator_action_required", `Bool (degraded_signal_count > 0)
     ; "scanned_row_count", `Int scanned_row_count
     ; "row_count", `Int !row_count
@@ -1438,14 +1488,15 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
-    ]
+    ] )
 ;;
 
 let error_summary ~keeper_name ~limit error =
-  `Assoc
+  ( Summary_unknown
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String "unknown"
+    ; "status", `String (keeper_summary_status_to_string Summary_unknown)
     ; "operator_action_required", `Bool true
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
@@ -1462,10 +1513,12 @@ let error_summary ~keeper_name ~limit error =
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
-    ]
+    ] )
 ;;
 
-let summary_for_keeper ~base_path ~keeper_name ~limit =
+(* The status travels with the JSON so the fleet roll-up can read it without
+   parsing what this module just wrote. *)
+let summary_with_status ~base_path ~keeper_name ~limit =
   try
     match
       Dated_jsonl.read_recent_result
@@ -1483,10 +1536,8 @@ let summary_for_keeper ~base_path ~keeper_name ~limit =
   | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)
 ;;
 
-let summary_status json =
-  match string_field "status" json with
-  | Some value -> value
-  | None -> "unknown"
+let summary_for_keeper ~base_path ~keeper_name ~limit =
+  snd (summary_with_status ~base_path ~keeper_name ~limit)
 ;;
 
 let summary_read_error_count json =
@@ -1495,10 +1546,18 @@ let summary_read_error_count json =
   | _ -> 0
 ;;
 
+(* Written out so the exhaustive match is what fails when a case is added,
+   rather than a caller quietly missing the new string. *)
+let fleet_summary_status_strings =
+  List.map
+    keeper_summary_status_to_string
+    [ Summary_empty; Summary_ok; Summary_degraded; Summary_unknown; Summary_unavailable ]
+;;
+
 let unavailable_fleet_summary_json () =
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String "unavailable"
+    ; "status", `String (keeper_summary_status_to_string Summary_unavailable)
     ; "status_reasons", `List []
     ; "operator_action_required", `Bool false
     ; "keeper_count", `Int 0
@@ -1549,11 +1608,13 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   (* NDT-OK: fleet summary health renders stale-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
-  let summaries =
+  let summaries_with_status =
     List.map
-      (fun keeper_name -> summary_for_keeper ~base_path ~keeper_name ~limit:limit_per_keeper)
+      (fun keeper_name ->
+        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
       keeper_names
   in
+  let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
   in
@@ -1735,20 +1796,19 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       read_error_count > 0
       || durable_event_queue_discovery_error_count > 0
       || durable_event_queue_read_error_count > 0
-    then "unknown"
+    then Summary_unknown
     else if
-      pending_count > 0
-      || quarantined_row_count > 0
+      List.exists
+        (fun (status, _) -> status = Summary_degraded)
+        summaries_with_status
       || durable_event_queue_stale_count > 0
-    then "degraded"
-    else if row_count = 0 && durable_event_queue_count = 0 then "empty"
-    else if List.exists (fun summary -> summary_status summary = "degraded") summaries
-    then "degraded"
-    else "ok"
+    then Summary_degraded
+    else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
+    else Summary_ok
   in
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; ( "operator_action_required"
       , `Bool

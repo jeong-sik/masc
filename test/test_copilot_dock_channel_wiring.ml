@@ -30,7 +30,7 @@ let contains needle haystack = Astring.String.is_infix ~affix:needle haystack
 
 let test_copilot_parse_accepts_operator_workspace () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
+    {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
   let payload = parse_ok body in
   check string "channel" "copilot" payload.channel;
@@ -46,7 +46,7 @@ let test_copilot_parse_accepts_operator_workspace () =
 let test_copilot_surface_is_gate_label () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7"}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7"}|}
   in
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in
   check surface "chat surface"
@@ -64,7 +64,7 @@ let test_copilot_surface_is_gate_label () =
 let test_copilot_message_is_not_contextualized () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7"}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7"}|}
   in
   let message = Stream.For_testing.message_for_request payload in
   check bool "no external channel envelope" false
@@ -74,7 +74,7 @@ let test_copilot_message_is_not_contextualized () =
 let test_copilot_direct_message_carries_turn_contract () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
   let message = Stream.For_testing.direct_message_of_request payload in
   check string "name" "luna"
@@ -91,7 +91,7 @@ let test_copilot_direct_message_carries_turn_contract () =
 let test_surface_context_is_formatted_as_turn_instructions () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
   in
   let instructions = Stream.For_testing.turn_instructions_for_request payload in
   check bool "instructions produced" true (Option.is_some instructions);
@@ -108,7 +108,7 @@ let test_surface_context_is_formatted_as_turn_instructions () =
 let test_turn_instructions_and_surface_context_combine () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[]}}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[]}}|}
   in
   let instructions = Stream.For_testing.turn_instructions_for_request payload in
   let text = Option.value ~default:"" instructions in
@@ -120,7 +120,7 @@ let test_turn_instructions_and_surface_context_combine () =
 let test_external_connector_still_contextualized () =
   let payload =
     parse_ok
-      {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
   check bool "has external speaker" true
     (Stream.For_testing.has_external_speaker payload);
@@ -147,7 +147,7 @@ let test_external_connector_still_contextualized () =
     (Keeper_invocation_contract.direct_message_channel direct_message)
 
 let test_dashboard_without_channel_is_owner () =
-  let payload = parse_ok {|{"name":"luna","message":"hello"}|} in
+  let payload = parse_ok {|{"request_id":"req-copilot-fixture","name":"luna","message":"hello"}|} in
   check bool "no connector context" false
     (Stream.For_testing.has_connector_context payload);
   let chat_surface = Stream.For_testing.chat_surface_of_request payload in

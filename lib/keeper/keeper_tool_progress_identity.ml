@@ -44,13 +44,38 @@ let stored_output_identity_json ~sha256 ~bytes ~mime =
     ]
 ;;
 
+(* Measurement is not identity. The Execute envelope writes
+   [execution_time_ms] into the payload the model reads
+   (keeper_tool_execute_runtime.ml), so two byte-identical answers to the
+   same command hash apart on that one field, and the repeated-call yield in
+   keeper_agent_run.ml (threshold 3) could never see an Execute loop —
+   observed live 2026-08-24: a keeper repeated [gh auth status] four times in
+   one run, the four outputs differing only at execution_time_ms
+   (1170/1471/...). Identity therefore hashes the answer: output that parses
+   as JSON is digested with that field dropped at every depth. Output that is
+   not JSON keeps the byte hash. *)
+let measurement_field = "execution_time_ms"
+
+let rec drop_measurement = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.filter (fun (key, _) -> not (String.equal key measurement_field))
+       |> List.map (fun (key, value) -> key, drop_measurement value))
+  | `List items -> `List (List.map drop_measurement items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
+;;
+
 let inline_output_fingerprint value =
-  let text =
-    value
-    |> Safe_ops.sanitize_text_utf8
-    |> Observability_redact.redact_preview ~max_len:4000
-  in
-  Some (sha256_hex text)
+  match Yojson.Safe.from_string value with
+  | json -> Some (digest_json (drop_measurement json))
+  | exception Yojson.Json_error _ ->
+    let text =
+      value
+      |> Safe_ops.sanitize_text_utf8
+      |> Observability_redact.redact_preview ~max_len:4000
+    in
+    Some (sha256_hex text)
 ;;
 
 let output_fingerprint output_text =

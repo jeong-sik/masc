@@ -33,14 +33,50 @@ const loading = signal(false)
 
 type EventTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
+// The custom-event vocabulary of `Keeper_lifecycle_events.t`
+// (lib/keeper_registry/keeper_lifecycle_events.ml). Both maps below are typed
+// `Record<LifecycleVerb, _>`, so adding a verb here fails the build until it
+// has a tone *and* a label. They used to be two independent switches and drifted:
+// `admission_denied` had a label but no tone, so a refused launch rendered in
+// the muted `info` grey next to `purged`.
+export const LIFECYCLE_VERBS = [
+  'started',
+  'reconciled',
+  'restarted',
+  'supervisor_cleaned',
+  'purged',
+  'admission_denied',
+] as const
+
+export type LifecycleVerb = (typeof LIFECYCLE_VERBS)[number]
+
+const VERB_TONE: Record<LifecycleVerb, EventTone> = {
+  started: 'ok',
+  reconciled: 'ok',
+  restarted: 'warn',
+  supervisor_cleaned: 'neutral',
+  purged: 'info',
+  admission_denied: 'bad',
+}
+
+const VERB_LABEL: Record<LifecycleVerb, string> = {
+  started: '기동됨',
+  reconciled: '재조정됨',
+  restarted: '재시작됨',
+  supervisor_cleaned: '부재 Keeper 정리됨',
+  purged: '완전 삭제됨',
+  admission_denied: '기동 거부됨',
+}
+
+function verbOf(event: string): LifecycleVerb | null {
+  const e = event.trim().toLowerCase()
+  return (LIFECYCLE_VERBS as readonly string[]).includes(e) ? (e as LifecycleVerb) : null
+}
+
 /** Map well-known lifecycle event strings to a semantic tone. */
 export function lifecycleEventTone(event: string): EventTone {
-  const e = event.trim().toLowerCase()
-  if (e === 'started' || e === 'reconciled') return 'ok'
-  if (e === 'restarted') return 'warn'
-  if (e === 'supervisor_cleaned') return 'neutral'
-  if (e === 'purged') return 'info'
-  return 'info'
+  const verb = verbOf(event)
+  return verb === null ? 'info' : VERB_TONE[verb]
 }
 
 function toneStyle(tone: EventTone): { dot: string; label: string } {
@@ -56,14 +92,11 @@ function toneStyle(tone: EventTone): { dot: string; label: string } {
 
 /** Human-readable label for well-known lifecycle event keys. */
 export function lifecycleEventLabel(event: string): string {
-  switch (event.trim().toLowerCase()) {
-    case 'started':           return '기동됨'
-    case 'reconciled':        return '재조정됨'
-    case 'restarted':         return '재시작됨'
-    case 'supervisor_cleaned': return '부재 Keeper 정리됨'
-    case 'purged':            return '완전 삭제됨'
-    default:                  return event.replace(/_/g, ' ')
-  }
+  const verb = verbOf(event)
+  // Keeper_lifecycle_events.event_of_string maps anything outside the custom
+  // vocabulary to None on purpose: phase-derived and operator strings reach
+  // this timeline too, so the wire set here is open and the fallback stays.
+  return verb === null ? event.replace(/_/g, ' ') : VERB_LABEL[verb]
 }
 
 // ── Data loading ──────────────────────────────────────────────────────────

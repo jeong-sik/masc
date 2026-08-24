@@ -670,7 +670,6 @@ let display_of_phase_event = function
     Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
   | Keeper_state_machine.Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining
@@ -746,7 +745,6 @@ let control_status_override_of_lifecycle_event row event =
   | Keeper_lifecycle_events.Phase_event
       ( Keeper_state_machine.Offline
       | Keeper_state_machine.Failing
-      | Keeper_state_machine.Overflowed
       | Keeper_state_machine.Compacting
       | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
@@ -778,7 +776,7 @@ let patched_keeper_status row ~event ~keepalive_running =
     match Keeper_status_runtime.control_plane_status_of_string_opt status with
     | Some
         (Cp_surface
-           ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
+           ((Surface_active | Surface_idle) as s)) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
     | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
     | Some Cp_paused ->

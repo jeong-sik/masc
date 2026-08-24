@@ -336,6 +336,7 @@ let claim_next_r
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name ~task_id:task.id ~status:claimed_status
                  ~module_name:"claim_next_r.claim")
              config new_backlog;

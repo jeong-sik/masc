@@ -37,8 +37,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_offline["Offline"] --> ksm_running["Running"]
     ksm_running --> ksm_failing["Failing"]
     ksm_failing --> ksm_running
-    ksm_running --> ksm_overflowed["Overflowed"]
-    ksm_overflowed --> ksm_compacting["Compacting"]
+    ksm_running --> ksm_compacting["Compacting"]
     ksm_compacting --> ksm_running
     ksm_running --> ksm_handingoff["HandingOff"]
     ksm_handingoff --> ksm_running
@@ -98,7 +97,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
 
   class ksm_stopped terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating stable
-  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
+  class ksm_compacting,ksm_handingoff,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
   class ksm_failing,ksm_crashed,kcl_exhausted error
 `
 

@@ -397,6 +397,7 @@ let messages_of_message_with
       ?(tool_messages_fn = openai_tool_messages_of_blocks)
       ?(include_reasoning_content = false)
       ?(include_reasoning_details = false)
+      ?(reasoning_wire_field = "reasoning_content")
       ?(assistant_tool_content_format = Capability_vocab.Assistant_tool_content_null)
       ?(modality_priority = Modality.Preserve_input_order)
       (msg : message)
@@ -462,7 +463,7 @@ let messages_of_message_with
       | None
         when include_reasoning_content
              && not (Api_common.string_is_blank reasoning_content) ->
-        ("reasoning_content", `String reasoning_content) :: fields
+        (reasoning_wire_field, `String reasoning_content) :: fields
       | None -> fields
     in
     let fields =
@@ -470,7 +471,7 @@ let messages_of_message_with
         include_reasoning_content
         && reasoning_details <> None
         && not (Api_common.string_is_blank reasoning_content)
-      then ("reasoning_content", `String reasoning_content) :: fields
+      then (reasoning_wire_field, `String reasoning_content) :: fields
       else fields
     in
     let fields =
@@ -569,6 +570,21 @@ let render_history_projection
       dialect
       (projection : Reasoning_history_projection.t)
   =
+  (* The request-side replay field mirrors the response-side streaming field:
+     every dialect that names a reasoning side-channel reads and writes the
+     same member (DeepSeek [reasoning_content], Ollama /v1 and OpenRouter
+     [reasoning]). Emitting a fixed "reasoning_content" made replay a silent
+     wire no-op on endpoints that only read "reasoning" — Ollama's
+     OpenAI-compat layer maps incoming [reasoning] to the template's thinking
+     slot and ignores unknown members (ollama/openai/openai.go,
+     verified 2026-08-24). *)
+  let reasoning_wire_field =
+    match dialect.Reasoning_dialect.streaming with
+    | Reasoning_dialect.Delta_field field -> field
+    | Reasoning_dialect.No_streaming_reasoning
+    | Reasoning_dialect.Delta_reasoning_details
+    | Reasoning_dialect.Template_parser -> "reasoning_content"
+  in
   let projected_messages =
     List.fold_left
       (fun projected (msg : Types.message) ->
@@ -586,6 +602,7 @@ let render_history_projection
              ~tool_calls_fn:(fun _ -> tool_calls)
              ~include_reasoning_content:include_reasoning
              ~include_reasoning_details
+             ~reasoning_wire_field
              ~assistant_tool_content_format
              msg
          in
@@ -630,13 +647,14 @@ let dialect_history_projection
 let dialect_messages_of_history
       ?assistant_tool_content_format
       ~replay_capability
+      ~stream
       dialect
       messages
   =
   match typed_history_projection ~replay_capability dialect messages with
   | Error _ as error -> error
   | Ok projection ->
-    Reasoning_history_projection.observe ~component:"backend_openai" projection;
+    Reasoning_history_projection.observe ~component:"backend_openai" ~stream projection;
     let rendered =
       render_history_projection ?assistant_tool_content_format dialect projection
     in

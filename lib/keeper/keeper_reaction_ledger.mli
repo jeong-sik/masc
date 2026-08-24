@@ -2,9 +2,10 @@
 
     Queue-visible stimuli and queue transition reactions are
     written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v6/YYYY-MM/DD.jsonl].  The
-    generation namespace is a hard boundary: older stores are neither read nor
-    written by this module. *)
+    [.masc/keepers/<keeper>/reaction-ledger/<generation>/YYYY-MM/DD.jsonl].
+    The generation namespace is a hard boundary: older stores are neither read
+    nor written by this module. Ask {!store_dir} for the path rather than
+    spelling the generation out. *)
 
 type stimulus_kind =
   | Board_signal
@@ -20,6 +21,7 @@ type stimulus_kind =
   | Task_cancelled
       (** Another Keeper cancelled a Task this Keeper authored. *)
   | Workspace_message
+  | Delegate_completed
       (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =
@@ -29,6 +31,21 @@ type reaction_kind =
 
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
+
+val digest_id : string -> string -> string
+(** [digest_id prefix payload] is the durable event id: [prefix], a colon, and
+    the SHA-256 of [payload] in full hex. Readers recompute and compare it, so
+    a collision is a replay decision rather than a display artefact. *)
+
+val schema : string
+(** The schema string current rows carry. Readers reject any other value, so
+    a test that spells the generation out is asserting against a literal the
+    writer can move without it. *)
+
+val store_dir : masc_root:string -> keeper_name:string -> string
+(** Where rows are written and read, generation included. A reader that
+    rebuilds this path itself keeps looking at the old namespace after a
+    generation bump and sees an empty store rather than an error. *)
 
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
@@ -153,6 +170,11 @@ val fleet_summary_json :
   limit_per_keeper:int ->
   Yojson.Safe.t
 (** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
+
+val fleet_summary_status_strings : string list
+(** Every value the fleet summary's ["status"] field can carry. A reader that
+    has to enumerate them was previously reading four from a type and a fifth
+    from a string literal elsewhere in the same file (#27560). *)
 
 val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
 (** Canonical empty fleet projection used when server state is unavailable.

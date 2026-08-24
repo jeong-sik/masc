@@ -1,13 +1,5 @@
 ---
 status: reference
-last_verified: 2026-05-05
-code_refs:
-  - lib/board.ml
-  - lib/board_types/
-  - lib/board_votes.ml
-  - lib/board_dispatch.ml
-  - lib/board_tool_adapter/board_tool.ml
-  - lib/server/server_h2_gateway_routes_extra.ml
 ---
 
 # Board System

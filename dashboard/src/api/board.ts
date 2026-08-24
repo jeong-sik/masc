@@ -1026,6 +1026,47 @@ export async function fetchBoardReactionState(
   }))
 }
 
+/**
+ * Reaction state for a page of targets in one request.
+ *
+ * The board list is a public, cached projection and reaction state is per
+ * viewer -- whether *you* reacted -- so the two cannot travel together. Asking
+ * per row made twenty of the twenty-three requests that opening the board sent.
+ */
+export async function fetchBoardReactionsBatch(
+  targetType: BoardReactionTargetType,
+  targetIds: readonly string[],
+): Promise<{ byTargetId: Map<string, BoardReactionSummary[]>; supportedEmojis: string[] }> {
+  const wanted = targetIds.filter(id => id !== '')
+  if (wanted.length === 0) return { byTargetId: new Map(), supportedEmojis: [] }
+  return timeBoardRequest('reaction_summary', () => runRequest('fetchBoardReactionsBatch', async () => {
+    const params = new URLSearchParams({
+      target_type: targetType,
+      target_ids: wanted.join(','),
+    })
+    const raw = await get<unknown>(`/api/v1/board/reactions/batch?${params}`)
+    if (!isRecord(raw) || !Array.isArray(raw.targets)) {
+      throw new Error('Malformed board reaction batch: targets must be an array')
+    }
+    const supportedEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
+    if (!supportedEmojis || supportedEmojis.length === 0) {
+      throw new Error('Malformed board reaction batch: supported_reaction_emojis is required')
+    }
+    const byTargetId = new Map<string, BoardReactionSummary[]>()
+    for (const row of raw.targets) {
+      if (!isRecord(row) || typeof row.target_id !== 'string' || !Array.isArray(row.reactions)) {
+        throw new Error('Malformed board reaction batch: each target needs an id and reactions')
+      }
+      const summaries = row.reactions.map(normalizeBoardReactionSummary)
+      if (summaries.some(entry => entry === null)) {
+        throw new Error('Malformed board reaction batch: invalid reaction summary')
+      }
+      byTargetId.set(row.target_id, summaries as BoardReactionSummary[])
+    }
+    return { byTargetId, supportedEmojis }
+  }))
+}
+
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
   return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({

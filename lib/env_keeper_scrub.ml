@@ -109,8 +109,30 @@ let scrub_entry entry =
   else entry
 ;;
 
+(* A keeper subprocess has no terminal and nobody to answer a prompt, so a
+   command that opens an editor or asks for a credential waits for someone who
+   is never coming. Measured over 2026-08 on the reference workspace: 23 git
+   commands that open an editor held 3.6 hours, the longest a single
+   [git rebase --continue] for 2h29m that then reported success. The host
+   EDITOR is inherited on purpose (it is on the allowlist above), so git
+   launched the operator's own editor into a process with no tty.
+
+   [GIT_EDITOR] is first in git's editor precedence, ahead of core.editor,
+   VISUAL and EDITOR, so one key settles all of them and the allowlist stays
+   as it is — a tool that reads $EDITOR to show a name still sees one. [false]
+   rather than [true]: git stops and says which command needed an editor,
+   where [true] would quietly commit a message nobody wrote.
+
+   [GIT_TERMINAL_PROMPT=0] is the same fact for credentials. It is a smaller
+   share of the measured time (6 calls, 13 minutes) and is here because the
+   prompt has no possible answer in this process either, not because the
+   minutes matter. *)
+let non_interactive_entries : string list =
+  [ "GIT_EDITOR=false"; "GIT_TERMINAL_PROMPT=0" ]
+
 let filter_environment existing =
-  Array.to_list existing
-  |> List.filter (fun e -> is_allowed (key_of_entry e))
-  |> List.map scrub_entry
+  (Array.to_list existing
+   |> List.filter (fun e -> is_allowed (key_of_entry e))
+   |> List.map scrub_entry)
+  @ non_interactive_entries
   |> Array.of_list

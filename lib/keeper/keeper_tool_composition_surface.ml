@@ -1,16 +1,6 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 
-let empty_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc []
-    ; "required", `List []
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
-
 let plan_execute_tool_name = "keeper_plan_execute"
 
 let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
@@ -41,7 +31,66 @@ let plan_execute_input_schema =
                   [ "type", `String "array"
                   ; "items", `Assoc [ "type", `String "string" ]
                   ] )
-            ; "input", `Assoc [ "type", `String "object" ]
+              (* The four template shapes were spelled out in the tool's
+                 description because the schema said only "object". A reader
+                 had to learn them from prose while the validator knew them
+                 exactly. Stating them here puts the shape where a model
+                 reads structure rather than prose. It does not make them
+                 enforced: [validate_args] descends no further than the
+                 top-level schema, so [Keeper_tool_plan] is still what refuses
+                 a malformed template. Recursive shapes are named
+                 through [$ref] so [object] and [array] can hold any input. *)
+            ; ( "input"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "oneOf"
+                    , `List
+                        [ `Assoc
+                            [ "required", `List [ `String "kind"; `String "value" ]
+                            ; ( "properties"
+                              , `Assoc
+                                  [ ( "kind"
+                                    , `Assoc
+                                        [ "const", `String "literal" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List
+                                  [ `String "kind"
+                                  ; `String "node"
+                                  ; `String "pointer"
+                                  ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "output" ]
+                                  ; "node", `Assoc [ "type", `String "string" ]
+                                  ; ( "pointer"
+                                    , `Assoc [ "type", `String "string" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "fields" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "object" ]
+                                  ; ( "fields"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "items" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "array" ]
+                                  ; ( "items"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ] )
+                  ] )
             ] )
       ; "required", `List [ `String "id"; `String "tool" ]
       ; "additionalProperties", `Bool false
@@ -56,19 +105,29 @@ let plan_execute_input_schema =
     ]
 ;;
 
+(* What it buys, then how to say it. Measured over 2026-08-21..23: this tool
+   sat in all 87 tool surfaces of 368 turns and was chosen zero times, while
+   [keeper_compose_mission-snapshot] -- 254 bytes that open "Read clock,
+   board, and tool state concurrently, then search durable memory with the
+   exact clock output" -- was chosen eight. The old text opened with the DAG
+   and spent its length on template grammar, so a reader learned how to write
+   a plan without learning when one is worth writing.
+
+   The grammar stays, shorter. It cannot leave: [input] is typed
+   `{"type":"object"}` in the schema, so the template shapes live in this
+   string and nowhere else. *)
 let plan_execute_description =
   String.concat
     ""
-    [ "Execute a plan you define in this turn: a list of tool nodes run as one "
-    ; "dependency DAG (independent nodes overlap when their tools allow "
-    ; "concurrent execution; \"after\" edges and output references order the "
-    ; "rest). Only tools that declare a composable JSON output can feed a "
-    ; "downstream node; reference one with "
-    ; "{\"kind\":\"output\",\"node\":\"<id>\",\"pointer\":\"/field\"}. Input "
-    ; "templates: {\"kind\":\"literal\",\"value\":...} | output | "
-    ; "{\"kind\":\"object\",\"fields\":[{\"name\":...,\"value\":<template>}]} | "
-    ; "{\"kind\":\"array\",\"items\":[...]}. A node without \"input\" receives "
-    ; "{}. Terminal tools are rejected. Example: "
+    [ "Take one result from a tool and hand it to the next without spending a "
+    ; "turn on the round trip. Nodes with no dependency between them run at "
+    ; "the same time. Reach for this when a later call needs an earlier "
+    ; "call's output; when the calls are independent, issue them as separate "
+    ; "tool calls in one turn instead -- that already runs them concurrently "
+    ; "and costs nothing to write. Order comes from \"after\" and from output "
+    ; "references. Only a tool that declares a composable JSON output can feed "
+    ; "a downstream node; terminal tools are rejected. Example -- search "
+    ; "memory for whatever the clock just returned: "
     ; "{\"nodes\":[{\"id\":\"clock\",\"tool\":\"keeper_time_now\"},"
     ; "{\"id\":\"memory\",\"tool\":\"keeper_memory_search\",\"after\":[\"clock\"],"
     ; "\"input\":{\"kind\":\"object\",\"fields\":[{\"name\":\"query\","
@@ -332,6 +391,9 @@ let template_resolution_error_to_json = function
       ; "source_node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
       ; "error", pointer_resolution_error_to_json error
       ]
+  | Keeper_tool_plan.Json_template.Param_not_substituted name ->
+    `Assoc
+      [ "kind", `String "param_not_substituted"; "param", `String name ]
 ;;
 
 let plan_execution_error_to_json = function
@@ -800,7 +862,7 @@ let make_request_control_tool
 ;;
 
 let make_tools
-      ?catalog
+      ?(skill_composition_entries = [])
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -819,12 +881,14 @@ let make_tools
       ?on_externalization_error
       ()
   =
+  (* Skill-declared entries went through the same [Catalog.parse] as the
+     TOML catalog, so materialization cannot tell them apart — one closure
+     serves both. Name collisions across the two sources are refused where
+     both catalogs are loaded, before this point. *)
+  let declared_entries = skill_composition_entries in
   let composition_tools =
-    match catalog with
-    | None -> []
-    | Some catalog ->
-      Catalog.entries catalog
-      |> List.map (fun (entry : Catalog.entry) ->
+    declared_entries
+    |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
@@ -858,12 +922,12 @@ let make_tools
                 ^ entry.name
                 ^ " and return its durable request id.")
            entry.description)
-      ~input_schema:empty_input_schema
+      ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
         let start_time = Time_compat.now () in
         match
           Tool_input_validation.validate_args
-            ~schema:empty_input_schema
+            ~schema:(Catalog.input_schema_of_params entry.params)
             ~name:tool_name
             ~args:input
             ()
@@ -899,11 +963,41 @@ let make_tools
                   ?clock
                   ()
               | Catalog.Inline ->
+                (match
+                   Catalog.instantiate
+                     ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                     ~args:input
+                     entry
+                 with
+                 | Error error ->
+                   (* Unreachable through the validated schema — required
+                      params are enforced there — but total: a rejected
+                      binding names the argument instead of executing a
+                      half-bound plan. *)
+                   let message = Catalog.instantiation_error_to_string error in
+                   let class_ =
+                     match error with
+                     | Catalog.Missing_argument _ -> Tool_result.Policy_rejection
+                     | Catalog.Instantiated_plan_rejected _ ->
+                       Tool_result.Runtime_failure
+                   in
+                   Tool_result.make_err
+                     ~tool_name
+                     ~class_
+                     ~start_time
+                     ~data:
+                       (`Assoc
+                           [ "composition_tool", `String tool_name
+                           ; tool_kind_field (Catalog.tool_kind entry)
+                           ; "error", `String message
+                           ])
+                     message
+                 | Ok plan ->
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let execution =
                Executor.execute_keeper
-                 ~plan:entry.plan
+                 ~plan
                  ~run_id
                  ~composition_run_id
                  ~parent_invocation
@@ -1000,7 +1094,7 @@ let make_tools
                   ~tool_name
                   ~class_:Tool_result.Runtime_failure
                   ~start_time
-                  "composition result manifest persistence failed")))))
+                  "composition result manifest persistence failed"))))))
   in
   let plan_execute_tool =
     let tool_name = plan_execute_tool_name in
@@ -1170,11 +1264,9 @@ let make_tools
                         "composition result manifest persistence failed")))))
   in
   let has_async =
-    match catalog with
-    | None -> false
-    | Some catalog ->
-      Catalog.entries catalog
-      |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+    List.exists
+      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+      declared_entries
   in
   let composition_tools = composition_tools @ [ plan_execute_tool ] in
   if not has_async

@@ -63,7 +63,7 @@ export const LANE_QUEUE_LANES: readonly LaneQueueLaneDef[] = [
 
 /** Design VAL_LBL — operator labels for the closed value vocabulary. */
 const LANE_VALUE_LABELS: Record<string, string> = {
-  running: '실행 중', failing: '문제 발생', overflowed: '컨텍스트 초과', compacting: '압축 중', handing_off: '인계 중', draining: '정리 중',
+  running: '실행 중', failing: '문제 발생', compacting: '압축 중', handing_off: '인계 중', draining: '정리 중',
   idle: '쉬는 중', prompting: '준비 중', executing: '작업 중', finalizing: '마무리', undecided: '미결정', guard_ok: '점검 통과',
   tool_policy_selected: '도구 확정', selecting: '경로 선택', trying: '모델 호출 중', done: '완료', exhausted: '가능한 경로 없음', accumulating: '누적 중',
 }
@@ -76,7 +76,7 @@ export function laneValueLabel(value: string): string {
 export type LaneSegmentTone = 'ok' | 'info' | 'warn' | 'bad' | 'idle'
 
 const LANE_VALUE_TONES: Record<string, LaneSegmentTone> = {
-  running: 'info', failing: 'bad', overflowed: 'warn', compacting: 'warn', handing_off: 'warn', draining: 'warn',
+  running: 'info', failing: 'bad', compacting: 'warn', handing_off: 'warn', draining: 'warn',
   idle: 'idle', prompting: 'info', executing: 'info', finalizing: 'info',
   undecided: 'idle', guard_ok: 'ok', tool_policy_selected: 'info',
   selecting: 'info', trying: 'info', done: 'ok', exhausted: 'bad', accumulating: 'idle',
@@ -92,7 +92,6 @@ const LANE_MEANING: Record<LaneKey, Record<string, (live: boolean) => string>> =
   phase: {
     running: (live) => live ? '정상 동작 중 — 지금 턴을 하나 돌리고 있다' : '정상 동작 중 — 지금 맡은 턴은 없다',
     failing: () => '문제가 걸려 있어 새 턴을 시작하지 못한다',
-    overflowed: () => '대화가 한도를 넘어 정리 전에는 새 턴을 못 받는다',
     compacting: () => '턴을 마치고 기록을 줄이는 중',
     handing_off: () => '다른 keeper 에게 넘기고 멈추는 중',
     draining: () => '남은 일을 마무리하고 멈추는 중',
@@ -128,7 +127,6 @@ const LANE_MEANING_DEV: Record<LaneKey, Record<string, (live: boolean) => string
   phase: {
     running: (live) => live ? 'parent lifecycle 정상 — live turn 진행 중' : 'keeper 는 살아있고 진행 중인 turn 은 없음',
     failing: () => 'parent lifecycle degraded — healthy turn 재개 전 해소 필요',
-    overflowed: () => 'context overflow latched — 해소 전 healthy turn 재개 불가',
     compacting: () => 'post-turn compaction 이 lifecycle 점유 중',
     handing_off: () => 'handoff 가 keeper 를 stop 방향으로 drain 중',
     draining: () => 'in-flight work drain 중 (stop 전)',

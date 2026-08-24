@@ -1,10 +1,7 @@
 (** Codec tests for [Compaction_trigger].
 
     The trigger decoder stays a durable reader: dashboards decode historical
-    "pre_compact" records via [of_detail_json]. The Overflowed lifecycle
-    scenarios that used to live here were removed with the
-    [Context_overflow_detected] event (#26546) — no producer derives the
-    [Overflowed] phase anymore. *)
+    "pre_compact" records via [of_detail_json]. *)
 
 open Alcotest
 

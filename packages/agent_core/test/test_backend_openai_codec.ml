@@ -78,6 +78,7 @@ let dialect_messages_of_history
     Serialize.dialect_messages_of_history
       ?assistant_tool_content_format
       ~replay_capability
+      ~stream:false
       dialect
       messages
   with

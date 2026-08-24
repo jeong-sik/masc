@@ -274,7 +274,7 @@ describe('keeperActivityDisplay', () => {
   it('uses heartbeat as the latest live signal when autonomous action is older', () => {
     expect(
       keeperActivityDisplay({
-        last_autonomous_action_at: '2026-04-24T12:00:00Z',
+        tool_audit_at: '2026-04-24T12:00:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
       }),
     ).toEqual({
@@ -364,7 +364,7 @@ describe('keeperActivityDisplay', () => {
   it('uses autonomous action when it is newer than heartbeat', () => {
     expect(
       keeperActivityDisplay({
-        last_autonomous_action_at: '2026-04-24T17:59:00Z',
+        tool_audit_at: '2026-04-24T17:59:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
       }).source,
     ).toBe('autonomous_action')

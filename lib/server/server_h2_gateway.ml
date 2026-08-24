@@ -465,9 +465,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
       | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
           let session_id = match session_id_opt with
             | Some id -> id
@@ -651,9 +648,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                    | json ->
                                        h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
 
-      | `DELETE, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
       | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
           let profile =
             if String.equal path "/mcp/managed"
@@ -790,6 +784,32 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                 (Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/fusion-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_dashboard_fusion_run_projection.list_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, p
+        when String.starts_with
+               ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
+               p ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let status, json =
+              Server_dashboard_fusion_run_projection.detail_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+                ~path
+            in
+            h2_respond_json_value
+              h2_reqd
+              json
+              ~status:(status :> H2.Status.t)
+              ~extra_headers:cors)
 
       (* H1 serves this through [with_public_read]
          (server_routes_http_routes_dashboard.ml). [with_server_state] only
@@ -1022,23 +1042,21 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
-          let resolved_host = Server_request_authority.host request_authority in
-          let resolved_port =
-            Option.value
-              ~default:(Env_config_core.masc_http_port_int ())
-              (Server_request_authority.port request_authority)
-          in
-          let json =
-            Transport.Rest.generate_openapi_document
-              ~host:resolved_host ~port:resolved_port ()
-          in
-          h2_respond_json_value h2_reqd json ~extra_headers:cors
-
-      | `GET, "/api/v1/namespace/current"
-      | `GET, "/api/v1/workspace/current"
-      | `POST, "/api/v1/namespace/current"
-      | `POST, "/api/v1/workspace/current" ->
-          h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
+          (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
+             not in the public-read allowlist, so strict mode answers 401
+             there; this arm used to answer the document (#28161). *)
+          with_h2_public_read h2_reqd (fun _state ->
+            let resolved_host = Server_request_authority.host request_authority in
+            let resolved_port =
+              Option.value
+                ~default:(Env_config_core.masc_http_port_int ())
+                (Server_request_authority.port request_authority)
+            in
+            let json =
+              Transport.Rest.generate_openapi_document
+                ~host:resolved_host ~port:resolved_port ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, keeper_path
         when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
@@ -1240,6 +1258,22 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
 
+      | `GET, "/api/v1/board/reactions/batch" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanReadState
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               let result =
+                 Server_board_reaction_http.targets_of_strings
+                   ~target_type:
+                     (Server_utils.query_param httpun_request "target_type")
+                   ~target_ids:
+                     (Server_utils.query_param httpun_request "target_ids")
+                 |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
       | `GET, "/api/v1/board/reactions" ->
           with_h2_token_permission_auth
             h2_reqd
@@ -1287,6 +1321,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                  (Option.map
                     (fun state -> (Mcp_server.workspace_config state))
                     (current_server_state ()))
+               (* The delegated routes take this gateway's own public-read gate
+                  rather than deciding for themselves; five of them answered
+                  unauthenticated over h2c while HTTP/1 answered 401 (#28161). *)
+               ~with_public_read:(fun f ->
+                 with_h2_public_read h2_reqd (fun _state -> f ()))
                httpun_meth ->
           ()
 

@@ -87,7 +87,7 @@ let require_unique_projections ~label projections =
          (keys |> List.sort_uniq String.compare |> String.concat ", "))
 
 let prefixed_tool_names names =
-  names |> List.map (fun name -> "mcp__masc__" ^ name)
+  names |> List.map Tool_transport_prefix.add
 
 let surface_to_string = function
   | Public_mcp -> "public_mcp"

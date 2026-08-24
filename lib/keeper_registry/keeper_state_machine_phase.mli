@@ -4,7 +4,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining

@@ -394,10 +394,16 @@ let test_rejections () =
     ~contents:
       (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nflavor = \"x\"\n")
     "unknown key \"flavor\"";
+  (* An integer param may enumerate integers, so the rejection is now the type
+     mismatch rather than the key itself. *)
   check_rejects ~name:"t"
     ~contents:
       (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"integer\"\nenum = [\"a\"]\n")
-    "only valid for type string";
+    "must be an integer";
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"boolean\"\nenum = [true]\n")
+    "only valid for type string or integer";
   check_rejects ~name:"t"
     ~contents:(minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nenum = []\n")
     "must not be empty";
@@ -579,6 +585,127 @@ let test_a_nested_required_child_lands_in_its_parents_list () =
 (* An array can bound both ends. keeper_task_done requires at least one
    evidence ref, and the loader read no lower bound at all before this, so that
    declaration could not move out of OCaml. *)
+(* An object can bound how many keys it carries. tool_execute uses
+   min_properties = max_properties = 1 on each redirect so a caller picks
+   exactly one way to route a stream; without the pair the schema would admit
+   two at once and the executor would have to reject what the declaration
+   advertised. *)
+(* A [number] lower bound that excludes the bound itself. tool_execute's
+   timeout_sec is seconds, and zero is not a timeout. It stays a float: TOML
+   tells 0.0 from 0 and so does the emitted schema, so an integer here would
+   move the bytes. *)
+let test_a_number_carries_an_exclusive_minimum () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"timeout_sec\"\ntype = \"number\"\n\
+            exclusive_minimum = 0.0\n")
+  in
+  let timeout = property schema [ "timeout_sec" ] in
+  check bool "the float bound reaches the number" true
+    (member timeout "exclusiveMinimum" = Some (`Float 0.0))
+;;
+
+(* An integer where a float is meant is a declaration error, not a value the
+   loader widens: 0 and 0.0 serialize differently. *)
+let test_an_exclusive_minimum_must_be_a_float () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"n\"\ntype = \"number\"\nexclusive_minimum = 0\n")
+    "must be a float"
+;;
+
+(* An integer parameter enumerates integers. tool_execute's [fd] offers 1 and
+   2; quoting them would declare a different schema than the executor reads. *)
+let test_an_integer_param_enumerates_integers () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t" ^ "[[params]]\nname = \"fd\"\ntype = \"integer\"\nenum = [1, 2]\n")
+  in
+  check bool "the members stay integers" true
+    (member (property schema [ "fd" ]) "enum" = Some (`List [ `Int 1; `Int 2 ]))
+;;
+
+(* additionalProperties is a boolean or a schema. tool_execute's [env] admits
+   any key name and demands a string value, which false could not say. *)
+let test_additional_properties_may_be_a_schema () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"env\"\ntype = \"object\"\n\
+            additional_properties = { type = \"string\" }\n")
+  in
+  check bool "the value schema reaches the object" true
+    (member (property schema [ "env" ]) "additionalProperties"
+     = Some (`Assoc [ "type", `String "string" ]))
+;;
+
+(* [[one_of]] names the fields a call must carry and the ones it must not. One
+   forbidden name writes not.required; several write not.anyOf, because
+   not.required over a list would only forbid having all of them at once. *)
+let test_one_of_writes_the_negation_two_ways () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"argv\"\ntype = \"string\"\n\
+            [[one_of]]\nrequired = [\"argv\"]\nforbidden = [\"pipeline\"]\n\
+            description = \"single\"\n\
+            [[one_of]]\nrequired = [\"script\"]\n\
+            forbidden = [\"argv\", \"pipeline\"]\ndescription = \"shell\"\n")
+  in
+  let alternatives =
+    match member schema.Masc_domain.input_schema "oneOf" with
+    | Some (`List items) -> items
+    | _ -> failf "oneOf is absent"
+  in
+  check int "both alternatives survive" 2 (List.length alternatives);
+  check bool "one forbidden name writes not.required" true
+    (member (List.nth alternatives 0) "not"
+     = Some (`Assoc [ "required", `List [ `String "pipeline" ] ]));
+  check bool "several write not.anyOf" true
+    (member (List.nth alternatives 1) "not"
+     = Some
+         (`Assoc
+             [ ( "anyOf"
+               , `List
+                   [ `Assoc [ "required", `List [ `String "argv" ] ]
+                   ; `Assoc [ "required", `List [ `String "pipeline" ] ]
+                   ] )
+             ]))
+;;
+
+let test_an_object_bounds_its_property_count () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"stdin\"\ntype = \"object\"\n\
+            min_properties = 1\nmax_properties = 1\n\
+            [[params.params]]\nname = \"file\"\ntype = \"string\"\n")
+  in
+  let stdin = property schema [ "stdin" ] in
+  check bool "min_properties reaches the object" true
+    (member stdin "minProperties" = Some (`Int 1));
+  check bool "max_properties reaches it too" true
+    (member stdin "maxProperties" = Some (`Int 1))
+;;
+
+(* A key-count bound on anything but an object is a declaration error, not a
+   key the loader quietly drops. *)
+let test_property_bounds_are_rejected_off_an_object () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[[params]]\nname = \"n\"\ntype = \"string\"\nmin_properties = 1\n")
+    "min_properties"
+;;
+
 let test_an_array_carries_min_items () =
   let schema =
     load_ok ~name:"t"
@@ -684,6 +811,34 @@ let () =
             "a nested required child lands in its parent's list"
             `Quick
             test_a_nested_required_child_lands_in_its_parents_list
+        ; test_case
+            "a number carries an exclusive minimum"
+            `Quick
+            test_a_number_carries_an_exclusive_minimum
+        ; test_case
+            "an exclusive minimum must be a float"
+            `Quick
+            test_an_exclusive_minimum_must_be_a_float
+        ; test_case
+            "an integer param enumerates integers"
+            `Quick
+            test_an_integer_param_enumerates_integers
+        ; test_case
+            "additional properties may be a schema"
+            `Quick
+            test_additional_properties_may_be_a_schema
+        ; test_case
+            "one_of writes the negation two ways"
+            `Quick
+            test_one_of_writes_the_negation_two_ways
+        ; test_case
+            "an object bounds its property count"
+            `Quick
+            test_an_object_bounds_its_property_count
+        ; test_case
+            "property bounds are rejected off an object"
+            `Quick
+            test_property_bounds_are_rejected_off_an_object
         ; test_case "an array carries min_items" `Quick test_an_array_carries_min_items
         ; test_case
             "min_items is rejected off an array"

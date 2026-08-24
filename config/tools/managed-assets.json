@@ -93,6 +93,7 @@
     "masc_transition.toml",
     "masc_update_priority.toml",
     "tool_edit_file.toml",
+    "tool_execute.toml",
     "tool_read_file.toml",
     "tool_search_files.toml",
     "tool_write_file.toml"

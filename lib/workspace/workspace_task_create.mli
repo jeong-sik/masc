@@ -54,11 +54,21 @@ val add_task_with_result :
   ?goal_id:string ->
   ?created_by:string ->
   ?predecessor_task_id:string ->
+  ?skills:string list ->
   config ->
   title:string ->
   priority:int ->
   description:string ->
   (add_task_success, add_task_error) result
+(** [skills] names the skill directories under [<base_path>/.masc/skills/]
+    that a keeper working this task may read. Absent means none, which is
+    every task that does not need one.
+
+    Stored as given. Whether a named directory exists is not checked here:
+    this is the backlog write boundary, and a task can be created before the
+    skill it names is installed. A name that resolves to nothing surfaces
+    when the keeper tries to read it, which is where the operator can act on
+    it. *)
 
 val add_task :
   ?contract:Masc_domain.task_contract ->

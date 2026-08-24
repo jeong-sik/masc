@@ -194,15 +194,21 @@ let run_loop_turns_detailed
         ~stop:(stop_reason_label response.stop_reason);
       Ok response
     | Ok (`ToolsExecuted _) ->
-      log_turn
+      incr tool_rounds;
+      log_tool_round
         ~run_start
         ~turn_start
         ~turn_index
         ~model:agent.state.config.model
-        ~stop:"tools_executed";
-      incr tool_rounds;
+        ~rounds:!tool_rounds
+        ~ceiling:agent.state.config.max_tool_rounds;
       (match agent.state.config.max_tool_rounds with
        | Some limit when !tool_rounds >= limit ->
+         log_tool_round_ceiling_reached
+           ~turn_index
+           ~model:agent.state.config.model
+           ~rounds:!tool_rounds
+           ~limit;
          Error
            (detailed_error_of_core_error
               (Error.Agent (Error.ToolRoundLimitExceeded { rounds = !tool_rounds; limit })))

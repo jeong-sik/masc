@@ -19,13 +19,12 @@ let decoded json =
 
 let test_a_listening_transport_reports_its_sessions_and_port () =
   let health = decoded (sample ()) in
-  (* #30240 closed both of these. Comparing the variant rather than its
-     spelling is what makes a renamed constructor a compile error here instead
-     of a string that quietly stops matching. *)
-  check bool "primary path" true
-    (health.Decode.th_primary_path = Metrics.Websocket);
-  check bool "queue pressure" true
-    (health.Decode.th_queue_pressure = Metrics.Steady);
+  check string "primary path" "websocket"
+    (Masc.Transport_metrics.primary_path_kind_to_string
+       health.Decode.th_primary_path);
+  check string "queue pressure" "steady"
+    (Masc.Transport_metrics.queue_pressure_kind_to_string
+       health.Decode.th_queue_pressure);
   check int "sse sessions" 3 health.Decode.th_sse_sessions;
   check (option int) "websocket sessions" (Some 1)
     health.Decode.th_websocket_sessions;
@@ -65,10 +64,9 @@ let test_a_dropped_event_count_survives_the_decode () =
   let health = decoded dropping in
   check int "dropped events are carried through" 17
     health.Decode.th_events_dropped;
-  (* The old spelling here was "backed_up", which the closed type does not
-     have -- #30240 renamed the vocabulary to Steady / Watch / High. *)
-  check bool "a backed up queue is reported as such" true
-    (health.Decode.th_queue_pressure = Metrics.High)
+  check string "a backed up queue is reported as such" "high"
+    (Masc.Transport_metrics.queue_pressure_kind_to_string
+       health.Decode.th_queue_pressure)
 
 let () =
   run "transport_health"

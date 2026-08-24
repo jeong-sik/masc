@@ -268,6 +268,33 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
       | exception Yojson.Json_error detail ->
           Error ("tool calls were not JSON: " ^ detail))
 
+(** Fetch the files a keeper wrote
+    ([GET /api/v1/keepers/:name/file-changes]).
+
+    The window is time rather than a row count. A count could not say what it
+    had covered -- the server scans a multiple of it in fleet rows, so a
+    keeper that made no more calls and a scan that stopped short arrive
+    looking the same. The server bounds the window at what the read costs and
+    states in its answer the window it actually covered. *)
+let fetch_keeper_file_changes ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(window_hours : float) :
+    (Masc.Tui_decode.file_change_snapshot, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/file-changes?window_hours=%g"
+      (percent_encode_path_segment keeper_name)
+      (Float.max 0.0 window_hours)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "file changes returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_file_change_snapshot json
+      | exception Yojson.Json_error detail ->
+          Error ("file changes were not JSON: " ^ detail))
+
 (** Open the MCP session the observer feed is registered under.
 
     The transport registers an SSE observer only for a session it has seen
@@ -906,3 +933,28 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
     ->
       Error (Printf.sprintf "resources/read returned %d: %s" status body)
   | Ok (_, body) -> Masc_tui_mcp.resource_text_of_body ~request_id body
+
+(** POST /api/v1/keepers/:name/github-login — the device-flow login as the
+    server streams it: gh's own (redacted) output, then an error or the
+    final identity observation. Every chunk reaches [on_chunk] as it
+    arrives; the return says only how the stream ended. *)
+let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(on_chunk : string -> unit) :
+    (unit, string) result =
+  let url =
+    url_of ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/keepers/%s/github-login"
+           (percent_encode_path_segment keeper_name))
+  in
+  let headers =
+    json_headers (("Accept", "text/event-stream") :: auth_headers ())
+  in
+  match
+    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url ~headers
+      ~body:"{}" ~on_chunk ()
+  with
+  | Error detail -> Error detail
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Printf.sprintf "github-login returned %d: %s" status body)
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()

@@ -457,6 +457,46 @@ let test_matching_read_counts_matches_not_rows () =
       check int "the shared predicate selects the same rows" 2
         (List.length by_actor))
 
+(* [since]/[until] are turned into day keys and compared against the day-file
+   names [Jsonl_writer] wrote. Formatting those keys separately meant a change
+   to the writer's layout would narrow every audit range silently instead of
+   failing, so the bound is derived from the writer now (#29358). A row written
+   today has to fall inside a window that starts today. *)
+let test_day_bounds_match_the_written_day_file () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Audit_log.log_non_public_tool_call
+        config
+        ~agent_id:"bounded"
+        ~tool_name:"masc_status"
+        ~success:true
+        ~error_msg:None
+        ();
+      let now = Unix.gettimeofday () in
+      let day = 86_400.0 in
+      let keep (e : Audit_log.audit_entry) = String.equal e.agent_id "bounded" in
+      check
+        int
+        "a window starting today holds today's row"
+        1
+        (List.length (Audit_log.read_entries_matching ~n:5 ~since:now ~keep config));
+      check
+        int
+        "a window that ends yesterday holds none of it"
+        0
+        (List.length
+           (Audit_log.read_entries_matching ~n:5 ~until:(now -. day) ~keep config));
+      check
+        int
+        "a window that starts tomorrow holds none of it"
+        0
+        (List.length
+           (Audit_log.read_entries_matching ~n:5 ~since:(now +. day) ~keep config)))
+;;
+
 let () =
   run "Audit_log"
     [
@@ -468,6 +508,8 @@ let () =
             test_audit_events_filter_severity_before_paging;
           test_case "get_stats reports oldest and newest in read order" `Quick
             test_get_stats_reports_oldest_and_newest_in_read_order;
+          test_case "day bounds match the written day file" `Quick
+            test_day_bounds_match_the_written_day_file;
           test_case "read_entries is chronological and drops corrupt rows"
             `Quick test_read_entries_is_chronological_and_drops_corrupt_rows;
           test_case "read_entries survives interleaved undecodable rows" `Quick

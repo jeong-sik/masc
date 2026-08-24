@@ -144,6 +144,14 @@ let parse_bundle_relative_repo_path bundle_relative =
   parse_bundle_relative_repo_path_segments (String.split_on_char '/' bundle_relative)
 ;;
 
+(* The inverse. Written here so the [repos] segment has one spelling: a caller
+   that built the path itself would be a second place that decides what the
+   anchor looks like, and the parser above would stop being the authority the
+   moment they disagreed. *)
+let bundle_relative_repo_path ~repo_id relative_path =
+  String.concat "/" [ "repos"; repo_id; relative_path ]
+;;
+
 (* RFC-0128 §4.5 — parse a sandbox playground absolute file path back
    into [(repo_id, rel_path)]. Used by the keeper write path so that
    files keepers edit inside their per-keeper repo clones map to the

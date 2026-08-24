@@ -16,14 +16,33 @@
 
     Definitions are read once at boot; there is no hot reload (RFC §6). *)
 
+type help =
+  { short_description : string option
+  ; when_to_use : string option
+  ; key_constraints : string list
+  ; details_markdown : string option
+  ; doc_refs : string list
+  ; prompt_hints : string list
+  ; examples : string list
+  ; alternatives : string list
+  }
+(** The [\[help\]] table: the operator-authored usage knowledge
+    {!Tool_help_registry} serves through [masc_tool_help] and the
+    [masc://tool-help] resources. Every field is optional — an absent field
+    falls back to the registry's derivation from the schema — but a [\[help\]]
+    table that declares nothing is a load error, because config without a
+    payload has no consumer. *)
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; keeper_projection : Masc_domain.tool_schema option
+  ; help : help option
   }
 (** One decoded tool definition. [schema] is the canonical schema published
     to MCP clients; [keeper_projection], when the file declares a
     [keeper_projection] table, is the deliberately narrower shape handed to
-    keeper models (same tool name, own description and params). *)
+    keeper models (same tool name, own description and params); [help], when
+    the file declares a [\[help\]] table, is the authored usage knowledge. *)
 
 val load
   :  name:string
@@ -36,8 +55,12 @@ val load
     renamed file cannot silently redefine a different tool.
 
     Accepted top-level keys: [name], [description] (non-empty),
-    [additional_properties] (bool), [[params]], and [keeper_projection]
-    (a table of [description] / [additional_properties] / [[params]]).
+    [additional_properties] (bool), [[params]], [keeper_projection]
+    (a table of [description] / [additional_properties] / [[params]]), and
+    [help] (a table of [short_description] / [when_to_use] /
+    [details_markdown] strings and [key_constraints] / [doc_refs] /
+    [prompt_hints] / [examples] / [alternatives] string lists, at least one
+    of which must be present).
     Accepted param keys: [name], [type] (string | integer | number |
     boolean | object | array), [required] (bool), [description], [enum]
     (non-empty string list, string params only), [default] (matching the

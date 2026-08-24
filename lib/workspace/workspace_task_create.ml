@@ -110,6 +110,7 @@ let add_task_with_result
       ?goal_id
       ?created_by
       ?predecessor_task_id
+      ?(skills = [])
       config
       ~title
       ~priority
@@ -171,7 +172,7 @@ let add_task_with_result
              ; reclaim_policy = None
              ; execution_links = Masc_domain.no_execution_links
              ; do_not_reclaim_reason = None
-             ; skills = []
+             ; skills
              }
            in
            (* [write_backlog] stamps version/last_updated at the commit point. *)

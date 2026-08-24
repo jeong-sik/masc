@@ -90,10 +90,22 @@ let try_handle_with_outcome
     match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) ->
       Keeper_tool_execution.failure (error_json ~fields diagnostic)
-    | Error Cannot_parse ->
-      Keeper_tool_execution.failure (error_json ~fields "Cannot parse command")
-    | Error Too_complex ->
-      Keeper_tool_execution.failure (error_json ~fields "Command too complex")
+    | Error (Cannot_parse reason) ->
+      Keeper_tool_execution.failure
+        (error_json
+           ~fields
+           (Printf.sprintf
+              "Cannot parse command: %s"
+              (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
+    | Error (Too_complex reason) ->
+      Keeper_tool_execution.failure
+        (error_json
+           ~fields
+           (Printf.sprintf
+              "Command too complex: %s. %s."
+              (Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason)
+              (Keeper_tooling.Subset_rewrite.to_string
+                 (Keeper_tooling.Subset_rewrite.of_reason reason))))
     | Error (Path_reject e) ->
       Keeper_tool_execution.failure
         (error_json ~fields:[ "blocked_cmd", `String cmd ] e)

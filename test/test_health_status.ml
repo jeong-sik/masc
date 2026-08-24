@@ -60,22 +60,35 @@ let test_serialized_agent_status_ranks_through_the_wire () =
    not what the producer meant. Adding a producer word without deciding where
    it belongs breaks this list. *)
 let producer_vocabulary =
-  [ (* channel_gate_metrics.health_of_counts *)
-    "idle", None
+  [ (* channel_gate_metrics.health_of_counts now returns Health_status.t, so
+       these words come back out of to_string rather than being spelled by
+       hand. They stay listed because the wire still carries them and a reader
+       decoding an older payload must land where the producer meant. *)
+    "idle", Some Health_status.Idle
   ; "healthy", Some Health_status.Ok
   ; "failing", Some Health_status.Error
   ; "degraded", Some Health_status.Degraded
     (* keeper_reaction_ledger: the fleet summary reader turns an
        unrecognized word into unavailable, so this one is decided. *)
   ; "empty", Some Health_status.Ok
-    (* keeper_manual_compaction *)
-  ; "compacted", None
-    (* server_dashboard_http_runtime_info *)
-  ; "reachable", None
-  ; "no_http_runtimes", None
+    (* server_dashboard_http_runtime_info, likewise typed now. *)
+  ; "reachable", Some Health_status.Ok
+  ; "no_http_runtimes", Some Health_status.Idle
+  ; "unreachable", Some Health_status.Unavailable
     (* schedule_runner_status *)
   ; "stale", Some Health_status.Stale
   ]
+;;
+
+(* [Idle] and [Ok] both rank 0, so neither reads as trouble, but they are not
+   the same fact: [Ok] says work happened and succeeded, [Idle] says none
+   arrived. Collapsing them would let a dead channel read as a working one. *)
+let test_idle_is_not_ok () =
+  check bool "idle and ok are distinct" false
+    (Health_status.equal Health_status.Idle Health_status.Ok);
+  check int "idle is not at risk" 0 (Health_status.rank Health_status.Idle);
+  check bool "idle needs no operator" false
+    (Health_status.requires_operator_action Health_status.Idle)
 ;;
 
 let test_producer_vocabulary_membership () =
@@ -136,7 +149,7 @@ let test_unknown_word_is_distinguishable () =
   Alcotest.(check bool)
     "an undeclared word is not an explicit unknown"
     true
-    (Health_status.of_string_opt "no_http_runtimes" = None
+    (Health_status.of_string_opt "no_such_health_word" = None
      && Health_status.of_string_opt "unknown" = Some Health_status.Unknown)
 ;;
 
@@ -163,6 +176,7 @@ let () =
             test_initializing_is_not_at_risk;
           test_case "undeclared word is distinguishable" `Quick
             test_unknown_word_is_distinguishable;
+          test_case "idle is not ok" `Quick test_idle_is_not_ok;
         ] );
       ( "agent_status rank",
         [

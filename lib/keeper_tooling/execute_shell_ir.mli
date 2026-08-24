@@ -15,11 +15,29 @@ val simple_bin :
 val pipeline : Masc_exec.Shell_ir.t list -> Masc_exec.Shell_ir.t
 (** Build an explicit Shell IR pipeline from already-lowered stages. *)
 
+(** Why a structured command was refused.  Every arm carries what was refused,
+    not just that something was.
+
+    [Cannot_parse] and [Too_complex] were nullary while the typed gate could
+    not produce them: [decide_typed] wrapped its own input as already-parsed,
+    so those arms were unreachable and dropping the reason cost nothing.  The
+    gate now checks the structural invariants a typed caller can violate, so
+    the arms are reachable, and a caller told only "Command too complex"
+    cannot tell a nested pipeline from a one-stage one. *)
 type dispatch_error =
   | Gate_reject of string
-  | Cannot_parse
-  | Too_complex
+  | Cannot_parse of Masc_exec_command_gate.Shell_command_gate.parse_reason
+  | Too_complex of Masc_exec_command_gate.Shell_command_gate.too_complex_reason
   | Path_reject of string
+
+val parse_reason_tag :
+  Masc_exec_command_gate.Shell_command_gate.parse_reason -> string
+
+val too_complex_reason_tag :
+  Masc_exec_command_gate.Shell_command_gate.too_complex_reason -> string
+(** Closed-vocabulary tags for the reasons {!Cannot_parse} and {!Too_complex}
+    carry.  Re-exported so a caller that already matched the arm can render it
+    without taking a direct dependency on the gate. *)
 
 val validate_paths :
   workdir:string ->

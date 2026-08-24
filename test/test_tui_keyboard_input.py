@@ -13,6 +13,7 @@ import select
 import signal
 import socket
 import struct
+import zlib
 import subprocess
 import sys
 import tempfile
@@ -284,6 +285,24 @@ def wait_for_output(
         if remaining <= 0.0:
             raise AssertionError(f"timed out waiting for {needle!r}: {bytes(output)!r}")
         select.select([master_fd], [], [], min(0.1, remaining))
+
+
+def write_all(master_fd: int, output: bytearray, data: bytes) -> None:
+    """Write every byte, draining the TUI as it goes.
+
+    A terminal's input queue is small -- 1024 bytes on macOS -- and the master
+    is non-blocking here, so one os.write of a real paste returns short and
+    the rest is simply gone. A scenario that pastes 4 kB and asserts on what
+    arrived would be asserting on the first kilobyte. Reading between writes
+    is what lets the TUI drain the queue so the next chunk fits.
+    """
+    offset = 0
+    while offset < len(data):
+        try:
+            offset += os.write(master_fd, data[offset : offset + 512])
+        except BlockingIOError:
+            pass
+        read_available(master_fd, output)
 
 
 def send_and_wait(
@@ -1210,6 +1229,7 @@ def run_terminal_scenario(
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
+    preload_input: bytes | None = None,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1285,6 +1305,13 @@ def run_terminal_scenario(
                 )
                 original_termios: list[Any] = termios.tcgetattr(slave_fd)
                 start_http_endpoint()
+                if preload_input is not None:
+                    # Bytes waiting in the terminal before the process reads
+                    # anything. A terminal that answers a capability query
+                    # answers within microseconds; this scenario cannot write
+                    # the answer later, because the TUI asks and gives up
+                    # before the first frame the harness waits for.
+                    os.write(master_fd, preload_input)
                 os.kill(process.pid, signal.SIGCONT)
                 wait_for_output(
                     process,
@@ -1792,8 +1819,8 @@ def keeper_selection_identity_interaction(
     failures = []
     if find_needle(missing_plain, screen_header(b"MASC Keepers", b" (1)")) < 0:
         failures.append("missing beta detail did not return to MASC Keepers (1)")
-    if b"Keeper: alpha" in missing_plain:
-        failures.append("missing beta detail silently retargeted to Keeper: alpha")
+    if b"Keepers \xe2\x96\xb8 alpha" in missing_plain:
+        failures.append("missing beta detail silently retargeted to alpha")
 
     after_selection = send_and_wait(
         process,
@@ -1903,7 +1930,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             screen_header(b"MASC Keepers", b" (1)"),
         )
         keepers_frame = frame_containing(keepers, screen_header(b"MASC Keepers", b" (1)"))
-        if b"Keeper: alpha" in CSI_RE.sub(b"", keepers_frame):
+        if b"Keepers \xe2\x96\xb8 alpha" in CSI_RE.sub(b"", keepers_frame):
             raise AssertionError(
                 f"Esc opened alpha detail after beta disappeared: {keepers!r}"
             )
@@ -3130,6 +3157,187 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+GRAPHICS_QUERY_ID = 31
+GRAPHICS_SUPPORTED_REPLY = b"\x1b_Gi=%d;OK\x1b\\" % GRAPHICS_QUERY_ID
+IMAGE_NAME = "shot.png"
+
+
+def seed_image_workspace(base_path: str) -> None:
+    # A real 8x8 PNG rather than arbitrary bytes: the TUI hands the file
+    # straight to the terminal, and a scenario that passed on nonsense would
+    # not have shown that a picture can make the trip.
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(body))
+            + kind
+            + body
+            + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+        )
+
+    width = height = 8
+    raw = b"".join(b"\x00" + bytes([255, 0, 0, 255] * width) for _ in range(height))
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    Path(base_path, IMAGE_NAME).write_bytes(png)
+
+
+def image_view_interaction() -> Interaction:
+    """A terminal that says it draws pictures gets one, and gets it taken away.
+
+    The reply to the capability query is preloaded, so this scenario is a
+    terminal that answers. What a terminal that stays silent does is the other
+    half, asserted below by asking for an image it cannot be given."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        # Asked before the first frame, so it is already on the stream.
+        for expected in (b"\x1b_G", b"i=%d" % GRAPHICS_QUERY_ID, b"a=q"):
+            if expected not in output:
+                raise AssertionError(
+                    f"the capability query never went out; missing {expected!r}"
+                )
+
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        path = str(Path(base_path, IMAGE_NAME))
+        command = f"/image {path}".encode()
+        send_and_wait(process, master_fd, output, command, composer_showing(command))
+
+        read_available(master_fd, output)
+        drawn_from = len(output)
+        os.write(master_fd, b"\r")
+        wait_for_output(
+            process, master_fd, output, b"a=T", start=drawn_from, timeout=5.0
+        )
+        drawn = bytes(output[drawn_from:])
+        for expected in (b"\x1b_G", b"f=100", b"a=T"):
+            if expected not in drawn:
+                raise AssertionError(
+                    f"the image was not placed; missing {expected!r}: {drawn!r}"
+                )
+
+        # The terminal keeps a picture in its own layer, so leaving has to say
+        # so explicitly; clearing the screen does not remove one.
+        read_available(master_fd, output)
+        dismissed_from = len(output)
+        os.write(master_fd, b" ")
+        wait_for_output(
+            process, master_fd, output, b"a=d", start=dismissed_from, timeout=5.0
+        )
+
+        # Back on the frame, and the space that dismissed the picture is not
+        # also a character in the draft.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+            start=dismissed_from,
+            timeout=5.0,
+        )
+
+        # Short on purpose: every character typed into the composer is a
+        # frame, and a long path spends the scenario's patience on redraws
+        # rather than on the thing being asserted.
+        missing = b"/image /nope.png"
+        send_and_wait(process, master_fd, output, missing, composer_showing(missing))
+        send_and_wait(process, master_fd, output, b"\r", b"No such file")
+
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def paste_spill_interaction(requests: HttpRequests) -> Interaction:
+    """A paste too big for the composer shows as one line and is sent whole.
+
+    The composer is five rows. Four hundred lines in it is a draft the
+    operator cannot read, and a draft they cannot read is a message they
+    cannot check. The text is kept and goes back in on the way out."""
+
+    pasted = "\r".join(f"line {index}" for index in range(400))
+    expected = "\n".join(f"line {index}" for index in range(400))
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        read_available(master_fd, output)
+        start = len(output)
+        write_all(master_fd, output, PASTE_START + pasted.encode() + PASTE_END)
+        wait_for_output(process, master_fd, output, b"[pasted ", start=start, timeout=10.0)
+        frame = frame_containing(bytes(output[start:]), b"[pasted ")
+        plain = CSI_RE.sub(b"", frame)
+        if b"400 line(s)" not in plain:
+            raise AssertionError(f"the placeholder does not say the size: {plain!r}")
+        # The point of the placeholder: the pasted text is not in the composer.
+        if b"line 399" in plain:
+            raise AssertionError(f"the draft still flooded: {plain!r}")
+
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != expected:
+            head = "" if message is None else message[:80]
+            raise AssertionError(
+                f"the keeper was sent the placeholder, not the paste: {head!r}"
+            )
+
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -3545,9 +3753,9 @@ def live_markdown_interaction(
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
-    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     tail = b"task478-server-unreadable-store"
     wait_for_output(
         process,
@@ -3574,7 +3782,7 @@ def live_markdown_interaction(
         raise AssertionError(f"language header has no neutral background: {frame!r}")
     if b"```bash" in plain:
         raise AssertionError(f"raw fence marker leaked into the chat: {frame!r}")
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
 
 
@@ -4957,6 +5165,26 @@ def run_keyboard_regression(executable: str) -> None:
         runtime_http_fixtures()
     )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Image view over the frame",
+        interact=image_view_interaction(),
+        prepare_workspace=seed_image_workspace,
+        preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
+    spill_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="A big paste is one line in the draft",
+        interact=paste_spill_interaction(spill_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the spill request capture"},
+            )
+        },
+        http_requests=spill_requests,
+    )
     paste_requests: HttpRequests = []
     run_terminal_scenario(
         executable,

@@ -300,19 +300,21 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
     Some (entry_of_json_r json))
   |> collect_entries
 
+(* The bounds below are compared against day-file names, so this has to be the
+   key [Jsonl_writer] wrote them with. Formatting it here a second time meant a
+   change to the writer's layout would silently narrow every audit range
+   instead of failing (#29358).
+
+   The year guard stays: [day_key] is total and formats out-of-range years
+   into a string that no longer sorts against the stored names, and this
+   function's [None] is what tells the caller the bound is unusable. *)
 let utc_date_of_timestamp timestamp =
   match Unix.gmtime timestamp with
   | tm ->
     let year = tm.Unix.tm_year + 1900 in
     if year < 0 || year > 9999
     then None
-    else
-      Some
-        (Printf.sprintf
-           "%04d-%02d-%02d"
-           year
-           (tm.Unix.tm_mon + 1)
-           tm.Unix.tm_mday)
+    else Some (Jsonl_writer.day_key ~ts:timestamp)
   | exception Invalid_argument _
   | exception Unix.Unix_error _ -> None
 ;;

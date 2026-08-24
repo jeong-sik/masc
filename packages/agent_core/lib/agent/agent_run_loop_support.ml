@@ -31,6 +31,40 @@ let log_turn ~run_start ~turn_start ~turn_index ~model ~stop =
     ]
 ;;
 
+(* The ceiling in force is logged on every tool round, not only when it fires.
+   Without it a run that never trips is indistinguishable from a run whose
+   config never received the value, which is exactly the question a live probe
+   needs answered (masc#30245). [ceiling] is the declared limit or [None]. *)
+let log_tool_round ~run_start ~turn_start ~turn_index ~model ~rounds ~ceiling =
+  let now = Unix.gettimeofday () in
+  let model_field = if String.length model = 0 then "-" else model in
+  Log.info
+    _log
+    "turn completed"
+    [ Log.I ("turn", turn_index)
+    ; Log.F ("elapsed_run_sec", now -. run_start)
+    ; Log.F ("turn_duration_sec", now -. turn_start)
+    ; Log.S ("model", model_field)
+    ; Log.S ("stop", "tools_executed")
+    ; Log.I ("tool_rounds", rounds)
+    ; Log.S
+        ( "tool_round_ceiling"
+        , match ceiling with None -> "none" | Some limit -> string_of_int limit )
+    ]
+;;
+
+let log_tool_round_ceiling_reached ~turn_index ~model ~rounds ~limit =
+  let model_field = if String.length model = 0 then "-" else model in
+  Log.info
+    _log
+    "tool round ceiling reached"
+    [ Log.I ("turn", turn_index)
+    ; Log.S ("model", model_field)
+    ; Log.I ("tool_rounds", rounds)
+    ; Log.I ("tool_round_ceiling", limit)
+    ]
+;;
+
 type provider_lease =
   | Held
   | Released

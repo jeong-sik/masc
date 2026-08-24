@@ -2385,36 +2385,27 @@ let render_keeper_message (state : state) =
              }
               : Message_layout.entry)
           in
-          (* The whole trail, not its last line. Reasoning is the only part of
-             a live turn the durable transcript does not keep, so the pane is
-             the one place it can be read, and one line out of it says what the
-             keeper concluded without saying how it got there. Blank lines are
-             dropped because models emit runs of them; the rest is one entry
-             the layout wraps like any other body. *)
-          let thinking_entry =
-            match Keeper_chat_transcript.thinking_lines live with
-            | [] -> []
-            | lines ->
-                [ entry Message_layout.Thinking "thinking"
-                    (String.concat "\n" lines) ]
+          (* The turn in the order it happened, one entry per stretch. A
+             tool-call round interleaves reasoning, calls and reply text, and
+             drawing them as three pooled blocks read as one wall of text with
+             its calls listed elsewhere. Reasoning is the only part of a live
+             turn the durable transcript does not keep, so the pane is the one
+             place it can be read — the whole trail, not its last line. *)
+          let keeper_label =
+            Keeper_chat.terminal_safe_text
+              (Keeper_chat_transcript.keeper_name live)
           in
-          let tool_entry =
-            match Keeper_chat_transcript.tool_rows live with
-            | [] -> []
-            | rows ->
-                [ entry Message_layout.Tool "tools" (String.concat "\n" rows) ]
-          in
-          let text_entry =
-            match Keeper_chat_transcript.text live with
-            | "" -> []
-            | text ->
-                [ entry Message_layout.Keeper
-                    (Keeper_chat.terminal_safe_text
-                       (Keeper_chat_transcript.keeper_name live))
-                    text
-                ]
-          in
-          thinking_entry @ tool_entry @ text_entry
+          List.map
+            (fun (item : Keeper_chat_transcript.trail_item) ->
+              match item with
+              | Keeper_chat_transcript.Trail_thinking lines ->
+                  entry Message_layout.Thinking "thinking"
+                    (String.concat "\n" lines)
+              | Keeper_chat_transcript.Trail_tools rows ->
+                  entry Message_layout.Tool "tools" (String.concat "\n" rows)
+              | Keeper_chat_transcript.Trail_text text ->
+                  entry Message_layout.Keeper keeper_label text)
+            (Keeper_chat_transcript.trail live)
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in

@@ -428,6 +428,95 @@ let test_tool_rows_mark_how_far_each_call_got () =
         (contains ~needle:"a.ml" open_call)
   | rows -> failf "expected three rows, got %d" (List.length rows)
 
+(* The shape a reader follows a long turn by: thinking, then the call, then
+   more thinking, then the reply — not three pooled blocks. This is the order
+   the live pane draws. *)
+let trail_item_to_string : Transcript.trail_item -> string = function
+  | Transcript.Trail_thinking lines ->
+      "thinking(" ^ String.concat "\\n" lines ^ ")"
+  | Transcript.Trail_tools rows -> "tools(" ^ String.concat "\\n" rows ^ ")"
+  | Transcript.Trail_text text -> "text(" ^ text ^ ")"
+
+let trail_item = testable (Fmt.of_to_string trail_item_to_string) ( = )
+
+let test_trail_keeps_arrival_order () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking "find the file first"
+    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
+    ; Live.Tool_args
+        { call_id = "c1"
+        ; fragment = Live.Args_delta "{\"file_path\":\"lib/keeper/a.ml\"}"
+        }
+    ; Live.Tool_ended { call_id = "c1" }
+    ; Live.Tool_result { call_id = "c1" }
+    ; Live.Thinking "now the caller"
+    ; Live.Text "The caller is safe."
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_thinking first
+    ; Transcript.Trail_tools rows
+    ; Transcript.Trail_thinking second
+    ; Transcript.Trail_text reply
+    ] ->
+      check (list string) "the first stretch of reasoning stands alone"
+        [ "find the file first" ] first;
+      check int "one call, one row" 1 (List.length rows);
+      check bool "the row carries the result marker" true
+        (contains ~needle:"✓" (List.hd rows));
+      check (list string) "the round-two reasoning is its own stretch"
+        [ "now the caller" ] second;
+      check string "the reply closes the trail" "The caller is safe." reply
+  | items ->
+      failf "expected thinking/tools/thinking/text, got %d item(s): %s"
+        (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+let test_trail_groups_consecutive_calls_into_one_block () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
+    ; Live.Tool_started { call_id = "c2"; tool_name = "execute" }
+    ; Live.Text "done"
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_tools rows; Transcript.Trail_text _ ] ->
+      check int "two consecutive calls draw as one block" 2 (List.length rows)
+  | items ->
+      failf "expected tools/text, got %d item(s): %s" (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+let test_trail_updates_a_call_after_later_stretches_open () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
+    ; Live.Thinking "while it runs"
+    ; Live.Tool_args
+        { call_id = "c1"
+        ; fragment = Live.Args_snapshot "{\"file_path\":\"lib/keeper/a.ml\"}"
+        }
+    ; Live.Tool_result { call_id = "c1" }
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_tools rows; Transcript.Trail_thinking _ ] ->
+      let row = List.hd rows in
+      check bool "the late arguments reach the earlier row" true
+        (contains ~needle:"a.ml" row);
+      check bool "the late result reaches the earlier row" true
+        (contains ~needle:"✓" row)
+  | items ->
+      failf "expected tools/thinking, got %d item(s): %s" (List.length items)
+        (String.concat "; " (List.map trail_item_to_string items))
+
+let test_trail_drops_blank_stretches () =
+  let t = fresh () in
+  feed t [ Live.Run_started; Live.Thinking "\n\n"; Live.Text "  " ];
+  check (list trail_item) "blank stretches draw nothing" []
+    (Transcript.trail t)
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
@@ -435,6 +524,16 @@ let () =
             test_text_and_thinking_accumulate
         ; test_case "the whole reasoning trail is kept" `Quick
             test_the_whole_reasoning_trail_is_kept
+        ] )
+    ; ( "trail"
+      , [ test_case "arrival order is kept" `Quick
+            test_trail_keeps_arrival_order
+        ; test_case "consecutive calls are one block" `Quick
+            test_trail_groups_consecutive_calls_into_one_block
+        ; test_case "a call updates after later stretches open" `Quick
+            test_trail_updates_a_call_after_later_stretches_open
+        ; test_case "blank stretches are dropped" `Quick
+            test_trail_drops_blank_stretches
         ] )
     ; ( "tool calls"
       , [ test_case "named as the other surfaces name it" `Quick

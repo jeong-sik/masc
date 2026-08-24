@@ -85,19 +85,12 @@ type reading = {
   liveness : liveness;
 }
 
-val display_status :
-  reading -> Masc.Keeper_status_runtime.control_plane_status option
-(** The published control-plane status for a reading, composed the way the
-    operator snapshot composes it: operator pause overrides the surface
-    status. [None] when the roster was not observed, because durable metadata
-    cannot answer what a keeper's live status is. *)
-
 val health : reading -> Masc.Tui_decode.keeper_health option
 (** How the keeper is reporting, or [None] when the roster was not read.
 
-    Separate from {!status_label}, which answers with the surface vocabulary
-    and lets an operator pause hide the health underneath it: a keeper a
-    person stopped and a keeper whose fiber died read the same word there. *)
+    Kept apart from {!reading.paused}: the function these replaced let an
+    operator pause hide the health underneath it, so a keeper a person stopped
+    and a keeper whose fiber died read the same word. *)
 
 val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path option
 (** What the runtime derived to do about this keeper, or [None] when the
@@ -108,12 +101,11 @@ val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path 
     inventing a mapping from the word. *)
 
 val health_label : reading -> string
-(** Terminal label for {!health}, or ["unread"]. *)
-
-val status_label : reading -> string
-(** Terminal label for {!display_status}, or ["unread"] when the roster was
-    not observed: the roster has not been read for this keeper, which is a
-    fact about the reading, not a status the keeper is in. *)
+(** Terminal label for {!health}, with two words {!health} has no value for:
+    ["unread"] when the roster was never read, and ["absent"] when it answered
+    and left this keeper out. The second is not a health reading but it is not
+    the lack of one either - a complete roster without the keeper means no
+    fiber is running it. *)
 
 val health_tally : reading list -> (string * int) list
 (** How many readings carry each {!health_label}, in first-seen order.

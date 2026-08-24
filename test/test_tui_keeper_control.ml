@@ -16,13 +16,11 @@ let health raw =
   | Some value -> value
   | None -> invalid_arg ("unknown test Keeper health: " ^ raw)
 
-let runtime ?(keepalive_running = true) ?(status = Status.Surface_active)
-    ?(health = health "healthy") ?(paused = false)
+let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
     ?(next_action = None) ?(autoboot_enabled = true) ?(proactive_enabled = true)
     ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running") name :
     Decode.keeper_runtime =
   { kr_name = name
-  ; kr_status = status
   ; kr_health = health
   ; kr_paused = paused
   ; kr_next_action = next_action
@@ -56,18 +54,19 @@ let test_unobserved_offers_nothing () =
   check_actions "no action without a roster" [] (Control.available r);
   Alcotest.(check (option action_testable))
     "no primary without a roster" None (Control.primary r);
-  Alcotest.(check string) "status is unread" "unread" (Control.status_label r)
+  Alcotest.(check string) "health is unread" "unread" (Control.health_label r)
 
 let test_absent_offers_boot () =
   let r = reading ~liveness:Control.Absent "analyst" in
   check_actions "boot" [ Control.Boot ] (Control.available r);
-  Alcotest.(check string) "offline" "offline" (Control.status_label r)
+  Alcotest.(check string) "an absent keeper reads absent, not unread" "absent"
+    (Control.health_label r)
 
 (* A keeper the operator paused and then shut down is absent from the roster.
-   Reading it as plain "offline" hides why a boot alone will not start it. *)
+   Pause is its own field, so it still reads even where health cannot. *)
 let test_absent_and_paused_reads_paused () =
   let r = reading ~paused:true ~liveness:Control.Absent "analyst" in
-  Alcotest.(check string) "paused" "paused" (Control.status_label r);
+  Alcotest.(check bool) "pause survives an absent roster" true r.Control.paused;
   check_actions "boot" [ Control.Boot ] (Control.available r)
 
 let test_live_running_offers_pause () =
@@ -77,7 +76,7 @@ let test_live_running_offers_pause () =
     (Control.available r);
   Alcotest.(check (option action_testable))
     "primary is pause" (Some Control.Pause) (Control.primary r);
-  Alcotest.(check string) "active" "active" (Control.status_label r)
+  Alcotest.(check string) "healthy" "healthy" (Control.health_label r)
 
 let test_live_paused_offers_resume () =
   let r =
@@ -91,24 +90,26 @@ let test_live_paused_offers_resume () =
   Alcotest.(check (option action_testable))
     "primary is resume" (Some Control.Resume) (Control.primary r)
 
-(* Pause is durable metadata and overrides the surface status the roster
-   reports, the same composition the operator snapshot publishes. Without the
-   override a paused keeper whose fiber is sleeping still reads "active". *)
-let test_pause_overrides_surface_status () =
-  let live = runtime ~status:Status.Surface_idle "analyst" in
+(* Pause is a person's decision and health is an observation, so neither
+   replaces the other. The composition this replaced let pause overwrite the
+   status word, which meant a paused keeper whose fiber had died read exactly
+   like one that was resting. *)
+let test_pause_and_health_are_read_separately () =
+  let live = runtime ~health:(health "zombie") "analyst" in
+  let resting = reading ~liveness:(Control.Present live) "analyst" in
+  let stopped = reading ~paused:true ~liveness:(Control.Present live) "analyst" in
   Alcotest.(check string)
-    "idle when not paused" "idle"
-    (Control.status_label (reading ~liveness:(Control.Present live) "analyst"));
+    "health reads the same either way" "zombie"
+    (Control.health_label resting);
   Alcotest.(check string)
-    "paused wins" "paused"
-    (Control.status_label
-       (reading ~paused:true ~liveness:(Control.Present live) "analyst"))
+    "pause does not overwrite it" "zombie" (Control.health_label stopped);
+  Alcotest.(check bool) "and pause is still readable" true stopped.Control.paused
 
 (* A row can be in the roster with its keepalive fiber stopped. Pause has
    nothing to pause there, so the fiber pair is what applies. *)
 let test_registered_without_fiber_offers_boot () =
   let live =
-    runtime ~keepalive_running:false ~status:Status.Surface_offline "analyst"
+    runtime ~keepalive_running:false "analyst"
   in
   let r = reading ~liveness:(Control.Present live) "analyst" in
   check_actions "boot, not pause" [ Control.Boot ] (Control.available r)
@@ -328,7 +329,7 @@ let test_short_roster_reads_unread_not_offline () =
           ; liveness = Control.liveness_of_roster roster "analyst" }
   in
   Alcotest.(check string) "unread, not offline" "unread"
-    (Control.status_label r);
+    (Control.health_label r);
   check_actions "no action on an unread keeper" [] (Control.available r)
 
 (* A refusal is two situations. Only one of them is fixed by providing a
@@ -390,8 +391,8 @@ let test_partial_roster_still_confirms_what_it_holds () =
     { Control.name = "analyst"; paused = false
     ; liveness = Control.liveness_of_roster roster "analyst" }
   in
-  Alcotest.(check string) "the observed keeper is active" "active"
-    (Control.status_label present);
+  Alcotest.(check string) "the observed keeper reports its health" "healthy"
+    (Control.health_label present);
   check_actions "and it can be paused"
     [ Control.Pause; Control.Wakeup; Control.Shutdown ]
     (Control.available present)
@@ -407,8 +408,10 @@ let test_full_roster_is_complete () =
         { Control.name = "bandleader"; paused = false
         ; liveness = Control.liveness_of_roster (complete rows) "bandleader" }
       in
-      Alcotest.(check string) "a name a complete roster omits is offline"
-        "offline" (Control.status_label absent)
+      (* "absent", not "unread": the roster answered and this keeper was not
+         in it, which says no fiber is running it. *)
+      Alcotest.(check string) "a name a complete roster omits is absent"
+        "absent" (Control.health_label absent)
   | Control.Roster_partial _ ->
       Alcotest.fail "a roster matching its own total is complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"
@@ -485,22 +488,22 @@ let test_empty_error_body_names_the_status () =
 
 (* {1 Roster decode} *)
 
-let gate_row ?(status = "active") ?(health = "healthy") ?(paused = false)
+let gate_row ?(health = "healthy") ?(paused = false)
     ?(next_action = "\"direct_message\"") ?(phase = "running") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
-       "status":%S,"health":%S,"paused":%b,"next_action":%s,
+       "health":%S,"paused":%b,"next_action":%s,
        "phase":%S,"keepalive_running":true,"autoboot_enabled":true,
        "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
-    name name status health paused next_action phase
+    name name health paused next_action phase
 
 let test_roster_decode_reads_rows () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row "analyst")
-         (gate_row ~status:"idle" ~health:"idle" "bandleader"))
+         (gate_row ~health:"idle" "bandleader"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
@@ -512,9 +515,10 @@ let test_roster_decode_reads_rows () =
         "names in order" [ "analyst"; "bandleader" ]
         (List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows);
       Alcotest.(check bool)
-        "idle parsed" true
+        "health parsed" true
         (match rows with
-         | [ _; second ] -> second.Decode.kr_status = Status.Surface_idle
+         | [ _; second ] ->
+           Decode.keeper_health_to_string second.Decode.kr_health = "idle"
          | _ -> false);
       Alcotest.(check bool)
         "phase parsed" true
@@ -523,19 +527,20 @@ let test_roster_decode_reads_rows () =
            Decode.keeper_phase_to_string first.Decode.kr_phase = "running"
          | [] -> false)
 
-(* A producer that grows a seventh status label must fail the reading. A
-   default would render the new state as one of the six and offer the action
-   that belongs to that one instead. *)
+(* A producer that grows a health reading this build does not know must fail
+   the reading. A default would render the new state as one of the known ones
+   and offer the action that belongs to that one instead. *)
 let test_roster_decode_rejects_an_unknown_status () =
   let json =
     Yojson.Safe.from_string
-      (Printf.sprintf {|{"keepers":[%s]}|} (gate_row ~status:"quarantined" "analyst"))
+      (Printf.sprintf {|{"keepers":[%s]}|}
+         (gate_row ~health:"quarantined" "analyst"))
   in
   match Decode.decode_keeper_runtime_list json with
-  | Ok _ -> Alcotest.fail "an unknown status must not decode"
+  | Ok _ -> Alcotest.fail "an unknown health must not decode"
   | Error err ->
       Alcotest.(check bool)
-        "error names the status" true
+        "error names the health" true
         (let contains needle =
            let n = String.length needle and h = String.length err in
            let rec scan i = i + n <= h && (String.sub err i n = needle || scan (i + 1)) in
@@ -625,7 +630,7 @@ let test_roster_decode_keeps_the_axes_apart () =
   let json =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":1,"total":1,"truncated":false,"keepers":[%s]}|}
-         (gate_row ~status:"inactive" ~health:"zombie" ~paused:true
+         (gate_row ~health:"zombie" ~paused:true
             ~next_action:{|"auto_restart"|} "wreck"))
   in
   match Decode.decode_keeper_runtime_list json with
@@ -697,8 +702,8 @@ let () =
             test_live_running_offers_pause
         ; Alcotest.test_case "live paused keeper offers resume" `Quick
             test_live_paused_offers_resume
-        ; Alcotest.test_case "pause overrides surface status" `Quick
-            test_pause_overrides_surface_status
+        ; Alcotest.test_case "pause and health are read separately" `Quick
+            test_pause_and_health_are_read_separately
         ; Alcotest.test_case "registered without a fiber offers boot" `Quick
             test_registered_without_fiber_offers_boot
         ] )
@@ -761,7 +766,7 @@ let () =
     ; ( "roster"
       , [ Alcotest.test_case "rows decode in order" `Quick
             test_roster_decode_reads_rows
-        ; Alcotest.test_case "unknown status is rejected" `Quick
+        ; Alcotest.test_case "unknown health is rejected" `Quick
             test_roster_decode_rejects_an_unknown_status
         ; Alcotest.test_case "unknown phase is rejected" `Quick
             test_roster_decode_rejects_an_unknown_phase

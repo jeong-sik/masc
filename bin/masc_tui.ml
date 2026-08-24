@@ -2604,7 +2604,10 @@ let handle_keeper_action state ~base_path ~mailbox action =
               | Keeper_control.Unobserved ->
                   "the live roster has not been read"
               | Keeper_control.Absent | Keeper_control.Present _ ->
-                  Keeper_control.status_label reading ^ " keeper"))
+                  (if reading.Keeper_control.paused then "paused, "
+                   else "")
+                  ^ Keeper_control.health_label reading
+                  ^ " keeper"))
       else
         match
           Keeper_control.gate_transition

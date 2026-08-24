@@ -50,7 +50,6 @@ let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
 type keeper_runtime = {
   kr_name : string;
-  kr_status : Keeper_status_runtime.surface_status;
   kr_health : keeper_health;
   kr_paused : bool;
   kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
@@ -1610,15 +1609,6 @@ let required_bool_field json key =
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
-  let* raw_status = required_string_field json "status" in
-  let* kr_status =
-    match Keeper_status_runtime.surface_status_of_string_opt raw_status with
-    | Some status -> Ok status
-    | None ->
-        Error
-          (Printf.sprintf "keeper %S has unknown runtime status %S" kr_name
-             raw_status)
-  in
   let* raw_health = required_string_field json "health" in
   let* kr_health =
     match keeper_health_of_string raw_health with
@@ -1657,7 +1647,6 @@ let decode_keeper_runtime json =
   in
   Ok
     { kr_name
-    ; kr_status
     ; kr_health
     ; kr_paused
     ; kr_next_action

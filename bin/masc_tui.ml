@@ -40,6 +40,37 @@ let synchronized_output_enabled () =
        | "" | "1" | "true" | "yes" | "on" | _ -> true)
   | None -> true
 
+(* Point fd 2 at a file under the base path, so writing to stderr cannot land
+   in the frame. Best effort by construction: a surface that cannot open its
+   log is still a working surface, and refusing to start over it would trade a
+   cosmetic fault for an outage. The failure is reported on the terminal that
+   is about to be cleared, which is the last moment a person can see it. *)
+let redirect_stderr_off_terminal ~base_path =
+  match
+    let dir = Filename.concat (Filename.concat base_path ".masc") "logs" in
+    let path =
+      Filename.concat dir (Printf.sprintf "masc-tui-%d.log" (Unix.getpid ()))
+    in
+    let fd =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
+    in
+    (* No [Fun.protect] around the close: its [Finally_raised] is neither
+       [Unix_error] nor [Sys_error], so a raising finaliser would leave this
+       match and take the surface down over a descriptor. If [dup2] raises,
+       one fd leaks in a process that is one line from reporting it. *)
+    Unix.dup2 fd Unix.stderr;
+    Unix.close fd;
+    path
+  with
+  | path ->
+      Log.info ~ctx:"masc-tui" "stderr redirected to %s" path
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+      (* Say so before the screen is taken: a surface drawing over a mirror it
+         could not move is the state this whole path exists to avoid. *)
+      prerr_endline
+        "[masc-tui] could not redirect stderr off this terminal; log lines may \
+         land in the drawn screen"
+
 let require_interactive_terminal () =
   let term =
     Sys.getenv_opt "TERM"
@@ -3458,15 +3489,21 @@ let main () =
   Provider_diag_log_sink.install ();
   let (base_path, workspace, port, refresh) = parse_args () in
   require_interactive_terminal ();
-  (* The console mirror writes every record to stderr, and stderr is this
-     terminal. A library Info line printed between two frames lands inside the
-     drawn screen, and the repaint that follows does not unprint it -- it is
-     already in the scrollback the frame occupies. Warn is the floor because a
-     warning is worth that cost and a routine "loaded N entries" is not.
+  (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
+     on the same [/dev/ttys*]. Everything that writes there writes into the
+     drawn screen: the console mirror behind every [Log] record, this binary's
+     own decode reports ([Masc_tui_loader.report]), and anything a library
+     prints without asking. Raising the level to Warn narrowed that to fewer
+     lines; it did not stop them, and it bought the narrowing by dropping Info
+     records from the ring the System logs surface reads.
 
-     MASC_LOG_LEVEL still wins: init_from_env runs after, so an operator who
-     asks for Info gets it, terminal or not. *)
-  Log.set_level Log.Warn;
+     So the terminal is taken away from stderr instead. The console is a
+     mirror by its own contract -- {!Console_sink} names the file sink and the
+     ring authoritative -- and a mirror pointed at a file is still a mirror,
+     while one pointed here is a corruption. This runs after
+     [require_interactive_terminal] so its refusal still reaches a person, and
+     before anything can log. *)
+  redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
   state.view <- Overview;

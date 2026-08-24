@@ -47,10 +47,16 @@ let trajectory_max_limit = 500
    [read_window] has no row cap, so everything in the window is in the answer
    and the window is a fact the response can state.
 
-   The ceiling is the tool-call log's own default retention: past it there is
-   nothing left on disk to read, so a wider window would only cost the scan. *)
+   The ceiling is what the read costs, not what the log keeps. [read_window]
+   parses every row in the date files the window touches, so the cost is a
+   straight line in days: measured against a server holding 2026-08-22..24,
+   one keeper's changes took 4.4s over 24h, 8.3s over 48h and 11.0s over 72h.
+   The log retains 30 days, and asking for all of them would be about two
+   minutes inside one request. Three days is what an operator can wait for.
+   Reading further back is a different feature and wants an index, not a
+   wider scan. *)
 let file_changes_default_window_hours = 24.0
-let file_changes_max_window_hours = 24.0 *. 30.0
+let file_changes_max_window_hours = 72.0
 
 (* Maximum per-keeper entries for /tool-calls; also sizes the shared
    fleet-row window that per-keeper responses derive from. *)

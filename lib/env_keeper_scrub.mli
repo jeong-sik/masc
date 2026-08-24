@@ -8,12 +8,8 @@
 val is_allowed : string -> bool
 (** [is_allowed key] returns [true] only for an exact inherited-host key. *)
 
-val non_interactive_entries : string list
-(** Environment entries appended to every keeper subprocess so a command that
-    would wait for a person fails instead. Nothing in this process can answer
-    an editor or a credential prompt. *)
-
 val filter_environment : string array -> string array
 (** Return a copy of the given [Unix.environment]-shaped array with only
-    allowed keys retained, followed by {!non_interactive_entries}. Entries
-    that do not contain ['='] are kept iff their key is allowed. *)
+    allowed keys retained, followed by entries that stop an editor or a
+    credential prompt from waiting for a person. Entries that do not contain
+    ['='] are kept iff their key is allowed. *)

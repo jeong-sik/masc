@@ -1,4 +1,6 @@
-(** TOML-backed catalog of immutable Keeper tool-composition plans.
+(** Closed grammar for immutable Keeper tool-composition plans. Declared
+    today inside SKILL.md composition fences ({!Keeper_skill_catalog});
+    the standalone tool-compositions.toml path is gone.
 
     The document grammar is closed and explicit. Input templates use tagged
     [literal], [output], [object], and [array] nodes; strings are never scanned
@@ -145,10 +147,6 @@ val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
 val status_tool_kind : Keeper_tool_descriptor.tool_kind
 val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
 
-val model_tool_names : t -> string list
-(** Exact model-visible composition surface, including the shared status and
-    cancel controls when at least one async composition is declared. *)
-
 val status_tool_name : string
 val cancel_tool_name : string
 
@@ -176,6 +174,3 @@ val instantiate
     [Param] leaf becomes the caller's value and the param-free copy is
     revalidated by {!Keeper_tool_plan.create}. A zero-param entry returns its
     declared plan unchanged. *)
-
-val path : config_root:string -> string
-(** Dedicated catalog path below the resolved MASC config root. *)

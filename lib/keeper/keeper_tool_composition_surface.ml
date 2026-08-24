@@ -862,7 +862,6 @@ let make_request_control_tool
 ;;
 
 let make_tools
-      ?catalog
       ?(skill_composition_entries = [])
       ~(config : Workspace.config)
       ~meta
@@ -886,12 +885,7 @@ let make_tools
      TOML catalog, so materialization cannot tell them apart — one closure
      serves both. Name collisions across the two sources are refused where
      both catalogs are loaded, before this point. *)
-  let declared_entries =
-    (match catalog with
-     | None -> []
-     | Some catalog -> Catalog.entries catalog)
-    @ skill_composition_entries
-  in
+  let declared_entries = skill_composition_entries in
   let composition_tools =
     declared_entries
     |> List.map (fun (entry : Catalog.entry) ->

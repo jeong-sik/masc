@@ -132,19 +132,11 @@ let tool_kind (entry : entry) =
 let status_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 let cancel_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 
-let path ~config_root = Filename.concat config_root "tool-compositions.toml"
 
 let entries catalog = catalog
 
 let find catalog name =
   List.find_opt (fun entry -> String.equal entry.name name) catalog
-;;
-
-let model_tool_names catalog =
-  let entry_names = List.map tool_name catalog in
-  if List.exists (fun entry -> entry.execution = Async) catalog
-  then entry_names @ [ status_tool_name; cancel_tool_name ]
-  else entry_names
 ;;
 
 let first_duplicate fields =

@@ -97,54 +97,6 @@ let gate_causal_initial
     ]
 ;;
 
-let composition_catalog_config_error detail =
-  Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig
-       { field = "tool-compositions.toml"; detail })
-;;
-
-let composition_catalog_io_error ~op ~path exn =
-  Agent_core.Error.Io
-    (Agent_core.Error.FileOpFailed
-       { op; path; detail = Printexc.to_string exn })
-;;
-
-let load_composition_catalog ~config_root =
-  let path = Keeper_tool_composition_catalog.path ~config_root in
-  match
-    try Ok (Fs_compat.exact_path_kind path) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (composition_catalog_io_error ~op:"inspect" ~path exn)
-  with
-  | Error _ as error -> error
-  | Ok Fs_compat.Exact_missing -> Ok None
-  | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
-    (match
-       try Ok (Fs_compat.load_file path) with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (composition_catalog_io_error ~op:"read" ~path exn)
-     with
-     | Error _ as error -> error
-     | Ok content ->
-       (match Keeper_tool_composition_catalog.parse content with
-        | Ok catalog -> Ok (Some catalog)
-        | Error error ->
-          Error
-            (composition_catalog_config_error
-               (Keeper_tool_composition_catalog.error_to_string error))))
-  | Ok
-      (Fs_compat.Exact_kind
-        ( Unix.S_DIR
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_LNK
-        | Unix.S_FIFO
-        | Unix.S_SOCK )) ->
-    Error (composition_catalog_config_error "catalog path is not a regular file")
-  | Ok Fs_compat.Exact_unknown ->
-    Error (composition_catalog_config_error "catalog path kind is unavailable")
-;;
-
 let skill_catalog_config_error detail =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig { field = "skills"; detail })
@@ -238,57 +190,17 @@ let load_skill_catalog ~base_path =
     Error (skill_catalog_config_error "skills path kind is unavailable")
 ;;
 
-(* Both sources materialize as [keeper_compose_<name>], so one name declared
-   by both would put two tools with one name on the surface. Refused here,
-   where both catalogs are first in one hand. *)
-let reject_composition_name_collisions ~composition_catalog ~skill_catalog =
-  match composition_catalog with
-  | None -> Ok ()
-  | Some catalog ->
-    let catalog_names =
-      Keeper_tool_composition_catalog.entries catalog
-      |> List.map
-           (fun (entry : Keeper_tool_composition_catalog.entry) -> entry.name)
-    in
-    (match
-       Keeper_skill_catalog.composition_entries skill_catalog
-       |> List.find_opt
-            (fun (entry : Keeper_tool_composition_catalog.entry) ->
-              List.mem entry.name catalog_names)
-     with
-     | None -> Ok ()
-     | Some entry ->
-       Error
-         (skill_catalog_config_error
-            (Printf.sprintf
-               "composition %S is declared by both tool-compositions.toml and \
-                a skill"
-               entry.name)))
-;;
-
-let expected_model_tool_names
-      ~skill_catalog
-      ~model_visible_descriptors
-      ~composition_catalog
-  =
+let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
-  let catalog_entries =
-    match composition_catalog with
-    | None -> []
-    | Some catalog -> Keeper_tool_composition_catalog.entries catalog
-  in
-  let entries =
-    catalog_entries @ Keeper_skill_catalog.composition_entries skill_catalog
-  in
+  let entries = Keeper_skill_catalog.composition_entries skill_catalog in
   let composition_names =
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
-  (* Mirrors [Keeper_tool_composition_catalog.model_tool_names], which cannot
-     see skill-declared entries: the shared async controls join the surface
-     when either source declares an async composition. *)
+  (* The shared async controls join the surface when any skill declares an
+     async composition. *)
   let control_names =
     if
       List.exists
@@ -353,9 +265,7 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* composition_catalog = load_composition_catalog ~config_root in
   let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
-  let* () = reject_composition_name_collisions ~composition_catalog ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -390,7 +300,6 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
-      ?composition_catalog
       ~skill_catalog
       ~turn_ctx_cell
       ()
@@ -516,10 +425,7 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names
-      ~skill_catalog
-      ~model_visible_descriptors
-      ~composition_catalog
+    expected_model_tool_names ~skill_catalog ~model_visible_descriptors
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

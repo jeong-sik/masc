@@ -826,44 +826,35 @@ def health_binary_commit(health: dict[str, Any]) -> str:
 
 def composition_catalog_status(masc_root: str) -> dict[str, Any]:
     """Compare the composition names this campaign's fixture requires against
-    the catalog installed at the deployed runtime's config root.
+    the skills installed at the deployed runtime.
 
-    keeper_compose_* tools are a config-driven surface: Keeper_run_tools_setup
-    reads <config_root>/tool-compositions.toml on every turn, so a missing or
-    incomplete file makes every composition mission fail eight minutes in with
-    a downstream browser timeout instead of failing here (masc#28975, run
-    e0-r3-20260818). The runner and the runtime share a host by the
-    --expected-base-path contract, so reading the file the server reads is a
-    legitimate read-only preflight check."""
+    keeper_compose_* tools are declared by SKILL.md composition fences:
+    Keeper_run_tools_setup scans <masc_root>/skills/ on every turn, and the
+    skill directory name equals the composition name by contract, so the
+    presence of skills/<name>/SKILL.md is the installation check. A missing
+    or incomplete install would otherwise make every composition mission
+    fail eight minutes in with a downstream browser timeout instead of
+    failing here (masc#28975, run e0-r3-20260818)."""
     with open(COMPOSITION_FIXTURE, "rb") as handle:
         fixture = tomllib.load(handle)
     required = sorted(
         entry["name"] for entry in fixture.get("compositions", [])
     )
-    installed_path = pathlib.Path(masc_root) / "config" / "tool-compositions.toml"
+    skills_dir = pathlib.Path(masc_root) / "skills"
     report: dict[str, Any] = {
         "required": required,
-        "installed_path": str(installed_path),
+        "skills_dir": str(skills_dir),
         "fixture_path": str(COMPOSITION_FIXTURE),
     }
-    if not installed_path.is_file():
-        report["status"] = "missing_file"
+    if not skills_dir.is_dir():
+        report["status"] = "missing_dir"
         report["installed"] = []
         report["missing"] = required
         return report
-    try:
-        with open(installed_path, "rb") as handle:
-            installed_catalog = tomllib.load(handle)
-    except tomllib.TOMLDecodeError as error:
-        report["status"] = "unparseable"
-        report["error"] = str(error)
-        return report
     installed = sorted(
-        name
-        for entry in installed_catalog.get("compositions", [])
-        if isinstance(entry, dict)
-        for name in [entry.get("name")]
-        if isinstance(name, str)
+        entry.name
+        for entry in skills_dir.iterdir()
+        if entry.is_dir() and (entry / "SKILL.md").is_file()
     )
     missing = sorted(set(required) - set(installed))
     report["installed"] = installed

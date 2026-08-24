@@ -3105,17 +3105,63 @@ describe('keeper config mutation API', () => {
 })
 
 describe('dashboard runtime probe API', () => {
+  function runtimeProbeWire() {
+    return {
+      generated_at: '2026-06-10T12:00:00Z',
+      refreshed_at_unix: 1781092800,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0.5,
+      cache_hit: true,
+      refresh_state: 'fresh',
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        probe_ok: true,
+        checked_at: '2026-06-10T12:00:00Z',
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 1,
+          failed: 0,
+          skipped: 0,
+          default_runtime_id: 'runpod.qwen',
+        },
+        providers: [
+          {
+            runtime_id: 'runpod.qwen',
+            provider_id: 'runpod',
+            provider_display_name: 'RunPod',
+            model_id: 'qwen',
+            model_api_name: 'Qwen/Qwen3-32B',
+            protocol: 'openai-compatible-http',
+            runtime_kind: 'http',
+            transport: 'http',
+            auth_kind: 'env:RUNPOD_API_KEY',
+            credential_required: true,
+            auth_present: true,
+            status: 'reachable',
+            reachable: true,
+            http_status: 200,
+            latency_ms: 42.5,
+            model_count: 1,
+            content_type: 'application/json',
+            downloaded_bytes: 128,
+            endpoint_url: 'https://example.invalid/v1',
+            probe_url: 'https://example.invalid/v1/models',
+            error: null,
+            checked_at: '2026-06-10T12:00:00Z',
+          },
+        ],
+        errors: [],
+        observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
+      },
+    }
+  }
+
   it('ensures dashboard auth before fetching runtime probe status', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        generated_at: '2026-06-10T12:00:00Z',
-        probe: {
-          status: 'ok',
-          probe_ok: true,
-          summary: { runtimes: 1, reachable: 1, failed: 0 },
-          providers: [],
-        },
-      }), {
+      new Response(JSON.stringify(runtimeProbeWire()), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3131,6 +3177,37 @@ describe('dashboard runtime probe API', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-probe?force=1')
     expect(result.probe?.probe_ok).toBe(true)
+  })
+
+  it('rejects legacy KV-cache fields at the API boundary', async () => {
+    const legacy = runtimeProbeWire()
+    Object.assign(legacy.probe, { kv_cache_assessment: { signal: 'likely_reused' } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(legacy), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchDashboardRuntimeProbe()).rejects.toThrow(
+      'runtime_probe schema drift',
+    )
+  })
+
+  it('rejects unknown provider status values at the API boundary', async () => {
+    const unknownStatus = runtimeProbeWire()
+    const provider = unknownStatus.probe.providers[0]
+    if (provider) provider.status = 'healthy'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(unknownStatus), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchDashboardRuntimeProbe()).rejects.toThrow(
+      'runtime_probe schema drift',
+    )
   })
 })
 

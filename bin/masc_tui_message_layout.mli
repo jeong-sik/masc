@@ -51,10 +51,6 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
-val input_cursor_row :
-  terminal_rows:int -> history_height:int -> status_rows:int -> int
-(** One-based input row clamped to the terminal viewport. *)
-
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane

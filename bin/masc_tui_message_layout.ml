@@ -240,11 +240,6 @@ let input_viewport ~max_cells input =
   else if max_cells = 0 then ""
   else "~" ^ cell_suffix input (max_cells - 1)
 
-let input_cursor_row ~terminal_rows ~history_height ~status_rows =
-  let last_row = max 1 terminal_rows in
-  let candidate = 5 + max 0 history_height + max 0 status_rows in
-  min last_row (max 1 candidate)
-
 (* The chat pane draws the composer's first line with this prefix and wraps
    continuation lines to the same width, so the caret column is measured from
    the prefix the pane actually renders — not from a hand-copied constant that

@@ -2559,10 +2559,13 @@ let render_keeper_message (state : state) =
     let visible_input =
       match List.rev composer with [] -> "" | last :: _ -> last
     in
-    let input_row =
-      Message_layout.input_cursor_row ~terminal_rows:rows ~history_height
-        ~status_rows
-    in
+    (* Where the composer landed, not where a second copy of the pane's
+       arithmetic predicted it would. The prediction only held while every row
+       the pane drew was also counted in [keeper_message_status_rows]; a
+       queued line was drawn and not counted, so the prompt moved down and the
+       caret did not. Reading the rows already in the frame, with the same
+       [frame_lines] that builds it, cannot disagree with it. *)
+    let rows_above_composer = List.length (frame_lines buf) in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -2574,6 +2577,10 @@ let render_keeper_message (state : state) =
         in
         box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
       composer;
+
+    let input_row =
+      min (max 1 rows) (rows_above_composer + max 1 (List.length composer))
+    in
 
     box_bottom buf cols;
 

@@ -66,6 +66,25 @@ let test_take_newest_returns_last_and_keeps_order () =
        | _ -> failf "oldest no longer drains first after take_newest")
 ;;
 
+(* The pane draws one row per waiting line. The row budget that sizes the
+   history has to count those rows: the frame presenter drops whatever runs
+   past the last terminal row, so a pane that came out taller by the number of
+   waiting lines loses its bottom and the prompt slides out from under the
+   caret. That was the bug -- the queue rows were drawn and never counted. *)
+let test_the_row_budget_counts_the_queue () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_types.ml"
+      ~binding_name:"keeper_message_status_rows"
+      ~callee:"Masc_tui_keeper_chat_queue.waiting"
+  in
+  if n < 1 then
+    failf
+      "keeper_message_status_rows must count the rows the pane draws for \
+       waiting lines; Masc_tui_keeper_chat_queue.waiting is called %d time(s)"
+      n
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -74,6 +93,8 @@ let () =
             test_enter_during_a_turn_queues
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
+        ; test_case "the row budget counts the queue" `Quick
+            test_the_row_budget_counts_the_queue
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick

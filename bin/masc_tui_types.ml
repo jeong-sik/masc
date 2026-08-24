@@ -745,6 +745,11 @@ let keeper_message_status_rows (state : state) =
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
               ~now:(Unix.gettimeofday ()) live))
+  (* One row per waiting line, drawn in full so an operator can see which
+     lines are held. Same call the pane makes, for the same reason as the
+     live rows above: a row that is drawn and not counted pushes the frame
+     past the terminal, and the presenter drops whatever ran off the bottom. *)
+  + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_scroll > 0 then 1 else 0)

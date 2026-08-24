@@ -89,6 +89,23 @@ val thinking_lines : t -> string list
 val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 
+(** One stretch of the turn, in arrival order. A tool-call round interleaves
+    reasoning, calls and reply text; {!text}, {!thinking_lines} and
+    {!tool_rows} answer the totals, this answers the order, which is what a
+    reader follows a long turn by. Strings are already terminal-safe and
+    formatted the way the flat accessors format them. *)
+type trail_item =
+  | Trail_thinking of string list
+      (** Non-blank reasoning lines of one contiguous stretch. *)
+  | Trail_tools of string list
+      (** Rendered rows of one contiguous run of tool calls, aligned within
+          the run. A call keeps updating its row (arguments, result) after
+          later stretches open. *)
+  | Trail_text of string  (** One contiguous stretch of reply text. *)
+
+val trail : t -> trail_item list
+(** Empty stretches are dropped, so every item draws at least one row. *)
+
 val completed_tool_rows : (string * string) list -> string list
 (** Rows for tool calls read back from the durable transcript, given as
     (tool name, argument text) pairs in the order they were made.

@@ -516,6 +516,10 @@ type state = {
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
   mutable task_focus: bool;
+  (* The [?] help overlay: open replaces the surface body until Esc/? closes
+     it. The scroll survives only while it is open. *)
+  mutable help_open: bool;
+  mutable help_scroll: int;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
@@ -834,6 +838,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks = [];
   tasks_domain = [];
   task_focus = false;
+  help_open = false;
+  help_scroll = 0;
   task_cursor = 0;
   task_detail_id = None;
   task_detail_scroll = 0;

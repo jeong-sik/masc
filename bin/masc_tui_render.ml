@@ -4765,6 +4765,126 @@ let render_surface (state : state) =
   | System_logs -> render_system_logs state
   | Schedules -> render_schedules state
 
+(* The [?] help screen: every binding, grouped by the surface that answers
+   it. Hand-maintained beside the arms that bind them -- a key added without
+   its row here is the discoverability bug this screen exists to close. *)
+let help_sections : (string * (string * string) list) list =
+  [ ( "Global"
+    , [ "Tab / Shift-Tab", "next / previous surface"
+      ; "r", "refresh the current surface"
+      ; "i", "focus the composer (message the shown keeper)"
+      ; "?", "this help"
+      ; "q", "quit"
+      ] )
+  ; ( "Overview"
+    , [ "j / k", "scroll events"
+      ; "t", "hand j/k to the task list"
+      ; "Enter", "open the selected task"
+      ; "Esc", "close detail / back to events"
+      ] )
+  ; ( "Keepers"
+    , [ "j / k", "move the roster cursor"
+      ; "Enter", "keeper detail"
+      ; "c", "chat with the keeper"
+      ; "l", "logs"
+      ; "t", "tool calls"
+      ; "u", "pick a runtime lane"
+      ; "g", "toggle yolo tool approval"
+      ; "p / w", "pause / wake"
+      ; "s", "shutdown"
+      ; "e", "settings"
+      ; "a", "new keeper"
+      ] )
+  ; ( "Chat"
+    , [ "Enter", "send, or queue while a turn runs"
+      ; "Ctrl-J", "newline in the draft"
+      ; "Ctrl-G", "next keeper with a chat open"
+      ; "Ctrl-U", "clear the draft"
+      ; "Ctrl-K / Ctrl-P", "cancel / edit the last queued line"
+      ; "PgUp / PgDn", "scroll history"
+      ; "y / n", "answer a tool approval"
+      ; "Esc", "back; during a turn, interrupt it"
+      ] )
+  ; ( "Board"
+    , [ "j / k", "move"
+      ; "Enter", "read the post"
+      ; "w", "write a post"
+      ; "v / V", "vote up / down"
+      ; "c", "reply (while reading)"
+      ] )
+  ; ( "Approvals"
+    , [ "j / k", "move"; "y", "confirm"; "n", "deny" ] )
+  ; ( "Planning"
+    , [ "c", "complete goal"; "x", "drop"; "o", "reopen" ] )
+  ; ( "Logs (Acting / System)"
+    , [ "j / k", "scroll"
+      ; "g / G", "newest / oldest"
+      ; "f", "cycle the filter"
+      ] )
+  ]
+
+let help_lines () =
+  help_sections
+  |> List.concat_map (fun (title, entries) ->
+       (Ansi.bold ^ title ^ Ansi.reset)
+       :: List.map
+            (fun (key, action) ->
+              Printf.sprintf
+                "  %s%-18s%s %s"
+                Ansi.cyan
+                key
+                Ansi.reset
+                action)
+            entries
+       @ [ "" ])
+
+let render_help (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
+    ^ "Esc or ? to close" ^ Ansi.reset);
+  box_divider buf cols;
+  let lines = help_lines () in
+  (* Two columns when they fit; the split point keeps groups readable by
+     cutting at the overall middle rather than balancing exact heights. *)
+  let column_width = (cols - 6) / 2 in
+  let rendered_rows =
+    if cols >= 96 then begin
+      let n = List.length lines in
+      let half = (n + 1) / 2 in
+      let left = List.filteri (fun i _ -> i < half) lines in
+      let right = List.filteri (fun i _ -> i >= half) lines in
+      let rec zip l r =
+        match l, r with
+        | [], [] -> []
+        | lh :: lt, [] -> (lh, "") :: zip lt []
+        | [], rh :: rt -> ("", rh) :: zip [] rt
+        | lh :: lt, rh :: rt -> (lh, rh) :: zip lt rt
+      in
+      List.map
+        (fun (l, r) ->
+          Message_layout.fit_width l column_width
+          ^ "  "
+          ^ Message_layout.fit_width r column_width)
+        (zip left right)
+    end
+    else lines
+  in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length rendered_rows - content_height) in
+  let scroll = max 0 (min state.help_scroll max_scroll) in
+  rendered_rows
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> box_line buf cols line);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  j/k:scroll  Esc:close  | Port: %d%s\n" Ansi.dim
+       state.port Ansi.reset);
+  ignore scroll;
+  finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
+
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in
   Buffer.add_string buf
@@ -4786,4 +4906,5 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
+  else if state.help_open then render_help state
   else render_surface state

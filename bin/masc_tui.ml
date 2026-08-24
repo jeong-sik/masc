@@ -3710,6 +3710,7 @@ let main () =
          appeared. The chat surface is excluded — it draws its own composer. *)
       let composer_claimed =
         (not compact_viewport)
+        && (not state.help_open)
         && state.view <> Keepers Keeper_message
         &&
         match key with
@@ -3720,6 +3721,17 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
            raise Break
+       (* The help overlay is modal: it answers scrolling and closing, and
+          swallows everything else so a surface binding cannot fire under a
+          screen that is describing it. Quit stays global above. *)
+       | Some k when state.help_open ->
+           (match k with
+            | "?" | "esc" ->
+                state.help_open <- false;
+                state.help_scroll <- 0
+            | "j" | "down" -> state.help_scroll <- state.help_scroll + 1
+            | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
+            | _ -> ())
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
@@ -3771,6 +3783,9 @@ let main () =
               surface cycle keeps working, and quit was answered above. *)
            let _handled = handle_board_compose_key state ~mailbox:async_messages k in
            ()
+       | Some "?" ->
+           state.help_open <- true;
+           state.help_scroll <- 0
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->

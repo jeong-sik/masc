@@ -1,4 +1,4 @@
-(** The four spawn tools.
+(** The four spawn tool handlers.
 
     RFC spawn-a-process-that-outlives-the-call §3.6. [Spawn_registry] holds the
     processes; this is the surface a caller reaches them through.

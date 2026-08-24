@@ -4,7 +4,7 @@
     caller sees -- the shape of each answer, and that a failure says what to do
     next rather than only that something went wrong. *)
 
-module Spawn = Masc.Tool_spawn
+module Spawn = Tool_spawn
 
 let with_eio f =
   Eio_main.run

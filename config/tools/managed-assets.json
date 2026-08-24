@@ -107,9 +107,12 @@
     "masc_tool_help.toml",
     "masc_transition.toml",
     "masc_update_priority.toml",
+    "masc_web_fetch.toml",
+    "masc_web_search.toml",
     "tool_edit_file.toml",
     "tool_execute.toml",
     "tool_read_file.toml",
+    "tool_search_files.toml",
     "tool_write_file.toml"
   ]
 }

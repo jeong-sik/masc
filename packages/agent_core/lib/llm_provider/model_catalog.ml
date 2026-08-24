@@ -959,13 +959,7 @@ type default_cache =
 
 let load_embedded_catalog () =
   match load_default () with
-  | Ok catalog ->
-    Diag.info
-      "model_catalog"
-      "loaded %d default model entries and %d provider entries from embedded catalog"
-      (List.length catalog.models)
-      (List.length catalog.providers);
-    catalog
+  | Ok catalog -> catalog
   | Error msg ->
     raise
       (Invalid_embedded_catalog

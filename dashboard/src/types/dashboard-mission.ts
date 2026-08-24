@@ -94,7 +94,6 @@ export interface DashboardMissionKeeperBrief {
   context_ratio?: number | null
   last_turn_ago_s?: number | null
   current_work?: string | null
-  last_autonomous_action_at?: string | null
   // Mission keeper briefs carry observed audit freshness, not authored policy.
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
@@ -234,7 +233,6 @@ export interface OperatorKeeperSnapshot {
   status?: string
   context_ratio?: number | null
   generation?: number
-  last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
   turn_count?: number
@@ -244,10 +242,6 @@ export interface OperatorKeeperSnapshot {
   context_metrics_unavailable?: OperatorContextMetricsUnavailable | null
   last_turn_usage?: KeeperLastTurnUsage | null
   keepalive_running?: boolean
-  autonomous_action_count?: number
-  autonomous_turn_count?: number
-  autonomous_text_turn_count?: number
-  autonomous_tool_turn_count?: number
   last_model_used?: string
   last_model_used_label?: string | null
   active_model?: string

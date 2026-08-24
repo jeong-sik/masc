@@ -6,9 +6,9 @@ status: runbook
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
-rotate with `Tab` in this order: Overview, Keepers, Approvals, Board,
-Planning, Schedules, Verification, Harness, Repositories, Connectors, Tools,
-Autonomy, System Logs.
+rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
+Board, Planning, Schedules, Verification, Harness, Repositories, Connectors,
+Tools, System Logs.
 
 ## Quick Start
 
@@ -46,6 +46,7 @@ decides whether launching one is worth it.
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
 | Board | unavailable | `GET /api/v1/board` |
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
@@ -155,20 +156,63 @@ reading. `g` returns to the newest row and clears the count; `G` goes to the
 oldest held. The TUI holds the last 1,000 events; `dropped N` says how many
 fell off the end while it ran.
 
+### The composer and /task
+
+The input row at the bottom of every surface sends text to the keeper it
+names. A line that starts with `/` is a command for the TUI instead:
+
+- `/task <title>` — followed by any further lines as the body — creates a
+  task over the server's `masc_add_task` tool and then messages the keeper
+  the operator's own words with the new id in front: `[task-512] <title>`.
+  The keeper claims that exact task. The events row records the creation;
+  a failure puts the typed text back into the input, unsent.
+- Any other `/word` is reported as unknown and sent nowhere - a mistyped
+  command must not become an instruction the keeper acts on. Text that
+  merely contains a slash later in the line is a message.
+
 ### Keepers
 
 Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-      Name                   Gen  Paused        Turns  Current Task
- >  adm-race-cf-001            1  no              498  -
-    analyst                    1  no              237  task-464
-    sangsu                     1  yes             182  task-317
-  j/k:move  Enter:detail  Tab:next  q:quit  r:refresh
+    STATUS       KEEPER             A P TURNS PHASE / MODEL       TASK
+ >  ● active     adm-race-cf-001    A P   498 running claude-opus task-471
+    ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
+  j/k move  p pause  w wake  s shutdown  c chat  enter detail
 ```
 
-This surface needs no server, so it stays readable while the runtime is down.
+The metadata list needs no server, so names, turn counts, and tasks stay
+readable while the runtime is down. `STATUS`, `PHASE / MODEL`, and lifecycle
+actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
+`- unread` rather than guessed from metadata. The status glyph is the primary
+colour cue. Phase and model stay neutral so an ordinary row does not turn into
+a strip of competing colours.
+
+### Lanes
+
+The current composite lifecycle and turn-cycle reading for every Keeper. Open
+it with `Tab` immediately after Keepers.
+
+```
+ MASC Lanes (10 keepers)  17:02:53  [connected]
+  KEEPER             PHASE       TURN        IDLE   LAST OUTCOME         DIAGNOSIS
+  taskmaster         ● running   executing   7m     done · deepseek-v4   running_fiber_alive
+  kidsnote           × failing   executing   59m    done                 failing_unhealthy
+```
+
+The rows come from `GET /api/v1/keepers/composite`. `PHASE` is the Keeper
+lifecycle, `TURN` is the current turn step, and `IDLE` is the producer's idle
+duration in seconds rendered as seconds, minutes, hours, or days. `LAST
+OUTCOME` keeps the latest runtime state and model when one exists.
+`DIAGNOSIS` is the condition the producer says determined the lifecycle
+phase. A phase or turn value this TUI does not know is shown verbatim with a
+`?`; it is never changed into a familiar state.
+
+Before the first response the page says `(not loaded yet)`. A successful empty
+response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
+rows on screen, adds the error in red, and says that an empty body is not a
+reading.
 
 ### Keeper detail
 
@@ -248,17 +292,37 @@ drawn rather than attributed by file position.
 
 ### Keeper message
 
-`m` from detail. Sends to the keeper over `POST /api/v1/keepers/chat/stream`
-with a durable UUIDv7 request ID. The send runs in the background, so refresh
-and navigation stay responsive while the turn runs.
+`c` (or `m`) from the roster or detail. Sends to the keeper over
+`POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
+runs in the background, so refresh and navigation stay responsive while the
+turn runs. `Esc` returns to the roster when chat opened there, and to detail
+when chat opened from detail.
 
 ```
- Message to: sangsu  (port 8935)
-   [14:35:01] you:    hello, how are you?  [tui-019...]
-   [14:35:03] sangsu: ...reply text...     [tui-019...]
+ Message to: sangsu  ● active · running claude-opus-5  (port 8935)
+   [14:35:01] From [you             ] tui-019...
+     hello, how are you?
+   [14:35:03] From [sangsu          ] tui-019...
+     ...reply text...
    > type here_
-  Enter:send  Esc:back  Ctrl-U:clear line
+  Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
+
+The header joins the selected Keeper's published status with its typed runtime
+phase and model, using the same roster reading as the Keepers table. While no
+turn is starting or running, `Ctrl-G` selects the next readable Keeper and
+wraps at the end of the roster. Each Keeper keeps its own draft. Every history
+GET carries a load generation, so a response that finishes after the operator
+switched away or left and returned is discarded instead of replacing the
+newer transcript. The shortcut is withdrawn while a turn is in flight or the
+roster cannot be read.
+
+`From` is a fixed-width reverse-video badge: operator sources are cyan,
+Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is
+the colour pointer; ordinary operator and Keeper prose uses the terminal's
+default foreground so Markdown, code, links, and emphasis keep their own
+hierarchy. Connector and agent origins remain in the badge label (`vincent ·
+slack`, `taskmaster · agent`) instead of being inferred from row position.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line: a `thinking` row with
@@ -420,7 +484,7 @@ Global, outside message input:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Acting -> Keepers -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
+| `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
 | `q` | Quit |
@@ -431,17 +495,20 @@ Per surface:
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
 | `j` / `k` | Keepers, Approvals, Board, Planning, Schedules | Move cursor |
-| `j` / `k` | System Logs | Scroll the page |
+| `j` / `k` | Lanes, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
 | `Enter` | Planning | Open goal detail |
 | `l` | Keeper detail | Open logs |
-| `m` | Keeper detail | Open message input |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
+| `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
+| `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
+| `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
 
@@ -450,17 +517,17 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Keepers -> Approvals -> Board -> Planning -> Schedules
-           -> Verification -> Harness -> Repositories -> Connectors
-           -> Tools -> Autonomy -> System Logs -> Overview
+  Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
+           -> Schedules -> Verification -> Harness -> Repositories
+           -> Connectors -> Tools -> System Logs -> Overview
 
 Within a surface:
 
   Keepers   --Enter-->  Keeper detail  --l-->  Keeper logs
-                              |
-                              m
-                              v
-                        Message input
+      |                       |
+      c                       c
+      v                       v
+  Message input          Message input
 
   Board     --Enter-->  Board read
   Planning  --Enter-->  Goal detail

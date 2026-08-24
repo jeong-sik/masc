@@ -125,6 +125,34 @@ let test_json_redaction_preserves_shape () =
   not_contains "sensitive key value hidden" raw "plain-password";
   contains "count preserved" raw {|"count":1|}
 
+(* A secret can be the key, not only the value: a header name, or a parameter
+   a tool used as a dict key. Three boundaries call [redact_json] and only one
+   used to also redact keys, so the other two emitted the secret (#22941). *)
+let test_json_redaction_covers_object_keys () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "json-keys" in
+  let root = secret_root_default ~base ~keeper_name in
+  let env_secret = "key.secret!" in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") env_secret;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let json =
+    `Assoc
+      [ (env_secret, `String "value under a secret key")
+      ; ( "nested"
+        , `Assoc [ ("headers", `Assoc [ (env_secret, `String "1") ]) ] )
+      ; ("list", `List [ `Assoc [ (env_secret, `Int 2) ] ])
+      ; ("kept", `String "not a secret")
+      ]
+  in
+  let raw = Yojson.Safe.to_string (R.redact_json redaction json) in
+  not_contains "top-level key redacted" raw env_secret;
+  contains "the structure survives" raw {|"kept":"not a secret"|};
+  contains "the value under the redacted key survives" raw "value under a secret key";
+  contains "the nested int survives" raw "2"
+;;
+
 let test_execute_output_redaction_uses_keeper_snapshot () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -280,6 +308,8 @@ let () =
             test_snapshot_redacts_base_secret_values;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
+          Alcotest.test_case "redacts json object keys" `Quick
+            test_json_redaction_covers_object_keys;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
             test_execute_output_redaction_uses_keeper_snapshot;
           Alcotest.test_case "redacts a secret split across chunks" `Quick

@@ -316,6 +316,30 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
       Error (Printf.sprintf "observer stream refused with %d: %s" status body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
+(** One MCP [tools/call] under an existing session.
+
+    The task tools ([masc_add_task], [masc_transition]) have no REST route;
+    this is how the dashboard calls them and now how the TUI does. The
+    session is the one the observer feed opened, or one the caller opened
+    for this call; the server keeps sessions across requests. *)
+let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
+    ~(request_id : string) ~(tool : string)
+    ~(arguments : (string * Yojson.Safe.t) list) :
+    (Masc_tui_mcp.outcome, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.request_body ~request_id ~tool ~arguments in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "tools/call returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.outcome_of_body ~request_id body
+
 (** Fetch a keeper's durable chat transcript.
 
     The pane's scrollback used to be session-local while the server kept the
@@ -638,6 +662,30 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
+    exactly the fields the operator left in $EDITOR; a field absent from the
+    body is absent from the patch, so the editor round-trip cannot blank a
+    setting it never showed. Validation is the route's (it re-uses
+    masc_keeper_up's arg parsing), not duplicated here. *)
+let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(patch_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/config"
+         (percent_encode_path_segment keeper_name))
+    ~body:patch_json
+
+(** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
+    contract. The keeper name in the path is the row the operator launched
+    from; the body carries the rest of the declaration. *)
+let post_keeper_up ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(declaration_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/up"
+         (percent_encode_path_segment keeper_name))
+    ~body:declaration_json
+
 (** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
     for a screenful's worth of history rather than the whole ring. *)
 let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
@@ -655,6 +703,11 @@ let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/gate/connectors"
 
+(** Fetch the current composite lane snapshot for every registered Keeper. *)
+let fetch_keeper_lanes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/composite"
+
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
@@ -666,14 +719,6 @@ let fetch_repositories ~(host : string) ~(port : int) :
 let fetch_harness_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/harness-health"
-
-(** Fetch /api/v1/dashboard/keeper-feature-proof. No [window_hours] is passed:
-    the surface asks whether a feature has ever been shown to work, and a
-    window turns that into "not lately", which is a narrower question than the
-    one the operator opened the screen with. *)
-let fetch_keeper_feature_proof ~(host : string) ~(port : int) :
-    (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-feature-proof"
 
 (** Fetch /api/v1/verification/requests. [limit] bounds the page; the surface
     lists what is waiting rather than the whole history. *)

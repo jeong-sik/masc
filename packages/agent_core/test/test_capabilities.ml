@@ -1560,7 +1560,11 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "deepseek-v4-pro"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      (* DeepSeek tool calling with thinking requires the tool-round
+         reasoning back on every request (api-docs.deepseek.com
+         /guides/thinking_mode, 2026-08-24); Ollama /v1 threads incoming
+         assistant [reasoning] into the template. *)
+      , Replay_tool_turn_only
       (* 2026-08-15 (closes #28749): no control wire on /v1. *)
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud DeepSeek V4 Flash"
@@ -1568,7 +1572,8 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "deepseek-v4-flash"
       , Extended_thinking
       , No_structured_output
-      , Replay_not_required
+      (* Same tool-round replay contract as the V4 Pro row above. *)
+      , Replay_tool_turn_only
       (* 2026-08-15 (closes #28749): no control wire on /v1. *)
       , Delta_stream "reasoning" )
     ; ( "Ollama Cloud GLM 5.2"

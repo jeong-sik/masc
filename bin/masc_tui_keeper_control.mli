@@ -97,6 +97,13 @@ val status_label : reading -> string
     not observed: the roster has not been read for this keeper, which is a
     fact about the reading, not a status the keeper is in. *)
 
+val status_tally : reading list -> (string * int) list
+(** How many readings carry each {!status_label}, in first-seen order.
+
+    Counted through {!status_label} on purpose: the roster header and the
+    status column are one reading drawn twice, and a tally that groups the
+    labels itself cannot report a word the column does not show. *)
+
 (** A lifecycle action the operator can take on one keeper.
 
     The pairs are deliberate. [Pause] and [Resume] move a live lane in and out

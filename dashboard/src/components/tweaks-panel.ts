@@ -663,8 +663,13 @@ export function TweaksPanel() {
           value=${tweaksTheme.value}
           options=${THEME_OPTIONS}
           onChange=${(v: Theme) => {
+            // The signal only. Writing the document attribute from here meant
+            // a third vocabulary on it -- 'dark' | 'paper' -- so choosing
+            // anything but paper wrote '' and erased a styleseed selection
+            // made through the theme switch (#22899). The app element reads
+            // this signal for its own data-theme; the document root belongs to
+            // main.ts and theme-switch.ts.
             tweaksTheme.value = v
-            document.documentElement.setAttribute('data-theme', v === 'paper' ? 'paper' : '')
           }}
         />
         <${TweakRadio}

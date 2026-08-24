@@ -1,0 +1,3 @@
+name = "keeper_voice_session_end"
+description = """
+End the active voice session for this keeper and release bridge resources."""

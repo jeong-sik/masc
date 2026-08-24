@@ -94,7 +94,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`�
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
-- **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
+- **Team/Autonomy**: `active_goal_ids`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 

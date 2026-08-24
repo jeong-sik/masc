@@ -3,7 +3,6 @@
   "examples": {
     "content_type_substring_checks": [],
     "direct_env_reads": [
-      "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:1251:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
       "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with",
@@ -13,7 +12,6 @@
       "lib/config/env_config_core.ml:25:match Unix.getenv name with"
     ],
     "direct_env_reads_outside_env_boundary": [
-      "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:1251:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
       "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with",
@@ -57,7 +55,6 @@
       "bin/gen_tool_descriptors.ml:508:| _ -> ());",
       "bin/gen_tool_descriptors.ml:511:| _ -> ());",
       "bin/gen_tool_descriptors.ml:514:| _ -> ());",
-      "bin/keeper_feature_proof_report.ml:31:| _ -> None",
       "bin/masc_trace.ml:47:| _ -> None",
       "bin/masc_trace.ml:418:| _ -> None"
     ]

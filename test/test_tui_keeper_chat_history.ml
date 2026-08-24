@@ -134,7 +134,7 @@ let test_a_failed_turn_names_the_request_it_came_from () =
 
 (* A [role: "user"] row is whatever was put in front of the keeper, and most of
    them are not the operator. One live keeper carried 92 such rows from 23
-   distinct speakers — taskmaster, an MCP client, the exact-lane verifier, a
+   distinct speakers — a keeper, an MCP client, the exact-lane verifier, a
    dozen canaries — and the pane drew every one as "you", which told the
    operator they had said things they had never seen. *)
 let test_an_addressed_row_is_labelled_by_who_sent_it () =
@@ -152,9 +152,9 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   check string "the dashboard is an operator surface, so it adds nothing"
     "vincent"
     (label (addressed ~speaker_name:"vincent" ~surface:(surface "dashboard" []) "hi"));
-  check string "an agent is named and marked" "taskmaster \xc2\xb7 agent"
+  check string "an agent is named and marked" "bandleader \xc2\xb7 agent"
     (label
-       (addressed ~speaker_name:"taskmaster" ~surface:(surface "agent" []) "routed"));
+       (addressed ~speaker_name:"bandleader" ~surface:(surface "agent" []) "routed"));
   check string "a fleet broadcast does not read like a direct message"
     "codex \xc2\xb7 broadcast"
     (label

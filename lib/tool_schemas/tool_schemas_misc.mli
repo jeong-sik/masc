@@ -9,8 +9,8 @@
 
     The [masc_config] category enum SSOT lives in
     [Tool_schemas_specs_types.config_category_enum_strings]
-    (issue #15257); [test/test_tool_descriptors_gen.ml ::
-    config_category_ssot] asserts it matches the producer-side
+    (issue #15257); [test/test_operator_surface_toml_parity.ml ::
+    the config category enum matches its owner] asserts it matches the producer-side
     [Env_config_snapshot.valid_config_category_strings]. *)
 
 (** {1 Enum string mirrors (SSOT)} *)

@@ -348,90 +348,8 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let closed_object_schema ?(required = []) properties =
-  match object_schema ~required properties with
-  | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
-  | schema -> schema
-;;
-
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
-let read_file_schema =
-  closed_object_schema
-    ~required:[ "file_path" ]
-    [ property
-        "file_path"
-        "string"
-        "Existing file path to read. Relative paths resolve against cwd when cwd is \
-         provided, otherwise against your workspace root. Read does not inherit Execute \
-         cwd implicitly; pass cwd explicitly or give a path relative to the workspace \
-         root."
-    ; property
-        "cwd"
-        "string"
-        "Optional directory, relative to your workspace root, to resolve file_path \
-         from. This is explicit only; Read never inherits the previous Execute cwd."
-    ; property
-        "offset"
-        "integer"
-        "1-based line number to start reading from (default 1). To continue a \
-         truncated read, pass the next_offset value from the previous response."
-    ; property
-        "limit"
-        "integer"
-        "Maximum number of LINES to return, counted from offset. The response \
-         is additionally bounded by a byte budget; when more content remains, \
-         the payload sets truncated=true and next_offset for the follow-up \
-         call."
-    ]
-;;
-
-let edit_file_schema =
-  object_schema
-    ~required:[ "file_path"; "old_string"; "new_string" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or sandbox-relative file path to edit. The file must exist."
-    ; property
-        "old_string"
-        "string"
-        "Exact substring to replace. Must occur exactly once unless replace_all=true."
-    ; property
-        "new_string"
-        "string"
-        "Replacement substring. Pass an empty string to delete old_string."
-    ; property
-        "replace_all"
-        "boolean"
-        "Default false. When true, replaces every occurrence of old_string."
-    ]
-;;
-
-let write_file_schema =
-  object_schema
-    ~required:[ "file_path"; "content" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or sandbox-relative file path. Parent directories are created as needed."
-    ; property "content" "string" "Full file content. Overwrites the existing file."
-    ]
-;;
-
-let search_files_schema =
-  object_schema
-    ~required:[ "pattern" ]
-    [ property "pattern" "string" "Regular expression to search file contents for (ripgrep)."
-    ; property
-        "path"
-        "string"
-        "Directory or file to search in. Defaults to the keeper sandbox when omitted."
-    ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
-    ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
-    ; property "-i" "boolean" "Case-insensitive search."
-    ]
-;;
 
 (* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
    line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
@@ -780,18 +698,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.search_files"
       ~public_name:"Grep"
       ~internal_name:"tool_search_files"
-      ~description:
-        "Search file contents with ripgrep: provide a regex `pattern` (and \
-         optionally path/glob/type). To list a directory, read a file, or run \
-         git status/log/diff, use the Execute tool (e.g. \
-         argv=['ls','-la','<path>']). Patterns match within a single line; a \
-         literal newline in `pattern` is rejected. To match across lines, run \
-         `rg -U` through the Execute tool."
-      ~input_schema:search_files_schema
+      ~description:Tool_schemas_filesystem_files.search_files.description
+      ~input_schema:Tool_schemas_filesystem_files.search_files.input_schema
       (* Concurrent: each call spawns its own rg process through the sandbox
          backend; the only shared write is the bash-history audit line, a
          single O_APPEND write with no fiber yield inside it. *)
@@ -815,16 +727,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.read_file"
       ~public_name:"Read"
       ~internal_name:"tool_read_file"
-      ~description:
-        "Read one existing file from the keeper sandbox or an allowed path with no \
-         implicit cwd. Read targets a single FILE; to list a directory use the \
-         Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
-         never inherits Execute cwd."
-      ~input_schema:read_file_schema
+      ~description:Tool_schemas_filesystem_files.read_file.description
+      ~input_schema:Tool_schemas_filesystem_files.read_file.input_schema
       (* Concurrent: a pure read — containment check plus either a host
          file read (Safe_ops.read_file_result) or a per-call backend read
          runner process; no shared mutable state on the path. *)
@@ -847,17 +755,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.edit_file"
       ~public_name:"Edit"
       ~internal_name:"tool_edit_file"
-      ~description:
-        "Patch an existing file by replacing an exact string. Read the file \
-         first and copy old_string verbatim from its current bytes, including \
-         leading whitespace, indentation, and newlines; the match is exact and \
-         byte-sensitive. On 'old_string not found', re-Read the file to get the \
-         current text instead of retrying the same string."
-      ~input_schema:edit_file_schema
+      ~description:Tool_schemas_filesystem_files.edit_file.description
+      ~input_schema:Tool_schemas_filesystem_files.edit_file.input_schema
       ~policy:
         (policy
            ~readonly:false
@@ -876,15 +779,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.write_file"
       ~public_name:"Write"
       ~internal_name:"tool_write_file"
-      ~description:
-        "Write full file content into the keeper sandbox or an allowed path. Missing \
-         parent directories are created safely; call Write directly instead of using \
-         Execute mkdir."
-      ~input_schema:write_file_schema
+      ~description:Tool_schemas_filesystem_files.write_file.description
+      ~input_schema:Tool_schemas_filesystem_files.write_file.input_schema
       ~policy:
         (policy
            ~readonly:false

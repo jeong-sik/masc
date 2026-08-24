@@ -45,7 +45,17 @@ let format_expiry expires_at =
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
   | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
-  | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
+  | Board.Comment_not_found s ->
+    (* A guessed id can pass the [Comment_id] shape check — all-zero hex is
+       valid hex — so this lookup miss is the first place a caller learns the
+       address was made up (keeper:polisher voted c-000…0, 2026-08-24). The
+       id parsers' [Invalid_id] message already names the two producers of
+       real ids; the miss teaches the same recovery, not just the dead id. *)
+    Printf.sprintf
+      "Comment not found: %s. Use an id the masc_board_post_get comment \
+       listing or the masc_board_comment result returns; a guessed id that \
+       matches the c-hex shape still fails here."
+      s
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s

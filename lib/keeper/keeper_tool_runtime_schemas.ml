@@ -52,65 +52,7 @@ let artifact_read =
   }
 ;;
 
-let fusion =
-  { name = "masc_fusion"
-  ; description =
-      "Run an out-of-band panel+judge deliberation. A panel of models from \
-       the configured preset answers the prompt independently; a judge model \
-       synthesises consensus, contradictions, partial coverage, unique \
-       insights, and blind spots. Advisory only: this keeper turn continues \
-       immediately; when the deliberation completes you are WOKEN with the \
-       result, and the conclusion (or the failure reason) is appended to \
-       your chat lane (also visible in the dashboard) — do not poll \
-       masc_fusion_status while waiting. Returns a status with a run_id. \
-       Panels answer from their own knowledge only: they cannot see your \
-       files, tasks, or conversation, so phrase the prompt \
-       self-contained. Set web_tools=true to let the panel and judge ground \
-       their answers with web_search / web_fetch. Gated by runtime.toml \
-       [fusion] (disabled by default)."
-  ; input_schema =
-      object_schema
-        ~required:[ "prompt" ]
-        [ property
-            "prompt"
-            "string"
-            "Question or task to deliberate. A panel of models answers \
-             independently, then a judge synthesises consensus, contradictions, \
-             partial coverage, unique insights, and blind spots. Out-of-band: the \
-             synthesis arrives asynchronously on this keeper's chat lane, not \
-             inline in this turn."
-        ; property
-            "preset"
-            "string"
-            "Panel preset name from runtime.toml [fusion.presets]. Omitted uses \
-             the configured default_preset."
-        ; property
-            "web_tools"
-            "boolean"
-            "When true, the panel and judge agents are given web_search / \
-             web_fetch tools to ground their answers. Defaults to false; the \
-             selected preset may also enable web tools on its own (the effective \
-             setting is this flag OR the preset's)."
-        ; property
-            "topology"
-            "string"
-            "How to reduce the panel answers. \"simple\" (default): panel -> one \
-             judge -> result. \"refine\": panel -> judge -> a second judge that \
-             critically reviews and improves the first synthesis against the panel \
-             evidence -> result (deeper, two judge passes). \"conditional\": like \
-             simple, but escalates to a second (refine) judge only when the first \
-             judge could not decide (verdict insufficient); otherwise returns the \
-             first synthesis. \"judge_of_judges\": several distinct judges each \
-             synthesise the panel independently and a meta-judge reconciles them \
-             (requires the preset to configure >= 2 judges). \
-             \"staged_judge_of_judges\": first judges are grouped by \
-             [fusion].staged_judge_group_size, each group is reconciled by a \
-             stage meta-judge, then a final meta-judge reconciles the stage \
-             results (requires at least two exact groups; ragged counts are \
-             rejected). Unknown values are rejected."
-        ]
-  }
-;;
+let fusion = Keeper_runtime_schemas_toml.fusion
 
 let fusion_status =
   { name = "masc_fusion_status"

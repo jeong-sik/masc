@@ -440,7 +440,7 @@ let keeper_queue_last_seen keeper trust =
   latest_iso_timestamp
     [ Json_util.assoc_string_opt "ts" latest_causal
     ; Json_util.assoc_string_opt "observed_at" latest_causal
-    ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
+    ; Json_util.assoc_string_opt "tool_audit_at" keeper
     ; Json_util.assoc_string_opt "last_heartbeat" keeper
     ; Json_util.assoc_string_opt "updated_at" keeper
     ; Json_util.assoc_string_opt "created_at" keeper

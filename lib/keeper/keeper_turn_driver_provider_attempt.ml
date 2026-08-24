@@ -2,6 +2,6 @@
 
 
 let success_selected_model_raw candidate =
-  Some (Runtime_candidate.model_health_key candidate)
+  Some (Runtime_candidate.selected_endpoint_label candidate)
 
 let runtime_candidate_label = "runtime"

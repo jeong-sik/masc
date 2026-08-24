@@ -1178,14 +1178,6 @@ export interface Keeper {
     blocked_task_count?: number
     convergence?: number | null
   } | null
-  last_autonomous_action_at?: string | null
-  autonomous_action_count?: number
-  autonomous_turn_count?: number
-  autonomous_text_turn_count?: number
-  autonomous_tool_turn_count?: number
-  board_reactive_turn_count?: number
-  mention_reactive_turn_count?: number
-  noop_turn_count?: number
   created_at?: string
   updated_at?: string
   last_heartbeat?: string

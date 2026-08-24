@@ -95,6 +95,13 @@ let bool_field json key =
     failf "expected bool at %S, got %s" key (Yojson.Safe.to_string other)
 ;;
 
+let string_field json key =
+  match json |> Yojson.Safe.Util.member key with
+  | `String value -> value
+  | other ->
+    failf "expected string at %S, got %s" key (Yojson.Safe.to_string other)
+;;
+
 let list_length json key =
   match json |> Yojson.Safe.Util.member key with
   | `List items -> List.length items
@@ -203,6 +210,20 @@ let test_default_limit_is_reported_not_assumed () =
       check bool "not truncated" false (bool_field json "truncated"))
 ;;
 
+let test_detailed_row_carries_lifecycle_phase () =
+  keeper_list
+    ~names:[ "alpha" ]
+    ~args:(`Assoc [ "detailed", `Bool true ])
+    (fun json ->
+      match Yojson.Safe.Util.member "keepers" json with
+      | `List (row :: _) ->
+        check string "unregistered keeper is offline" "offline"
+          (string_field row "phase")
+      | `List [] -> fail "detailed keeper list returned no rows"
+      | other ->
+        failf "expected keeper rows, got %s" (Yojson.Safe.to_string other))
+;;
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -216,6 +237,8 @@ let () =
             test_name_only_shape_carries_the_same_verdict
         ; test_case "default limit is reported" `Quick
             test_default_limit_is_reported_not_assumed
+        ; test_case "detailed row carries lifecycle phase" `Quick
+            test_detailed_row_carries_lifecycle_phase
         ] )
     ]
 ;;

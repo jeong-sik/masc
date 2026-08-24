@@ -22,12 +22,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_autonomous_turn_count : int;
-  k_autonomous_text_turn_count : int;
-  k_autonomous_tool_turn_count : int;
-  k_board_reactive_turn_count : int;
-  k_mention_reactive_turn_count : int;
-  k_noop_turn_count : int;
   k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
@@ -181,9 +175,20 @@ type tool_entry = {
   tl_direct_call : bool;
 }
 
+type inventory_freshness =
+  | Warming
+      (** The server answered with its warming placeholder: it has not built
+          the inventory yet, so the empty list beside this is not an answer
+          about how many tools exist. *)
+  | Settled
+      (** The server answered from a built inventory. An empty list here does
+          mean no tools. *)
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
+  ts_freshness : inventory_freshness;
+      (** Whether the count above is an answer. *)
 }
 
 (** A connector the gate can deliver through. *)
@@ -264,44 +269,13 @@ type verification_snapshot = {
   vs_total : int;  (** Requests the server holds, not the number returned. *)
 }
 
-type feature_proof_status =
-  | Fp_pass
-  | Fp_warn
-  | Fp_fail
-  | Fp_unreadable of string
-      (** A status word this build was not taught. Kept rather than folded
-          into a neighbour: the operator asked whether the feature is proven,
-          and "I cannot read the answer" is not "yes". It counts as a gap. *)
+type keeper_phase
+(** A validated Keeper lifecycle phase from the live roster. The underlying
+    state-machine type stays behind this decoder boundary so TUI executables do
+    not need a second dependency on the Keeper runtime library. *)
 
-type feature_proof = {
-  fp_id : string;
-  fp_label : string;
-  fp_status : feature_proof_status;
-  fp_summary : string;  (** The server's one-line reading, e.g. "3/9 keepers". *)
-  fp_next_action : string;  (** What would turn the gap into evidence. *)
-  fp_keeper_count : int;
-  fp_observed : string list;  (** Keepers with behaviour evidence for it. *)
-  fp_missing : string list;  (** Keepers with none. *)
-  fp_read_errors : string list;
-      (** Keepers whose evidence could not be read at all. Kept apart from
-          [fp_missing]: a keeper that failed to exercise the feature and a
-          keeper whose record would not open are different problems, and
-          counting the second as the first blames the keeper for a read
-          failure. *)
-}
-
-type autonomy_snapshot = {
-  au_generated_at : string;
-  au_status : feature_proof_status;  (** The worst status among the features. *)
-  au_features : feature_proof list;
-  au_feature_count : int;
-  au_pass_count : int;
-  au_gap_count : int;  (** Features the server counted as warn or fail. *)
-  au_keeper_count : int;
-  au_window_hours : float option;
-      (** The window the report was computed over, when it was given one.
-          [None] means the report looked at everything it holds. *)
-}
+val keeper_phase_of_string : string -> keeper_phase option
+val keeper_phase_to_string : keeper_phase -> string
 
 type keeper_runtime = {
   kr_name : string;
@@ -310,6 +284,7 @@ type keeper_runtime = {
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
+  kr_phase : keeper_phase;
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
@@ -322,9 +297,70 @@ type keeper_runtime = {
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
-    [(rows, truncated, total)]. A row whose [status] is outside the surface
-    vocabulary fails the whole reading rather than defaulting, so producer
+    [(rows, truncated, total)]. A row whose [status] or lifecycle [phase] is
+    outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph. *)
+
+(** Lifecycle value shown by the Lanes surface. The composite endpoint is an
+    operator projection whose vocabulary can grow before this binary does, so
+    an unknown value remains visible instead of becoming a familiar phase. *)
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_overflowed
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+val keeper_lane_phase_to_string : keeper_lane_phase -> string
+
+(** Turn-cycle value shown beside {!keeper_lane_phase}. *)
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+val keeper_lane_turn_phase_to_string : keeper_lane_turn_phase -> string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+      (** The producer's determining condition, or [None] when no condition
+          currently determines the phase. *)
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
+}
+
+val decode_keeper_lanes_snapshot :
+  Yojson.Safe.t -> (keeper_lanes_snapshot, string) result
+(** Decode the fields the Lanes table reads from
+    [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
+    the reading; additional producer fields are outside this light
+    projection and do not. *)
 
 type fleet_safety = {
   fs_status : string;
@@ -432,19 +468,6 @@ val decode_harness_snapshot :
 
 val decode_verification_snapshot :
   Yojson.Safe.t -> (verification_snapshot, string) result
-
-val decode_autonomy_snapshot :
-  Yojson.Safe.t -> (autonomy_snapshot, string) result
-(** Reads [GET /api/v1/dashboard/keeper-feature-proof]: which autonomy
-    features have current behaviour evidence and which still need it. *)
-
-val feature_proof_status_label : feature_proof_status -> string
-(** Fixed-width label for the status column. *)
-
-val feature_proof_is_gap : feature_proof_status -> bool
-(** Whether the status leaves the feature unproven. An unreadable status
-    counts as a gap, so a status word this build does not know can never be
-    drawn as evidence that the feature works. *)
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result

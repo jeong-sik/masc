@@ -91,6 +91,21 @@ let silent_stall_server ~sw ~net ~n_lines =
   listening_port listening
 ;;
 
+(* Variant (c): accept the request and close without answering it at all.
+   [Io.Response.read] then sees [`Eof] and cohttp-eio reports it as
+   [Failure "connection closed by peer"] — the shape that reached production
+   (masc#29951), and a different one from (a), where the response headers
+   arrived and only the body was cut. *)
+let close_before_response_server ~sw ~net =
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 0) in
+  let listening = Eio.Net.listen ~sw ~backlog:5 ~reuse_addr:true net addr in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+      drain_request_headers flow;
+      Eio.Flow.shutdown flow `All));
+  listening_port listening
+;;
+
 type outcome =
   | Returned_ok
   | Returned_error
@@ -196,6 +211,61 @@ let test_silent_stall_is_bounded () =
   | Exit -> ()
 ;;
 
+(* A peer that hangs up before answering must come back as a typed transport
+   error. Before masc#29951 this raised out of [with_post_stream]: cohttp-eio
+   turns the [`Eof] into [Failure "connection closed by peer"],
+   [classify_network_exn] answers [None] for prose, and the handler re-raised.
+   The runtime runner's outermost catch then recorded it as
+   [internal_unhandled_exception] and masc charged the keeper's crash budget
+   for the provider's disconnect.
+
+   [End_of_file] is the required kind, not merely a typed error: it is what
+   makes [Llm_provider.Error.is_retryable] and masc's transient-network
+   predicate answer true. A [ProviderFailure] or a [Tls_error] here would
+   still count toward the crash threshold. *)
+let test_close_before_response_is_typed_eof () =
+  Eio_main.run
+  @@ fun env ->
+  let net = env#net
+  and clock = env#clock in
+  Eio.Switch.run (fun sw ->
+    let port = close_before_response_server ~sw ~net in
+    let result =
+      try
+        Eio.Time.with_timeout_exn clock outer_budget_s (fun () ->
+          Http_client.with_post_stream
+            ~clock
+            ~net
+            ~url:(Printf.sprintf "http://127.0.0.1:%d/v1/chat/completions" port)
+            ~headers:[ "content-type", "application/json" ]
+            ~body:"{}"
+            ~f:(fun _reader -> ())
+            ())
+      with
+      | Eio.Time.Timeout -> Alcotest.fail "with_post_stream hung on a closed peer"
+      | exn ->
+        Alcotest.failf
+          "with_post_stream raised instead of returning a typed error: %s"
+          (Printexc.to_string exn)
+    in
+    match result with
+    | Error (Http_client.NetworkError { kind = Http_client.End_of_file; _ }) -> ()
+    | Error (Http_client.NetworkError { message; _ }) ->
+      Alcotest.failf
+        "NetworkError, but not the End_of_file kind that keeps it retryable: %s"
+        message
+    | Error
+        ( Http_client.HttpError _
+        | Http_client.TimeoutError _
+        | Http_client.AcceptRejected _
+        | Http_client.ProviderTerminal _
+        | Http_client.ProviderFailure _ ) ->
+      Alcotest.fail
+        "expected NetworkError End_of_file; any other constructor still counts \
+         toward the keeper crash threshold"
+    | Ok () -> Alcotest.fail "expected an error from a peer that never answered")
+;;
+
 let () =
   let open Alcotest in
   run
@@ -206,6 +276,12 @@ let () =
             `Quick
             test_half_close_is_bounded
         ; test_case "silent stall terminates bounded" `Quick test_silent_stall_is_bounded
+        ] )
+    ; ( "typed_transport_error"
+      , [ test_case
+            "close before response is a typed End_of_file"
+            `Quick
+            test_close_before_response_is_typed_eof
         ] )
     ]
 ;;

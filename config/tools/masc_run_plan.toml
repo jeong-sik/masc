@@ -1,0 +1,19 @@
+name = "masc_run_plan"
+description = """
+Set or update the execution plan (markdown) for a task run; each update \
+creates a new revision. \\nCall after masc_run_init to document your \
+approach before starting implementation. \\nOther agents can view plans via \
+masc_run_get for workspace and handoff context."""
+additional_properties = false
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID"
+
+[[params]]
+name = "plan"
+type = "string"
+required = true
+description = "The plan (markdown supported)"

@@ -49,7 +49,7 @@ let stored_output_identity_json ~sha256 ~bytes ~mime =
    (keeper_tool_execute_runtime.ml), so two byte-identical answers to the
    same command hash apart on that one field, and the repeated-call yield in
    keeper_agent_run.ml (threshold 3) could never see an Execute loop —
-   observed live 2026-08-24: sangsu repeated [gh auth status] four times in
+   observed live 2026-08-24: a keeper repeated [gh auth status] four times in
    one run, the four outputs differing only at execution_time_ms
    (1170/1471/...). Identity therefore hashes the answer: output that parses
    as JSON is digested with that field dropped at every depth. Output that is

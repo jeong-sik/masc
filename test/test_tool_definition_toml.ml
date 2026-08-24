@@ -410,8 +410,8 @@ let test_rejections () =
     "must be an integer";
   check_rejects ~name:"t"
     ~contents:
-      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\ndefault = \"hot\"\n")
-    "not supported for type string";
+      (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"number\"\ndefault = 1.5\n")
+    "not supported for type number";
   check_rejects ~name:"t"
     ~contents:
       (minimal "t" ^ "[[params]]\nname = \"p\"\ntype = \"string\"\nminimum = 1\n")
@@ -435,19 +435,6 @@ let test_rejections () =
       (minimal "t"
        ^ "[[params]]\nname = \"p\"\ntype = \"array\"\n[params.items]\ntype = \"integer\"\n")
     "not supported for items";
-  check_rejects ~name:"t"
-    ~contents:
-      (minimal "t"
-       ^ "[[params]]\n\
-          name = \"p\"\n\
-          type = \"array\"\n\
-          [params.items]\n\
-          type = \"object\"\n\
-          [[params.items.params]]\n\
-          name = \"u\"\n\
-          type = \"string\"\n\
-          required = true\n")
-    "unknown key \"required\"";
   check_rejects ~name:"t"
     ~contents:
       (minimal "t"
@@ -517,6 +504,153 @@ let test_validate_embedded () =
       (contains ~needle:"masc_example_bad" message)
 ;;
 
+(* ── The recursive parameter grammar ──────────────────────────────────────
+   masc_add_task.contract, masc_transition.handoff_context and
+   masc_batch_add_tasks.tasks could not move to TOML: an object parameter with
+   its own params, and an array whose object items declare required children,
+   were parsed by two separate key sets that did not admit each other. The
+   grammar is one function now, so these pin the shapes that were rejected. *)
+
+let load_ok ~name ~contents =
+  match Tool_definition_toml.load ~name ~contents with
+  | Ok { Tool_definition_toml.schema; _ } -> schema
+  | Error message -> failf "expected a schema, got error: %s" message
+;;
+
+let member (json : Yojson.Safe.t) key =
+  match json with
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let property schema path =
+  List.fold_left
+    (fun acc key ->
+       match member acc "properties" with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt key props with
+          | Some found -> found
+          | None -> failf "no property %S" key)
+       | _ -> failf "no properties while looking for %S" key)
+    schema.Masc_domain.input_schema
+    path
+;;
+
+let test_an_object_parameter_declares_its_own_params () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"contract\"\ntype = \"object\"\n\
+            additional_properties = false\n\
+            [[params.params]]\nname = \"strict\"\ntype = \"boolean\"\n\
+            [[params.params]]\nname = \"items_list\"\ntype = \"array\"\n\
+            [params.params.items]\ntype = \"string\"\n")
+  in
+  check bool "the nested object is closed" true
+    (member (property schema [ "contract" ]) "additionalProperties" = Some (`Bool false));
+  check bool "the nested boolean is reachable" true
+    (member (property schema [ "contract"; "strict" ]) "type" = Some (`String "boolean"));
+  check bool "an array nested inside the object keeps its items" true
+    (member
+       (match member (property schema [ "contract"; "items_list" ]) "items" with
+        | Some items -> items
+        | None -> failf "items_list lost its items")
+       "type"
+     = Some (`String "string"))
+;;
+
+(* [required] belongs to the enclosing object, not to the property. A child
+   marked required has to appear in the parent's list, or a caller reading the
+   schema cannot tell the field is mandatory. *)
+let test_a_nested_required_child_lands_in_its_parents_list () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"handoff\"\ntype = \"object\"\n\
+            [[params.params]]\nname = \"summary\"\ntype = \"string\"\n\
+            required = true\nmin_length = 1\n\
+            [[params.params]]\nname = \"note\"\ntype = \"string\"\n")
+  in
+  check bool "the parent lists the required child" true
+    (member (property schema [ "handoff" ]) "required" = Some (`List [ `String "summary" ]));
+  check bool "min_length reaches the child" true
+    (member (property schema [ "handoff"; "summary" ]) "minLength" = Some (`Int 1));
+  check bool "required is not emitted onto the child" true
+    (member (property schema [ "handoff"; "summary" ]) "required" = None)
+;;
+
+(* An array can bound both ends. keeper_task_done requires at least one
+   evidence ref, and the loader read no lower bound at all before this, so that
+   declaration could not move out of OCaml. *)
+let test_an_array_carries_min_items () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"evidence_refs\"\ntype = \"array\"\n\
+            min_items = 1\nmax_items = 8\n\
+            items = { type = \"string\" }\n")
+  in
+  let refs = property schema [ "evidence_refs" ] in
+  check bool "min_items reaches the array" true (member refs "minItems" = Some (`Int 1));
+  check bool "max_items still reaches it" true (member refs "maxItems" = Some (`Int 8))
+;;
+
+(* min_items on anything but an array is a declaration error, not a key the
+   loader quietly drops. *)
+let test_min_items_is_rejected_off_an_array () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t" ^ "[[params]]\nname = \"n\"\ntype = \"string\"\nmin_items = 1\n")
+    "min_items"
+;;
+
+let test_array_items_carry_max_items_and_required () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"tasks\"\ntype = \"array\"\nmax_items = 20\n\
+            [params.items]\ntype = \"object\"\n\
+            [[params.items.params]]\nname = \"title\"\ntype = \"string\"\n\
+            required = true\n\
+            [[params.items.params]]\nname = \"priority\"\ntype = \"integer\"\n\
+            default = 3\n")
+  in
+  let tasks = property schema [ "tasks" ] in
+  check bool "max_items reaches the array" true (member tasks "maxItems" = Some (`Int 20));
+  let items =
+    match member tasks "items" with
+    | Some items -> items
+    | None -> failf "tasks lost its items"
+  in
+  check bool "the item lists its required child" true
+    (member items "required" = Some (`List [ `String "title" ]));
+  check bool "a default inside items survives" true
+    (match member items "properties" with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt "priority" props with
+        | Some p -> member p "default" = Some (`Int 3)
+        | None -> false)
+     | _ -> false)
+;;
+
+(* A string default names which value a caller gets by omitting the key, the
+   same way an integer one does. It was refused, so masc_dashboard — whose
+   [scope] defaults to a string — could not be declared in TOML at all. *)
+let test_a_string_default_is_accepted () =
+  let schema =
+    load_ok ~name:"t"
+      ~contents:
+        (minimal "t" ^ "[[params]]\nname = \"scope\"\ntype = \"string\"\ndefault = \"hot\"\n")
+  in
+  check bool "the default reaches the property" true
+    (member (property schema [ "scope" ]) "default" = Some (`String "hot"))
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
@@ -530,6 +664,24 @@ let () =
             test_keeper_projection_round_trip
         ; test_case "keeper_projection decode is fail-closed" `Quick
             test_keeper_projection_rejections
+        ; test_case
+            "an object parameter declares its own params"
+            `Quick
+            test_an_object_parameter_declares_its_own_params
+        ; test_case
+            "a nested required child lands in its parent's list"
+            `Quick
+            test_a_nested_required_child_lands_in_its_parents_list
+        ; test_case "an array carries min_items" `Quick test_an_array_carries_min_items
+        ; test_case
+            "min_items is rejected off an array"
+            `Quick
+            test_min_items_is_rejected_off_an_array
+        ; test_case
+            "array items carry max_items and required"
+            `Quick
+            test_array_items_carry_max_items_and_required
+        ; test_case "a string default is accepted" `Quick test_a_string_default_is_accepted
         ; test_case "unknown keys, values, and missing keys reject" `Quick
             test_rejections
         ] )

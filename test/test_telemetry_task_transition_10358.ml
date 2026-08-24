@@ -105,12 +105,51 @@ let run_transition ctx ~task_id ~action ?(notes = "") ?(evidence_refs = []) () =
       if not (Tool_result.is_success result) then Alcotest.fail ((Tool_result.message result))
   | None -> Alcotest.fail "masc_transition dispatch returned None"
 
+(* verification_submit_request_fn defaults to an error and the server fills it
+   at boot (Verification_run_registry.install_global). This test is about the
+   telemetry a lifecycle raises, not about the storage boundary behind the
+   submission, so it stands in a persisting hook and puts the default back. *)
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
+let approve_task ctx ~task_id =
+  let config = ctx.Task.Tool.config in
+  let verification_id =
+    match
+      Workspace.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           String.equal task.id task_id)
+    with
+    | Some { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+      verification_id
+    | Some _ -> Alcotest.failf "task %s is not awaiting verification" task_id
+    | None -> Alcotest.failf "task %s not found" task_id
+  in
+  match
+    Workspace.commit_verdict_r config
+      ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+      ~verdict:Masc_domain.Verdict_approved ~task_id ~verification_id
+      ~notes:"telemetry lifecycle regression proof verified" ()
+  with
+  | Ok _ -> ()
+  | Error e -> Alcotest.failf "verdict refused: %s" (Masc_error.to_string e)
+;;
+
 let event_exists predicate config =
   Telemetry_eio.read_all_events config
   |> List.exists (fun (record : Telemetry_eio.event_record) ->
     predicate record.event)
 
 let test_masc_transition_claim_done_emits_task_lifecycle () =
+  with_verification_persistence @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let previous_default_runtime =
@@ -172,9 +211,18 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();
     run_transition ctx ~task_id:"task-001" ~action:"start" ();
-    run_transition ctx ~task_id:"task-001" ~action:"done"
+    (* done is not a transition a Keeper makes any more: submission moves the
+       task to awaiting_verification and a completion authority's verdict is
+       what finishes it. The telemetry this test reads is raised on that
+       verdict, so the test has to walk the same path a Keeper walks.
+
+       The reference is a note rather than a bare path: the verification store
+       cannot read a bare path, the reviewer sees missing evidence, and the
+       submission is refused before any of this is raised. *)
+    run_transition ctx ~task_id:"task-001" ~action:"submit_for_verification"
       ~notes:"Telemetry lifecycle regression proof completed."
-      ~evidence_refs:[ "test/test_telemetry_task_transition_10358.ml" ] ();
+      ~evidence_refs:[ "note:telemetry lifecycle regression proof" ] ();
+    approve_task ctx ~task_id:"task-001";
     let started =
       event_exists
         (function

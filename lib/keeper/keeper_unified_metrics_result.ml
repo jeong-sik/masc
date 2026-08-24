@@ -37,7 +37,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let observed_output_tokens = result.usage.output_tokens in
   let observed_total_tokens = Inference_utils.total_tokens result.usage in
   let turn_cost = estimate_usage_cost_usd result.usage in
-  let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
   (* Visible-output preview follows the typed result surface. *)
@@ -175,33 +174,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              else 0
            else rt.proactive_rt.consecutive_noop_count);
       };
-      (* Autonomous action tracking from tool calls *)
-      autonomous_action_count =
-        rt.autonomous_action_count
-        + (if is_autonomous_turn then substantive_tool_call_count else 0);
-      autonomous_turn_count =
-        rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
-      autonomous_text_turn_count =
-        rt.autonomous_text_turn_count
-        + (if is_autonomous_turn && has_text && not has_substantive_tools then 1 else 0);
-      autonomous_tool_turn_count =
-        rt.autonomous_tool_turn_count
-        + (if is_autonomous_turn && has_substantive_tools then 1 else 0);
-      board_reactive_turn_count =
-        rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
-      mention_reactive_turn_count =
-        rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
-      noop_turn_count =
-        rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_substantive_tools
-              && not has_validated_evidence then 1 else 0);
-      (* This timestamp stays scoped to substantive tool actions.
-         Validated evidence affects proactive visibility, but it does not
-         redefine the autonomous action counter semantics. *)
-      last_autonomous_action_at =
-        (if is_autonomous_turn && has_substantive_tools
-         then now_iso ()
-         else rt.last_autonomous_action_at);
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the

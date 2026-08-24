@@ -16,6 +16,7 @@
   tool_task_no_eligible
   tool_task_payloads
   tool_task_schemas
+  tool_task_schemas_toml
   workflow_rejection_payload)
  (flags
   (:standard -w -4 -w +37))
@@ -37,6 +38,10 @@
   masc_bounded_event_dedupe
   masc_eio_context
   masc.masc_tool_dispatch
+  ; tool_task_schemas_toml reads config/tools/masc_*.toml from the
+  ; binary-embedded config tree.
+  masc.embedded_config
+  masc.masc_tool_surface
   masc.tool_types
   masc.config_dir_resolver
   masc.prompt_registry

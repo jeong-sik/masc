@@ -39,7 +39,6 @@ let dashboard_scope_strings =
   List.map dashboard_scope_to_string all_dashboard_scopes
 ;;
 
-let dashboard_scope_default = Dashboard_scope_current
 
 type param_type =
   | T_string of

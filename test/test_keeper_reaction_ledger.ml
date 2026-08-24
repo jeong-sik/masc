@@ -114,13 +114,11 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-          keeper_name)
-       "reaction-ledger")
-    "v6"
+  (* Ask the writer where it writes. Rebuilding the path here made a storage
+     generation bump silently point the test at an empty old namespace. *)
+  Masc.Keeper_reaction_ledger.store_dir
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -188,7 +186,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v6" "schema" stimulus_row;
+  check_member_string "stimulus schema" Masc.Keeper_reaction_ledger.schema "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -266,7 +264,7 @@ let test_unknown_record_kind_is_quarantined_not_fatal () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v6"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "unexpected"
         ; "event_id", `String "krl:unknown-record-kind-fixture"
         ; "keeper_name", `String keeper_name
@@ -725,7 +723,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v6"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1053,7 +1051,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v6"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1174,6 +1172,49 @@ let test_after_ledger_append_seam_is_reachable_through_the_interface () =
   ignore !ran
 ;;
 
+(* The event id is recomputed on read and compared, so the digest decides
+   replay: two stimuli landing on one id make the second read as the first.
+   MD5 and SHA-256 both produce a hex string of the right shape, and every
+   other case in this file passes under either, so the algorithm needs saying
+   out loud (#26720). *)
+let test_event_id_digest_is_sha256 () =
+  let stimulus_id = "board:post-42" in
+  let expected =
+    "krl:" ^ Digestif.SHA256.(digest_string (stimulus_id ^ "|stimulus") |> to_hex)
+  in
+  let actual = Masc.Keeper_reaction_ledger.digest_id "krl" (stimulus_id ^ "|stimulus") in
+  check string "event id carries a SHA-256 digest" expected actual;
+  check
+    int
+    "and the full digest, not a truncation"
+    (String.length "krl:" + 64)
+    (String.length actual)
+;;
+
+(* The fleet summary emitted four statuses from a closed type and a fifth,
+   "unavailable", as a bare string beside it, so nothing in the code said the
+   vocabulary was five wide (#27560). These read the field the HTTP route
+   serves and check it against the exported list. *)
+let test_fleet_summary_status_vocabulary_is_closed () =
+  let status json =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String value) -> value
+       | _ -> Alcotest.fail "fleet summary carried no status string")
+    | _ -> Alcotest.fail "fleet summary is not an object"
+  in
+  let unavailable = status (Masc.Keeper_reaction_ledger.unavailable_fleet_summary_json ()) in
+  Alcotest.(check bool)
+    (Printf.sprintf "%S is in the declared vocabulary" unavailable)
+    true
+    (List.mem unavailable Masc.Keeper_reaction_ledger.fleet_summary_status_strings);
+  Alcotest.(check (list string))
+    "the vocabulary is exactly these five"
+    [ "empty"; "ok"; "degraded"; "unknown"; "unavailable" ]
+    Masc.Keeper_reaction_ledger.fleet_summary_status_strings
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1266,6 +1307,14 @@ let () =
             "after_ledger_append seam is reachable through the interface"
             `Quick
             test_after_ledger_append_seam_is_reachable_through_the_interface
+        ; test_case
+            "event id digest is SHA-256"
+            `Quick
+            test_event_id_digest_is_sha256
+        ; test_case
+            "fleet summary status vocabulary is closed"
+            `Quick
+            test_fleet_summary_status_vocabulary_is_closed
         ] )
     ]
 ;;

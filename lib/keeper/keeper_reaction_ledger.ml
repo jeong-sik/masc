@@ -22,7 +22,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v6"
+let storage_generation = "v7"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -71,7 +71,15 @@ let reaction_kind_of_string = function
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
-let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
+(* The event id is recomputed on read and compared, so a collision is a replay
+   decision, not a display artefact -- two stimuli landing on one id make the
+   second read as the first. Stdlib.Digest is MD5; the schedule, auth and
+   cache identities in this repository already use Digestif.SHA256 (#26720).
+   The digest feeds the id readers compare, so the storage generation advances
+   with it: rows written under v6 stay in the v6 namespace and are not read. *)
+let digest_id prefix payload =
+  prefix ^ ":" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+;;
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -1317,12 +1325,19 @@ type keeper_summary_status =
   | Summary_ok
   | Summary_degraded
   | Summary_unknown
+  | Summary_unavailable
+      (** The store could not be reached at all, which is not the same as
+          reaching it and finding nothing ([Summary_empty]) or reading it and
+          finding trouble ([Summary_degraded]). It was emitted as a bare
+          string beside a four-case type, so the vocabulary a reader had to
+          handle was one wider than anything in the code said (#27560). *)
 
 let keeper_summary_status_to_string = function
   | Summary_empty -> "empty"
   | Summary_ok -> "ok"
   | Summary_degraded -> "degraded"
   | Summary_unknown -> "unknown"
+  | Summary_unavailable -> "unavailable"
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =
@@ -1515,10 +1530,18 @@ let summary_read_error_count json =
   | _ -> 0
 ;;
 
+(* Written out so the exhaustive match is what fails when a case is added,
+   rather than a caller quietly missing the new string. *)
+let fleet_summary_status_strings =
+  List.map
+    keeper_summary_status_to_string
+    [ Summary_empty; Summary_ok; Summary_degraded; Summary_unknown; Summary_unavailable ]
+;;
+
 let unavailable_fleet_summary_json () =
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String "unavailable"
+    ; "status", `String (keeper_summary_status_to_string Summary_unavailable)
     ; "status_reasons", `List []
     ; "operator_action_required", `Bool false
     ; "keeper_count", `Int 0
@@ -1757,19 +1780,19 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       read_error_count > 0
       || durable_event_queue_discovery_error_count > 0
       || durable_event_queue_read_error_count > 0
-    then "unknown"
+    then Summary_unknown
     else if
       List.exists
         (fun (status, _) -> status = Summary_degraded)
         summaries_with_status
       || durable_event_queue_stale_count > 0
-    then "degraded"
-    else if row_count = 0 && durable_event_queue_count = 0 then "empty"
-    else "ok"
+    then Summary_degraded
+    else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
+    else Summary_ok
   in
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; ( "operator_action_required"
       , `Bool

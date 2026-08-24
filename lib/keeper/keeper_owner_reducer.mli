@@ -21,13 +21,6 @@ type usage_delta =
 type turn_counter_deltas =
   { proactive_count : int
   ; proactive_visible_count : int
-  ; autonomous_action_count : int
-  ; autonomous_turn_count : int
-  ; autonomous_text_turn_count : int
-  ; autonomous_tool_turn_count : int
-  ; board_reactive_turn_count : int
-  ; mention_reactive_turn_count : int
-  ; noop_turn_count : int
   ; compaction_count : int
   }
 
@@ -46,7 +39,6 @@ type turn_runtime_delta =
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
-  ; last_autonomous_action_at : string observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }

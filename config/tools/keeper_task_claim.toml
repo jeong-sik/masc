@@ -1,0 +1,19 @@
+name = "keeper_task_claim"
+description = """
+Claim MASC backlog work. With no task_id, claims the next eligible unclaimed \
+todo task that matches your capabilities. awaiting_verification tasks are \
+pending a verdict from the system LLM agent at the completion-authority \
+boundary and are not claimable Keeper work. Never Read producer sandbox \
+paths directly. With task_id, claims that exact task when a user, mention, \
+board item, or keeper_tasks_list row identifies it; an awaiting_verification \
+task returns the typed pending-verdict refusal. If you already own another \
+Claimed/InProgress task, finish it with keeper_task_done or explicitly \
+release it first; keeper_task_claim does not auto-release active work."""
+
+[[params]]
+name = "task_id"
+type = "string"
+description = """
+Optional exact task id from keeper_tasks_list, board, mention, or user \
+request"""
+min_length = 1

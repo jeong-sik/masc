@@ -451,6 +451,13 @@ let record_runtime_mcp_keeper_tool_trace
        ~message)
 
 (** Resolve managed agent tool call to canonical operation *)
+(* The protocol layer answers this with Invalid_params rather than a generic
+   failure. It used to tell the two apart by prefix-matching the message of an
+   [Invalid_argument] -- the sentinel text was the whole contract, written once
+   at the raise and once at the catch, and a reword on either side would have
+   quietly downgraded the answer with nothing going red. *)
+exception Managed_agent_translation_failed of string
+
 let resolve_managed_agent_call ?mcp_session_id request =
   let requested_name = Mcp_server_eio_call_request.requested_name request in
   let arguments = Mcp_server_eio_call_request.arguments request in
@@ -501,9 +508,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         match resolve_managed_agent_call ?mcp_session_id request with
         | Ok resolved -> resolved
         | Error msg ->
-            raise
-              (Invalid_argument
-                 ("managed agent tool translation failed: " ^ msg)))
+            raise (Managed_agent_translation_failed msg))
     | Full | Operator_remote -> requested_name, admitted_arguments
   in
   (* Measure execution time for telemetry *)

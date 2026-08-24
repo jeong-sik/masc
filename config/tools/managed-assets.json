@@ -2,10 +2,15 @@
   "managed_by": "MASC",
   "schema": "masc.tool-managed-assets.v1",
   "paths": [
+    "Edit.toml",
+    "Grep.toml",
+    "Read.toml",
+    "Write.toml",
     "analyze_image.toml",
     "keeper_artifact_read.toml",
     "keeper_broadcast.toml",
     "keeper_context_status.toml",
+    "keeper_ide_annotate.toml",
     "keeper_memory_search.toml",
     "keeper_memory_write.toml",
     "keeper_person_note_set.toml",
@@ -105,7 +110,6 @@
     "tool_edit_file.toml",
     "tool_execute.toml",
     "tool_read_file.toml",
-    "tool_search_files.toml",
     "tool_write_file.toml"
   ]
 }

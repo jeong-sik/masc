@@ -1,43 +1,17 @@
 name = "tool_read_file"
 description = """
-Read one existing file from the keeper sandbox or an allowed path with no \
-implicit cwd. Read targets a single FILE; to list a directory use the Execute \
-tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits \
-Execute cwd."""
-
-# Closed: the runtime handler reads exactly these four, and an unread key on a
-# read is a silent no-op the caller cannot see. The three sibling filesystem
-# tools stay open, as they were.
-additional_properties = false
+Read a file as text (truncated at max_bytes). path is REQUIRED. Paths \
+resolve relative to your workspace root, or to the typed `cwd` when you pass \
+one — never a host path like '.masc/playground/your-name/...'. Good: \
+path='lib/foo.ml'. Bad: path=''. For multi-file search, use Grep."""
 
 [[params]]
-name = "file_path"
+name = "path"
 type = "string"
 required = true
-description = """
-Existing file path to read. Relative paths resolve against cwd when cwd is \
-provided, otherwise against your workspace root. Read does not inherit Execute \
-cwd implicitly; pass cwd explicitly or give a path relative to the workspace \
-root."""
+description = "Relative or absolute file path"
 
 [[params]]
-name = "cwd"
-type = "string"
-description = """
-Optional directory, relative to your workspace root, to resolve file_path \
-from. This is explicit only; Read never inherits the previous Execute cwd."""
-
-[[params]]
-name = "offset"
+name = "max_bytes"
 type = "integer"
-description = """
-1-based line number to start reading from (default 1). To continue a \
-truncated read, pass the next_offset value from the previous response."""
-
-[[params]]
-name = "limit"
-type = "integer"
-description = """
-Maximum number of LINES to return, counted from offset. The response is \
-additionally bounded by a byte budget; when more content remains, the payload \
-sets truncated=true and next_offset for the follow-up call."""
+description = "Max bytes to return (default: 20000)"

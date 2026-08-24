@@ -302,6 +302,46 @@ let test_surface_post_caps_match_their_owner () =
   check int "blocks cap" Masc.Keeper_surface_post.max_rich_blocks (cap "blocks")
 ;;
 
+(* tool_read_file states its default byte ceiling inside the sentence a client
+   reads. [Tool_shard_limits] owns the number; the declaration used to render
+   it through a pre-made string, and in TOML it is a literal. Nothing else
+   compares the two. *)
+let test_read_file_default_appears_in_its_description () =
+  let read_file =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "tool_read_file")
+        Tool_shard_types.filesystem_tools
+    with
+    | Some s -> s
+    | None -> failf "tool_read_file is absent"
+  in
+  let description =
+    match read_file.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "description" p with
+             | Some (`String d) -> d
+             | _ -> failf "max_bytes has no description")
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let needle = string_of_int Tool_shard_limits.read_file_default_max_bytes in
+  let n = String.length needle
+  and h = String.length description in
+  let rec probe i =
+    i + n <= h && (String.equal (String.sub description i n) needle || probe (i + 1))
+  in
+  check bool
+    (Printf.sprintf "max_bytes description names %s" needle)
+    true
+    (probe 0)
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -437,6 +477,10 @@ let () =
             "surface post caps"
             `Quick
             test_surface_post_caps_match_their_owner
+        ; test_case
+            "read_file default in its description"
+            `Quick
+            test_read_file_default_appears_in_its_description
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

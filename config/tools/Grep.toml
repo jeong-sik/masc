@@ -1,4 +1,4 @@
-name = "tool_search_files"
+name = "Grep"
 description = """
 Search file contents with ripgrep: provide a regex `pattern` (and \
 optionally path/glob/type). To list a directory, read a file, or run \

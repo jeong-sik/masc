@@ -211,6 +211,26 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
               (Printf.sprintf "- Handoff evidence: %s\n"
                  (String.concat ", " refs)))
    | Some _ | None -> ());
+  (* RFC skills-declared-not-discovered: the task names its skills, so this
+     block does not list what is available and let the model match — there is
+     nothing to choose between by the time the turn starts.
+
+     Names and a path, not the instruction itself. A skill body is written to
+     be read whole and some run to tens of kilobytes (the published
+     im-ai-copyeditor carries an 80 KB reference pack), which would land on
+     every turn of the task rather than the one turn that uses it. The keeper
+     already has [Read]; spending one call is cheaper than carrying the file.
+
+     A task that names none adds no line, so the assembled prompt for every
+     existing task is byte-identical to what it was before skills existed. *)
+  (match task.Masc_domain.skills with
+   | [] -> ()
+   | skills ->
+       Buffer.add_string buf
+         (Printf.sprintf
+            "- Skills named by this task: %s. Each one is at \
+             .masc/skills/<name>/SKILL.md — read it before you use it.\n"
+            (String.concat ", " skills)));
   Buffer.add_string buf
     "\n";
   Buffer.contents buf

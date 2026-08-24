@@ -73,6 +73,7 @@ let seed_task ?handoff_context config ~task_id ~created_by ~status =
     ; reclaim_policy = None
     ; execution_links = Masc_domain.no_execution_links
     ; do_not_reclaim_reason = None
+    ; skills = []
     }
   in
   Workspace_backlog.write_backlog

@@ -37,9 +37,9 @@ usage() {
   cat <<'EOF'
 Usage: scripts/check-gate-inheritance.sh --base-ref <ref> --head-ref <ref>
 
-Compares the ci-gate job's `needs` list between the base and head ci.yml.
-Fails when the head omits a gate job the base requires, so a branch that
-forked before a gate was introduced cannot merge without rebasing.
+Compares the `scripts/*.sh` references between the base and head ci.yml.
+Fails when the head omits a gate script the base runs, so a branch that forked
+before a gate was introduced cannot merge without rebasing.
 EOF
 }
 
@@ -109,7 +109,7 @@ printf '  %s\n' "$HEAD_SCRIPTS" | sed 's/^/    /'
 
 missing=0
 while IFS= read -r script; do
-  if ! printf '%s\n' "$HEAD_SCRIPTS" | grep -qx "$script"; then
+  if ! grep -Fqx "$script" <<<"$HEAD_SCRIPTS"; then
     echo "::error title=gate-inheritance::PR branch ci.yml is missing required gate script '${script}' that base ${BASE_REF} runs. This branch forked before that gate was introduced; rebase onto ${BASE_REF} so the full-inspection gate runs before merge."
     missing=1
   fi

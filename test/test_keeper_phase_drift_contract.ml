@@ -14,8 +14,11 @@ module KSM = Keeper_state_machine
 
 (* ── Keeper phase round-trip completeness ─────────────────── *)
 
-let all_phases_count_is_11 =
-  List.length KSM.all_phases = 11
+(* Ten since #30133 retired [Overflowed] across every layer. The number is
+   written out rather than derived so a phase leaving or arriving has to be
+   said here too — that is the whole of what this contract does. *)
+let all_phases_count_is_10 =
+  List.length KSM.all_phases = 10
 
 let roundtrip_every_phase () =
   List.iter (fun p ->
@@ -78,8 +81,8 @@ let agent_core_stop_reason_strings =
 let () =
   Alcotest.run "keeper_phase_drift_contract"
     [ ( "keeper_phase_roundtrip"
-      , [ Alcotest.test_case "all_phases has 11 variants" `Quick (fun () ->
-            Alcotest.(check bool) "11 phases" true all_phases_count_is_11)
+      , [ Alcotest.test_case "all_phases has 10 variants" `Quick (fun () ->
+            Alcotest.(check bool) "10 phases" true all_phases_count_is_10)
         ; Alcotest.test_case "roundtrip: to_string -> of_string = id" `Quick roundtrip_every_phase
         ; Alcotest.test_case "no orphan strings" `Quick no_orphan_strings
         ; Alcotest.test_case "all phase strings are unique" `Quick

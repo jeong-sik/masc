@@ -13,7 +13,7 @@ module Change = Keeper_tool_call_file_change
 (* One logged call. Only the fields the projection reads are spelled; a real
    row carries about thirty more, and listing them here would make the test
    about the writer's schema instead of about what the reader needs. *)
-let row ?(keeper = "rondo") ?(descriptor_id = "agent.edit_file")
+let row ?(keeper = "alpha") ?(descriptor_id = "agent.edit_file")
     ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml") ?(success = true)
     ?(turn = Some 2459) ?(task_id = Some "task-475") ?(ts = 1787533327.603755) input =
   let optional name = function None -> [] | Some value -> [ (name, value) ] in
@@ -134,7 +134,7 @@ let test_absolute_outside_any_playground () =
 
 let test_metadata_round_trip () =
   let change = change_of (row (edit_input ~before:"a" ~after:"b" ())) in
-  check string "keeper" "rondo" change.Change.keeper;
+  check string "keeper" "alpha" change.Change.keeper;
   check (option int) "turn" (Some 2459) change.Change.turn;
   check (option string) "task" (Some "task-475") change.Change.task_id;
   check bool "succeeded" true change.Change.succeeded
@@ -195,7 +195,7 @@ let test_missing_action_radius_is_unreadable () =
   let bare =
     `Assoc
       [ ("ts", `Float 1.)
-      ; ("keeper", `String "rondo")
+      ; ("keeper", `String "alpha")
       ; ("input", edit_input ~before:"a" ~after:"b" ())
       ; ("route_evidence", `Assoc [ ("descriptor_id", `String "agent.edit_file") ])
       ]
@@ -230,7 +230,7 @@ let test_row_without_route_evidence_is_not_a_change () =
   let bare =
     `Assoc
       [ ("ts", `Float 1.)
-      ; ("keeper", `String "rondo")
+      ; ("keeper", `String "alpha")
       ; ("tool", `String "keeper_compose_mission-snapshot")
       ; ("input", `Assoc [ ("content", `String "x") ])
       ]

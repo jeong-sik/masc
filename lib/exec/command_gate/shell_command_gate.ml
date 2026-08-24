@@ -238,15 +238,19 @@ let gate_typed ~ir ~syntax_policy ~sandbox () : verdict =
   verdict
 ;;
 
+(* The verdict with no logging, so a caller that is only classifying -- not
+   about to run the text -- does not add a line indistinguishable from a real
+   raw call.  [gate_raw] is this plus the log. *)
+let decide_raw ~text ~syntax_policy ~sandbox : verdict =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | PD.Parsed ir -> decide_typed ~ir ~syntax_policy ~sandbox
+  | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
+  | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
+  | PD.Too_complex reason -> Too_complex { reason = Unsupported_construct reason }
+;;
+
 let gate_raw ~text ~syntax_policy ~sandbox () : verdict =
-  let verdict =
-    match Masc_exec_bash_parser.Bash.parse_string text with
-    | PD.Parsed ir -> decide_typed ~ir ~syntax_policy ~sandbox
-    | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
-    | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
-    | PD.Too_complex reason ->
-      Too_complex { reason = Unsupported_construct reason }
-  in
+  let verdict = decide_raw ~text ~syntax_policy ~sandbox in
   log_verdict ~source:"raw" verdict;
   verdict
 ;;

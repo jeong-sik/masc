@@ -21,11 +21,46 @@ type interrupt =
   | Signal_declined of string
   | Signal_error of string
 
-type tool_call =
-  { call_id : string
+type tool_outcome =
+  | Started
+  | Awaiting_result
+  | Returned
+  | Failed
+  | Never_returned
+  | Outcome_unrecorded
+
+type tool_activity =
+  { call_id : string option
   ; tool_name : string
   ; args : string
   ; subject : string option
+  ; outcome : tool_outcome
+  ; duration : string option
+  }
+
+type tool_block =
+  { activities : tool_activity list
+  ; omitted_steps : int
+  }
+
+type tool_projection_mode =
+  | Compact
+  | Full
+
+type tool_projection =
+  { activities : tool_activity list
+  ; rows : string list
+  ; hidden_activity_rows : int
+  ; omitted_steps : int
+  }
+
+(* Mutable stream state stays private. The typed activity handed to history
+   and rendering below is immutable, so neither consumer has to infer an
+   outcome from these two booleans. *)
+type live_tool_call =
+  { call_id : string
+  ; tool_name : string
+  ; args : string
   ; ended : bool
   ; result_ready : bool
   }
@@ -67,7 +102,7 @@ type t =
            the age has to cover it. *)
   ; text_buffer : Buffer.t
   ; thinking_buffer : Buffer.t
-  ; mutable reversed_tool_calls : tool_call list
+  ; mutable reversed_tool_calls : live_tool_call list
   ; mutable reversed_trail : trail_node list
   ; mutable phase : phase
   ; mutable interrupt : interrupt
@@ -119,7 +154,6 @@ let interrupt t = t.interrupt
 let note_interrupt t interrupt = t.interrupt <- interrupt
 let text t = safe_block (Buffer.contents t.text_buffer)
 let thinking t = safe_block (Buffer.contents t.thinking_buffer)
-let tool_calls t = List.rev t.reversed_tool_calls
 
 let awaiting_approval t = t.awaiting
 
@@ -135,6 +169,35 @@ let subject_of ~tool_name ~args =
   if String.equal (String.trim args) "" then None
   else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
 
+let make_tool_activity ~call_id ~tool_name ~args ~outcome ~duration =
+  let call_id =
+    match call_id with
+    | Some value when String.trim value <> "" -> Some value
+    | Some _ | None -> None
+  in
+  { call_id
+  ; tool_name
+  ; args
+  ; subject = subject_of ~tool_name ~args
+  ; outcome
+  ; duration
+  }
+
+let activity_of_live_call (call : live_tool_call) =
+  make_tool_activity ~call_id:(Some call.call_id) ~tool_name:call.tool_name
+    ~args:call.args
+    ~outcome:
+      (if call.result_ready then Returned
+       else if call.ended then Awaiting_result
+       else Started)
+    ~duration:None
+
+let tool_calls t =
+  List.rev t.reversed_tool_calls |> List.map activity_of_live_call
+
+let tool_block ?(omitted_steps = 0) activities : tool_block =
+  { activities; omitted_steps }
+
 (* Which reasoning lines the pane shows, kept here rather than in the drawing
    because it is a question about the content. The whole trail, minus the runs
    of blank lines models emit: reasoning is the only part of a live turn the
@@ -147,10 +210,12 @@ let thinking_lines t =
 
 let finished_marker = "✓"
 
-let marker_of call =
-  if call.result_ready then finished_marker
-  else if call.ended then "▶"
-  else "·"
+let marker_of_outcome = function
+  | Started | Never_returned -> "·"
+  | Awaiting_result -> "▶"
+  | Returned -> finished_marker
+  | Failed -> "\xe2\x9c\x97"
+  | Outcome_unrecorded -> "?"
 
 let pad_to width text =
   let length = String.length text in
@@ -162,66 +227,118 @@ let pad_to width text =
    call. A trailer, when a row has one, goes after the subject: it is the
    part only a persisted step knows (how long the call took), and a row
    without one draws exactly as before. *)
-let render_rows rows =
+let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest (_, tool_name, _, _) -> max widest (String.length tool_name))
-      0 rows
+      (fun widest activity ->
+        max widest (String.length activity.tool_name))
+      0 activities
   in
   let with_trailer text = function
     | None -> text
     | Some trailer -> Printf.sprintf "%s \xc2\xb7 %s" text trailer
   in
   List.map
-    (fun (marker, tool_name, args, trailer) ->
-      match subject_of ~tool_name ~args with
+    (fun activity ->
+      let marker = marker_of_outcome activity.outcome in
+      match activity.subject with
       | None ->
           safe_line
-            (with_trailer (Printf.sprintf "%s %s" marker tool_name) trailer)
+            (with_trailer
+               (Printf.sprintf "%s %s" marker activity.tool_name)
+               activity.duration)
       | Some subject ->
           safe_line
             (with_trailer
-               (Printf.sprintf "%s %s %s" marker (pad_to name_width tool_name)
-                  subject)
-               trailer))
-    rows
+               (Printf.sprintf "%s %s %s" marker
+                  (pad_to name_width activity.tool_name) subject)
+               activity.duration))
+    activities
+
+let plural count noun =
+  Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
+
+let omitted_steps_row count =
+  Printf.sprintf "(%s not carried by the transcript)" (plural count "step")
+
+let compact_outcome_parts (activities : tool_activity list) =
+  let count outcome =
+    List.fold_left
+      (fun total activity ->
+        if activity.outcome = outcome then total + 1 else total)
+      0 activities
+  in
+  [ Started, "started"
+  ; Awaiting_result, "awaiting result"
+  ; Returned, "returned"
+  ; Failed, "failed"
+  ; Never_returned, "never returned"
+  ; Outcome_unrecorded, "outcome unrecorded"
+  ]
+  |> List.filter_map (fun (outcome, label) ->
+         match count outcome with
+         | 0 -> None
+         | count -> Some (Printf.sprintf "%d %s" count label))
+
+let compact_marker (activities : tool_activity list) =
+  if List.exists (fun activity -> activity.outcome = Failed) activities then
+    marker_of_outcome Failed
+  else if
+    List.exists (fun activity -> activity.outcome = Awaiting_result) activities
+  then marker_of_outcome Awaiting_result
+  else if
+    List.exists
+      (fun activity ->
+        activity.outcome = Started || activity.outcome = Never_returned)
+      activities
+  then marker_of_outcome Started
+  else if
+    List.exists
+      (fun activity -> activity.outcome = Outcome_unrecorded)
+      activities
+  then marker_of_outcome Outcome_unrecorded
+  else marker_of_outcome Returned
+
+(* Both projections retain the same typed activities. [Full] is the shipping
+   view and therefore stays byte-compatible with the old formatter. [Compact]
+   folds only the presentation rows; it reports exactly how many detail rows
+   it hid and keeps failures/open calls visible in its outcome summary. *)
+let project_tool_block mode (block : tool_block) =
+  let activity_count = List.length block.activities in
+  let full_activity_rows = render_activity_rows block.activities in
+  let activity_rows, hidden_activity_rows =
+    match mode, block.activities with
+    | (Full | Compact), ([] | [ _ ]) ->
+        full_activity_rows, 0
+    | Full, _ -> full_activity_rows, 0
+    | Compact, activities ->
+        let outcomes = String.concat ", " (compact_outcome_parts activities) in
+        let hidden_activity_rows = List.length full_activity_rows in
+        ( [ safe_line
+              (Printf.sprintf "%s %s · %s · %s hidden"
+                 (compact_marker activities)
+                 (plural activity_count "tool call") outcomes
+                 (plural hidden_activity_rows "detail row"))
+          ]
+        , hidden_activity_rows )
+  in
+  let rows =
+    if block.omitted_steps = 0 then activity_rows
+    else activity_rows @ [ omitted_steps_row block.omitted_steps ]
+  in
+  { activities = block.activities
+  ; rows
+  ; hidden_activity_rows
+  ; omitted_steps = block.omitted_steps
+  }
 
 let tool_rows t =
-  tool_calls t
-  |> List.map (fun call -> (marker_of call, call.tool_name, call.args, None))
-  |> render_rows
-
-let completed_tool_rows pairs =
-  pairs
-  |> List.map (fun (tool_name, args) -> (finished_marker, tool_name, args, None))
-  |> render_rows
-
-type persisted_tool_outcome =
-  | Returned
-  | Failed
-  | Never_returned
-  | Outcome_unrecorded
-
-(* The live markers say how far a call got; a persisted step says how it
-   ended. They share the finished glyph so a call that returned reads the
-   same whether it was watched or scrolled back to. A failure gets its own
-   glyph rather than the finished one: "returned" and "returned an error" are
-   different facts, and a block of twenty calls is scanned by glyph. *)
-let persisted_marker = function
-  | Returned -> finished_marker
-  | Failed -> "\xe2\x9c\x97"
-  | Never_returned -> "\xc2\xb7"
-  | Outcome_unrecorded -> "?"
-
-let persisted_tool_rows steps =
-  steps
-  |> List.map (fun (outcome, tool_name, args, duration) ->
-         (persisted_marker outcome, tool_name, args, duration))
-  |> render_rows
+  let projection = project_tool_block Full (tool_block (tool_calls t)) in
+  projection.rows
 
 type trail_item =
   | Trail_thinking of string list
-  | Trail_tools of string list
+  | Trail_tools of tool_block
   | Trail_text of string
 
 (* The turn in arrival order, one item per stretch. Consecutive tool calls
@@ -233,19 +350,17 @@ type trail_item =
 let trail t =
   let call_of id =
     List.find_opt
-      (fun (call : tool_call) -> String.equal call.call_id id)
+      (fun (call : live_tool_call) -> String.equal call.call_id id)
       t.reversed_tool_calls
   in
   let flush_tools acc group =
     match group with
     | [] -> acc
     | calls ->
-        let rows =
-          calls |> List.rev
-          |> List.map (fun call -> (marker_of call, call.tool_name, call.args, None))
-          |> render_rows
+        let activities =
+          calls |> List.rev |> List.map activity_of_live_call
         in
-        Trail_tools rows :: acc
+        Trail_tools (tool_block activities) :: acc
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
@@ -365,7 +480,7 @@ let update_call t call_id f =
   let found = ref false in
   let updated =
     List.map
-      (fun (call : tool_call) ->
+      (fun (call : live_tool_call) ->
         if (not !found) && String.equal call.call_id call_id then begin
           found := true;
           f call
@@ -395,7 +510,6 @@ let apply t (delta : Live.delta) =
         { call_id
         ; tool_name
         ; args = ""
-        ; subject = None
         ; ended = false
         ; result_ready = false
         }
@@ -408,10 +522,7 @@ let apply t (delta : Live.delta) =
             | Live.Args_delta delta -> call.args ^ delta
             | Live.Args_snapshot snapshot -> snapshot
           in
-          { call with
-            args
-          ; subject = subject_of ~tool_name:call.tool_name ~args
-          })
+          { call with args })
   | Live.Tool_ended { call_id } ->
       update_call t call_id (fun call -> { call with ended = true })
   | Live.Tool_result { call_id } ->
@@ -422,8 +533,7 @@ let apply t (delta : Live.delta) =
       (match args with
        | "" -> ()
        | args ->
-           update_call t call_id (fun call ->
-               { call with args; subject = subject_of ~tool_name ~args }));
+           update_call t call_id (fun call -> { call with args }));
       t.awaiting <- Some { call_id; tool_name; question }
   | Live.Approval_settled { call_id; outcome = _ } ->
       (* Cleared whatever the answer was, including none: the prompt is over

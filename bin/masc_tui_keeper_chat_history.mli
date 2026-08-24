@@ -16,10 +16,10 @@
     reasoning row and a tool block ahead of whatever the turn said, and a
     turn that only called tools no longer reads as a blank line. A
     direct-conversation row's trace block is not read: its calls are already
-    in the transcript as [role: "tool"] rows. A tool row's [content] is the call's arguments
-    and [tool_call_name] is the tool — the same pair the live view names a call
-    from, so a turn watched live and the same turn scrolled back read
-    identically.
+    in the transcript as [role: "tool"] rows. A tool row's [content] is the
+    call's arguments, [tool_call_name] is the tool, and [tool_call_id] is its
+    stable identity. Those become the same typed activity the live view uses;
+    no rendered row is parsed to recover a fact.
 
     Consecutive tool rows are folded into one block, the way a live turn draws
     its calls, rather than becoming a row each.
@@ -77,22 +77,26 @@ type kind =
           what lets a session drop its own row for the same failure once this
           one arrives, rather than drawing both. [None] for a row the server
           wrote under another producer's key, or under none. *)
-  | Tool_calls of string list
-      (** One block of finished calls, already formatted as rows. Either
-          consecutive [role: "tool"] rows, or the tool steps of one
-          autonomous turn's trace block. *)
+  | Tool_calls of Masc_tui_keeper_chat_transcript.tool_block
+      (** One typed block of calls. Either consecutive [role: "tool"] rows,
+          or the tool steps of one autonomous turn's trace block. Rendering is
+          deferred to the shared [Compact | Full] projector. *)
   | Reasoning of string list
       (** What the keeper reasoned during one autonomous turn, as the trace
           block carried it: the lines the server kept, and a count of the
           steps it withheld. A blank [content] with a trace behind it used
           to draw as an empty line; this is what was behind it. *)
 
+val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
+(** The current full-detail rows for a typed history block. This delegates to
+    the shared projector; it does not own another formatter. *)
+
 type row =
   { at : float  (** The server's [ts], the sort key. *)
   ; kind : kind
   ; text : string
-      (** What to draw. Empty for [Tool_calls] and [Reasoning], whose rows
-          carry the text. *)
+      (** What to draw. Empty for [Tool_calls] and [Reasoning], whose typed
+          block or lines carry the content. *)
   }
 
 type decoded =

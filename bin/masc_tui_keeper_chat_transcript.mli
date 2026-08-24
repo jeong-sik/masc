@@ -29,18 +29,76 @@ type interrupt =
           flight, or the cancel itself failed. Carries its reason. *)
   | Signal_error of string  (** The request never got an answer. *)
 
-(** One tool call the turn made. *)
-type tool_call =
-  { call_id : string
+(** What the source says happened to a tool call. Live calls distinguish a
+    call still accepting arguments from one whose invocation ended but whose
+    result has not landed. Durable traces additionally distinguish an explicit
+    failure, an explicitly open call, and an absent outcome. *)
+type tool_outcome =
+  | Started
+  | Awaiting_result
+  | Returned
+  | Failed
+  | Never_returned
+  | Outcome_unrecorded
+
+(** One tool call as shared by the live turn and durable history decoders.
+    This remains typed until {!project_tool_block}; consumers never recover
+    identity or outcome by parsing a rendered row. *)
+type tool_activity = private
+  { call_id : string option
+      (** Stable producer identity when the source carried one. [None] is kept
+          for a trace step that did not carry an id; no positional id is
+          invented. *)
   ; tool_name : string
-  ; args : string  (** Argument text accumulated so far. *)
+  ; args : string  (** Argument text accumulated or persisted by the source. *)
   ; subject : string option
       (** The one argument a reader names the call by, or [None] while the
           arguments are still arriving or carry no known key. Same naming as
           the connector trail and the dashboard. *)
-  ; ended : bool
-  ; result_ready : bool
+  ; outcome : tool_outcome
+  ; duration : string option
+      (** The source's duration label. Live events do not currently carry one,
+          so they retain [None]. *)
   }
+
+(** A contiguous block of tool calls. [omitted_steps] is a durable transcript
+    fact, not the number of rows a compact projection hides. *)
+type tool_block = private
+  { activities : tool_activity list
+  ; omitted_steps : int
+  }
+
+type tool_projection_mode =
+  | Compact
+  | Full
+
+(** Rows derived from one typed block. Both modes retain [activities] in the
+    same order. [hidden_activity_rows] is exact: zero for [Full], and the
+    number of per-call detail rows folded into a compact summary. *)
+type tool_projection = private
+  { activities : tool_activity list
+  ; rows : string list
+  ; hidden_activity_rows : int
+  ; omitted_steps : int
+  }
+
+val make_tool_activity :
+  call_id:string option ->
+  tool_name:string ->
+  args:string ->
+  outcome:tool_outcome ->
+  duration:string option ->
+  tool_activity
+(** Build an activity and derive its [subject] through the shared tool-subject
+    authority. History and live projection must not derive it independently. *)
+
+val tool_block : ?omitted_steps:int -> tool_activity list -> tool_block
+
+val project_tool_block : tool_projection_mode -> tool_block -> tool_projection
+(** The only tool-row formatter. [Full] preserves the existing one-row-per-call
+    output. [Compact] folds two or more calls into one outcome summary and
+    states the exact number of hidden detail rows. Neither mode fabricates
+    missing identity, duration, outcome, or omitted transcript steps. *)
 
 (** Lines the live reader could not read. Kept because a pane that drops what
     it does not understand looks like a keeper that did nothing. *)
@@ -86,33 +144,25 @@ val thinking_lines : t -> string list
     last line alone -- reasoning is the only part of a live turn the
     durable transcript does not keep, so the pane is the one place it can
     be read. *)
-val tool_calls : t -> tool_call list  (** In the order the stream opened them. *)
+val tool_calls : t -> tool_activity list
+(** In the order the stream opened them. *)
 val unreadable : t -> unreadable option
 
 (** One stretch of the turn, in arrival order. A tool-call round interleaves
     reasoning, calls and reply text; {!text}, {!thinking_lines} and
     {!tool_rows} answer the totals, this answers the order, which is what a
-    reader follows a long turn by. Strings are already terminal-safe and
-    formatted the way the flat accessors format them. *)
+    reader follows a long turn by. Tool stretches stay typed; text and
+    reasoning strings are terminal-safe. *)
 type trail_item =
   | Trail_thinking of string list
       (** Non-blank reasoning lines of one contiguous stretch. *)
-  | Trail_tools of string list
-      (** Rendered rows of one contiguous run of tool calls, aligned within
-          the run. A call keeps updating its row (arguments, result) after
-          later stretches open. *)
+  | Trail_tools of tool_block
+      (** One contiguous run of typed calls. A call keeps updating its facts
+          (arguments, outcome) after later stretches open. *)
   | Trail_text of string  (** One contiguous stretch of reply text. *)
 
 val trail : t -> trail_item list
 (** Empty stretches are dropped, so every item draws at least one row. *)
-
-val completed_tool_rows : (string * string) list -> string list
-(** Rows for tool calls read back from the durable transcript, given as
-    (tool name, argument text) pairs in the order they were made.
-
-    Formatted by the same function {!tool_rows} uses, so a turn watched live
-    and the same turn scrolled back after a restart read identically. They
-    always carry the finished marker: a persisted call is one that returned. *)
 
 val tool_rows : t -> string list
 
@@ -120,33 +170,9 @@ val tool_rows : t -> string list
     marker for how far the call got, the tool's name, and the argument it is
     known by.
 
-    The same strings are used for the live rows and for the row block kept in
-    the transcript once the turn ends, so what an operator watched and what
-    they scroll back to are not formatted by two different functions. *)
-
-(** How a tool step recorded in an autonomous turn's trace ended. The server
-    writes one of [ok], [err], [pending]; a step with no status at all is the
-    fourth case, kept apart from [pending] because "the trace closed with the
-    call open" and "the trace did not say" are different facts. *)
-type persisted_tool_outcome =
-  | Returned  (** [status: "ok"] *)
-  | Failed  (** [status: "err"] *)
-  | Never_returned  (** [status: "pending"] *)
-  | Outcome_unrecorded  (** no [status] field *)
-
-val persisted_tool_rows :
-  (persisted_tool_outcome * string * string * string option) list -> string list
-(** Rows for the tool steps of one autonomous turn read back from the
-    transcript's trace block, given as (outcome, tool name, argument text,
-    duration label) in the order the turn made them.
-
-    Formatted by the same function {!tool_rows} uses, so a turn the keeper
-    ran on its own reads like one watched live: the finished glyph for a call
-    that returned, a distinct one for a call that returned an error, and the
-    open glyph for a call the trace never saw finish, and [?] for a step
-    whose outcome the trace did not record. The duration follows the subject
-    only when the server recorded one, which it does for a call that
-    finished. *)
+    This is the [Full] compatibility accessor for the current pane. New live
+    and history consumers carry {!tool_block} to the render boundary and call
+    {!project_tool_block} explicitly. *)
 (** How a status row reads. *)
 type status_kind =
   | Progress  (** How the turn is going. *)
@@ -168,4 +194,3 @@ val status_rows : now:float -> t -> (status_kind * string) list
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before
     [started_at] drops the age instead of printing a negative one. *)
-

@@ -829,7 +829,15 @@ let settle_live_turn state (request : Keeper_chat.request) =
     when String.equal
            (Keeper_chat_transcript.request_id live)
            request.Keeper_chat.request_id ->
-      (match Keeper_chat_transcript.tool_rows live with
+      let block =
+        Keeper_chat_transcript.tool_block
+          (Keeper_chat_transcript.tool_calls live)
+      in
+      let projection =
+        Keeper_chat_transcript.project_tool_block Keeper_chat_transcript.Full
+          block
+      in
+      (match projection.rows with
        | [] -> ()
        | rows ->
            append_chat_history state request Message_tool
@@ -1532,8 +1540,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         , row.text )
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
     | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
-    | Keeper_chat_history.Tool_calls rows ->
-        (Message_tool, String.concat "\n" rows)
+    | Keeper_chat_history.Tool_calls block ->
+        (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, String.concat "\n" lines)
   in

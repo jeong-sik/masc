@@ -2973,8 +2973,13 @@ let render_keeper_message (state : state) =
                     (if state.msg_thinking_collapsed
                      then folded_thinking_summary (String.concat "\n" lines)
                      else String.concat "\n" lines)
-              | Keeper_chat_transcript.Trail_tools rows ->
-                  entry Message_layout.Tool "tools" (String.concat "\n" rows)
+              | Keeper_chat_transcript.Trail_tools block ->
+                  let projection =
+                    Keeper_chat_transcript.project_tool_block
+                      Keeper_chat_transcript.Full block
+                  in
+                  entry Message_layout.Tool "tools"
+                    (String.concat "\n" projection.rows)
               | Keeper_chat_transcript.Trail_text text ->
                   entry Message_layout.Keeper keeper_label text)
             (Keeper_chat_transcript.trail live)

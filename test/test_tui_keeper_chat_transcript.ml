@@ -23,10 +23,20 @@ let phase_to_string : Transcript.phase -> string = function
 
 let phase = testable (Fmt.of_to_string phase_to_string) ( = )
 
-let call_to_string (call : Transcript.tool_call) =
-  Printf.sprintf "%s|%s|%s|%b|%b" call.tool_name call.args
-    (Option.value ~default:"-" call.subject)
-    call.ended call.result_ready
+let outcome_to_string : Transcript.tool_outcome -> string = function
+  | Transcript.Started -> "started"
+  | Transcript.Awaiting_result -> "awaiting_result"
+  | Transcript.Returned -> "returned"
+  | Transcript.Failed -> "failed"
+  | Transcript.Never_returned -> "never_returned"
+  | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
+
+let call_to_string (call : Transcript.tool_activity) =
+  Printf.sprintf "%s|%s|%s|%s|%s|%s"
+    (Option.value ~default:"-" call.call_id)
+    call.tool_name call.args (Option.value ~default:"-" call.subject)
+    (outcome_to_string call.outcome)
+    (Option.value ~default:"-" call.duration)
 
 let tool_call = testable (Fmt.of_to_string call_to_string) ( = )
 
@@ -60,13 +70,10 @@ let test_tool_call_is_named_the_way_the_other_surfaces_name_it () =
   match Transcript.tool_calls t with
   | [ call ] ->
       check tool_call "the row carries the file, not the whole argument object"
-        { Transcript.call_id = "c1"
-        ; tool_name = "read_file"
-        ; args = "{\"file_path\":\"lib/keeper/a.ml\"}"
-        ; subject = Some "lib/keeper/a.ml"
-        ; ended = true
-        ; result_ready = true
-        }
+        (Transcript.make_tool_activity ~call_id:(Some "c1")
+           ~tool_name:"read_file"
+           ~args:"{\"file_path\":\"lib/keeper/a.ml\"}"
+           ~outcome:Transcript.Returned ~duration:None)
         call
   | other -> failf "expected one call, got %d" (List.length other)
 
@@ -80,7 +87,7 @@ let test_calls_keep_stream_order () =
   check (list string) "rows read in the order the turn opened them"
     [ "read_file"; "edit_file"; "shell_light" ]
     (Transcript.tool_calls t
-     |> List.map (fun (c : Transcript.tool_call) -> c.Transcript.tool_name))
+     |> List.map (fun (c : Transcript.tool_activity) -> c.Transcript.tool_name))
 
 let test_snapshot_replaces_accumulated_args () =
   let t = fresh () in
@@ -428,13 +435,61 @@ let test_tool_rows_mark_how_far_each_call_got () =
         (contains ~needle:"a.ml" open_call)
   | rows -> failf "expected three rows, got %d" (List.length rows)
 
+let test_compact_and_full_keep_the_same_typed_facts () =
+  let activities =
+    [ Transcript.make_tool_activity ~call_id:(Some "c1")
+        ~tool_name:"read_file" ~args:"{\"file_path\":\"a.ml\"}"
+        ~outcome:Transcript.Returned ~duration:(Some "12ms")
+    ; Transcript.make_tool_activity ~call_id:(Some "c2")
+        ~tool_name:"edit_file" ~args:"{\"file_path\":\"b.ml\"}"
+        ~outcome:Transcript.Failed ~duration:(Some "18ms")
+    ; Transcript.make_tool_activity ~call_id:None ~tool_name:"glob" ~args:""
+        ~outcome:Transcript.Outcome_unrecorded ~duration:None
+    ]
+  in
+  let block = Transcript.tool_block ~omitted_steps:2 activities in
+  let full = Transcript.project_tool_block Transcript.Full block in
+  let compact = Transcript.project_tool_block Transcript.Compact block in
+  check (list tool_call) "full retains identity, order, outcome and duration"
+    activities full.Transcript.activities;
+  check (list tool_call) "compact retains the exact same typed facts" activities
+    compact.Transcript.activities;
+  check int "full retains the source omission count" 2 full.omitted_steps;
+  check int "compact retains the same source omission count" 2
+    compact.omitted_steps;
+  check (list string) "full keeps the shipping row bytes"
+    [ "✓ read_file a.ml · 12ms"
+    ; "✗ edit_file b.ml · 18ms"
+    ; "? glob"
+    ; "(2 steps not carried by the transcript)"
+    ]
+    full.rows;
+  check int "full has three details plus the transcript omission" 4
+    (List.length full.rows);
+  check int "full hides no detail row" 0 full.hidden_activity_rows;
+  check int "compact keeps its summary and the transcript omission" 2
+    (List.length compact.rows);
+  check int "compact states exactly how many rows it hid" 3
+    compact.hidden_activity_rows;
+  let summary = List.hd compact.rows in
+  check bool "the compact row does not hide the failure" true
+    (contains ~needle:"1 failed" summary);
+  check bool "the compact row carries the exact hidden count" true
+    (contains ~needle:"3 detail rows hidden" summary);
+  check string "compact does not count the visible omission as hidden"
+    (List.nth full.rows 3) (List.nth compact.rows 1)
+
+let full_tool_rows block =
+  (Transcript.project_tool_block Transcript.Full block).Transcript.rows
+
 (* The shape a reader follows a long turn by: thinking, then the call, then
    more thinking, then the reply — not three pooled blocks. This is the order
    the live pane draws. *)
 let trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_thinking lines ->
       "thinking(" ^ String.concat "\\n" lines ^ ")"
-  | Transcript.Trail_tools rows -> "tools(" ^ String.concat "\\n" rows ^ ")"
+  | Transcript.Trail_tools block ->
+      "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
   | Transcript.Trail_text text -> "text(" ^ text ^ ")"
 
 let trail_item = testable (Fmt.of_to_string trail_item_to_string) ( = )
@@ -456,12 +511,13 @@ let test_trail_keeps_arrival_order () =
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_thinking first
-    ; Transcript.Trail_tools rows
+    ; Transcript.Trail_tools block
     ; Transcript.Trail_thinking second
     ; Transcript.Trail_text reply
     ] ->
       check (list string) "the first stretch of reasoning stands alone"
         [ "find the file first" ] first;
+      let rows = full_tool_rows block in
       check int "one call, one row" 1 (List.length rows);
       check bool "the row carries the result marker" true
         (contains ~needle:"✓" (List.hd rows));
@@ -482,7 +538,8 @@ let test_trail_groups_consecutive_calls_into_one_block () =
     ; Live.Text "done"
     ];
   match Transcript.trail t with
-  | [ Transcript.Trail_tools rows; Transcript.Trail_text _ ] ->
+  | [ Transcript.Trail_tools block; Transcript.Trail_text _ ] ->
+      let rows = full_tool_rows block in
       check int "two consecutive calls draw as one block" 2 (List.length rows)
   | items ->
       failf "expected tools/text, got %d item(s): %s" (List.length items)
@@ -501,7 +558,8 @@ let test_trail_updates_a_call_after_later_stretches_open () =
     ; Live.Tool_result { call_id = "c1" }
     ];
   match Transcript.trail t with
-  | [ Transcript.Trail_tools rows; Transcript.Trail_thinking _ ] ->
+  | [ Transcript.Trail_tools block; Transcript.Trail_thinking _ ] ->
+      let rows = full_tool_rows block in
       let row = List.hd rows in
       check bool "the late arguments reach the earlier row" true
         (contains ~needle:"a.ml" row);
@@ -543,6 +601,8 @@ let () =
             test_snapshot_replaces_accumulated_args
         ; test_case "a fragment with no open call is dropped" `Quick
             test_fragment_for_an_unopened_call_is_dropped
+        ; test_case "compact and full keep the same typed facts" `Quick
+            test_compact_and_full_keep_the_same_typed_facts
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick

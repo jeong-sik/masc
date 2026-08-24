@@ -52,6 +52,19 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val dress_bare_links :
+  open_style:string -> close_style:string -> string -> string
+(** Style every bare [http://]/[https://] run in [text].
+
+    For the URL pasted as plain text — a markdown link already carries its
+    own spans. The URL token ends at whitespace, a control byte (so a
+    styling escape already in the row is never swallowed), or a closing
+    quote/bracket, which is how prose most often ends one. Rows are styled
+    after wrapping, so a URL split across rows gets each fragment dressed.
+    [close_style] is the caller's row-restoring sequence, not a bare reset:
+    a reset alone would strip the row's own dress from everything after the
+    link. *)
+
 val fit_width : string -> int -> string
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
     or renderer-owned ANSI CSI sequence. Short text is padded to the budget. *)

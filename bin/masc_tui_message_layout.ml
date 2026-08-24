@@ -298,6 +298,38 @@ let fit_width text width =
       prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
     else text ^ String.make (width - cells) ' '
 
+let dress_bare_links ~open_style ~close_style text =
+  let is_url_end ch =
+    match ch with
+    | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
+    | _ -> Char.code ch < 0x20
+  in
+  let length = String.length text in
+  let buffer = Buffer.create (length + 16) in
+  let starts_at index prefix =
+    let plen = String.length prefix in
+    index + plen <= length && String.equal (String.sub text index plen) prefix
+  in
+  let rec loop index =
+    if index >= length then ()
+    else if starts_at index "http://" || starts_at index "https://" then begin
+      let rec url_end i =
+        if i < length && not (is_url_end text.[i]) then url_end (i + 1) else i
+      in
+      let stop = url_end index in
+      Buffer.add_string buffer open_style;
+      Buffer.add_string buffer (String.sub text index (stop - index));
+      Buffer.add_string buffer close_style;
+      loop stop
+    end
+    else begin
+      Buffer.add_char buffer text.[index];
+      loop (index + 1)
+    end
+  in
+  loop 0;
+  Buffer.contents buffer
+
 let composer_max_rows = 5
 
 let composer_lines ~max_rows input =

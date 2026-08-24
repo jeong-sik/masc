@@ -726,9 +726,31 @@ let test_a_backwards_clock_says_nothing () =
   check (option string) "later start than now" None
     (Layout.age_text ~now:100. ~since:104.)
 
+(* Bare-link dressing: styles the URL run only, restores the caller's row
+   style after it, and never swallows an escape already in the row. *)
+let test_bare_links_are_dressed_and_bounded () =
+  let dress = Layout.dress_bare_links ~open_style:"<U>" ~close_style:"</U>" in
+  check string "a bare url is dressed"
+    "see <U>https://example.com/a?b=1</U> now"
+    (dress "see https://example.com/a?b=1 now");
+  check string "a bracketed url stops at the bracket"
+    "(<U>https://example.com</U>)"
+    (dress "(https://example.com)");
+  check string "an escape ends the token"
+    "<U>https://a.io</U>\x1b[0m tail"
+    (dress "https://a.io\x1b[0m tail");
+  check string "text with no url is untouched" "plain words"
+    (dress "plain words");
+  check string "http without slashes is not a link" "httpx and http:"
+    (dress "httpx and http:")
+
 let () =
   run "tui_message_layout"
-    [ ( "message rows"
+    [
+      ( "bare links"
+      , [ test_case "dressed and bounded" `Quick
+            test_bare_links_are_dressed_and_bounded
+        ] ); ( "message rows"
       , [ test_case "keeps latest reply at 20/40/80 columns" `Quick
             test_keeps_latest_reply
         ; test_case "keeps newest metadata and body bytes" `Quick

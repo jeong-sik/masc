@@ -864,6 +864,12 @@ let optional_string_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a string or null" bad
 
+let optional_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok (Some value)
+  | `Null -> Ok None
+  | bad -> field_type_error key "a boolean or null" bad
+
 let required_int_field json key =
   match member key json with
   | `Int value -> Ok value
@@ -1129,9 +1135,14 @@ type tool_entry = {
   tl_direct_call : bool;
 }
 
+type inventory_freshness =
+  | Warming
+  | Settled
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
+  ts_freshness : inventory_freshness;
 }
 
 type connector = {
@@ -1256,7 +1267,16 @@ let decode_tool_snapshot json =
   let* tools_json = required_list_field inventory "tools" in
   let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
   let* ts_count = required_int_field inventory "count" in
-  Ok { ts_tools; ts_count }
+  (* Only the warming placeholder carries this flag, and it carries it as
+     [true]; a payload built from a real inventory does not mention it. So an
+     absent flag is a built inventory, and the pane can tell "the server has
+     not looked yet" apart from "there are none" -- which it could not, and so
+     reported a warming server as a workspace with no tools registered. *)
+  let* warming = optional_bool_field json "is_warming" in
+  let ts_freshness =
+    match warming with Some true -> Warming | Some false | None -> Settled
+  in
+  Ok { ts_tools; ts_count; ts_freshness }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in

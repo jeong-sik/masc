@@ -2989,6 +2989,8 @@
 (include stanzas/test_tui_paste_spill.inc)
 (include stanzas/test_keeper_sandbox_root_by_profile.inc)
 
+(include stanzas/test_tui_utf8_input.inc)
+
 (test
  (name test_code_address)
  (modules test_code_address)

@@ -99,6 +99,66 @@ let test_the_cap_still_finds_the_marker () =
     (next ())
 ;;
 
+(* A dropped file arrives as the shell would want it, and the draft is not a
+   shell. Recognising that shape is only safe if everything else is refused:
+   the operator has no other way to paste a backslash, so a false positive
+   silently rewrites bytes they meant to send. The refusals below matter more
+   than the acceptance. *)
+
+let test_a_dropped_path_loses_its_escapes () =
+  match
+    Masc_tui_paste.unescaped_path "/Users/dancer/Desktop/screen\\ shot\\ 1.png"
+  with
+  | Some path ->
+    check string "spaces are spaces" "/Users/dancer/Desktop/screen shot 1.png" path
+  | None -> fail "an escaped path was not recognised"
+;;
+
+let test_a_hangul_path_survives () =
+  (* The bytes that made this worth fixing. Multi-byte characters are copied
+     through untouched; only the escapes go. *)
+  match
+    Masc_tui_paste.unescaped_path "/Users/dancer/Desktop/스크린샷\\ 2026-08-25.png"
+  with
+  | Some path ->
+    check string "hangul intact" "/Users/dancer/Desktop/스크린샷 2026-08-25.png" path
+  | None -> fail "an escaped hangul path was not recognised"
+;;
+
+let test_an_unescaped_path_is_still_a_path () =
+  match Masc_tui_paste.unescaped_path "/tmp/plain.png" with
+  | Some path -> check string "unchanged" "/tmp/plain.png" path
+  | None -> fail "a path with nothing to unescape was refused"
+;;
+
+let refuses name text =
+  match Masc_tui_paste.unescaped_path text with
+  | None -> ()
+  | Some path -> failf "%s was rewritten to %S" name path
+;;
+
+let test_a_code_snippet_is_left_alone () =
+  (* "\\n" in pasted code is two characters the operator wants. Treating the
+     backslash as escaping would hand them a bare "n". *)
+  refuses "a snippet" "let x = \"a\\nb\""
+;;
+
+let test_prose_is_left_alone () = refuses "prose" "back\\slash in the middle"
+
+let test_a_relative_path_is_left_alone () =
+  (* Only an absolute path is the drop shape; a relative one is as likely to
+     be prose that happens to contain a slash. *)
+  refuses "a relative path" "docs/screen\\ shot.png"
+;;
+
+let test_a_multi_line_paste_is_left_alone () =
+  refuses "two lines" "/tmp/one.png\n/tmp/two.png"
+;;
+
+let test_a_trailing_backslash_is_left_alone () =
+  refuses "a trailing backslash" "/tmp/odd\\"
+;;
+
 let () =
   run
     "tui_paste"
@@ -115,6 +175,21 @@ let () =
             test_a_partial_marker_before_the_end_is_text
         ; test_case "an unterminated paste keeps what arrived" `Quick
             test_an_unterminated_paste_keeps_what_arrived
+        ] )
+    ; ( "dropped paths"
+      , [ test_case "escapes are removed" `Quick test_a_dropped_path_loses_its_escapes
+        ; test_case "hangul survives" `Quick test_a_hangul_path_survives
+        ; test_case "a plain path passes through" `Quick
+            test_an_unescaped_path_is_still_a_path
+        ; test_case "a code snippet is left alone" `Quick
+            test_a_code_snippet_is_left_alone
+        ; test_case "prose is left alone" `Quick test_prose_is_left_alone
+        ; test_case "a relative path is left alone" `Quick
+            test_a_relative_path_is_left_alone
+        ; test_case "a multi-line paste is left alone" `Quick
+            test_a_multi_line_paste_is_left_alone
+        ; test_case "a trailing backslash is left alone" `Quick
+            test_a_trailing_backslash_is_left_alone
         ] )
     ; ( "cap"
       , [ test_case "counts what it drops" `Quick

@@ -3336,6 +3336,54 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
 
+(* Under the Reasoning_effort dialect the wire field comes from the declared
+   effort, not from enable_thinking, so a model row that names an effort has
+   to reach the materialized provider config. It did not: only the
+   official-client path read spec.reasoning_effort, which left an HTTP model
+   whose endpoint honours the control reasoning on every turn with no way to
+   say otherwise. *)
+let test_runtime_toml_reasoning_effort_flows_to_provider_config () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.undeclared]\n\
+     api-name = \"undeclared\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.quiet]\n\
+     api-name = \"quiet\"\n\
+     max-context = 1024\n\
+     reasoning-effort = \"none\"\n\
+     \n\
+     [local.undeclared]\n\
+     \n\
+     [local.quiet]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.undeclared\"\n"
+  in
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "runtime TOML should materialize: %s" msg
+    | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+      let effort id =
+        match
+          List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
+        with
+        | None -> failf "expected runtime %s" id
+        | Some rt ->
+          Option.map
+            Llm_provider.Reasoning_effort.to_string
+            (agent_core_provider_config rt).reasoning_effort
+      in
+      check (option string) "declared effort reaches the provider config"
+        (Some "none") (effort "local.quiet");
+      check (option string) "omitted effort stays absent" None
+        (effort "local.undeclared"))
+
 let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
   with_fake_runtime_model_catalog @@ fun () ->
   let base =
@@ -4205,6 +4253,8 @@ let () =
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick
             test_runtime_toml_max_concurrent_flows_to_provider_config;
+          test_case "reasoning-effort flows from model row to provider config" `Quick
+            test_runtime_toml_reasoning_effort_flows_to_provider_config;
           test_case "max-request-body-bytes is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_request_body_bytes;
           test_case "return-progress is optional opt-in" `Quick

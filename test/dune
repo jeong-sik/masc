@@ -809,6 +809,11 @@
 ; them dune keeps a cached pass and the suite never re-runs when the code it
 ; asserts on changes.
 (test
+ (name test_chat_send_checks_the_registry)
+ (modules test_chat_send_checks_the_registry)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (deps

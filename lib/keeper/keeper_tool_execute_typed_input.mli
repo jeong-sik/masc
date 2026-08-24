@@ -36,6 +36,14 @@ type input_source =
   | Inherit_input  (** default; the child keeps the parent's stdin *)
   | Empty_input  (** read nothing — [/dev/null] *)
   | Read_file of { path : string }  (** absolute path opened for reading *)
+  | Literal_input of { bytes : string }
+      (** the bytes themselves, with no file anywhere.
+
+          This is what a heredoc is, and until it existed the tool could tell a
+          caller its heredoc belonged in the stdin field while the stdin field
+          had nowhere to put it. Content never reaches the filesystem, so
+          nothing has to be cleaned up and nothing else can read it on the way
+          past. *)
       (** stdin cannot duplicate another descriptor: a merge is carried out on
           captured output and stdin is not a capture. *)
 

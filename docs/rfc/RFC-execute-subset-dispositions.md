@@ -299,21 +299,59 @@ already-parsed. Concretely, the structural invariants `lower_typed_pipeline`
 enforces (no nested `Pipeline`, no empty stage list) move into a function both
 entry points call, so a hand-built IR cannot skip them.
 
-### 3.7 Staging
+### 3.7 Staging, and what the corpus says
 
-Ordered so that no step regresses a working call:
+The order below was written before anything was counted. `tools/costume_census`
+runs the same recogniser and classifier over the recorded Execute calls, which
+answers the question the live tap answers, over a month instead of an
+afternoon. Run over `<base-path>/.masc/tool_calls/2026-08/*.jsonl`, 2026-08-25:
 
-1. **Shadow count.** Route argv-shaped shells through `script_to_shell_ir` for
-   classification only; keep executing as today; record the reason tag. This is
-   the corpus tap §3.5 names, which is currently a comment and not code. No
-   behaviour change.
-2. **A: glob/brace + heredoc/here-string.** Both are pure. Covers 284 + heredoc
-   traffic with no effectful gating.
-3. **§3.6** typed-path invariants, and **C/D** refusals carrying replacements.
-4. **Flip §3.5** to execution once the shadow count shows the remaining refusals
-   are only C and D.
-5. **B**, on its own RFC-sized change, since it splits `dispatch_result`
-   across 14 non-test consumers.
+```
+execute=29610  argv_form=28858  costumes=1584
+
+what the gate would have said        what the caller should have called
+   1212  representable                  252  move_to_field:connector
+    252  command_separator                79  call_this_instead:execute-twice
+     79  cmd_subst                        32  move_to_field:stdin
+     27  heredoc                           5  call_this_instead:spawn
+      5  background                        4  call_this_instead:write-then-execute
+      5  redirect
+      4  subshell
+```
+
+Two entries of the first draft do not survive it.
+
+**`glob_brace` is zero.** The 284 this RFC first quoted counted argv that
+*contained* a glob character, and §3.2 already found that a wildcard is
+`representable` rather than refused. Brace expansion does not appear in a month
+of traffic. The glob half of step 2 is cancelled: there is nothing to rewrite.
+
+**76.5% of the escapes carry nothing the IR cannot hold.** 1212 of 1584
+`sh -c` calls are `representable`, so routing them through the gate costs
+nothing and buys them path scope, redirect policy, and the connector rules.
+That makes the flip the highest-value step rather than the last one -- but it
+must be partial. A blanket flip would refuse the other 372, which run today.
+
+The largest refusal is `;` (252, 16% of costumes). It is the one thing
+`Shell_ir.connector` deliberately cannot say, so the most common reason to
+leave the typed surface is to ignore whether the last command worked.
+
+Revised order:
+
+1. **Shadow count** -- shipped. `Shell_costume` plus `hidden_script_findings`,
+   and `tools/costume_census` for the recorded corpus.
+2. **The rewrites** -- shipped for `;` and the script constructs
+   (`Subset_rewrite`), and for heredoc, which needed `input_source` to gain a
+   literal before its own advice was actionable. **Glob is cancelled.**
+3. **§3.6 typed-path invariants** -- shipped.
+4. **Flip §3.5, for the representable only.** Lower an argv-shaped shell
+   through the gate when the classifier says `representable`, and leave the
+   rest on today's path with the tap still recording them. 1212 calls gain the
+   boundary and none change what they do.
+5. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus, and it
+   splits `dispatch_result` across 14 non-test consumers. The count says this
+   is last on traffic, not that it is unnecessary -- backgrounding has no
+   alternative today, so a caller that needs it cannot ask.
 
 Steps 1-4 leave `dispatch_result` untouched.
 

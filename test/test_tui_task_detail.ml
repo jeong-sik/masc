@@ -29,6 +29,7 @@ let domain_task ~id ~(status : Masc_domain.task_status) () :
   ; cycle_count = 0
   ; reclaim_policy = None
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 let detail_row ~detail_id tasks =

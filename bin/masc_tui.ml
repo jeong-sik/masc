@@ -350,21 +350,40 @@ let keeper_message_page_rows state =
   let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
-(* What this pane has sent to the keeper on screen, oldest first. The arrows
-   walk it the way a shell walks its own history. That is why the wheel no
-   longer arrives as the same key: one of the two had to be wrong while they
-   shared it, and scrolling has the wheel and the page keys. *)
-let own_sent_messages (state : state) =
+(* What this pane has of the operator's own lines for the keeper on screen,
+   oldest first. The arrows walk it the way a shell walks its own history.
+   That is why the wheel no longer arrives as the same key: one of the two had
+   to be wrong while they shared it, and scrolling has the wheel and the page
+   keys.
+
+   Sent lines come from [msg_history], which is written when a line is
+   dispatched. A line typed during a turn has not been dispatched, so it is
+   not there -- it is in the queue, and it is the newest thing the operator
+   typed. Walking only the sent ones stepped straight past it, which is how a
+   queued line could be neither read back nor edited. *)
+let own_typed_messages (state : state) =
   let target = Option.value ~default:"" state.msg_target_keeper_name in
-  state.msg_history
-  |> List.filter (fun entry ->
-         (match entry.me_role with
-          | Message_user label -> String.equal label "you"
-          | Message_keeper | Message_status | Message_error | Message_tool
-          | Message_thinking ->
-              false)
-         && String.equal entry.me_keeper_name target)
-  |> List.map (fun entry -> entry.me_text)
+  let sent =
+    state.msg_history
+    |> List.filter (fun entry ->
+           (match entry.me_role with
+            | Message_user label -> String.equal label "you"
+            | Message_keeper | Message_status | Message_error | Message_tool
+            | Message_thinking ->
+                false)
+           && String.equal entry.me_keeper_name target)
+    |> List.map (fun entry -> entry.me_text)
+  in
+  (* Newest last, same as [sent], so one walk crosses both without a seam.
+     A line leaves the queue and enters the history in the same step it is
+     dispatched, so it is in exactly one of the two lists at any moment. *)
+  let queued =
+    Chat_queue.waiting state.msg_queued
+    |> List.filter (fun (queued_keeper, _) ->
+           String.equal queued_keeper target)
+    |> List.map snd
+  in
+  sent @ queued
 
 let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
@@ -374,7 +393,7 @@ let set_composer_text (state : state) text =
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
 let recall_older (state : state) =
-  let sent = own_sent_messages state in
+  let sent = own_typed_messages state in
   let count = List.length sent in
   if count = 0 then ()
   else begin
@@ -396,7 +415,7 @@ let recall_newer (state : state) =
       state.msg_recall_at <- None;
       set_composer_text state state.msg_recall_draft
   | Some at ->
-      let sent = own_sent_messages state in
+      let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
       let count = List.length sent in

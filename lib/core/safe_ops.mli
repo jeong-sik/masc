@@ -199,9 +199,6 @@ val json_int_opt : string -> Yojson.Safe.t -> int option
 val json_float_opt : string -> Yojson.Safe.t -> float option
 val json_bool_opt : string -> Yojson.Safe.t -> bool option
 
-val json_list : string -> Yojson.Safe.t -> Yojson.Safe.t list
-(** Extract a JSON list by key. Returns [[]] if missing or non-list. *)
-
 val json_list_opt : string -> Yojson.Safe.t -> Yojson.Safe.t list option
 (** Extract a JSON list by key. Returns [None] if missing or non-list. *)
 

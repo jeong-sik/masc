@@ -2412,6 +2412,7 @@ let gc_make_task ~id ~created_at ~status : Masc_domain.task =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 ;;
 
@@ -2657,6 +2658,7 @@ let test_append_archive_tasks () =
       ; reclaim_policy = None
       ; execution_links = Masc_domain.no_execution_links
       ; do_not_reclaim_reason = None
+      ; skills = []
       }
     in
     Workspace.append_archive_tasks config [ task ];

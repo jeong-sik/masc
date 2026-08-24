@@ -1282,6 +1282,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
+    skills = [];
   }
 
 let terminal_fixture_epoch = 0.0

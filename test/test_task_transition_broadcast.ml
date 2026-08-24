@@ -64,6 +64,7 @@ let make_task ~id ~status : D.task =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 ;;
 

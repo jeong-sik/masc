@@ -1,0 +1,18 @@
+name = "masc_operator_confirm"
+description = """
+Confirm and execute a previously previewed operator action. Use this only \
+after masc_operator_action returns confirm_required=true."""
+
+[[params]]
+name = "actor"
+type = "string"
+
+[[params]]
+name = "confirm_token"
+type = "string"
+required = true
+
+[[params]]
+name = "decision"
+type = "string"
+enum = ["confirm", "deny"]

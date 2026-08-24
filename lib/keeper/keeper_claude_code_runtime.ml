@@ -911,7 +911,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
        passed [max_int], so a model that declares max-prompt-bytes was sent the
        whole history anyway and learned its ceiling only from the provider's
        rejection -- after the turn had already run. claude-sonnet-5 declares
-       524288, and rondo spent 29 minutes per attempt discovering it
+       524288, and one live keeper spent 29 minutes per attempt discovering it
        (2026-08-24). A runtime that declares nothing keeps the old behaviour.
 
        The ceiling is the smaller of the model's max-prompt-bytes and the

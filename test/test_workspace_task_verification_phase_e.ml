@@ -22,6 +22,7 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 let test_analysis_only_with_plain_notes_keeps_notes () =

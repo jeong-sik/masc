@@ -84,8 +84,8 @@ let chat_markdown_palette : Markdown.palette =
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)
-  ; code_keyword = (Ansi.yellow, Ansi.reset)
-  ; code_string = (Ansi.green, Ansi.reset)
+  ; code_keyword = (Theme.Syntax.keyword, Ansi.reset)
+  ; code_string = (Theme.Syntax.string, Ansi.reset)
   ; code_comment = (Ansi.gray, Ansi.reset)
   ; code_number = (Ansi.magenta, Ansi.reset)
   ; code_type = (Ansi.bold ^ Ansi.blue, Ansi.reset)
@@ -100,20 +100,6 @@ let chat_markdown ~width body =
    reverse-video badge gives the source a background that works with the
    terminal's own light or dark palette, while the body keeps its semantic
    Markdown colours. *)
-let chat_origin_style : Message_layout.style -> string = function
-  | Message_layout.User -> Ansi.cyan
-  | Message_layout.Keeper -> Ansi.blue
-  | Message_layout.Status -> Theme.warn
-  | Message_layout.Error -> Theme.bad
-  | Message_layout.Tool -> Ansi.magenta
-  | Message_layout.Thinking -> Ansi.gray
-
-let chat_body_style : Message_layout.style -> string = function
-  | Message_layout.User | Message_layout.Keeper -> Ansi.reset
-  | Message_layout.Status -> Theme.warn
-  | Message_layout.Error -> Theme.bad
-  | Message_layout.Tool | Message_layout.Thinking -> Ansi.dim
-
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
 let folded_thinking_summary body =
@@ -137,7 +123,7 @@ let render_chat_row buf cols (row : Message_layout.row) =
            after the link. *)
         Masc_tui_message_layout.dress_bare_links
           ~open_style:(Ansi.underline ^ Ansi.blue)
-          ~close_style:(Ansi.reset ^ chat_body_style row.style)
+          ~close_style:(Ansi.reset ^ Chat_theme.body row.style)
           rest
       in
       if
@@ -147,10 +133,10 @@ let render_chat_row buf cols (row : Message_layout.row) =
         let rest = String.sub text 2 (String.length text - 2) in
         box_line buf cols
           (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
-             (chat_origin_style row.style) Ansi.reset
-             (chat_body_style row.style) (dress rest) Ansi.reset))
+             (Chat_theme.origin row.style) Ansi.reset
+             (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols ~style:(chat_body_style row.style)
+        box_line_styled buf cols ~style:(Chat_theme.body row.style)
           (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
@@ -158,7 +144,7 @@ let render_chat_row buf cols (row : Message_layout.row) =
   | Message_layout.Metadata
       (Message_layout.Origin { timestamp; role_label; request_label }) ->
       let badge =
-        Printf.sprintf "%s%s %s %s" (chat_origin_style row.style) Ansi.reverse
+        Printf.sprintf "%s%s %s %s" (Chat_theme.origin row.style) Ansi.reverse
           role_label Ansi.reset
       in
       box_line buf cols
@@ -3066,6 +3052,37 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
+    (* What is waiting, in the order it will go. Drawn in full rather than as
+       a count: an operator who typed three lines during a turn needs to see
+       which three, and a queue that only says "3 waiting" is the same silence
+       that made a refused send look like a sent one.
+
+       [keeper_message_status_rows] has always reserved one row per waiting
+       line. #29818 rewrote the in-flight block above and took these rows out
+       with it, leaving the reservation behind: the history was sized as if
+       the queue were drawn, so each line typed during a turn took a row off
+       the conversation and put nothing in its place. *)
+    List.iteri
+      (fun index (queued_keeper, text) ->
+        (* First line only. A queued line can be a pasted paragraph, and the
+           budget counts one row for it, so this row has one row to fit in. *)
+        let body =
+          match String.index_opt text '\n' with
+          | None -> text
+          | Some cut -> String.sub text 0 cut ^ " …"
+        in
+        (* The operator can switch keepers while a turn runs, and a queued
+           line travels with the keeper it was written to. Naming the ones
+           that are not this pane's keeps a line from looking like it will go
+           to whoever is on screen. *)
+        let addressed =
+          if String.equal queued_keeper keeper_name then ""
+          else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
+        in
+        box_line_styled buf cols ~style:Ansi.dim
+          (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
+             (Keeper_chat.terminal_safe_text body)))
+      (Masc_tui_keeper_chat_queue.waiting state.msg_queued);
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

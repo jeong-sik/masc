@@ -64,14 +64,14 @@ module Ansi = struct
   let box_r = "\xe2\x94\xa4"  (* right tee *)
 end
 
-(** Semantic styles for state.
+(** Semantic styles for state and content syntax.
 
     A fact about health, phase, or attention draws through these names, so
     one remap -- a theme, a colourblind palette -- moves every reading at
-    once. The boundary: state goes through [Theme]; prose emphasis and
-    syntax colouring keep raw [Ansi] styles, because "this word is green"
-    is sometimes the content itself (a diff, a code literal) rather than a
-    reading of state. *)
+    once. The boundary: state goes through the top-level names; syntax colours
+    stay under [Syntax], because "this word is green" is content (a diff or a
+    code literal) rather than a reading of state. Renderers do not choose raw
+    red, yellow, or green themselves. *)
 module Theme = struct
   let ok = Ansi.green
   let warn = Ansi.yellow
@@ -80,6 +80,33 @@ module Theme = struct
   let muted = Ansi.dim
   let selection = Ansi.reverse
   let border_focus = Ansi.cyan
+
+  module Syntax = struct
+    let keyword = Ansi.yellow
+    let string = Ansi.green
+  end
+end
+
+(** One owner for the visual distinction between conversation roles.
+
+    Role and state are different axes: a Keeper message is not a success, and
+    a user message is not merely informational. The renderer asks this module
+    for its badge/gutter and body styles instead of rebuilding that mapping.
+    Both human and Keeper prose deliberately keep the terminal's foreground. *)
+module Chat_theme = struct
+  let origin : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User -> Ansi.cyan
+    | Masc_tui_message_layout.Keeper -> Ansi.blue
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool -> Ansi.magenta
+    | Masc_tui_message_layout.Thinking -> Ansi.gray
+
+  let body : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
+    | Masc_tui_message_layout.Status -> Theme.warn
+    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking -> Ansi.dim
 end
 
 (** A screen title.
@@ -101,15 +128,20 @@ let terminal_size_cache =
 let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
-(* Asked of the tty, not of [tput]. [tput] reads the size from TIOCGWINSZ on
-   its own stdout, and this probe captured that stdout through a pipe, so the
-   ioctl never saw a terminal and [tput] answered from the static terminfo
-   entry instead -- 80x24 for most terminals. The frame then drew at 80x24
-   inside whatever window the operator actually had, and only an exported
-   COLUMNS/LINES pair made it right by accident. Measured 2026-08-25 in a
-   120x40 pane: 24x80 without those variables, 40x120 with them.
+(* Asked of the tty itself, without a child process.
 
-   Two processes per resize become none. *)
+   [tput] reads the size from TIOCGWINSZ on its own stdout, and this probe
+   captured that stdout through a pipe, so the ioctl never saw a terminal and
+   [tput] answered from the static terminfo entry instead -- 80x24 for most
+   terminals, returned as though it were a measurement. #30187 found the other
+   half: since #30160 pointed stderr at a file, a child probe can inherit no
+   tty fd at all, which is why it reached for /dev/tty by name.
+
+   Both halves are answered by asking the kernel directly. [Terminal_size]
+   tries the three standard descriptors and then /dev/tty, and says [None]
+   rather than guessing when none of them is a terminal -- the [tput] fallback
+   is gone because a fabricated 80x24 is the failure, not the cure. Two
+   processes per resize become none. *)
 let probe_terminal_size () = Terminal_size.get ()
 
 (** Get terminal size (fallback to 80x24). *)

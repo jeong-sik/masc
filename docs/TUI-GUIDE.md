@@ -74,7 +74,7 @@ list, Recent Events, and active tasks.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Agents: 2  Approvals: 0  Incidents: 4
+   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
    Cluster: default          Project: me      websocket/steady  sse 3  ws 1  grpc :8936
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started
@@ -118,6 +118,42 @@ the last 1,000 and counts what falls off the end.
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
+
+### Acting
+
+Every keeper's actions as the runtime event feed delivers them, newest first:
+tool calls and their returns, turn boundaries and settlements, chat rows
+landing. This is the surface for watching ten keepers at once without
+opening ten chats.
+
+```
+ MASC Acting (212 of 640 held, actions)  01:12:04  [connected]
+   feed: live 640  dropped 0
+   Time     Keeper             Event            Detail
+   01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
+   01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
+   01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
+   01:11:51 taskmaster       ● turn start       turn 1738
+  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
+```
+
+The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
+started, `✓` a call returned, `✗` a failure, `●` a turn boundary, `■` a turn
+settled, `?` something needing attention, `·` the quiet kinds. A returned
+call shows how long it took when its start is among the events held; a
+call that began before the feed opened shows none.
+
+`f` switches between `actions` - what keepers did - and `everything`, which
+adds heartbeats, composite and snapshot pushes, and telemetry. On the live
+runtime those were more than half of the feed and said nothing a row could
+act on, so `actions` is the default. An event kind this build was not taught
+draws under both, by its name, so a new kind is noticed rather than hidden.
+
+Scrolling down into older rows (`j`) freezes the view: new events count up
+in `N new above (g)` on the status row instead of pushing the rows you are
+reading. `g` returns to the newest row and clears the count; `G` goes to the
+oldest held. The TUI holds the last 1,000 events; `dropped N` says how many
+fell off the end while it ran.
 
 ### Keepers
 
@@ -249,8 +285,10 @@ rows, so its trace block is not drawn a second time.
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
-promoted to a successful reply. One request may be in flight at a time. Drafts
-are retained per keeper while navigating.
+promoted to a successful reply. Requests are tracked per keeper, so a turn
+running for one keeper does not decide what `Enter` does in another's window;
+sends going elsewhere show as `(also sending to X)`. Drafts are retained per
+keeper while navigating.
 
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
@@ -382,7 +420,7 @@ Global, outside message input:
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next surface: Overview -> Keepers -> Approvals -> Board -> Planning -> System Logs -> Overview |
+| `Tab` | Next surface: Overview -> Acting -> Keepers -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
 | `q` | Quit |
@@ -404,12 +442,8 @@ Per surface:
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
-| `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed fence, replay only a replayable fence, or remove a rejected or settled fence by exact durable ID |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
-
-`Ctrl-R` stays available even when extra status rows leave the terminal too
-small for normal message input.
 
 ## Navigation
 

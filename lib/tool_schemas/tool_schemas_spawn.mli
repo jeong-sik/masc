@@ -1,8 +1,5 @@
-(** The four spawn actions with the schema each one runs.
-
-    The description travels with the TOML declaration rather than being
-    restated here: each schema is the whole [Masc_domain.tool_schema], and the
-    file the model is handed is the one that should carry it. *)
+(** The spawn tool surface: which four tools exist, what each one declares, and
+    which of them a caller may treat as read-only. *)
 
 type action =
   | Start
@@ -10,16 +7,22 @@ type action =
   | Wait
   | Stop
 
-type definition = {
-  action : action;
-  schema : Masc_domain.tool_schema;
-  read_only : bool;
-}
+(** [read_only] is the caller's question, not the store's: [Wait] changes
+    nothing and is still [false], because a surface that lets a read-only tool
+    block for a caller-supplied bound is a surface that can be made to hang.
+    The reason lives with the value in [tool_schemas_spawn.ml]. *)
+type definition =
+  { action : action
+  ; schema : Masc_domain.tool_schema
+  ; read_only : bool
+  }
 
-val definitions : definition list
-
-(** [definitions], projected to just the schema each action runs. *)
+(** Every spawn schema, in declaration order. This is what a tool surface
+    advertises. *)
 val schemas : Masc_domain.tool_schema list
 
-(** The definition whose schema is named [name], if any. *)
+(** [find_definition name] is the declaration whose schema carries [name], or
+    [None] when no spawn tool answers to it. Dispatch matches on the returned
+    [action] rather than on the name again, so a renamed tool moves in one
+    place. *)
 val find_definition : string -> definition option

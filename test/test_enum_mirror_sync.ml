@@ -269,6 +269,39 @@ let test_runtime_tool_owners_match () =
   check int "max_bytes default" Masc.Keeper_artifact_read.default_max_bytes (field "default")
 ;;
 
+(* keeper_surface_post caps two arrays, and [Keeper_surface_post] owns both
+   numbers. The descriptor used to build the mentions cap from the constant;
+   that copy is gone, so the file states it and this compares the two. The
+   block cap already had a check in the registry-integrity suite. *)
+let test_surface_post_caps_match_their_owner () =
+  let post =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_surface_post")
+        Tool_shard_types.surface_tools
+    with
+    | Some s -> s
+    | None -> failf "keeper_surface_post is absent"
+  in
+  let cap property =
+    match post.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "maxItems" p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s has no maxItems" property)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "mention_user_ids cap" Masc.Keeper_surface_post.max_user_mentions
+    (cap "mention_user_ids");
+  check int "blocks cap" Masc.Keeper_surface_post.max_rich_blocks (cap "blocks")
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -400,6 +433,10 @@ let () =
             "keeper status bounds"
             `Quick
             test_keeper_status_bounds_match_their_owner
+        ; test_case
+            "surface post caps"
+            `Quick
+            test_surface_post_caps_match_their_owner
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

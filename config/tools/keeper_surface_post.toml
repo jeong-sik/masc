@@ -15,20 +15,25 @@ new, the turn ends without a post."""
 name = "surface"
 type = "string"
 required = true
-description = "Lane to post to: 'dashboard', 'discord', or 'slack'"
+description = """
+Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
+this keeper is not bound to is an error, not a no-op."""
 
 [[params]]
 name = "content"
 type = "string"
 required = true
-description = "Message text to deliver on the lane"
+description = """
+Standard Markdown message to deliver. Discord renders it natively; Slack \
+renders it through the official Block Kit markdown block. When blocks is \
+provided, content is only the Slack notification fallback text."""
 
 [[params]]
 name = "channel_id"
 type = "string"
 description = """
-Bound Discord or Slack channel id; required only when more than one channel \
-is bound for the selected surface"""
+Bound Discord or Slack channel id. Required only when more than one channel \
+is bound for the selected surface; must be one of those bindings."""
 
 [[params]]
 name = "mention_user_ids"
@@ -37,8 +42,8 @@ items = { type = "string" }
 max_items = 100
 description = """
 Stable ids from keeper_surface_read participants to visibly mention. Slack \
-requires U.../W... ids; Discord requires decimal user snowflakes. Display \
-names such as @Vincent do not create API mentions."""
+requires U.../W... ids; Discord requires decimal user snowflakes. Never \
+guess an id from a display name; plain @name text is not an API mention."""
 
 [[params]]
 name = "thread_ts"
@@ -46,20 +51,19 @@ type = "string"
 description = """
 Slack timestamp of an existing thread's root message (from \
 keeper_surface_read). Posts this message as a reply inside that thread. \
-Slack surface only — a dashboard or discord target is rejected, not ignored. \
-When both this and a continuation thread exist, this value wins."""
+Slack surface only; when both this and a continuation thread exist, this \
+value wins."""
 
 [[params]]
 name = "blocks"
 type = "array"
 max_items = 50
 description = """
-Slack Block Kit blocks (chat.postMessage blocks parameter) for a \
-structurally rich PR report: section/header/divider/context blocks, color \
-banners, images. Slack surface only — a dashboard or discord target is \
-rejected, not ignored. Each block must be a JSON object carrying a non-empty \
-string \"type\" member. When blocks is present it is sent alongside content \
-(content remains the notification fallback text)."""
+Slack Block Kit blocks for chat.postMessage (at most 50, each a block object \
+with a \"type\" member). Slack surface only. content stays the notification \
+fallback text; when omitted, content renders as one markdown block. \
+Rendering mentions inside custom blocks is the author's responsibility; \
+mention_user_ids are still roster-validated."""
 
 [params.items]
 type = "object"

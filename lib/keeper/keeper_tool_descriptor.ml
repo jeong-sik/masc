@@ -331,15 +331,6 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
-let string_enum_property name values description =
-  ( name
-  , `Assoc
-      [ "type", `String "string"
-      ; "enum", `List (List.map (fun value -> `String value) values)
-      ; "description", `String description
-      ] )
-;;
-
 (* An empty ["required"] says nothing an absent one does not, and both readers
    fold them together: llm_provider/types.ml answers [None] and [`Null] with
    [Ok []], and tool_input_validation.ml treats a non-matching key the same
@@ -974,122 +965,21 @@ let library_read_schema =
     ]
 ;;
 
-let surface_read_schema =
-  object_schema
-    ~required:[ "surface" ]
-    [ property
-        "surface"
-        "string"
-        "Lane label exactly as shown in Connected Surfaces or chat history \
-         source: 'dashboard', 'discord', 'slack', or another connector's \
-         channel label. Rows written before source labelling carry no label \
-         and are not returned."
-    ; string_enum_property
-        "mode"
-        [ "local"; "channel"; "messages"; "members"; "member" ]
-        "Optional exact read mode. When absent, the request is exactly 'local' \
-         for the persisted lane; padded or unknown values are invalid. The \
-         other modes query Discord live and require surface='discord'."
-    ; property
-        "limit"
-        "integer"
-        "Maximum messages or Discord members to return (default 20; messages: \
-         1-100; members: 1-1000). The local participant roster covers the \
-         whole loaded lane."
-    ; property
-        "channel_id"
-        "string"
-        "Bound Discord channel snowflake. Optional when this keeper has one \
-         bound channel; required when it has multiple."
-    ; property
-        "user_id"
-        "string"
-        "Discord user snowflake, required for mode='member'."
-    ; property
-        "query"
-        "string"
-        "Optional member username/nickname prefix for mode='members'."
-    ; property
-        "discord_before"
-        "string"
-        "Discord message snowflake for backward paging in mode='messages'."
-    ; property
-        "discord_after"
-        "string"
-        "Discord message/member snowflake for forward paging. Do not send it \
-         together with discord_before."
-    ]
+(* These three were declared twice: here and in the surface shard, whose file
+   is config/tools/keeper_*.toml. The two copies carried the same shapes and
+   fifteen different sentences, and only the shard declared [before], which
+   keeper_tool_in_process_runtime reads for local-lane pagination -- so the
+   model was handed a schema that hid a parameter it could use. The shard is
+   now the one declaration; the wording that used to be here moved into it. *)
+let shard_surface_schema name =
+  match find_schema_opt Tool_shard_types.surface_tools name with
+  | Some schema -> schema.Masc_domain.input_schema
+  | None -> failwith (Printf.sprintf "surface shard is missing %s" name)
 ;;
 
-let surface_post_schema =
-  object_schema
-    ~required:[ "surface"; "content" ]
-    [ property
-        "surface"
-        "string"
-        "Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
-         this keeper is not bound to is an error, not a no-op."
-    ; property
-        "content"
-        "string"
-        "Standard Markdown message to deliver. Discord renders it natively; \
-         Slack renders it through the official Block Kit markdown block. \
-         When blocks is provided, content is only the Slack notification \
-         fallback text."
-    ; property
-        "channel_id"
-        "string"
-        "Bound Discord or Slack channel id. Required only when more than one \
-         channel is bound for the selected surface; must be one of those \
-         bindings."
-    ; property
-        "thread_ts"
-        "string"
-        "Slack timestamp of an existing thread's root message (from \
-         keeper_surface_read). Posts this message as a reply inside that \
-         thread. Slack surface only; when both this and a continuation \
-         thread exist, this value wins."
-    ; ( "blocks"
-      , `Assoc
-          [ "type", `String "array"
-          ; "items", `Assoc [ "type", `String "object" ]
-          ; "maxItems", `Int Keeper_surface_post.max_rich_blocks
-          ; ( "description"
-            , `String
-                "Slack Block Kit blocks for chat.postMessage (at most 50, \
-                 each a block object with a \"type\" member). Slack surface \
-                 only. content stays the notification fallback text; when \
-                 omitted, content renders as one markdown block. Rendering \
-                 mentions inside custom blocks is the author's \
-                 responsibility; mention_user_ids are still roster-validated." )
-          ] )
-    ; ( "mention_user_ids"
-      , `Assoc
-          [ "type", `String "array"
-          ; "items", `Assoc [ "type", `String "string" ]
-          ; "maxItems", `Int Keeper_surface_post.max_user_mentions
-          ; ( "description"
-            , `String
-                "Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Never guess an id from a display name; plain @name text is not an API mention." )
-          ] )
-    ]
-;;
-
-let person_note_set_schema =
-  object_schema
-    ~required:[ "speaker_id"; "note" ]
-    [ property
-        "speaker_id"
-        "string"
-        "Stable speaker id from the roster (Discord snowflake). Notes \
-         attach to ids, never to display names."
-    ; property
-        "note"
-        "string"
-        "What to remember about this person. Blank clears the note \
-         (tombstone)."
-    ]
-;;
+let surface_read_schema = shard_surface_schema "keeper_surface_read"
+let surface_post_schema = shard_surface_schema "keeper_surface_post"
+let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let memory_search_schema_source, memory_search_schema =
   base_schema_input "keeper_memory_search"

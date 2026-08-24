@@ -279,6 +279,34 @@ def send_and_wait(
 TAB_CYCLE_BOUND = 24
 
 
+def drain_until_quiet(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    quiet: float = 0.25,
+    cap: float = 3.0,
+) -> None:
+    """Read until the TUI has written nothing for [quiet] seconds.
+
+    A keypress's consequences are not one frame: the switch redraw can be
+    preceded by frames already in flight. The only moment a press can be
+    judged is after its output has stopped arriving.
+    """
+    deadline = time.monotonic() + cap
+    grown_at = time.monotonic()
+    length = len(output)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited while draining: {bytes(output)!r}")
+        select.select([master_fd], [], [], 0.05)
+        read_available(master_fd, output)
+        if len(output) != length:
+            length = len(output)
+            grown_at = time.monotonic()
+        elif time.monotonic() - grown_at >= quiet:
+            return
+
+
 def tab_until(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -297,10 +325,33 @@ def tab_until(
             start=start,
             timeout=3.0,
         )
-        frame_end = output.find(FRAME_END, start) + len(FRAME_END)
-        frame = bytes(output[start:frame_end])
-        if needle in frame:
-            return frame
+        # Asynchronous frames (a feed event row, a clock tick, the previous
+        # surface's redraw still in flight) can land between the press and
+        # the switch redraw. Judging the first frame pressed Tab again over
+        # surfaces that had already drawn, and the walk lapped its target
+        # without ever reading it; judging everything since the walk began
+        # returned while the walk had already overshot. So the press is
+        # judged only once its frames have stopped arriving: after the
+        # quiet, everything since the press belongs to this press.
+        drain_until_quiet(process, master_fd, output)
+        found = find_needle(output, needle, start)
+        if found < 0:
+            continue
+        frame_end = output.find(FRAME_END, found)
+        if frame_end < 0:
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=found,
+                timeout=3.0,
+            )
+            frame_end = output.find(FRAME_END, found)
+        frame_end += len(FRAME_END)
+        frame_begin = output.rfind(FRAME_END, start, found)
+        frame_begin = start if frame_begin < 0 else frame_begin + len(FRAME_END)
+        return bytes(output[frame_begin:frame_end])
     raise AssertionError(
         f"tabbed {TAB_CYCLE_BOUND} times without reaching {needle!r}; "
         f"last frame: {bytes(output[-1500:])!r}"
@@ -1237,6 +1288,10 @@ def navigate_with_arrows_and_quit(
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
     send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+    # That the letters became draft text is the claim above. Leaving the
+    # pane and quitting is this walk's own exit, not part of the claim.
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    os.write(master_fd, b"q")
 
 
 def wheel_scrolls_and_clicks_do_not(
@@ -1281,7 +1336,7 @@ def wheel_scrolls_and_clicks_do_not(
         b"\x1b[<65;5;5M",
         keeper_row_selected(b"beta"),
     )
-    send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+    send_and_wait(process, master_fd, output, b"iq2Q", b"to beta q2Q")
 
     resize_and_wait(
         process,
@@ -1311,17 +1366,23 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         rows=30,
         columns=100,
-        needle=b"> q2Q",
+        needle=b"to beta q2Q",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25h",
     )
-    if b"> q2Qx" in restored_message_patch or b"(sending " in restored_message_patch:
+    if b"q2Qx" in restored_message_patch or b"(sending " in restored_message_patch:
         raise AssertionError(
             "compact viewport accepted hidden message input: "
             f"{restored_message_patch!r}"
         )
 
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    # Esc leaves insert mode: the draft stays on the composer row and the
+    # keys belong to the roster again. Enter then opens the selected keeper
+    # -- beta, where the wheel left the cursor.
+    os.write(master_fd, b"\x1b")
+    wait_for_terminal_input_consumed(slave_fd)
+    drain_until_quiet(process, master_fd, output)
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
     resize_and_wait(
         process,
         master_fd,
@@ -1338,12 +1399,12 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         rows=30,
         columns=100,
-        needle=b"Keeper: \x1b[1malpha",
+        needle=b"Keeper: \x1b[1mbeta",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
 
-    send_and_wait(process, master_fd, output, b"l", b"Keeper Logs: alpha")
+    send_and_wait(process, master_fd, output, b"l", b"Keeper Logs: beta")
     resize_and_wait(
         process,
         master_fd,
@@ -1360,7 +1421,7 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         rows=30,
         columns=100,
-        needle=b"Keeper Logs: alpha",
+        needle=b"Keeper Logs: beta",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
@@ -1903,9 +1964,9 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Board")
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Approvals")
+    tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
 
     board = resize_and_wait(
@@ -2029,14 +2090,20 @@ def assert_overview_event_rows(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    def scroll_to_oldest(total: int, window: int = 2) -> None:
+    def scroll_to_oldest(total: int, window: int = 2, start_offset: int = 0) -> None:
         """Press j until the window rests against the oldest event.
 
         How many presses that takes follows the event total, which the TUI
         raises itself. Four presses against a literal "/6" held only while
         the startup event count happened to equal the panel.
+
+        [start_offset] is the offset the panel already rests at. The second
+        walk of the scenario starts where the 22-row expansion clamped the
+        offset -- with more events than the panel that is not the newest
+        window, so counting from 0 would wait for labels the TUI has
+        already scrolled past.
         """
-        for first in range(2, total - window + 2):
+        for first in range(start_offset + 2, total - window + 2):
             send_and_wait(
                 process,
                 master_fd,
@@ -2133,7 +2200,7 @@ def assert_overview_event_rows(
     send_and_wait(process, master_fd, output, b"jk", event_range(total - 2, total - 1, total))
     send_and_wait(process, master_fd, output, b"j", oldest_window(2, total))
 
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, oldest_window(2, total))
     resize_and_wait(
         process,
@@ -2195,33 +2262,60 @@ def assert_overview_event_rows(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    scroll_to_oldest(total)
-    send_and_wait(process, master_fd, output, b"r", oldest_window(2, total + 1))
+    scroll_to_oldest(total, start_offset=max(0, total - OVERVIEW_PANEL_ROW_CAP))
+    # The r adds the manual-refresh event, and the observer may add a feed
+    # event of its own on the same refresh. How many arrive is the runtime's
+    # business; what is asserted is that the pin held. So the total is read
+    # back off the redrawn frame rather than predicted.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"r",
+        re.compile(rb"Recent Events \d+-\d+/\d+"),
+    )
+    drain_until_quiet(process, master_fd, output)
     anchored = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=99,
-        needle=oldest_window(2, total + 1),
+        needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    if b"TUI started" not in anchored or anchored.count(b"Manual refresh") != 1:
+    after_r_total = event_total(anchored, "99-column Overview")
+    if after_r_total <= total:
+        raise AssertionError(
+            f"the refresh did not add an event ({total} -> {after_r_total}): {anchored!r}"
+        )
+    if oldest_window(2, after_r_total) not in anchored:
+        raise AssertionError(f"event prepend broke the oldest pin: {anchored!r}")
+    # The oldest event on screen is the whole claim: the pin followed the
+    # prepend. Which younger event shares the two-row window depends on how
+    # many feed events the runtime logged, which is not this test's claim.
+    if b"TUI started" not in anchored:
         raise AssertionError(f"event prepend changed the manual anchor: {anchored!r}")
 
-    send_and_wait(process, master_fd, output, b"k", event_range(total - 1, total, total + 1))
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"k",
+        event_range(after_r_total - 2, after_r_total - 1, after_r_total),
+    )
     newer = resize_and_wait(
         process,
         master_fd,
         output,
         rows=14,
         columns=100,
-        needle=event_range(total - 1, total, total + 1),
+        needle=event_range(after_r_total - 2, after_r_total - 1, after_r_total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    if b"TUI started" in newer or newer.count(b"Manual refresh") != 2:
+    if b"TUI started" in newer:
         raise AssertionError(f"one k did not move toward newer events: {newer!r}")
 
     os.write(master_fd, b"q")
@@ -2249,12 +2343,11 @@ def approval_selection_identity_interaction(
             start=cluster_end,
             timeout=3.0,
         )
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-        send_and_wait(
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(
             process,
             master_fd,
             output,
-            b"\t",
             screen_header(
                 b"MASC Approvals", b" (3/3, hidden 0, actor masc-tui)"
             ),
@@ -2339,10 +2432,10 @@ def open_loaded_planning(
         start=cluster_end,
         timeout=3.0,
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-    send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (0)"))
-    send_and_wait(process, master_fd, output, b"\t", b"plan-alpha-29424")
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Approvals")
+    tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (0)"))
+    tab_until(process, master_fd, output, b"plan-alpha-29424")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
@@ -2488,9 +2581,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
             timeout=3.0,
         )
 
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-        send_and_wait(process, master_fd, output, b"\t", screen_header(b"MASC Board", b" (3)"))
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (3)"))
         selected_b = selected_row(b"post-b")
         selected_a = selected_row(b"post-a")
         selected_new = selected_row(b"post-new")
@@ -2543,13 +2636,12 @@ def open_loaded_board(
         start=cluster_end,
         timeout=3.0,
     )
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-    send_and_wait(
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Approvals")
+    tab_until(
         process,
         master_fd,
         output,
-        b"\t",
         screen_header(b"MASC Board", f" ({post_count})".encode()),
     )
 
@@ -2651,16 +2743,15 @@ def board_detail_authority_interaction(
                 raise AssertionError(f"Board A detail did not become ready: {detail!r}")
 
             late_list.release.set()
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Planning")
+            tab_until(process, master_fd, output, b"MASC Planning")
             tab_until(process, master_fd, output, b"MASC System Logs")
-            send_and_wait(process, master_fd, output, b"\t", b"late-list-applied")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
-            board = send_and_wait(
+            tab_until(process, master_fd, output, b"late-list-applied")
+            tab_until(process, master_fd, output, b"MASC Keepers")
+            tab_until(process, master_fd, output, b"MASC Approvals")
+            board = tab_until(
                 process,
                 master_fd,
                 output,
-                b"\t",
                 b"a-authoritative-detail",
             )
             if b"a-late-light-body" in board:

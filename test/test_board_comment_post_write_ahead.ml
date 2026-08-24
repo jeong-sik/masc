@@ -148,6 +148,35 @@ let test_post_append_failure_commits_nothing () =
     "posts WAL has exactly the retried row, no ghost from the failure" 1
     (List.length (Fs_compat.load_jsonl (Board.persist_path ())))
 
+(* An edit that cannot reach disk used to report success: the rewrite carrying
+   the new content and the new updated_at discarded its failure and the call
+   returned Ok. A restart showed the old post, and a keeper board cursor rides
+   updated_at, so nothing said the edit was gone (#26168). *)
+let test_post_edit_failure_is_reported () =
+  let working_base =
+    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
+  in
+  let post =
+    match
+      Board_dispatch.create_post ~author:"edit-author" ~content:"original"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e ->
+      Alcotest.fail ("setup create must succeed, got " ^ Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.Board.id in
+  ignore (block_board_masc_dir_with_file ());
+  (match
+     Board_dispatch.update_post ~post_id ~editor:"edit-author"
+       ~content:"edit that cannot reach disk" ()
+   with
+   | Ok _ -> Alcotest.fail "an edit that cannot be persisted must not report success"
+   | Error (Board.Io_error _) -> ()
+   | Error e ->
+     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Unix.putenv "MASC_BASE_PATH" working_base
+
 let test_restart_recomputes_reply_count_from_comment_wal () =
   let post =
     create_post_exn ~author:"restart-wa-author"
@@ -193,6 +222,9 @@ let () =
           Alcotest.test_case "post: failed append leaves nothing committed"
             `Quick
             (with_eio test_post_append_failure_commits_nothing);
+          Alcotest.test_case "post: an edit that cannot be persisted fails"
+            `Quick
+            (with_eio test_post_edit_failure_is_reported);
           Alcotest.test_case "restart derives reply_count from comment WAL"
             `Quick
             (with_eio test_restart_recomputes_reply_count_from_comment_wal);

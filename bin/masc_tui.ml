@@ -814,7 +814,11 @@ type async_msg =
       string
       * Keeper_control.action
       * (Keeper_control.outcome, string) result
-  | Board_new_post_done of (string, string) result
+  | Board_new_post_done of {
+      reply_to : string option;
+      sent_draft : string;
+      result : (string, string) result;
+    }
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
@@ -1719,6 +1723,18 @@ let goto_surface state ~mailbox (destination : surface) =
        state.pending_approval_action <- None
    | _ -> ());
   state.view <- destination
+
+(* One step around the ring the surface strip draws. Tab and Shift-Tab
+   call this; so does board compose when its handler declines the key, so
+   "Tab falls through" stays true while composing. *)
+let cycle_surface state ~mailbox ~backwards =
+  let ring = Masc_tui_types.surface_ring in
+  let count = List.length ring in
+  let step = if backwards then count - 1 else 1 in
+  let index =
+    (Masc_tui_types.surface_ring_index state.view + step) mod count
+  in
+  goto_surface state ~mailbox (fst (List.nth ring index))
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
@@ -3166,7 +3182,11 @@ let split_board_draft (text : string) : string * string =
    out, and the outcome lands in the same mailbox everything else does. *)
 let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   state.board_post_error <- None;
+  state.board_post_inflight <- true;
   add_event state "system" "posting to Board";
+  (* What this send answers for: the completion clears and lands against
+     these, not against whatever the operator typed while it was out. *)
+  let sent_draft = Buffer.contents state.board_draft in
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let run_post () =
@@ -3175,7 +3195,8 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
-    enqueue_async mailbox (Board_new_post_done result)
+    enqueue_async mailbox
+      (Board_new_post_done { reply_to = None; sent_draft; result })
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_post
@@ -3250,7 +3271,9 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
 let start_board_comment state ~mailbox ~(post_id : string)
     ~(content : string) =
   state.board_post_error <- None;
+  state.board_post_inflight <- true;
   add_event state "system" "commenting on Board";
+  let sent_draft = Buffer.contents state.board_draft in
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let run_comment () =
@@ -3259,7 +3282,8 @@ let start_board_comment state ~mailbox ~(post_id : string)
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
-    enqueue_async mailbox (Board_new_post_done result)
+    enqueue_async mailbox
+      (Board_new_post_done { reply_to = Some post_id; sent_draft; result })
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run_comment
@@ -3373,6 +3397,10 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
             state.board_compose_armed <- false;
             state.board_post_error <- Some "the comment is empty";
             true
+          end else if state.board_post_inflight then begin
+            state.board_compose_armed <- false;
+            state.board_post_error <- Some "a send is already in flight";
+            true
           end else begin
             state.board_compose_armed <- false;
             start_board_comment state ~mailbox ~post_id ~content;
@@ -3386,6 +3414,10 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
           | [] | [ "" ] ->
               state.board_compose_armed <- false;
               state.board_post_error <- Some "the first line (title) is empty";
+              true
+          | _ when state.board_post_inflight ->
+              state.board_compose_armed <- false;
+              state.board_post_error <- Some "a send is already in flight";
               true
           | _ ->
               state.board_compose_armed <- false;
@@ -3411,7 +3443,7 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       Buffer.clear state.board_draft;
       Buffer.add_string state.board_draft new_content;
       true
-  | "\t" -> false
+  | "\t" | "shift-tab" -> false
   | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
       (* The same printable test the chat draft uses: a Korean scalar is
          three bytes and one keystroke, and a control byte is neither. *)
@@ -3704,22 +3736,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          waiting out the refresh interval. *)
       start_http_refresh state ~host:(Env_config_core.masc_host ())
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
-  | Board_new_post_done result -> (
-      (* The same envelope carries a new post and a comment; where the
-         operator lands afterwards is the only difference. A comment returns
-         to the post it answered (and refreshes that detail), a post to the
-         list. *)
-      let reply_to = state.board_compose_reply_to in
+  | Board_new_post_done { reply_to; sent_draft; result } -> (
+      (* The completion answers for the draft it carried, not for whatever
+         is in the buffer now: a slow server must not clear words typed
+         since, nor yank the operator out of a compose they restarted. *)
+      state.board_post_inflight <- false;
+      let compose_unchanged =
+        String.equal (Buffer.contents state.board_draft) sent_draft
+      in
       match result with
       | Ok message ->
-          Buffer.clear state.board_draft;
-          state.board_compose_armed <- false;
-          state.board_compose_reply_to <- None;
-          state.board_post_error <- None;
-          (match reply_to with
-           | Some post_id -> state.board_mode <- Board_read post_id
-           | None -> state.board_mode <- Board_list);
           add_event state "system" ("Board: " ^ message);
+          if compose_unchanged then begin
+            Buffer.clear state.board_draft;
+            state.board_compose_armed <- false;
+            state.board_compose_reply_to <- None;
+            state.board_post_error <- None;
+            match reply_to with
+            | Some post_id -> state.board_mode <- Board_read post_id
+            | None -> state.board_mode <- Board_list
+          end;
           (* The posted row is the half the periodic refresh has not fetched
              yet; without this the operator returns to a list that does not
              contain what they just published. A comment refreshes the
@@ -5004,10 +5040,16 @@ let main () =
               && state.view = Board
               && state.board_mode = Board_compose ->
            (* Same shape as the chat pane: while a draft is being written,
-              printable keys belong to the draft. Tab falls through so the
-              surface cycle keeps working, and quit was answered above. *)
-           let _handled = handle_board_compose_key state ~mailbox:async_messages k in
-           ()
+              printable keys belong to the draft. A key the handler declines
+              (Tab) keeps its global meaning, so the cycle works mid-compose
+              as this comment always claimed. *)
+           let handled = handle_board_compose_key state ~mailbox:async_messages k in
+           if not handled then
+             (match k with
+              | "\t" | "shift-tab" ->
+                  cycle_surface state ~mailbox:async_messages
+                    ~backwards:(k = "shift-tab")
+              | _ -> ())
        | Some "?" when not compact_viewport ->
            state.help_open <- true;
            state.help_scroll <- 0
@@ -5114,17 +5156,8 @@ let main () =
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->
-           (* Tab and Shift-Tab walk the ring the surface strip draws, in the
-              two directions. Arrival loads live in [goto_surface] so both
-              directions (and any future jump) fetch the same things. *)
-           let ring = Masc_tui_types.surface_ring in
-           let count = List.length ring in
-           let step = if key = Some "\t" then 1 else count - 1 in
-           let index =
-             (Masc_tui_types.surface_ring_index state.view + step) mod count
-           in
-           goto_surface state ~mailbox:async_messages
-             (fst (List.nth ring index))
+           cycle_surface state ~mailbox:async_messages
+             ~backwards:(key = Some "shift-tab")
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with

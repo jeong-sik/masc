@@ -411,6 +411,51 @@ let test_a_scrolled_window_matches_the_full_walk () =
          [ 1; 3; 10 ])
     [ 1; 3; 12 ]
 
+(* A board post arrived as one unbroken run with "\x0A" printed where every
+   break belonged: the body went through a sanitiser that escapes control
+   bytes, and a newline is one. The sanitiser below stands in for that one --
+   what is under test is that it never sees a newline to escape. *)
+let escape_control_bytes text =
+  String.to_seq text
+  |> Seq.map (fun c ->
+         if Char.code c < 0x20 then Printf.sprintf "\\x%02X" (Char.code c)
+         else String.make 1 c)
+  |> List.of_seq
+  |> String.concat ""
+
+let test_a_body_keeps_the_breaks_its_author_wrote () =
+  let body = "## heading\nfirst line\n\nlast line" in
+  let rows =
+    Layout.wrap_body ~max_cells:40 ~sanitize:escape_control_bytes body
+  in
+  check (list string) "one row per line, blank line kept"
+    [ "## heading"; "first line"; ""; "last line" ] rows;
+  check bool "no escaped newline reaches the screen" false
+    (List.exists
+       (fun row ->
+         let needle = {|\x0A|} in
+         let rec at i =
+           i + String.length needle <= String.length row
+           && (String.sub row i (String.length needle) = needle || at (i + 1))
+         in
+         at 0)
+       rows)
+
+let test_a_body_still_escapes_what_a_line_carries () =
+  let rows =
+    Layout.wrap_body
+      ~max_cells:40
+      ~sanitize:escape_control_bytes
+      "before\n\x1b[31mred\nafter"
+  in
+  check (list string) "the escape on a line is still escaped"
+    [ "before"; {|\x1B[31mred|}; "after" ] rows
+
+let test_a_body_of_one_line_is_one_row () =
+  check (list string) "no newline, no change"
+    [ "plain" ]
+    (Layout.wrap_body ~max_cells:40 ~sanitize:escape_control_bytes "plain")
+
 let test_history_never_splits_grapheme_clusters () =
   let body = "A👍🏽🇰🇷❤️B" in
   let rows =
@@ -693,6 +738,12 @@ let () =
             test_an_unterminated_escape_absorbs_the_space_after_it
         ; test_case "a row carrying an escape wraps by its real width" `Quick
             test_a_row_carrying_an_escape_wraps_by_its_real_width
+        ; test_case "a body keeps the breaks its author wrote" `Quick
+            test_a_body_keeps_the_breaks_its_author_wrote
+        ; test_case "a body still escapes what a line carries" `Quick
+            test_a_body_still_escapes_what_a_line_carries
+        ; test_case "a body of one line is one row" `Quick
+            test_a_body_of_one_line_is_one_row
         ; test_case "clamping a scroll reads only as far as it must" `Quick
             test_clamping_a_scroll_reads_only_as_far_as_it_must
         ; test_case "a scrolled window matches the full walk" `Quick

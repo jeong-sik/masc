@@ -1010,6 +1010,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          site's spelling, so a wrapper that sanitizes internally has to be
          named here or the guard reads it as a raw access. *)
     ; "Masc_tui_operator_projection.approval_payload_for_terminal"
+      (* Also not a [Terminal_text] name, and also a boundary: it sanitises the
+         text it is handed one line at a time, through the sanitiser its caller
+         passes. A body cannot be sanitised whole -- a newline is a control
+         byte, so the escape lands at every break and the document arrives as
+         one unbroken run with "\x0A" printed through it, which is what a board
+         post looked like. Per line the escape still covers what it is for. *)
+    ; "Message_layout.wrap_body"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in

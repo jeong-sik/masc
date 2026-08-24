@@ -1116,9 +1116,14 @@ let render_board_read (state : state) (list_post : board_post) =
 
   (* Body lines *)
   let text_width = cols - 8 in
+  (* Sanitised a line at a time. A newline is a control byte, so sanitising the
+     body whole escaped every break and the post arrived as one unbroken run
+     with "\x0A" printed through it. *)
   let body_lines =
-    Message_layout.wrap_words ~max_cells:text_width
-      (Terminal_text.single_line post.bp_body)
+    Message_layout.wrap_body
+      ~max_cells:text_width
+      ~sanitize:Terminal_text.single_line
+      post.bp_body
   in
   let total_lines = List.length body_lines in
   let detail_lines =

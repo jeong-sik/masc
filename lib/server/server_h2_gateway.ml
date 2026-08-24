@@ -465,9 +465,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
       | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
           let session_id = match session_id_opt with
             | Some id -> id
@@ -650,9 +647,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                          ~extra_headers:mcp_hdrs
                                    | json ->
                                        h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
-
-      | `DELETE, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
 
       | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
           let profile =
@@ -1037,12 +1031,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                 ~host:resolved_host ~port:resolved_port ()
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
-
-      | `GET, "/api/v1/namespace/current"
-      | `GET, "/api/v1/workspace/current"
-      | `POST, "/api/v1/namespace/current"
-      | `POST, "/api/v1/workspace/current" ->
-          h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
 
       | `GET, keeper_path
         when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path

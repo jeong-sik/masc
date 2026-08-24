@@ -543,8 +543,11 @@ let render_overview (state : state) =
                 value trims itself against the border instead of pushing the
                 cluster and project columns around. *)
              Printf.sprintf "  %s/%s  sse %d  %s  %s%s"
-               (Terminal_text.single_line t.th_primary_path)
-               (Terminal_text.single_line t.th_queue_pressure)
+               (* Both come off a closed type now, so there is no arbitrary
+                  text to sanitize here. *)
+               (Masc.Transport_metrics.primary_path_kind_to_string t.th_primary_path)
+               (Masc.Transport_metrics.queue_pressure_kind_to_string
+                  t.th_queue_pressure)
                t.th_sse_sessions websocket grpc dropped
          in
          (* The runtime event feed rides the same tail. "live N" counts the

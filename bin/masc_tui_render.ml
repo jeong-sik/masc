@@ -2850,10 +2850,14 @@ let render_keeper_message (state : state) =
       keeper_available_for_new_message state keeper_name
     in
     let status_rows = keeper_message_status_rows state in
+    (* Wide terminals keep the roster beside the chat, exactly as the detail
+       view does; the chat lays out against its own pane width. *)
+    let split = cols >= keeper_split_threshold_cols in
+    let chat_cols = if split then cols - keeper_roster_pane_cols else cols in
     if
       not
         (Message_layout.message_viewport_supported ~terminal_rows:rows
-           ~terminal_cols:cols ~status_rows)
+           ~terminal_cols:chat_cols ~status_rows)
     then begin
       let notice =
         " Keeper chat needs a larger terminal; resize to type (Esc:back)"
@@ -2863,10 +2867,11 @@ let render_keeper_message (state : state) =
       finish_frame_with_strip state ~surface_key:"keeper-message"
         ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
+    let chat_buf = if split then Buffer.create 4096 else buf in
     (* Header *)
-    box_top buf cols;
-    box_line buf cols header;
-    box_divider buf cols;
+    box_top chat_buf chat_cols;
+    box_line chat_buf chat_cols header;
+    box_divider chat_buf chat_cols;
 
     (* Message history. The fixed chrome is 7 rows — box top, header, its
        divider, the input divider, the composer's first line, box bottom and
@@ -2960,7 +2965,7 @@ let render_keeper_message (state : state) =
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
-    let inner_width = max 1 (cols - 4) in
+    let inner_width = max 1 (chat_cols - 4) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
@@ -2976,23 +2981,23 @@ let render_keeper_message (state : state) =
 
     if visible_rows = [] then begin
       if history_height > 0 then
-        box_line_styled buf cols ~style:Ansi.dim
+        box_line_styled chat_buf chat_cols ~style:Ansi.dim
           "  (no messages yet -- type below and press Enter)";
       for _ = 1 to history_height - 1 do
-        box_empty buf cols
+        box_empty chat_buf chat_cols
       done
     end else begin
       List.iter
-        (render_chat_row buf cols)
+        (render_chat_row chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do
-        box_empty buf cols
+        box_empty chat_buf chat_cols
       done
     end;
 
     (* Input area divider *)
-    box_divider buf cols;
+    box_divider chat_buf chat_cols;
 
     (* Input line *)
     (* This keeper's own turn first, then any other keeper's — talking here
@@ -3017,14 +3022,14 @@ let render_keeper_message (state : state) =
      | mine, others ->
          List.iter
            (fun entry ->
-             box_line_styled buf cols ~style:Ansi.yellow
+             box_line_styled chat_buf chat_cols ~style:Ansi.yellow
                (Printf.sprintf "  (sending %s%s…)"
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
                   (sending_age entry)))
            mine;
          List.iter
            (fun entry ->
-             box_line_styled buf cols ~style:Ansi.dim
+             box_line_styled chat_buf chat_cols ~style:Ansi.dim
                (Printf.sprintf "  (also sending to %s: %s%s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
@@ -3033,12 +3038,12 @@ let render_keeper_message (state : state) =
            others);
     (match state.msg_loaded_error with
      | Some detail ->
-         box_line_styled buf cols ~style:Ansi.yellow
+         box_line_styled chat_buf chat_cols ~style:Ansi.yellow
            ("  saved conversation could not be loaded; showing this session \
              only: " ^ detail)
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
-       box_line_styled buf cols ~style:Ansi.yellow
+       box_line_styled chat_buf chat_cols ~style:Ansi.yellow
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
@@ -3055,10 +3060,10 @@ let render_keeper_message (state : state) =
              in
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  box_line_styled buf cols ~style:Ansi.cyan
+                  box_line_styled chat_buf chat_cols ~style:Ansi.cyan
                     ("  " ^ spinner ^ " " ^ text)
               | Keeper_chat_transcript.Attention ->
-                  box_line_styled buf cols ~style:Ansi.yellow ("  " ^ text)))
+                  box_line_styled chat_buf chat_cols ~style:Ansi.yellow ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
     if not target_registered then begin
@@ -3071,13 +3076,13 @@ let render_keeper_message (state : state) =
               "  Keeper %s is no longer registered; draft retained; Esc to choose another"
               display_keeper_name
       in
-      box_line_styled buf cols ~style:Ansi.red unavailable_message
+      box_line_styled chat_buf chat_cols ~style:Ansi.red unavailable_message
     end;
     let input = Buffer.contents state.msg_input in
     let composer =
       Message_layout.composer_lines
         ~max_rows:Message_layout.composer_max_rows input
-      |> List.map (Message_layout.input_viewport ~max_cells:(max 0 (cols - 8)))
+      |> List.map (Message_layout.input_viewport ~max_cells:(max 0 (chat_cols - 8)))
     in
     (* The cursor sits on the last composer line, which the row budget has
        already made room for. *)
@@ -3090,7 +3095,7 @@ let render_keeper_message (state : state) =
        queued line was drawn and not counted, so the prompt moved down and the
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
-    let rows_above_composer = List.length (frame_lines buf) in
+    let rows_above_composer = List.length (frame_lines chat_buf) in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -3100,14 +3105,14 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line buf cols (Ansi.cyan ^ prefix ^ Ansi.reset ^ line))
+        box_line chat_buf chat_cols (Ansi.cyan ^ prefix ^ Ansi.reset ^ line))
       composer;
 
     let input_row =
       min (max 1 rows) (rows_above_composer + max 1 (List.length composer))
     in
 
-    box_bottom buf cols;
+    box_bottom chat_buf chat_cols;
 
     (* Footer *)
     let enter_hint =
@@ -3156,18 +3161,38 @@ let render_keeper_message (state : state) =
       Printf.sprintf "%s  %s  Ctrl-J:newline  %s%s  %s  Ctrl-U:clear%s"
         Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
     in
-    Buffer.add_string buf
-      (Message_layout.fit_width footer (max 1 (cols - 1)));
-    Buffer.add_char buf '\n';
+    Buffer.add_string chat_buf
+      (Message_layout.fit_width footer (max 1 (chat_cols - 1)));
+    Buffer.add_char chat_buf '\n';
 
     let input_column =
-      Message_layout.input_cursor_column ~terminal_cols:cols
+      Message_layout.input_cursor_column ~terminal_cols:chat_cols
         ~input:visible_input
     in
+    let cursor_column =
+      input_column + if split then keeper_roster_pane_cols else 0
+    in
+    if split then begin
+      let left_buf = Buffer.create 1024 in
+      keeper_roster_pane state ~rows ~cols:keeper_roster_pane_cols left_buf;
+      let blank_left = String.make keeper_roster_pane_cols ' ' in
+      let rec zip left right =
+        match left, right with
+        | [], [] -> []
+        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+        | l :: lt, [] -> l :: zip lt []
+      in
+      List.iter
+        (fun line ->
+          Buffer.add_string buf line;
+          Buffer.add_char buf '\n')
+        (zip (frame_lines left_buf) (frame_lines chat_buf))
+    end;
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~cursor:
         (Frame_presenter.Visible_at
-           { row = input_row; column = input_column })
+           { row = input_row; column = cursor_column })
       ~rows ~cols buf
     end
 

@@ -812,3 +812,97 @@ let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, st
     view rather than on every tick. *)
 let fetch_fleet_safety ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/health?full=1"
+
+(** GET /api/v1/keepers/:name/config — name, instructions, effective_config,
+    sources. Read here for the detail pane's Instructions tab. *)
+let fetch_keeper_config_snapshot ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/config"
+         (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/keepers/:name/github-identity — the keeper's GitHub CLI
+    identity observation (config dir, projected token env, stored and
+    effective auth). *)
+let fetch_keeper_github_identity ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/github-identity"
+         (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/runtime/config/raw — runtime.toml's path and text as the
+    server reads them. *)
+let fetch_runtime_config_raw ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/config/raw"
+
+(** POST /api/v1/runtime/config/raw/preview — validate edited text without
+    writing it. The body names the one field the route reads. *)
+let post_runtime_config_preview ~(host : string) ~(port : int)
+    ~(source_text : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/runtime/config/raw/preview"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+
+(** POST /api/v1/runtime/config/raw — write the edited text. Callers go
+    through the preview first; this route also validates, so a race still
+    fails closed. *)
+let post_runtime_config_raw ~(host : string) ~(port : int)
+    ~(source_text : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
+    ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+
+(** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
+let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
+    ~(body_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/connector/bind?name=%s"
+         (percent_encode_path_segment connector))
+    ~body:body_json
+
+(** POST /api/v1/gate/connector/unbind?name= — body {channel_id}. *)
+let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
+    ~(body_json : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+         (percent_encode_path_segment connector))
+    ~body:body_json
+
+(** One [resources/list] over the MCP endpoint, on an open session. *)
+let call_mcp_resources_list ~(host : string) ~(port : int)
+    ~(session_id : string) ~(request_id : string) :
+    ((string * string) list, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.resources_list_request_body ~request_id in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "resources/list returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.resources_of_body ~request_id body
+
+(** One [resources/read] over the MCP endpoint, on an open session. *)
+let call_mcp_resources_read ~(host : string) ~(port : int)
+    ~(session_id : string) ~(request_id : string) ~(uri : string) :
+    (string, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.resources_read_request_body ~request_id ~uri in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "resources/read returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.resource_text_of_body ~request_id body

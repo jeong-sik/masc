@@ -101,3 +101,78 @@ let task_id_of_add_task text =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error ("masc_add_task did not answer with an object: " ^ text)
   | exception Yojson.Json_error _ -> Error ("masc_add_task did not answer JSON: " ^ text)
+
+(* The resources side of the same wire: list and read, framed exactly like
+   tools/call and read through the same SSE-or-plain body reader. *)
+
+let plain_request_body ~request_id ~method_ ~params =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `String request_id)
+      ; ("method", `String method_)
+      ; ("params", params)
+      ])
+
+let resources_list_request_body ~request_id =
+  plain_request_body ~request_id ~method_:"resources/list" ~params:(`Assoc [])
+
+let resources_read_request_body ~request_id ~uri =
+  plain_request_body ~request_id ~method_:"resources/read"
+    ~params:(`Assoc [ ("uri", `String uri) ])
+
+let result_of_body ~request_id ~label body =
+  let* json = response_json body in
+  match json with
+  | `Assoc fields -> (
+      let answered_id =
+        match List.assoc_opt "id" fields with
+        | Some (`String value) -> value
+        | Some (`Int value) -> string_of_int value
+        | _ -> ""
+      in
+      if not (String.equal answered_id request_id) then
+        Error (label ^ " answered a different request id")
+      else
+        match List.assoc_opt "error" fields with
+        | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
+        | None -> (
+            match List.assoc_opt "result" fields with
+            | Some (`Assoc result) -> Ok result
+            | Some _ | None -> Error (label ^ " answered with no result")))
+  | _ -> Error (label ^ " answer was not an object")
+
+let resources_of_body ~request_id body =
+  let* result = result_of_body ~request_id ~label:"resources/list" body in
+  match List.assoc_opt "resources" result with
+  | Some (`List rows) ->
+      Ok
+        (List.filter_map
+           (fun row ->
+             match row with
+             | `Assoc fields -> (
+                 match string_field fields "uri" with
+                 | Some uri ->
+                     let name =
+                       match string_field fields "name" with
+                       | Some name when String.trim name <> "" -> name
+                       | Some _ | None -> uri
+                     in
+                     Some (uri, name)
+                 | None -> None)
+             | _ -> None)
+           rows)
+  | Some _ | None -> Error "resources/list answered with no resources"
+
+let resource_text_of_body ~request_id body =
+  let* result = result_of_body ~request_id ~label:"resources/read" body in
+  match List.assoc_opt "contents" result with
+  | Some (`List parts) ->
+      Ok
+        (parts
+         |> List.filter_map (fun part ->
+                match part with
+                | `Assoc fields -> string_field fields "text"
+                | _ -> None)
+         |> String.concat "\n")
+  | Some _ | None -> Error "resources/read answered with no contents"

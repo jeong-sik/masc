@@ -718,6 +718,11 @@ type async_msg =
   | Schedule_cancel_done of (string, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+  | Keeper_config_view_loaded of string * (string list, string) result
+  | Runtime_config_view_loaded of (string * string list, string) result
+  | Resources_listed of ((string * string) list, string) result
+  | Resource_read of string * (string list, string) result
+  | Github_identity_view_loaded of string * (string list, string) result
   | Observer_opened of string
   | Observer_received of Masc_tui_observer.decoded list
   | Observer_closed of string
@@ -1033,6 +1038,140 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
       enqueue_async mailbox
         (Keeper_calls_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+(* The detail pane's two non-Info tabs. Same discipline as the call log:
+   the answer names the keeper it is for, so a stale load cannot be drawn
+   under another keeper's heading. *)
+(* The MCP resource inventory, and one resource's text. Each operation
+   opens its own session: a human-cadence browser does not earn a held
+   connection, and a stale session id would be a second failure mode. *)
+let launch_resources_list state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.open_mcp_session ~host ~port
+            ~client_version:Runtime_build_version.current
+        with
+        | Error detail -> Error detail
+        | Ok session_id ->
+            Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
+              ~request_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Resources_listed result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
+
+let launch_resource_read state ~mailbox ~uri =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.open_mcp_session ~host ~port
+            ~client_version:Runtime_build_version.current
+        with
+        | Error detail -> Error detail
+        | Ok session_id -> (
+            match
+              Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
+                ~request_id ~uri
+            with
+            | Ok text -> Ok (String.split_on_char '\n' text)
+            | Error _ as error -> error)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Resource_read (uri, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Resource_read (uri, Error "Eio switch is unavailable"))
+
+let launch_runtime_config_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_config_view ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_config_view_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_config_view state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_config_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_config_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_github_identity_view state ~mailbox keeper_name =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_keeper_github_identity_view ~host ~port
+          ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Github_identity_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Github_identity_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
 let launch_connectors_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1258,6 +1397,8 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
+   | Config -> launch_runtime_config_load state ~mailbox
+   | Resources -> launch_resources_list state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -3194,6 +3335,39 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_calls <- Some snapshot;
             state.keeper_calls_error <- None
         | Error detail -> state.keeper_calls_error <- Some detail)
+  | Keeper_config_view_loaded (keeper_name, result) -> (
+      match result with
+      | Ok lines ->
+          state.keeper_config_view <- Some (keeper_name, lines);
+          state.keeper_config_view_error <- None
+      | Error detail -> state.keeper_config_view_error <- Some detail)
+  | Runtime_config_view_loaded result -> (
+      match result with
+      | Ok view ->
+          state.runtime_config_view <- Some view;
+          state.runtime_config_view_error <- None
+      | Error detail -> state.runtime_config_view_error <- Some detail)
+  | Resources_listed result -> (
+      match result with
+      | Ok rows ->
+          state.resources_list <- Some rows;
+          state.resources_error <- None;
+          state.resources_cursor <-
+            max 0 (min state.resources_cursor (List.length rows - 1))
+      | Error detail -> state.resources_error <- Some detail)
+  | Resource_read (uri, result) -> (
+      match result with
+      | Ok lines ->
+          state.resource_content <- Some (uri, lines);
+          state.resource_content_error <- None;
+          state.resource_scroll <- 0
+      | Error detail -> state.resource_content_error <- Some detail)
+  | Github_identity_view_loaded (keeper_name, result) -> (
+      match result with
+      | Ok lines ->
+          state.github_identity_view <- Some (keeper_name, lines);
+          state.github_identity_view_error <- None
+      | Error detail -> state.github_identity_view_error <- Some detail)
   | Schedules_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3827,6 +4001,122 @@ let main () =
      has no view of the current settings to prefill from -- showing a
      guessed stem would invite an operator to "keep" a value that is not
      the one on disk. *)
+  (* runtime.toml edit: $EDITOR over the text the Config surface shows,
+     then the server's preview validation; only a preview that passes is
+     written. A failed preview keeps the operator's text out of the file
+     and puts the validator's words in Recent Events. *)
+  (* Connector bind/unbind: the form is three fields, and $EDITOR is the
+     form we already have. The name field picks the connector; the rest is
+     the route's body. *)
+  let handle_connector_form ~action ~stem ~post () =
+    match Masc_tui_editor.editor_command () with
+    | None ->
+      add_event state "error"
+        ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
+    | Some _ -> (
+      match
+        Masc_tui_editor.roundtrip ~restore:restore_terminal
+          ~reenter:reenter_terminal stem
+      with
+      | None -> add_event state "system" (action ^ " cancelled")
+      | Some body -> (
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error e ->
+          add_event state "error" (action ^ ": body is not JSON: " ^ e)
+        | json -> (
+          let field key =
+            match json with
+            | `Assoc fields -> (
+                match List.assoc_opt key fields with
+                | Some (`String value) when String.trim value <> "" ->
+                    Some (String.trim value)
+                | _ -> None)
+            | _ -> None
+          in
+          match field "name" with
+          | None -> add_event state "error" (action ^ ": \"name\" is required")
+          | Some connector -> (
+            match post ~connector ~json with
+            | Ok _ ->
+              add_event state "system" (action ^ ": ok (" ^ connector ^ ")");
+              launch_connectors_load state ~mailbox:async_messages
+            | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
+  in
+  let handle_connector_bind () =
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    handle_connector_form ~action:"bind"
+      ~stem:
+        "{\n  \"name\": \"discord\",\n  \"channel_id\": \"\",\n  \"keeper_name\": \"\"\n}\n"
+      ~post:(fun ~connector ~json ->
+        Masc_tui_http.post_connector_bind ~host ~port ~connector
+          ~body_json:(Yojson.Safe.to_string json))
+      ()
+  in
+  let handle_connector_unbind () =
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    handle_connector_form ~action:"unbind"
+      ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
+      ~post:(fun ~connector ~json ->
+        Masc_tui_http.post_connector_unbind ~host ~port ~connector
+          ~body_json:(Yojson.Safe.to_string json))
+      ()
+  in
+  let handle_runtime_config_edit () =
+    match state.runtime_config_view with
+    | None -> add_event state "error" "config not loaded yet; r to reload"
+    | Some (_, lines) -> (
+      match Masc_tui_editor.editor_command () with
+      | None ->
+        add_event state "error"
+          "no $EDITOR set; export EDITOR to edit runtime.toml here"
+      | Some _ -> (
+        let stem = String.concat "\n" lines in
+        match
+          Masc_tui_editor.roundtrip ~restore:restore_terminal
+            ~reenter:reenter_terminal stem
+        with
+        | None -> add_event state "system" "runtime.toml unchanged"
+        | Some edited -> (
+          let host = Env_config_core.masc_host () in
+          let port = state.port in
+          match
+            Masc_tui_http.post_runtime_config_preview ~host ~port
+              ~source_text:edited
+          with
+          | Error detail -> add_event state "error" ("preview failed: " ^ detail)
+          | Ok preview -> (
+            let ok =
+              match preview with
+              | `Assoc fields -> (
+                  match List.assoc_opt "validation" fields with
+                  | Some (`Assoc v) -> (
+                      match List.assoc_opt "ok" v with
+                      | Some (`Bool value) -> Some value
+                      | _ -> None)
+                  | _ -> (
+                      match List.assoc_opt "ok" fields with
+                      | Some (`Bool value) -> Some value
+                      | _ -> None))
+              | _ -> None
+            in
+            match ok with
+            | Some false ->
+              add_event state "error"
+                ("preview rejected the edit: "
+                 ^ Terminal_text.single_line
+                     (Yojson.Safe.to_string preview))
+            | Some true | None -> (
+              match
+                Masc_tui_http.post_runtime_config_raw ~host ~port
+                  ~source_text:edited
+              with
+              | Ok _ ->
+                add_event state "system" "runtime.toml saved";
+                launch_runtime_config_load state ~mailbox:async_messages
+              | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
+  in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
     | None -> ()
@@ -4047,6 +4337,46 @@ let main () =
             | _ -> ())
        | Some "/" when state.view = Keepers Keeper_list ->
            state.roster_search <- Some ""
+       | Some (("[" | "]") as bracket)
+         when state.view = Keepers Keeper_detail ->
+           (* Tabs inside the detail pane: [ and ] walk the same short list
+              the pane's title row draws. Non-Info tabs read over HTTP on
+              entry; the stamped keeper name keeps a slow answer from being
+              drawn under a different selection. *)
+           let tabs = Masc_tui_types.keeper_detail_tabs in
+           let count = List.length tabs in
+           let index =
+             let rec find i = function
+               | [] -> 0
+               | tab :: rest ->
+                   if tab = state.detail_tab then i else find (i + 1) rest
+             in
+             find 0 tabs
+           in
+           let step = if bracket = "]" then 1 else count - 1 in
+           state.detail_tab <- List.nth tabs ((index + step) mod count);
+           state.detail_scroll <- 0;
+           (match selected_keeper state, state.detail_tab with
+            | Some keeper, Detail_instructions ->
+                launch_keeper_config_view state ~mailbox:async_messages
+                  keeper.k_name
+            | Some keeper, Detail_github ->
+                launch_github_identity_view state ~mailbox:async_messages
+                  keeper.k_name
+            | _, Detail_info | None, _ -> ())
+       | Some "\r" when state.view = Resources ->
+           (match
+              Option.bind state.resources_list (fun rows ->
+                  List.nth_opt rows state.resources_cursor)
+            with
+            | Some (uri, _) ->
+                state.resource_focus <- true;
+                launch_resource_read state ~mailbox:async_messages ~uri
+            | None -> ())
+       | Some "J" when state.view = Resources ->
+           state.resource_scroll <- state.resource_scroll + 1
+       | Some "K" when state.view = Resources ->
+           state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "n"
          when state.view = Keepers Keeper_list
               && state.roster_search_last <> "" ->
@@ -4217,6 +4547,10 @@ let main () =
                 launch_runtime_surface_load state ~mailbox:async_messages
                   ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
+            | Config ->
+                launch_runtime_config_load state ~mailbox:async_messages
+            | Resources ->
+                launch_resources_list state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
@@ -4305,7 +4639,10 @@ let main () =
                 end
                 else state.task_focus <- false
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Verification | Harness | Repositories | Connectors | Runtime | Tools
+            | Resources ->
+                state.resource_focus <- false
+            | Verification | Harness | Repositories | Connectors | Runtime
+            | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -4415,6 +4752,17 @@ let main () =
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.tools_scroll
+            | Config -> state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.config_scroll
+            | Resources ->
+                let total =
+                  match state.resources_list with
+                  | Some rows -> List.length rows
+                  | None -> 0
+                in
+                if state.resources_cursor < total - 1 then
+                  state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -4538,6 +4886,14 @@ let main () =
                   state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.tools_scroll
+            | Config ->
+                if state.config_scroll > 0 then
+                  state.config_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.config_scroll
+            | Resources ->
+                if state.resources_cursor > 0 then
+                  state.resources_cursor <- state.resources_cursor - 1
             | Acting ->
                 if state.acting_scroll > 0 then begin
                   state.acting_scroll <- state.acting_scroll - 1;
@@ -4642,7 +4998,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -4714,7 +5070,7 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
+            | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -4780,7 +5136,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -4810,7 +5166,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -4833,7 +5189,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4843,7 +5199,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -4865,7 +5221,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -4874,10 +5230,13 @@ let main () =
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Config -> handle_runtime_config_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Resources | Tools | System_logs -> ())
+       | Some "b" when state.view = Connectors -> handle_connector_bind ()
+       | Some "u" when state.view = Connectors -> handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4885,7 +5244,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -4969,6 +5328,13 @@ let main () =
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)
              launch_tools_load state ~mailbox:async_messages
+         | Config ->
+             (* The file moves under hot-reload edits from other agents. *)
+             launch_runtime_config_load state ~mailbox:async_messages
+         | Resources ->
+             (* The inventory follows the store; a resource added by a
+                keeper mid-session should appear without a manual reload. *)
+             launch_resources_list state ~mailbox:async_messages
          | Schedules ->
              (* Rows cross their due time and turn terminal while an operator
                 watches; the page that answers "why is this keeper awake"

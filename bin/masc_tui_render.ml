@@ -1614,27 +1614,44 @@ let render_schedules (state : state) =
    nothing observed -- and the word next to it is the exact published status,
    so the column stays legible at four shapes instead of needing a distinct
    glyph per label. *)
-let keeper_status_glyph (status : Status.control_plane_status option) =
-  match status with
-  | None -> (Ansi.dim, "-")
-  | Some Status.Cp_paused -> (Ansi.yellow, "\xe2\x97\x8b")
-  | Some (Status.Cp_surface surface) -> (
-      match surface with
-      | Status.Surface_active -> (Ansi.green, "\xe2\x97\x8f")
-      | Status.Surface_busy -> (Ansi.cyan, "\xe2\x97\x8f")
-      | Status.Surface_listening -> (Ansi.blue, "\xe2\x97\x8f")
-      | Status.Surface_idle -> (Ansi.gray, "\xe2\x97\x8f")
-      | Status.Surface_inactive -> (Ansi.yellow, "\xe2\x97\x90")
-      | Status.Surface_offline -> (Ansi.gray, "\xc3\x97"))
+(* One keeper is described by four separate readings, and the status cell draws
+   three of them in three separate channels rather than folding them into one
+   word:
 
-(* [None] is a roster that was not read, not a status the roster could not
+     colour  what to do about it   from next_action, which the runtime derives
+     glyph   whether it is paused  a person's decision, not a health reading
+     word    how it is reporting   from health
+
+   The lifecycle cell is the fourth and has its own column. The cell used to
+   show a single word from [surface_status], which restates health with stale,
+   degraded and zombie folded together and hides health entirely while a keeper
+   is paused. *)
+let keeper_action_color
+    (action : Status.keeper_next_action_path option) =
+  match action with
+  | None -> Ansi.dim
+  | Some Status.Auto_restart -> Ansi.red
+  | Some Status.Recover -> Ansi.yellow
+  | Some Status.Probe -> Ansi.cyan
+  | Some Status.Direct_message -> Ansi.green
+
+let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
+  match health with
+  | None -> "-"
+  | Some _ when paused -> "\xe2\x97\x8b"
+  | Some value -> (
+      match Tui_decode.keeper_health_to_string value with
+      | "offline" -> "\xc3\x97"
+      | _ -> "\xe2\x97\x8f")
+
+(* [None] is a roster that was not read, not a health the roster could not
    name: the word says so, and it is the word the header's tally uses for
    the same keepers, so a column of ten of them and "10 unread" above it
    are one fact drawn twice rather than two. *)
-let keeper_status_word (status : Status.control_plane_status option) =
-  match status with
+let keeper_health_word (health : Tui_decode.keeper_health option) =
+  match health with
   | None -> "unread"
-  | Some value -> Status.control_plane_status_to_string value
+  | Some value -> Tui_decode.keeper_health_to_string value
 
 (* The runtime id is [provider.model], and the provider half repeats inside the
    model half often enough that printing both costs the column its width. The
@@ -1666,18 +1683,20 @@ let keeper_message_identity state keeper_name =
       Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset
   | Some keeper ->
       let reading = keeper_reading state keeper in
-      let status = Keeper_control.display_status reading in
+      let health = Keeper_control.health reading in
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
         | Keeper_control.Absent | Keeper_control.Unobserved -> None
       in
-      let status_color, glyph = keeper_status_glyph status in
+      let status_color =
+        keeper_action_color (Keeper_control.next_action reading)
+      in
       String.concat ""
         [ status_color
-        ; glyph
+        ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
         ; " "
-        ; keeper_status_word status
+        ; keeper_health_word health
         ; Ansi.reset
         ; Ansi.dim
         ; " \xc2\xb7 "
@@ -1722,8 +1741,9 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
-    ~status ~keeper ~runtime =
-  let status_color, glyph = keeper_status_glyph status in
+    ~paused ~health ~next_action ~keeper ~runtime =
+  let status_color = keeper_action_color next_action in
+  let glyph = keeper_state_glyph ~paused ~health in
   (* Same gutter marker the Approvals, Board and Planning lists draw. A
      selection cursor that changes shape when the operator switches surface
      reads as a different control, not the same one. *)
@@ -1742,7 +1762,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
     ; marker
     ; " "
     ; status_color ^ glyph ^ " "
-      ^ fit_width (keeper_status_word status)
+      ^ fit_width (keeper_health_word health)
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
@@ -1822,16 +1842,20 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 
 (* Counted from the same readings the rows are drawn from, so the heading
    cannot disagree with the list under it. *)
+(* Tally words come from [Keeper_control.health_label], so this paints the
+   health vocabulary. [unread] is the roster not answering, which is dim rather
+   than any health colour. *)
 let keeper_roster_status_color = function
-  | "running" | "active" | "busy" | "listening" -> Ansi.green
-  | "inactive" | "paused" -> Ansi.yellow
+  | "healthy" -> Ansi.green
+  | "stale" | "degraded" -> Ansi.yellow
+  | "zombie" -> Ansi.red
   | "offline" | "idle" -> Ansi.gray
   | _ -> Ansi.dim
 
 (* The tally is [Keeper_control.status_tally], so every word here is a word the
    status column shows for the same keeper. This function only paints it. *)
 let keeper_roster_summary readings =
-  Keeper_control.status_tally readings
+  Keeper_control.health_tally readings
   |> List.map (fun (label, count) ->
          Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
            label Ansi.reset)
@@ -2009,7 +2033,10 @@ let render_keeper_list (state : state) =
           box_line buf cols
             (keeper_row_content ~columns
                ~selected:(position = state.keeper_cursor)
-               ~status:(Keeper_control.display_status reading) ~keeper ~runtime)
+               ~paused:reading.Keeper_control.paused
+               ~health:(Keeper_control.health reading)
+               ~next_action:(Keeper_control.next_action reading)
+               ~keeper ~runtime)
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 

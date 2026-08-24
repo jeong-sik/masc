@@ -108,20 +108,44 @@ let display_status reading =
       if reading.paused then Some Status.Cp_paused
       else Some (Status.Cp_surface runtime.Decode.kr_status)
 
+(* One keeper, four separate readings. [display_status] answers with one word
+   because operator pause overrides the surface status inside it, which loses
+   the health of a paused keeper: a keeper stopped by a person and a keeper
+   whose fiber died read the same. These accessors answer one axis each, and
+   nothing here folds one into another.
+
+   [None] everywhere means the roster was not read for this keeper - a fact
+   about the reading, not a state the keeper is in. *)
+let health reading =
+  match reading.liveness with
+  | Unobserved | Absent -> None
+  | Present runtime -> Some runtime.Decode.kr_health
+
+let next_action reading =
+  match reading.liveness with
+  | Unobserved | Absent -> None
+  | Present runtime -> runtime.Decode.kr_next_action
+
+let health_label reading =
+  match health reading with
+  | None -> "unread"
+  | Some value -> Decode.keeper_health_to_string value
+
 let status_label reading =
   match display_status reading with
   | None -> "unread"
   | Some status -> Status.control_plane_status_to_string status
 
-(* The roster header's tally, counted with {!status_label} so the header and
-   the status column cannot disagree. They did: the tally folded
-   [Surface_inactive] into "running", so ten rows reading "inactive" sat under
-   a header reading "10 running". Counting the label itself removes the second
-   spelling of the same reading rather than keeping it in step by hand. *)
-let status_tally readings =
+(* The roster header's tally, counted with the same function that labels the
+   status column so the header and the column cannot disagree. They did: the
+   tally folded [Surface_inactive] into "running", so ten rows reading
+   "inactive" sat under a header reading "10 running". Counting the label
+   itself removes the second spelling of the same reading rather than keeping
+   it in step by hand. *)
+let tally_by label_of readings =
   List.fold_left
     (fun counts reading ->
-      let label = status_label reading in
+      let label = label_of reading in
       let rec bump = function
         | [] -> [ (label, 1) ]
         | (name, n) :: rest when String.equal name label -> (name, n + 1) :: rest
@@ -130,6 +154,11 @@ let status_tally readings =
       bump counts)
     []
     readings
+
+(* Counted with [health_label] because that is the word the status column now
+   shows. The header and the column are one reading drawn twice; whichever
+   function labels the column has to be the one that counts it. *)
+let health_tally readings = tally_by health_label readings
 
 type action =
   | Pause

@@ -277,9 +277,22 @@ type keeper_phase
 val keeper_phase_of_string : string -> keeper_phase option
 val keeper_phase_to_string : keeper_phase -> string
 
+type keeper_health
+(** A validated keeper health reading — whether the keeper is reporting on
+    time. Behind the decoder boundary for the same reason as {!keeper_phase}:
+    a TUI executable should not need a second dependency on the Keeper runtime
+    library to name one. *)
+
+val keeper_health_of_string : string -> keeper_health option
+val keeper_health_to_string : keeper_health -> string
+
+
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
   kr_keepalive_running : bool;
   kr_autoboot_enabled : bool;
   kr_proactive_enabled : bool;
@@ -289,10 +302,18 @@ type keeper_runtime = {
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
 
-    [kr_status] is the six-member surface vocabulary. It carries no "paused"
-    member: operator pause is durable metadata and reaches the TUI on
-    {!keeper} instead. A reader that wants the published control-plane status
-    composes the two the way the operator snapshot does. *)
+    One keeper is described by four separate readings and each has its own
+    field here: [kr_phase] is the lifecycle cell, [kr_health] is whether the
+    keeper is reporting on time, [kr_paused] is whether a person stopped it,
+    and [kr_next_action] is what the runtime derived to do about it.
+
+    [kr_status] is a fifth field that re-answers [kr_health] with [stale],
+    [degraded] and [zombie] folded into one word. It is kept only until the
+    surfaces stop reading it; a caller wanting health should read
+    [kr_health].
+
+    [kr_next_action] is [None] when the runtime named no action, which is not
+    the same as naming one that means "nothing to do". *)
 
 val decode_keeper_runtime_list :
   Yojson.Safe.t -> (keeper_runtime list * bool * int, string) result

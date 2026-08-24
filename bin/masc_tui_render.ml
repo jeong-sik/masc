@@ -45,7 +45,15 @@ let chat_markdown_palette : Markdown.palette =
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)
-  ; heading = (Ansi.bold, Ansi.reset)
+  (* Which heading is inside which, said the way a terminal can: the top
+     level is underlined as well as bold, the next is bold, and the rest are
+     bold and dim so they still read as headings without competing with the
+     two above. One span for every level drew a document with no shape. *)
+  ; heading =
+      (fun level ->
+        if level <= 1 then (Ansi.bold ^ Ansi.underline, Ansi.reset)
+        else if level = 2 then (Ansi.bold, Ansi.reset)
+        else (Ansi.bold ^ Ansi.dim, Ansi.reset))
   ; quote = (Ansi.dim, Ansi.reset)
   ; link_text = (Ansi.blue, Ansi.reset)
   ; link_target = (Ansi.dim, Ansi.reset)
@@ -53,6 +61,8 @@ let chat_markdown_palette : Markdown.palette =
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; quote_gutter = "\xe2\x96\x8f "
+  ; table_header = (Ansi.bold, Ansi.reset)
+  ; table_gutter = " \xe2\x94\x82 "
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)

@@ -6,7 +6,7 @@ type palette = {
   strong : span;
   emphasis : span;
   code : span;
-  heading : span;
+  heading : int -> span;
   quote : span;
   link_text : span;
   link_target : span;
@@ -14,6 +14,8 @@ type palette = {
   bullet : string;
   code_gutter : string;
   quote_gutter : string;
+  table_header : span;
+  table_gutter : string;
   (* Styles for fenced code that names a language this module lexes. A fence
      without a language, or one naming a language it does not, keeps the
      single [code] span: colouring a grammar nobody parsed is decoration
@@ -29,7 +31,7 @@ let plain_palette =
   { strong = ("", "")
   ; emphasis = ("", "")
   ; code = ("", "")
-  ; heading = ("", "")
+  ; heading = (fun _ -> ("", ""))
   ; quote = ("", "")
   ; link_text = ("", "")
   ; link_target = ("", "")
@@ -37,6 +39,8 @@ let plain_palette =
   ; bullet = "-"
   ; code_gutter = "| "
   ; quote_gutter = "> "
+  ; table_header = ("", "")
+  ; table_gutter = " | "
   ; code_keyword = ("", "")
   ; code_string = ("", "")
   ; code_comment = ("", "")
@@ -774,11 +778,184 @@ let code_rows palette ~width line =
     Layout.split_cells ~max_cells:body_width line
     |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
 
+(* {1 Tables} *)
+
+(* A table is the one block form that cannot be decided one line at a time. A
+   row of pipes is a table only when a delimiter row follows it -- without that
+   rule an OCaml [| Some x -> y] pasted outside a fence would become one -- and
+   the column widths are a property of every row at once. So the whole block is
+   matched together, in [render], where the rest of it is still in hand. *)
+
+type alignment =
+  | Left
+  | Centre
+  | Right
+
+let table_cells line =
+  let trimmed = String.trim line in
+  if not (String.contains trimmed '|') then None
+  else
+    let parts = String.split_on_char '|' trimmed in
+    (* The outer pipes are optional in the source and carry nothing, so the
+       empty cells they leave are dropped rather than drawn. *)
+    let parts = match parts with "" :: rest -> rest | other -> other in
+    let parts =
+      match List.rev parts with "" :: rest -> List.rev rest | _ -> parts
+    in
+    match parts with
+    | [] -> None
+    | cells -> Some (List.map String.trim cells)
+
+let delimiter_alignment cell =
+  let length = String.length cell in
+  if length = 0 then None
+  else
+    let opens = cell.[0] = ':' in
+    let closes = length > 1 && cell.[length - 1] = ':' in
+    let first = if opens then 1 else 0 in
+    let last = if closes then length - 1 else length in
+    let dashes = last - first in
+    let all_dashes = ref (dashes >= 1) in
+    String.iteri
+      (fun index char ->
+        if index >= first && index < last && char <> '-' then all_dashes := false)
+      cell;
+    if not !all_dashes then None
+    else
+      Some
+        (match (opens, closes) with
+         | true, true -> Centre
+         | false, true -> Right
+         | true, false | false, false -> Left)
+
+let table_alignments line =
+  match table_cells line with
+  | None | Some [] -> None
+  | Some cells ->
+      let alignments = List.map delimiter_alignment cells in
+      if List.for_all Option.is_some alignments
+      then Some (List.map Option.get alignments)
+      else None
+
+(* Every row is drawn with the same number of columns as the delimiter row
+   declared: a short row is padded and a long one keeps its overflow in the
+   last column rather than being cut, because a cell the source wrote is worth
+   more than a straight right edge. *)
+let normalise_row ~columns cells =
+  let rec take taken remaining = function
+    | _ when remaining = 0 -> List.rev taken
+    | [] -> List.rev taken @ List.init remaining (fun _ -> "")
+    | [ last ] when remaining = 1 -> List.rev (last :: taken)
+    | rest when remaining = 1 -> List.rev (String.concat " " rest :: taken)
+    | cell :: rest -> take (cell :: taken) (remaining - 1) rest
+  in
+  take [] columns cells
+
+let pad ~alignment ~cells text =
+  let missing = max 0 (cells - Layout.display_width text) in
+  match alignment with
+  | Left -> text ^ String.make missing ' '
+  | Right -> String.make missing ' ' ^ text
+  | Centre ->
+      let left = missing / 2 in
+      String.make left ' ' ^ text ^ String.make (missing - left) ' '
+
+(* Columns get their natural width when the row fits. When it does not, the
+   widest column gives up a cell at a time: taking it evenly would shrink a
+   two-cell column that costs nothing to keep. *)
+let column_widths ~width ~gutter_cells ~columns rows =
+  let natural =
+    List.init columns (fun index ->
+      List.fold_left
+        (fun widest row ->
+          max widest (Layout.display_width (List.nth row index)))
+        1 rows)
+  in
+  let spacing = gutter_cells * max 0 (columns - 1) in
+  let widths = Array.of_list natural in
+  let total () = Array.fold_left ( + ) 0 widths + spacing in
+  let rec shrink () =
+    if total () <= width then ()
+    else
+      let widest = ref 0 in
+      Array.iteri (fun index w -> if w > widths.(!widest) then widest := index) widths;
+      if widths.(!widest) <= 1 then ()
+      else begin
+        widths.(!widest) <- widths.(!widest) - 1;
+        shrink ()
+      end
+  in
+  shrink ();
+  Array.to_list widths
+
+let table_block palette ~width ~alignments ~header ~body =
+  let columns = List.length alignments in
+  let gutter = palette.table_gutter in
+  let gutter_cells = Layout.display_width gutter in
+  let styled cells =
+    List.map
+      (fun cell ->
+        match
+          wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell
+        with
+        | [] -> ""
+        | row :: _ -> row)
+      (normalise_row ~columns cells)
+  in
+  let header = styled header in
+  let body = List.map styled body in
+  let widths = column_widths ~width ~gutter_cells ~columns (header :: body) in
+  let draw row =
+    List.mapi
+      (fun index cell ->
+        let cells = List.nth widths index in
+        let alignment = List.nth alignments index in
+        (* [fit_width] pads on the left as well as truncating, and a cell it
+           has padded has no room left for the alignment the delimiter row
+           asked for. So it is asked only for the cut. *)
+        let fitted =
+          if Layout.display_width cell > cells then Layout.fit_width cell cells
+          else cell
+        in
+        pad ~alignment ~cells fitted)
+      row
+    |> String.concat gutter
+  in
+  let opening, closing = palette.table_header in
+  let rule_opening, rule_closing = palette.rule in
+  let rule =
+    List.map (fun cells -> String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80"))) widths
+    |> String.concat gutter
+  in
+  (opening ^ draw header ^ closing)
+  :: (rule_opening ^ rule ^ rule_closing)
+  :: List.map draw body
+
+(* The table starting at [line], if one starts there: its delimiter row, the
+   body rows that follow it, and what is left of the source. *)
+let table_at line rest =
+  match (table_cells line, rest) with
+  | Some header, delimiter :: after -> (
+      match table_alignments delimiter with
+      | None -> None
+      | Some alignments ->
+          let rec body taken = function
+            | next :: more -> (
+                match table_cells next with
+                | Some cells when table_alignments next = None ->
+                    body (cells :: taken) more
+                | Some _ | None -> (List.rev taken, next :: more))
+            | [] -> (List.rev taken, [])
+          in
+          let rows, remaining = body [] after in
+          Some (header, alignments, rows, remaining))
+  | Some _, [] | None, _ -> None
+
 (* One source line outside a fence, as the rows it becomes. Flat rather than
    nested so each block form is readable next to the others. *)
 let block_rows palette ~width line =
-  let heading_rows body =
-    let opening, closing = palette.heading in
+  let heading_rows level body =
+    let opening, closing = palette.heading level in
     wrap_inline palette ~width ~prefix:"" ~continuation:"" body
     |> List.map (fun row -> opening ^ row ^ closing)
   in
@@ -802,7 +979,7 @@ let block_rows palette ~width line =
     ]
   else
     match heading_level line with
-    | Some (_level, body) -> heading_rows body
+    | Some (level, body) -> heading_rows level body
     | None -> (
         match quote_body line with
         | Some body -> quote_rows body
@@ -857,9 +1034,15 @@ let render ~palette ~width text =
                   Option.bind (fence_language line) lexer_of_language
                 in
                 walk (Some (marker, lexer)) [] rest
-            | None ->
-                emit_all (block_rows palette ~width line);
-                walk None [] rest))
+            | None -> (
+                match table_at line rest with
+                | Some (header, alignments, body, remaining) ->
+                    emit_all
+                      (table_block palette ~width ~alignments ~header ~body);
+                    walk None [] remaining
+                | None ->
+                    emit_all (block_rows palette ~width line);
+                    walk None [] rest)))
   in
   walk None [] (String.split_on_char '\n' text);
   List.rev !rows

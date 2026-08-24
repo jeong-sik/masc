@@ -8,6 +8,22 @@ open Types
 
 (* ── Generators ──────────────────────────────────────────────── *)
 
+(* [ToolUse.id], [ToolUse.name] and [ToolResult.tool_use_id] are identifiers,
+   and [Api_common.required_identifier_field] refuses a blank one by contract:
+   a blank id makes each writer invent its own stand-in, and the two records of
+   one execution then join to nothing. [string_printable] generates the empty
+   string, so the round-trip property was asserting that a block the decoder is
+   built to refuse survives being refused. Only blankness is repaired -- the
+   rest of the generated string is left alone, and a value that merely looks
+   odd still has to round-trip. The contract itself is pinned separately in
+   [test_blank_identifiers_are_refused] below, so nothing is lost by keeping it
+   out of this generator. *)
+let identifier_gen =
+  QCheck.Gen.map
+    (fun raw -> if String.trim raw = "" then "x" ^ raw else raw)
+    QCheck.Gen.string_printable
+;;
+
 let content_block_gen =
   QCheck.Gen.oneof
     [ QCheck.Gen.map (fun s -> Text s) QCheck.Gen.string_printable
@@ -18,8 +34,8 @@ let content_block_gen =
     ; QCheck.Gen.map (fun s -> RedactedThinking s) QCheck.Gen.string_printable
     ; QCheck.Gen.map3
         (fun id name -> fun input -> ToolUse { id; name; input })
-        QCheck.Gen.string_printable
-        QCheck.Gen.string_printable
+        identifier_gen
+        identifier_gen
         (QCheck.Gen.return (`Assoc [ "key", `String "value" ]))
     ; QCheck.Gen.map3
         (fun id content is_error ->
@@ -34,7 +50,7 @@ let content_block_gen =
              ; json = Types.try_parse_json content
              ; content_blocks = None
              })
-        QCheck.Gen.string_printable
+        identifier_gen
         QCheck.Gen.string_printable
         QCheck.Gen.bool
     ; QCheck.Gen.map2
@@ -282,6 +298,67 @@ let test_lifecycle_show_non_empty =
 
 (* ── Test Runner ─────────────────────────────────────────────── *)
 
+(* The generator above stops producing blank identifiers, so the contract that
+   made them illegal is pinned here instead of being lost with them. Blank
+   means [String.trim] empty, not just [""] -- a writer that pads its stand-in
+   with a space must not slip through. *)
+let test_blank_identifiers_are_refused () =
+  let refused label json =
+    match Llm_provider.Api_common.content_block_of_json_result json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s must be refused" label
+  in
+  List.iter
+    (fun blank ->
+       refused
+         (Printf.sprintf "tool_use with id %S" blank)
+         (`Assoc
+           [ "type", `String "tool_use"
+           ; "id", `String blank
+           ; "name", `String "Execute"
+           ; "input", `Assoc []
+           ]);
+       refused
+         (Printf.sprintf "tool_use with name %S" blank)
+         (`Assoc
+           [ "type", `String "tool_use"
+           ; "id", `String "tu-1"
+           ; "name", `String blank
+           ; "input", `Assoc []
+           ]);
+       refused
+         (Printf.sprintf "tool_result with tool_use_id %S" blank)
+         (`Assoc
+           [ "type", `String "tool_result"
+           ; "tool_use_id", `String blank
+           ; "content", `String "ok"
+           ]))
+    [ ""; " "; "\t"; "\n"; "   " ]
+;;
+
+(* The counterpart: a non-blank identifier that merely looks strange is not the
+   decoder's business, and refusing it would be the same over-reach in the
+   other direction. *)
+let test_odd_but_present_identifiers_survive () =
+  List.iter
+    (fun odd ->
+       let json =
+         `Assoc
+           [ "type", `String "tool_use"
+           ; "id", `String odd
+           ; "name", `String odd
+           ; "input", `Assoc []
+           ]
+       in
+       match Llm_provider.Api_common.content_block_of_json_result json with
+       | Ok (Types.ToolUse { id; name; _ }) ->
+         Alcotest.(check string) "id survives verbatim" odd id;
+         Alcotest.(check string) "name survives verbatim" odd name
+       | Ok _ -> Alcotest.fail "expected a tool_use block"
+       | Error _ -> Alcotest.failf "%S is not blank and must be accepted" odd)
+    [ "x"; " padded "; "y%fERll\"="; "call_01ABC" ]
+;;
+
 let () =
   let suite =
     List.map
@@ -302,5 +379,18 @@ let () =
         test_lifecycle_show_non_empty
       ]
   in
-  Alcotest.run "property_advanced" [ "properties", suite ]
+  Alcotest.run
+    "property_advanced"
+    [ "properties", suite
+    ; ( "identifier contract"
+      , [ Alcotest.test_case
+            "blank tool identifiers are refused"
+            `Quick
+            test_blank_identifiers_are_refused
+        ; Alcotest.test_case
+            "odd but present identifiers survive"
+            `Quick
+            test_odd_but_present_identifiers_survive
+        ] )
+    ]
 ;;

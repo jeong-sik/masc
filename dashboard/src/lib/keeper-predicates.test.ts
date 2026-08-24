@@ -114,6 +114,58 @@ describe('isKeeperOffline', () => {
   })
 })
 
+// `RUNNING_STATUS_TOKENS` 에는 `busy` 와 `listening` 이 있었는데, 이 둘은
+// types_core.ml 의 *에이전트* 어휘지 키퍼 status 가 아니다. #30084 에서
+// Surface_busy/Surface_listening 을 지운 뒤로는 어떤 producer 도 보내지 않는다.
+// `running` 도 키퍼 status 로 나온 적이 없다. 키퍼의 status 는
+// keeper_surface_status 가 만드는 active|inactive|offline|idle 과
+// control-plane 의 paused 뿐이다.
+describe('running 판정은 phase 와 health 로만 한다', () => {
+  it('running 계열 phase 는 running 이다', () => {
+    for (const phase of ['Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining']) {
+      expect(isKeeperRunningExcludingRestarting(k({ phase } as Partial<Keeper>))).toBe(true)
+    }
+  })
+
+  it('Restarting 은 이름 그대로 제외한다', () => {
+    expect(isKeeperRunningExcludingRestarting(k({ phase: 'Restarting' }))).toBe(false)
+  })
+
+  it.each(['Paused', 'Offline', 'Stopped', 'Crashed'])('%s 는 running 이 아니다', (phase) => {
+    expect(isKeeperRunningExcludingRestarting(k({ phase } as Partial<Keeper>))).toBe(false)
+  })
+
+  it('소문자 phase 토큰도 같은 답을 준다', () => {
+    expect(isKeeperRunningExcludingRestarting(k({ phase: 'running' } as unknown as Partial<Keeper>))).toBe(true)
+    expect(isKeeperRunningExcludingRestarting(k({ phase: 'restarting' } as unknown as Partial<Keeper>))).toBe(false)
+  })
+
+  it.each(['active', 'running', 'idle', 'busy', 'listening'])(
+    'status=%s 하나로는 running 이 되지 않는다',
+    (status) => {
+      expect(isKeeperRunningExcludingRestarting(k({ status, phase: null }))).toBe(false)
+    },
+  )
+
+  // phase 가 없는 스냅샷에서는 health 가 답한다. 하트비트가 늦은(stale) 키퍼도
+  // 아직 돌고 있으므로 종료를 걸 수 있어야 한다.
+  it.each(['healthy', 'idle', 'stale', 'degraded'])('phase 없이 health=%s 면 running', (health_state) => {
+    expect(isKeeperRunningExcludingRestarting(
+      k({ phase: null, diagnostic: { health_state } } as Partial<Keeper>),
+    )).toBe(true)
+  })
+
+  it.each(['offline', 'zombie'])('phase 없이 health=%s 면 running 이 아니다', (health_state) => {
+    expect(isKeeperRunningExcludingRestarting(
+      k({ phase: null, diagnostic: { health_state } } as Partial<Keeper>),
+    )).toBe(false)
+  })
+
+  it('축이 하나도 없으면 running 이라고 단정하지 않는다', () => {
+    expect(isKeeperRunningExcludingRestarting(k({ phase: null }))).toBe(false)
+  })
+})
+
 describe('isKeeperOperatorTargetable', () => {
   it('keeps phase-paused keepers targetable even when status is offline', () => {
     expect(isKeeperOperatorTargetable({
@@ -203,11 +255,6 @@ describe('keeperCanWakeup', () => {
 })
 
 describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
-  it.each([
-    ['active'], ['running'], ['idle'], ['busy'],
-  ])('status=%s ⇒ running', (status) => {
-    expect(isKeeperRunningExcludingRestarting(k({ status }))).toBe(true)
-  })
   it.each([
     ['Running'], ['Failing'], ['Overflowed'], ['Compacting'], ['HandingOff'], ['Draining'],
   ])('phase=%s ⇒ running', (phase) => {

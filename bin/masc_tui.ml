@@ -476,6 +476,7 @@ type async_msg =
       int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
+  | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
@@ -770,6 +771,24 @@ let launch_harness_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+
+let launch_lanes_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_lanes ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Lanes_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None -> enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
 
 let launch_verification_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -2651,6 +2670,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
+  | Lanes_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.lanes <- Some snapshot;
+          state.lanes_error <- None
+      | Error detail ->
+          (* Keep the previous rows visible. The error says that they are
+             stale; clearing them would turn a failed refresh into an empty
+             reading. *)
+          state.lanes_error <- Some detail)
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3121,6 +3150,7 @@ let main () =
                  | None -> ())
             | Verification ->
                 launch_verification_load state ~mailbox:async_messages
+            | Lanes -> launch_lanes_load state ~mailbox:async_messages
             | Harness -> launch_harness_load state ~mailbox:async_messages
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
@@ -3135,7 +3165,10 @@ let main () =
            (match state.view with
             | Overview -> state.view <- Acting
             | Acting -> state.view <- Keepers Keeper_list
-            | Keepers _ -> state.view <- Approvals
+            | Keepers _ ->
+                launch_lanes_load state ~mailbox:async_messages;
+                state.view <- Lanes
+            | Lanes -> state.view <- Approvals
             | Approvals ->
                 state.pending_approval_action <- None;
                 state.view <- Board
@@ -3221,8 +3254,8 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Acting | Keepers Keeper_list | Approvals | Schedules | Verification
-            | Harness | Repositories | Connectors | Tools
+            | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
+            | Verification | Harness | Repositories | Connectors | Tools
             | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
@@ -3298,6 +3331,10 @@ let main () =
                 state.verification_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.verification_scroll
+            | Lanes ->
+                state.lanes_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.lanes_scroll
             | Harness -> state.harness_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.harness_scroll
@@ -3387,6 +3424,11 @@ let main () =
                   state.verification_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.verification_scroll
+            | Lanes ->
+                if state.lanes_scroll > 0 then
+                  state.lanes_scroll <-
+                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                      ~current:state.lanes_scroll
             | Harness ->
                 if state.harness_scroll > 0 then
                   state.harness_scroll <-
@@ -3468,8 +3510,8 @@ let main () =
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Approvals | Schedules | Verification | Harness | Repositories
-            | Connectors | Tools | System_logs -> ())
+            | Acting | Lanes | Approvals | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -3500,7 +3542,7 @@ let main () =
                      state.view <- Keepers Keeper_calls
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
-            | Board | Approvals | Planning | Schedules
+            | Lanes | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -3563,7 +3605,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
@@ -3592,7 +3634,7 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
@@ -3614,7 +3656,7 @@ let main () =
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
@@ -3623,7 +3665,7 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
@@ -3644,7 +3686,7 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs
             -> ())
@@ -3655,14 +3697,14 @@ let main () =
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
+            | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | System_logs -> ())
       | _ -> ());
@@ -3722,6 +3764,7 @@ let main () =
                 another arrives. Refreshed on the same tick as the surfaces
                 above rather than only on a keypress. *)
              launch_verification_load state ~mailbox:async_messages
+         | Lanes -> launch_lanes_load state ~mailbox:async_messages
          | Harness -> launch_harness_load state ~mailbox:async_messages
          | Repositories ->
              (* Registration and keeper assignment change from elsewhere, so

@@ -3614,6 +3614,177 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
     return interact
 
 
+KEEPER_LANES_PATH = "/api/v1/keepers/composite"
+
+
+def keeper_lanes_response(lanes: list[dict[str, object]]) -> HttpResponse:
+    return (
+        200,
+        {
+            "generated_at": 1787557669.715736,
+            "count": len(lanes),
+            "snapshots": lanes,
+        },
+    )
+
+
+def keeper_lane_row(
+    keeper: str,
+    *,
+    phase: str,
+    turn_phase: str,
+    idle_seconds: int,
+    runtime_state: str | None,
+    selected_model: str | None,
+    diagnosis: str | None,
+) -> dict[str, object]:
+    last_outcome: object = None
+    if runtime_state is not None:
+        last_outcome = {
+            "runtime_state": runtime_state,
+            "selected_model": selected_model,
+        }
+    return {
+        "keeper": keeper,
+        "phase": phase,
+        "turn_phase": turn_phase,
+        "idle_seconds": idle_seconds,
+        "last_outcome": last_outcome,
+        "phase_diagnosis": {"determining_condition": diagnosis},
+    }
+
+
+def keeper_lanes_interaction(
+    fixtures: HttpFixtures,
+    gate: GatedHttpResponse,
+) -> Interaction:
+    """One visit distinguishes unread, empty, failed, and populated lanes."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        unread = tab_until(process, master_fd, output, b"MASC Lanes")
+        if b"(not loaded)" not in unread or b"(not loaded yet)" not in unread:
+            raise AssertionError(
+                f"Lanes claimed a reading before one arrived: {unread!r}"
+            )
+        unread_plain = CSI_RE.sub(b"", unread).decode("utf-8")
+        for column in (
+            "KEEPER",
+            "PHASE",
+            "TURN",
+            "IDLE",
+            "LAST OUTCOME",
+            "DIAGNOSIS",
+        ):
+            if column not in unread_plain:
+                raise AssertionError(
+                    f"Lanes did not draw the {column!r} column: {unread_plain!r}"
+                )
+        if not gate.requested.wait(timeout=3.0):
+            raise AssertionError("Lanes did not request the composite snapshot")
+
+        empty = release_and_wait_for_frame(
+            process,
+            master_fd,
+            output,
+            gate,
+            b"(no keeper lane snapshots)",
+        )
+        if b"MASC Lanes" not in empty or b"(0 keepers)" not in empty:
+            raise AssertionError(f"Lanes did not draw the empty reading: {empty!r}")
+
+        fixtures[KEEPER_LANES_PATH] = (503, {"error": "lane fixture failed"})
+        failed = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"(load failed; nothing here is a reading)",
+        )
+        if b"keeper lanes load failed" not in failed:
+            raise AssertionError(f"Lanes hid the load error: {failed!r}")
+
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="new_phase",
+                    turn_phase="new_turn",
+                    idle_seconds=3661,
+                    runtime_state=None,
+                    selected_model=None,
+                    diagnosis=None,
+                ),
+            ]
+        )
+        populated = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"new_phase",
+        )
+        plain = CSI_RE.sub(b"", populated).decode("utf-8")
+        for needle in (
+            "MASC Lanes (2 keepers)",
+            "alpha",
+            "running",
+            "executing",
+            "1m",
+            "done",
+            "claude-opus-5",
+            "running_fiber_alive",
+            "beta",
+            "new_phase",
+            "new_turn",
+            "1h",
+        ):
+            if needle not in plain:
+                raise AssertionError(f"Lanes did not draw {needle!r}: {plain!r}")
+
+        fixtures[KEEPER_LANES_PATH] = (503, {"error": "lane refresh failed"})
+        stale = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"keeper lanes load failed",
+        )
+        stale_plain = CSI_RE.sub(b"", stale).decode("utf-8")
+        for needle in (
+            "MASC Lanes (2 keepers)",
+            "alpha",
+            "beta",
+        ):
+            if needle not in stale_plain:
+                raise AssertionError(
+                    f"Lanes did not preserve {needle!r} after refresh failure: "
+                    f"{stale_plain!r}"
+                )
+        if "nothing here is a reading" in stale_plain:
+            raise AssertionError(
+                "Lanes discarded the prior reading after refresh failure: "
+                f"{stale_plain!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
     b"event: message\n"
@@ -3919,6 +4090,9 @@ def run_keyboard_regression(executable: str) -> None:
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
     missing_target_fixtures, late_b = board_missing_target_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    lanes_fixtures = keeper_runtime_http_fixtures()
+    lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
+    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
     run_terminal_scenario(
         executable,
         description="UTF-8 message input",
@@ -3952,6 +4126,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper message Ctrl-G switch",
         interact=keeper_message_switch_interaction(alpha_history),
         http_fixtures=message_switch_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper lanes unread, failed, empty, and populated",
+        interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
+        http_fixtures=lanes_fixtures,
     )
     run_terminal_scenario(
         executable,

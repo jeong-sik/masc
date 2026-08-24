@@ -359,6 +359,7 @@ type surface =
   | Overview
   | Acting
   | Keepers of keeper_mode
+  | Lanes
   | Board
   | Approvals
   | Planning
@@ -409,8 +410,8 @@ let surface_needs : surface -> surface_needs = function
   | Board -> { nothing with needs_board = true }
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
-  | Approvals | Schedules | Verification | Harness | Repositories | Connectors
-  | Tools ->
+  | Lanes | Approvals | Schedules | Verification | Harness | Repositories
+  | Connectors | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -431,7 +432,7 @@ type scrolled = {
   sc_chrome : int;  (** rows it spends on its own frame *)
 }
 
-(* These six draw the same frame: a title, a column row, three dividers, the
+(* These seven draw the same frame: a title, a column row, three dividers, the
    scroll line and the footer -- and two more rows when a load error is on
    screen. The number is the drawing's; a surface whose chrome moves has to
    move it here in the same change. *)
@@ -549,6 +550,9 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
+  mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable lanes_error: string option;
+  mutable lanes_scroll: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -783,6 +787,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   schedule_scroll = 0;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  lanes = None;
+  lanes_error = None;
+  lanes_scroll = 0;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -926,6 +933,11 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.verification with
          | None -> 0
          | Some s -> List.length s.Tui_decode.vs_requests)
+  | Lanes ->
+      listing ~error:state.lanes_error
+        (match state.lanes with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.kls_lanes)
   | Harness ->
       listing ~error:state.harness_error
         (match state.harness with

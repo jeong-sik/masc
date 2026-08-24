@@ -1583,6 +1583,92 @@ let test_decode_repository_with_no_keepers () =
   | Ok _ -> Alcotest.fail "expected one repository"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* Keeper lane rows. Shape is the light projection the TUI reads from
+   [GET /api/v1/keepers/composite]. *)
+let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
+    ?(idle_seconds = 75) ?(last_outcome = `Null)
+    ?(diagnosis = `String "running_fiber_alive") keeper =
+  `Assoc
+    [ "keeper", `String keeper
+    ; "phase", `String phase
+    ; "turn_phase", `String turn_phase
+    ; "idle_seconds", `Int idle_seconds
+    ; "last_outcome", last_outcome
+    ; ( "phase_diagnosis"
+      , `Assoc [ "determining_condition", diagnosis ] )
+    ]
+
+let keeper_lanes_json lanes =
+  `Assoc
+    [ "generated_at", `Float 1787557669.715736
+    ; "count", `Int (List.length lanes)
+    ; "snapshots", `List lanes
+    ]
+
+let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
+  let last_outcome =
+    `Assoc
+      [ "runtime_state", `String "done"
+      ; "selected_model", `String "claude-opus-5"
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json
+         [ keeper_lane_json ~last_outcome "alpha"
+         ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
+             ~diagnosis:`Null "beta"
+         ])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check int) "envelope count" 2 snapshot.Tui_decode.kls_count;
+      (match snapshot.Tui_decode.kls_lanes with
+       | [ alpha; beta ] ->
+           Alcotest.(check string) "first keeper" "alpha" alpha.kl_keeper;
+           Alcotest.(check string) "known phase" "running"
+             (Tui_decode.keeper_lane_phase_to_string alpha.kl_phase);
+           Alcotest.(check string) "known turn" "executing"
+             (Tui_decode.keeper_lane_turn_phase_to_string alpha.kl_turn_phase);
+           Alcotest.(check int) "idle seconds" 75 alpha.kl_idle_seconds;
+           (match alpha.kl_last_outcome with
+            | Some outcome ->
+                Alcotest.(check string) "outcome" "done"
+                  outcome.klo_runtime_state;
+                Alcotest.(check (option string)) "model"
+                  (Some "claude-opus-5") outcome.klo_selected_model
+            | None -> Alcotest.fail "alpha lost its last outcome");
+           (match beta.kl_phase with
+            | Tui_decode.Lane_phase_unknown raw ->
+                Alcotest.(check string) "unknown phase" "future_phase" raw
+            | _ -> Alcotest.fail "future phase was folded into a known phase");
+           (match beta.kl_turn_phase with
+            | Tui_decode.Lane_turn_unknown raw ->
+                Alcotest.(check string) "unknown turn" "future_turn" raw
+            | _ -> Alcotest.fail "future turn was folded into a known turn");
+           Alcotest.(check (option string)) "no determining condition" None
+             beta.kl_diagnosis
+       | lanes ->
+           Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
+
+let test_decode_keeper_lanes_requires_the_table_fields () =
+  let incomplete =
+    `Assoc
+      [ "keeper", `String "alpha"
+      ; "phase", `String "running"
+      ; "turn_phase", `String "idle"
+      ; "last_outcome", `Null
+      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ]
+  in
+  match
+    Tui_decode.decode_keeper_lanes_snapshot (keeper_lanes_json [ incomplete ])
+  with
+  | Ok _ -> Alcotest.fail "a lane without idle_seconds decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the missing field" true
+        (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
   `Assoc
@@ -1820,6 +1906,14 @@ let () =
           test_decode_repository_absent_auto_sync_is_off;
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
+      ] );
+    ( "decode_keeper_lanes",
+      [
+        Alcotest.test_case "reads the live shape and keeps unknown values"
+          `Quick
+          test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
+        Alcotest.test_case "requires the table fields" `Quick
+          test_decode_keeper_lanes_requires_the_table_fields;
       ] );
     ( "decode_harness",
       [

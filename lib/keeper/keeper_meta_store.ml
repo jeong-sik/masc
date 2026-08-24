@@ -89,6 +89,8 @@ module Problem_report_state = struct
   let should_report ~site ~path ~detail =
     Stdlib.Mutex.protect mutex (fun () ->
       let key = site, path in
+      (* NDT-OK: wall clock stamps first_observed for dashboard telemetry;
+         no branch reads it. *)
       let now = Unix.gettimeofday () in
       match Table.find_opt reported key with
       | Some (previous, first_observed) when String.equal previous detail ->

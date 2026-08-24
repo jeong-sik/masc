@@ -381,6 +381,38 @@ type surface =
   | Tools
   | System_logs
 
+(* The Tab cycle and the strip drawn above every surface share this order,
+   so the strip cannot disagree with where Tab actually goes. Labels are the
+   strip's spelling; the Keepers entry stands for every keeper sub-mode. *)
+let surface_ring : (surface * string) list =
+  [ (Overview, "Overview");
+    (Acting, "Acting");
+    (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
+    (Approvals, "Approvals");
+    (Board, "Board");
+    (Planning, "Planning");
+    (Schedules, "Schedules");
+    (Verification, "Verify");
+    (Harness, "Harness");
+    (Fusion, "Fusion");
+    (Repositories, "Repos");
+    (Connectors, "Connectors");
+    (Runtime, "Runtime");
+    (Tools, "Tools");
+    (System_logs, "Logs");
+  ]
+
+(* Ring position of the family a view belongs to. Keeper sub-modes collapse
+   onto the Keepers entry; every other surface is its own entry. *)
+let surface_ring_index (view : surface) =
+  let family = match view with Keepers _ -> Keepers Keeper_list | v -> v in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 surface_ring
+
 (** What a surface needs loaded to draw itself.
 
     Declared per surface in one place rather than asked as a separate

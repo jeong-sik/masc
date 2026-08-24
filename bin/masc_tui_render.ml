@@ -20,6 +20,15 @@ module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Status = Masc.Keeper_status_runtime
 
+(* Every surface lays out against a viewport one row shorter than the
+   terminal: the top row belongs to the surface strip, prepended when a frame
+   is finished. Shadowing the probe here (and, via open order, in masc_tui.ml)
+   keeps all sixteen surfaces' row budgets and the input layer's paging math
+   in step without touching each formula. *)
+let get_terminal_size () =
+  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  (max 1 (rows - 1), cols)
+
 let frame_lines buf =
   match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
   | "" :: reversed -> List.rev reversed
@@ -260,6 +269,83 @@ let composer_cursor state ~rows ~cols =
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
         }
 
+(* The strip above every surface: the Tab ring with the active family
+   highlighted. Wider terminals see the whole ring; narrower ones see a
+   window around the active entry with how many entries hide past each edge,
+   so position in the cycle stays readable at any width. *)
+let surface_strip (state : state) ~cols =
+  let ring = Masc_tui_types.surface_ring in
+  let n = List.length ring in
+  let active = Masc_tui_types.surface_ring_index state.view in
+  let label i = snd (List.nth ring i) in
+  (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
+  let entry_width ~lo i =
+    String.length (label i)
+    + (if i = active then 1 else 0)
+    + (if i > lo then 2 else 0)
+  in
+  let window_width lo hi =
+    let rec sum i acc =
+      if i > hi then acc else sum (i + 1) (acc + entry_width ~lo i)
+    in
+    sum lo 0
+  in
+  let budget = max 8 (cols - 1) in
+  let lo, hi =
+    if window_width 0 (n - 1) <= budget then (0, n - 1)
+    else begin
+      (* Markers for hidden entries cost room; reserve it up front. *)
+      let budget = max 8 (budget - 10) in
+      let lo = ref active and hi = ref active in
+      let grew = ref true in
+      while !grew do
+        grew := false;
+        if !hi + 1 < n && window_width !lo (!hi + 1) <= budget then begin
+          incr hi;
+          grew := true
+        end;
+        if !lo > 0 && window_width (!lo - 1) !hi <= budget then begin
+          decr lo;
+          grew := true
+        end
+      done;
+      (!lo, !hi)
+    end
+  in
+  let parts = Buffer.create 128 in
+  Buffer.add_char parts ' ';
+  if lo > 0 then
+    Buffer.add_string parts
+      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+  for i = lo to hi do
+    if i > lo then Buffer.add_string parts "  ";
+    if i = active then
+      Buffer.add_string parts
+        (Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+    else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
+  done;
+  if hi < n - 1 then
+    Buffer.add_string parts
+      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+  Buffer.contents parts
+
+(* Finish a frame with the strip on top. Surfaces measured cursor rows inside
+   their own frame, so a visible cursor shifts down with the prepend, and the
+   declared height grows back to the terminal's real row count. *)
+let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
+    ~cols buf =
+  let cursor =
+    match cursor with
+    | Frame_presenter.Hidden -> Frame_presenter.Hidden
+    | Frame_presenter.Visible_at { row; column } ->
+      Frame_presenter.Visible_at { row = row + 1; column }
+  in
+  let framed = Buffer.create (Buffer.length buf + 160) in
+  Buffer.add_string framed (surface_strip state ~cols);
+  Buffer.add_char framed '\n';
+  Buffer.add_buffer framed buf;
+  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
+
 (* Close a surface: pad its frame to the row above the composer, then draw the
    composer on the terminal's last row.
 
@@ -287,7 +373,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_char framed '\n')
     body;
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
-  finish_frame ?clamped ~surface_key
+  finish_frame_with_strip state ?clamped ~surface_key
     ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
@@ -1027,7 +1113,7 @@ let render_board_compose (state : state) =
   in
   Buffer.add_string buf
     (Printf.sprintf "%s  %s%s\n" Ansi.dim prompt Ansi.reset);
-  finish_frame ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
+  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor:Frame_presenter.Hidden ~rows
     ~cols buf
 
 let render_board_list (state : state) =
@@ -2481,7 +2567,7 @@ let render_keeper_detail (state : state) =
 
     (* Title *)
     let title =
-      Printf.sprintf " Keeper: %s%s%s " Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s " Ansi.bold
         (Terminal_text.single_line k.k_name)
         Ansi.reset
     in
@@ -2555,7 +2641,7 @@ let render_keeper_logs (state : state) =
     let header =
       Printf.sprintf "%s  (%d entries)"
         (screen_title
-           (Printf.sprintf " Keeper Logs: %s"
+           (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
               (Terminal_text.single_line k.k_name)))
         total_entries
     in
@@ -2663,13 +2749,14 @@ let render_keeper_message (state : state) =
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+    finish_frame_with_strip state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
       Printf.sprintf "%s  %s  %s(port %d)%s"
-        (screen_title (Printf.sprintf " Message to: %s" display_keeper_name))
+        (screen_title
+         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
         Ansi.dim state.port Ansi.reset
     in
@@ -2687,7 +2774,7 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      finish_frame ~surface_key:"keeper-message"
+      finish_frame_with_strip state ~surface_key:"keeper-message"
         ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     (* Header *)
@@ -2991,7 +3078,7 @@ let render_keeper_message (state : state) =
       Message_layout.input_cursor_column ~terminal_cols:cols
         ~input:visible_input
     in
-    finish_frame ~surface_key:"keeper-message"
+    finish_frame_with_strip state ~surface_key:"keeper-message"
       ~cursor:
         (Frame_presenter.Visible_at
            { row = input_row; column = input_column })
@@ -4208,7 +4295,7 @@ let render_keeper_calls (state : state) =
   let header =
     match state.keeper_calls with
     | None ->
-        Printf.sprintf " Keeper Calls: %s  (not loaded yet)  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
           (Terminal_text.single_line keeper_name)
           timestamp
           (connection_badge state.connection_status)
@@ -4222,7 +4309,7 @@ let render_keeper_calls (state : state) =
           | health, Some age -> Printf.sprintf "%s · latest %.0fs ago" health age
           | health, None -> health
         in
-        Printf.sprintf " Keeper Calls: %s (%d)  %s  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
           (List.length snapshot.Masc.Tui_decode.kcs_entries)
           freshness timestamp
@@ -4574,7 +4661,8 @@ let render_runtime_pick (state : state) =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %scurrent: %s%s"
-       (screen_title (Printf.sprintf " Runtime for %s" keeper_name))
+       (screen_title
+         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
        Ansi.dim current Ansi.reset);
   box_divider buf cols;
   (match Terminal_text.optional_single_line state.runtime_catalog_error with

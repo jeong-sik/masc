@@ -1085,6 +1085,37 @@ let launch_verification_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
 
+(* Move to a surface, fetching what that surface shows on arrival. Tab,
+   Shift-Tab, and any future jump go through here so no direction can forget
+   a load the other performs. Surfaces not listed refresh on the periodic
+   cadence ([surface_needs]); the ones here are snapshots that would
+   otherwise read as empty until the next tick. *)
+let goto_surface state ~mailbox (destination : surface) =
+  (match destination with
+   | Lanes -> launch_lanes_load state ~mailbox
+   | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+   | Schedules -> launch_schedules_load state ~mailbox
+   | Verification -> launch_verification_load state ~mailbox
+   | Harness -> launch_harness_load state ~mailbox
+   | Fusion ->
+       launch_fusion_runs_load state ~mailbox;
+       (match state.fusion_mode with
+        | Fusion_list -> ()
+        | Fusion_detail run_id ->
+            launch_fusion_detail_load state ~mailbox ~run_id)
+   | Repositories -> launch_repositories_load state ~mailbox
+   | Connectors -> launch_connectors_load state ~mailbox
+   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+   | Tools -> launch_tools_load state ~mailbox
+   | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
+  (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
+     arm did on the Approvals -> Board step. *)
+  (match state.view with
+   | Approvals when destination <> Approvals ->
+       state.pending_approval_action <- None
+   | _ -> ());
+  state.view <- destination
+
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -3828,63 +3859,18 @@ let main () =
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
-       | Some "\t" ->
-           (* Tab cycles through primary surfaces *)
-           (match state.view with
-            | Overview -> state.view <- Acting
-            | Acting -> state.view <- Keepers Keeper_list
-            | Keepers _ ->
-                launch_lanes_load state ~mailbox:async_messages;
-                state.view <- Lanes
-            | Lanes ->
-                (* Loaded on arrival: a held call is on a short clock, and
-                   showing none until the next periodic refresh reads as
-                   "nothing is waiting". *)
-                launch_keeper_tool_approvals_load state
-                  ~mailbox:async_messages;
-                state.view <- Approvals
-            | Approvals ->
-                state.pending_approval_action <- None;
-                state.view <- Board
-            | Board -> state.view <- Planning
-            | Planning ->
-                (* Loaded on arrival: the schedule page is a snapshot of the
-                   store, and a stale one would answer "why is this keeper
-                   awake" with yesterday's rows. *)
-                launch_schedules_load state ~mailbox:async_messages;
-                state.view <- Schedules
-            | Schedules ->
-                (* Loaded on arrival: the queue is what the surface is, so
-                   showing it empty until a refresh would read as "nothing is
-                   waiting". *)
-                launch_verification_load state ~mailbox:async_messages;
-                state.view <- Verification
-            | Verification ->
-                launch_harness_load state ~mailbox:async_messages;
-                state.view <- Harness
-            | Harness ->
-                launch_fusion_runs_load state ~mailbox:async_messages;
-                (match state.fusion_mode with
-                 | Fusion_list -> ()
-                 | Fusion_detail run_id ->
-                     launch_fusion_detail_load state ~mailbox:async_messages
-                       ~run_id);
-                state.view <- Fusion
-            | Fusion ->
-                launch_repositories_load state ~mailbox:async_messages;
-                state.view <- Repositories
-            | Repositories ->
-                launch_connectors_load state ~mailbox:async_messages;
-                state.view <- Connectors
-            | Connectors ->
-                launch_runtime_surface_load state ~mailbox:async_messages
-                  ~force:false;
-                state.view <- Runtime
-            | Runtime ->
-                launch_tools_load state ~mailbox:async_messages;
-                state.view <- Tools
-            | Tools -> state.view <- System_logs
-            | System_logs -> state.view <- Overview)
+       | Some "\t" | Some "shift-tab" ->
+           (* Tab and Shift-Tab walk the ring the surface strip draws, in the
+              two directions. Arrival loads live in [goto_surface] so both
+              directions (and any future jump) fetch the same things. *)
+           let ring = Masc_tui_types.surface_ring in
+           let count = List.length ring in
+           let step = if key = Some "\t" then 1 else count - 1 in
+           let index =
+             (Masc_tui_types.surface_ring_index state.view + step) mod count
+           in
+           goto_surface state ~mailbox:async_messages
+             (fst (List.nth ring index))
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with

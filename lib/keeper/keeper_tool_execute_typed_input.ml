@@ -9,6 +9,7 @@ type input_source =
   | Inherit_input
   | Empty_input
   | Read_file of { path : string }
+  | Literal_input of { bytes : string }
 
 type output_sink =
   | Inherit_output
@@ -223,9 +224,9 @@ let optional_input_source ~path fields key =
   | Some props ->
     let reject () =
       result_errorf
-        "%s.%s must name exactly one of {discard:true} or \
-         {file:\"/abs/path\"}. Omit the key to leave stdin alone; \
-         {discard:false} names nothing."
+        "%s.%s must name exactly one of {discard:true}, \
+         {file:\"/abs/path\"}, or {literal:\"bytes\"}. Omit the key to \
+         leave stdin alone; {discard:false} names nothing."
         path
         key
     in
@@ -236,7 +237,10 @@ let optional_input_source ~path fields key =
      with
      | Some (`Bool true), None, 1 -> Ok Empty_input
      | None, Some (`String path_value), 1 -> Ok (Read_file { path = path_value })
-     | _ -> reject ())
+     | _ ->
+       (match List.assoc_opt "literal" props, List.length props with
+        | Some (`String bytes), 1 -> Ok (Literal_input { bytes })
+        | _ -> reject ()))
 ;;
 
 (* [stdout]/[stderr] give bytes to somewhere. A file sink must say which of the
@@ -567,7 +571,8 @@ let check_fd ~fd target =
 ;;
 
 let check_input_source ~fd = function
-  | Inherit_input | Empty_input -> Ok ()
+  (* A literal names no path, so the path boundary has nothing to check. *)
+  | Inherit_input | Empty_input | Literal_input _ -> Ok ()
   | Read_file { path } -> check_path ~fd path
 ;;
 
@@ -656,6 +661,8 @@ let input_entry ~resolve source =
   | Inherit_input -> Ok None
   | Empty_input -> file dev_null
   | Read_file { path } -> file path
+  | Literal_input { bytes } ->
+    Ok (Some (Masc_exec.Redirect_scope.Literal { bytes }))
 ;;
 
 let output_entry ~resolve ~fd sink =

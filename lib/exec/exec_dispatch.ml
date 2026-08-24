@@ -56,9 +56,14 @@ let no_attachments =
   ; stderr_to = Process_eio.Captured
   }
 
+(* [From_string] counts. It used to not, because nothing put one in
+   [attachments] -- the only [From_string] was built further down from the
+   [stdin_content] argument, inside the path this predicate selects. A literal
+   redirect puts one here, and the path that discards attachments would drop
+   it without a word. *)
 let holds_a_source = function
-  | Process_eio.Inherited | Process_eio.From_string _ -> false
-  | Process_eio.Read_from _ -> true
+  | Process_eio.Inherited -> false
+  | Process_eio.From_string _ | Process_eio.Read_from _ -> true
 
 let holds_a_sink = function
   | Process_eio.Captured -> false
@@ -173,6 +178,10 @@ let redirect_plan_of_redirects ~cwd redirects =
        | Redirect_scope.Write | Redirect_scope.Append | Redirect_scope.Read ->
          let* attach = attach_file ~cwd attach ~fd ~target ~mode in
          Ok (plan, attach))
+    | Redirect_scope.Literal { bytes } ->
+      (* Content with no file, and stdin is the only descriptor that can take
+         it, which the type says rather than the run time. *)
+      Ok (plan, { attach with stdin_from = Process_eio.From_string bytes })
   in
   List.fold_left
     (fun acc redirect -> Result.bind acc (fun state -> step state redirect))
@@ -327,14 +336,14 @@ let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
       match
         List.find_opt
           (function
-            | Redirect_scope.Fd_to_fd _ -> false
+            | Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _ -> false
             | Redirect_scope.File { target; _ } ->
               not (target_is_openable_here ~sandbox:s.sandbox target))
           s.redirects
       with
       | Some (Redirect_scope.File { target; _ }) ->
         unsupported_redirect_result (unresolved_target_message target)
-      | Some (Redirect_scope.Fd_to_fd _) | None ->
+      | Some (Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _) | None ->
         (match s.sandbox with
          | Docker { runner; _ } ->
            (* stdin from a file is read here and handed to the runner as

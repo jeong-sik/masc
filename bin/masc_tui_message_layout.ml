@@ -526,3 +526,11 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
     in
     min requested (max 0 (count 0 (List.rev entries) - height))
   end
+
+let age_text ~now ~since =
+  let seconds = now -. since in
+  if seconds < 0. then None
+  else
+    let whole = int_of_float seconds in
+    if whole < 60 then Some (Printf.sprintf "%ds" whole)
+    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))

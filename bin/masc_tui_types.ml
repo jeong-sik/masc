@@ -382,6 +382,16 @@ let surface_needs : surface -> surface_needs = function
       { needs_transport = false; needs_keeper_roster = false }
 
 (** Dashboard state *)
+(* A request that has been POSTed and has not settled, with when it went out.
+   The instant rides with the request rather than in a second structure keyed
+   by id: a turn taking minutes is normal here and an operator watching one
+   needs to see it advancing, but two structures for one fact drift the moment
+   somebody adds a third place that removes a request. *)
+type inflight =
+  { sent_request : Masc_tui_keeper_chat_projection.request
+  ; sent_at : float
+  }
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -564,7 +574,7 @@ type state = {
      serialized on a single slot because the durable recovery fence held one
      un-acknowledged POST for the whole workspace; with that gone the only
      reason left is per keeper, which is how the server runs turns anyway. *)
-  mutable msg_inflight: Masc_tui_keeper_chat_projection.request list;
+  mutable msg_inflight: inflight list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -580,8 +590,7 @@ type send_disposition =
    keeper does not decide what Enter does here. *)
 let inflight_for_keeper state keeper_name =
   List.find_opt
-    (fun (request : Masc_tui_keeper_chat_projection.request) ->
-      String.equal request.keeper_name keeper_name)
+    (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
     state.msg_inflight
 ;;
 
@@ -595,7 +604,9 @@ let inflight_for_keeper state keeper_name =
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
     ~recovery_blocked:None
-    ~inflight:(inflight_for_keeper state keeper_name)
+    ~inflight:
+      (Option.map (fun entry -> entry.sent_request)
+         (inflight_for_keeper state keeper_name))
     ~unverified:None
 
 (** One keeper as the Keepers surface reads it: durable pause from the

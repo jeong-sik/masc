@@ -147,3 +147,12 @@ val composer_lines : max_rows:int -> string -> string list
     before the width is applied, and a count that moved with the width would
     disagree with the drawing. A line wider than the pane is fitted by
     {!input_viewport}, the way the single-line composer already was. *)
+
+val age_text : now:float -> since:float -> string option
+(** How long something has been outstanding, as [12s] or [3m07s].
+
+    An age, not a countdown: it says how long a thing has been going so a
+    reader can tell slow from stuck. Rendered from a clock the caller passes
+    rather than one read here, so a test can state the instant and two rows in
+    one frame can share a single read. A clock that moved backwards says
+    nothing rather than a negative age. *)

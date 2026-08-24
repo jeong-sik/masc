@@ -243,12 +243,7 @@ let unreadable_text t =
    caller passes rather than one read here, so a test can state the instant.
    A clock that moved backwards says nothing instead of a negative age. *)
 let elapsed_text ~now t =
-  let seconds = now -. t.started_at in
-  if seconds < 0. then None
-  else
-    let whole = int_of_float seconds in
-    if whole < 60 then Some (Printf.sprintf "%ds" whole)
-    else Some (Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60))
+  Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
 let progress_text ~now t =
   match elapsed_text ~now t with

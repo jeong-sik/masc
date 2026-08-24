@@ -907,23 +907,26 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.keeper_name keeper_name)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+       state.msg_inflight)
 ;;
 
 let inflight_by_request_id state request_id =
-  List.find_opt
-    (fun (request : Keeper_chat.request) ->
-      String.equal request.request_id request_id)
-    state.msg_inflight
+  Option.map
+    (fun entry -> entry.sent_request)
+    (List.find_opt
+       (fun entry -> String.equal entry.sent_request.request_id request_id)
+       state.msg_inflight)
 ;;
 
 let drop_inflight state request =
   state.msg_inflight <-
     List.filter
-      (fun current -> not (Keeper_chat.same_request_identity current request))
+      (fun entry ->
+        not (Keeper_chat.same_request_identity entry.sent_request request))
       state.msg_inflight
 ;;
 
@@ -935,7 +938,9 @@ let drop_inflight state request =
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
 let launch_keeper_request state ~mailbox request =
-  state.msg_inflight <- request :: state.msg_inflight;
+  state.msg_inflight <-
+    { sent_request = request; sent_at = Unix.gettimeofday () }
+    :: state.msg_inflight;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin

@@ -892,12 +892,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~arguments:
          [ "cleanup", "cleanup"
          ; "terminate", "terminate"
+         ; "request_interrupt", "request_interrupt"
          ; "request_full_repaint", "request_full_repaint"
          ; "suspend", "suspend"
          ; "new_term", "new_term"
          ]);
-  check int "SIGINT terminates through cleanup" 1
-    (signal_handler "Sys.sigint" "terminate");
+  check int "SIGINT asks the loop rather than ending the process" 1
+    (signal_handler "Sys.sigint" "request_interrupt");
   check int "SIGTERM terminates through cleanup" 1
     (signal_handler "Sys.sigterm" "terminate");
   check int "SIGHUP terminates through cleanup" 1

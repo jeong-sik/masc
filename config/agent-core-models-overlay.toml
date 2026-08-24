@@ -247,7 +247,9 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = false
-thinking_control_format = "none"
+thinking_control_format = "reasoning_effort"
+# Measured 2026-08-24; the endpoint rejects "minimal" and "xhigh".
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "max"]
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_response_format_json = false

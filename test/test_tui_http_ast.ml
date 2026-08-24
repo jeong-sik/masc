@@ -469,11 +469,25 @@ let test_tui_current_projection_wiring () =
        ~callee:"Metrics_tail.empty_message"
      = 1);
   (* Exact, not substring: the retired alias is the whole key "running", and
-     the fleet reading legitimately holds "running_keeper_fiber_count". *)
-  check int "retired planning running alias absent" 0
-    (Ast_grep.count_exact_string_literals
-       ~module_path:"lib/tui_decode.ml"
-       ~needle:"running");
+     the fleet reading legitimately holds "running_keeper_fiber_count".
+     Scoped to the planning decoders, not the file: the alias was theirs, and
+     other readers in this module spell the same word for their own reasons --
+     [Fusion_running] serialises to it (#30079). A file-wide count read those
+     as the retired alias returning. *)
+  List.iter
+    (fun binding_name ->
+      check int
+        (Printf.sprintf "retired planning running alias absent from %s" binding_name)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:"lib/tui_decode.ml"
+           ~binding_name
+           ~needle:"running"))
+    [ "decode_planning_goal"
+    ; "decode_planning_rollup"
+    ; "decode_planning_backlog"
+    ; "decode_planning_snapshot"
+    ];
   (* [proactive_enabled] left the keeper detail row in #29311, and that row is
      now built from [Keeper_meta_contract] rather than raw keys, so it cannot
      come back through it. The one literal left is [decode_keeper_runtime],

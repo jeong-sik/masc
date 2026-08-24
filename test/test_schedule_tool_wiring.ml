@@ -145,6 +145,15 @@ let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   | Error err -> fail (Schedule_service.service_error_to_string err)
 ;;
 
+(* [required] is absent when nothing is mandatory and a list otherwise, so
+   read both shapes into the one fact the callers below want. *)
+let required_names (schema : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  match schema |> member "required" with
+  | `Null -> []
+  | value -> value |> to_list |> List.map to_string
+;;
+
 let test_flat_tool_surface () =
   let names =
     Tool_schemas_schedule.definitions
@@ -187,17 +196,20 @@ let test_flat_tool_surface () =
   let open Yojson.Safe.Util in
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
-  check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+  (* Assert the fact -- which fields the schema makes mandatory -- rather than
+     the JSON shape it uses to say "none". The pre-TOML builder always emitted
+     [required] and defaulted it to [[]]; the TOML builder omits the key when
+     nothing is required. Both are legal JSON Schema and no reader in this
+     repo reads the key, so this test should not be the thing that decides
+     between them. It failed on the shape while the fact was unchanged. *)
+  check (list string) "create schema makes no field mandatory" []
+    (required_names create_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
   check (list string) "get requires the durable schedule pointer"
     [ "schedule_id" ]
-    (get_schema.input_schema
-     |> member "required"
-     |> to_list
-     |> List.map to_string)
+    (required_names get_schema.input_schema)
 ;;
 
 let test_create_list_get_cancel () =

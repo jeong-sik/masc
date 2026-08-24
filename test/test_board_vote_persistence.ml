@@ -548,6 +548,31 @@ let test_flush_failure_keeps_the_vote_log_scheduled () =
     store.Board.dirty_posts
 ;;
 
+(* rewrite_posts drops an orphan row an aborted append left on disk. Its write
+   used to swallow the Error, so a failed rewrite left the orphan with nothing
+   scheduled to retry and a restart revived a post that never reached memory.
+   Blocking only the posts snapshot path exercises that branch on its own. *)
+let test_rewrite_posts_failure_stays_scheduled () =
+  let post = create_post_exn ~author:"rewrite-retry-author" ~content:"rewrite retry body" in
+  ignore post;
+  let store =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  let posts_path = Board.persist_path () in
+  (try Sys.remove posts_path with Sys_error _ -> ());
+  Fs_compat.mkdir_p posts_path;
+  let before = Board.persist_error_count () in
+  Board.rewrite_posts store;
+  Alcotest.(check bool)
+    "the failed rewrite was counted"
+    true
+    (Board.persist_error_count () > before);
+  Alcotest.(check bool)
+    "the snapshot rewrite is still scheduled after it failed"
+    true
+    store.Board.dirty_posts
+;;
+
 let () =
   Alcotest.run "board_vote_persistence"
     [
@@ -582,5 +607,9 @@ let () =
             "flush: failed vote log write stays scheduled"
             `Quick
             (with_eio test_flush_failure_keeps_the_vote_log_scheduled);
+          Alcotest.test_case
+            "rewrite_posts: failed snapshot write stays scheduled"
+            `Quick
+            (with_eio test_rewrite_posts_failure_stays_scheduled);
         ] );
     ]

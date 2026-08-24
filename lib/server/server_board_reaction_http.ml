@@ -90,6 +90,53 @@ let target_of_strings ~target_type ~target_id =
             (String.concat ", " Board.valid_reaction_target_type_strings)))
 ;;
 
+(* A page of the board asks about its rows together. The board list is a
+   public, cached projection and reaction state is per viewer -- whether *you*
+   reacted -- so the two cannot travel in one response, and the surface was
+   asking once per row: twenty of the twenty-three requests that opening the
+   board made. The cap is the page size the board list itself clamps to, so a
+   caller cannot ask about more rows than it can be handed. *)
+let batch_target_limit = 500
+
+let targets_of_strings ~target_type ~target_ids =
+  let* target_type = required_nonempty "target_type" target_type in
+  let* target_ids = required_nonempty "target_ids" target_ids in
+  match Board.reaction_target_type_of_string_opt target_type with
+  | None ->
+    Error
+      (make_error
+         ~code:Invalid_target_type
+         ~status:`Bad_request
+         (Printf.sprintf
+            "target_type must be one of: %s"
+            (String.concat ", " Board.valid_reaction_target_type_strings)))
+  | Some target_type ->
+    let ids =
+      String.split_on_char ',' target_ids
+      |> List.map String.trim
+      |> List.filter (fun id -> not (String.equal id ""))
+    in
+    let count = List.length ids in
+    if count = 0
+    then
+      Error
+        (make_error
+           ~code:Missing_field
+           ~status:`Bad_request
+           "target_ids must hold at least one id")
+    else if count > batch_target_limit
+    then
+      Error
+        (make_error
+           ~code:Validation_error
+           ~status:`Bad_request
+           (Printf.sprintf
+              "target_ids holds %d ids; at most %d are answered at once"
+              count
+              batch_target_limit))
+    else Ok (List.map (fun target_id -> { target_type; target_id }) ids)
+;;
+
 let toggle_request_of_json = function
   | `Assoc _ as json ->
     let* target =
@@ -173,6 +220,42 @@ let list_json ~actor target =
     ()
   |> Result.map reaction_state_json
   |> Result.map_error of_board_error
+;;
+
+(* Keyed by the id the caller asked about so a row it did not ask for cannot
+   be read as an answer, and so an id the store has nothing for still comes
+   back -- as an empty list rather than a gap the caller has to guess at. *)
+let list_batch_json ~actor targets =
+  let rows =
+    Board_dispatch.list_reactions_batch
+      ~targets:
+        (List.map (fun target -> (target.target_type, target.target_id)) targets)
+      ~user_id:actor
+      ()
+  in
+  let summaries_for =
+    let table = Hashtbl.create (List.length rows) in
+    List.iter (fun (key, summaries) -> Hashtbl.replace table key summaries) rows;
+    fun target ->
+      Hashtbl.find_opt table (target.target_type, target.target_id)
+      |> Option.value ~default:[]
+  in
+  `Assoc
+    [ ( "targets"
+      , `List
+          (List.map
+             (fun target ->
+                `Assoc
+                  [ "target_id", `String target.target_id
+                  ; ( "reactions"
+                    , `List
+                        (List.map
+                           Board.reaction_summary_to_yojson
+                           (summaries_for target)) )
+                  ])
+             targets) )
+    ; "supported_reaction_emojis", supported_reaction_emojis_json ()
+    ]
 ;;
 
 let toggle_json ~actor request =

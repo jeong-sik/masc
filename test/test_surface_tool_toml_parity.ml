@@ -1,0 +1,89 @@
+(** Byte-identity pins for the surface tool toml parity declarations moving to
+    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
+    §2.2).
+
+    The expected values were read off [Tool_shard_types.surface_tools] before any file moved, so this
+    suite passing *before* the TOML replaces a literal is what proves the file
+    says the same thing. Written against the published list rather than a loader
+    module, so it holds across the whole migration: what a Keeper receives must
+    not move whether a declaration lives in OCaml or TOML.
+
+    All three are literals -- nothing here derives a value from an owner
+    module, so the whole shard moves in one step.
+
+    Compared as parsed JSON with keys sorted, per RFC §4 -- object key order is
+    not part of a JSON object's meaning, and TOML cannot place a sub-table
+    before its parent's scalar keys. *)
+
+open Alcotest
+
+let rec sorted (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (key, value) -> key, sorted value)
+       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  | `List items -> `List (List.map sorted items)
+  | other -> other
+;;
+
+(* name, description, input_schema (keys sorted) *)
+let expected =
+    [ {|keeper_surface_read|}, {|Read recent messages from one conversation endpoint (dashboard, discord, slack, or another connector label) with speaker identity and a derived participant roster. With mode='channel', 'messages', 'members', or 'member', the Discord lane can also query its live channel and server read surface within the keeper's bound channels.|}, {|{"properties":{"before":{"description":"Page backward: return messages strictly older than this ts (a message timestamp from a previous call). Walk history by passing the oldest_ts of the previous response; stop when has_more is false.","type":"number"},"channel_id":{"description":"Bound Discord channel snowflake; optional when exactly one channel is bound","type":"string"},"discord_after":{"description":"Discord paging cursor; do not combine with discord_before","type":"string"},"discord_before":{"description":"Discord message snowflake for backward paging","type":"string"},"limit":{"description":"Maximum lane messages to return (default 20, max 100)","type":"integer"},"mode":{"description":"Optional exact read mode. When absent, the request is exactly 'local' for the persisted lane; padded or unknown values are invalid. The other modes query Discord live and require surface='discord'.","enum":["local","channel","messages","members","member"],"type":"string"},"query":{"description":"Optional member username/nickname prefix","type":"string"},"surface":{"description":"Lane label exactly as shown in Connected Surfaces or chat history source: 'dashboard', 'discord', 'slack', or another connector's channel label","type":"string"},"user_id":{"description":"Discord user snowflake for mode='member'","type":"string"}},"required":["surface"],"type":"object"}|}
+    ; {|keeper_surface_post|}, {|Post a message to one conversation endpoint: 'dashboard' (appears in the operator's chat transcript), 'discord', or 'slack'. Standard Markdown is rendered natively by Discord and by Slack's Block Kit markdown block. To create a real highlighted user mention, pass stable participant-roster ids in mention_user_ids; never guess ids from display names. A Slack post may reply inside an existing thread (thread_ts) or carry Block Kit blocks; see those parameters. Posting to an unbound surface is an error. These endpoints are read by a person, so an unchanged status reposted every cycle crowds their view and says nothing the previous one did not; when there is nothing new, the turn ends without a post.|}, {|{"properties":{"blocks":{"description":"Slack Block Kit blocks (chat.postMessage blocks parameter) for a structurally rich PR report: section/header/divider/context blocks, color banners, images. Slack surface only — a dashboard or discord target is rejected, not ignored. Each block must be a JSON object carrying a non-empty string \"type\" member. When blocks is present it is sent alongside content (content remains the notification fallback text).","items":{"type":"object"},"maxItems":50,"type":"array"},"channel_id":{"description":"Bound Discord or Slack channel id; required only when more than one channel is bound for the selected surface","type":"string"},"content":{"description":"Message text to deliver on the lane","type":"string"},"mention_user_ids":{"description":"Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Display names such as @Vincent do not create API mentions.","items":{"type":"string"},"maxItems":100,"type":"array"},"surface":{"description":"Lane to post to: 'dashboard', 'discord', or 'slack'","type":"string"},"thread_ts":{"description":"Slack timestamp of an existing thread's root message (from keeper_surface_read). Posts this message as a reply inside that thread. Slack surface only — a dashboard or discord target is rejected, not ignored. When both this and a continuation thread exist, this value wins.","type":"string"}},"required":["surface","content"],"type":"object"}|}
+    ; {|keeper_person_note_set|}, {|Remember (or clear) a note about a person met on a connected surface, keyed by their roster speaker_id (RFC-0229). The note survives after their messages age out of the log window and shows up on the keeper_surface_read roster.|}, {|{"properties":{"note":{"description":"What to remember about this person; blank clears the note","type":"string"},"speaker_id":{"description":"Stable speaker id from the roster (Discord snowflake); notes attach to ids, never names","type":"string"}},"required":["speaker_id","note"],"type":"object"}|}
+    ]
+;;
+
+let published = Tool_shard_types.surface_tools
+
+let find name =
+  match
+    List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
+  with
+  | Some schema -> schema
+  | None -> failwith (name ^ " is absent from Tool_shard_types.surface_tools")
+;;
+
+let test_descriptions_are_byte_identical () =
+  List.iter
+    (fun (name, description, _) ->
+       check string (name ^ " description") description (find name).description)
+    expected
+;;
+
+let test_input_schemas_match_with_keys_sorted () =
+  List.iter
+    (fun (name, _, schema) ->
+       check
+         string
+         (name ^ " input_schema")
+         schema
+         (Yojson.Safe.to_string (sorted (find name).input_schema)))
+    expected
+;;
+
+(* The order is what a model reads the tool list in, so a reordering is a
+   change to the surface even when every schema still matches. *)
+let test_the_published_order_is_unchanged () =
+  check
+    (list string)
+    "Tool_shard_types.surface_tools in order"
+    (List.map (fun (name, _, _) -> name) expected)
+    (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
+;;
+
+let () =
+  run
+    "surface_tool_toml_parity"
+    [ ( "byte_identity"
+      , [ test_case "descriptions" `Quick test_descriptions_are_byte_identical
+        ; test_case
+            "input schemas, keys sorted"
+            `Quick
+            test_input_schemas_match_with_keys_sorted
+        ; test_case "published order" `Quick test_the_published_order_is_unchanged
+        ] )
+    ]
+;;

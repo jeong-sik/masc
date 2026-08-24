@@ -224,6 +224,83 @@ let test_detailed_row_carries_lifecycle_phase () =
         failf "expected keeper rows, got %s" (Yojson.Safe.to_string other))
 ;;
 
+(* Four separate readings describe one keeper, and a row that answers all four
+   with a single word forces its readers to guess. The TUI header read the
+   folded "inactive" as running while the dashboard read it as attention -
+   neither was wrong about the word, because the word does not say which
+   question it answers. Each axis gets its own field so no reader has to fold
+   or unfold anything. *)
+let detailed_row f =
+  keeper_list
+    ~names:[ "alpha" ]
+    ~args:(`Assoc [ "detailed", `Bool true ])
+    (fun json ->
+      match Yojson.Safe.Util.member "keepers" json with
+      | `List (row :: _) -> f row
+      | `List [] -> fail "detailed keeper list returned no rows"
+      | other ->
+        failf "expected keeper rows, got %s" (Yojson.Safe.to_string other))
+;;
+
+let test_detailed_row_carries_every_axis () =
+  detailed_row (fun row ->
+    List.iter
+      (fun field ->
+        check bool
+          (Printf.sprintf "row publishes %s" field)
+          true
+          (Yojson.Safe.Util.member field row <> `Null))
+      [ "phase"; "health"; "paused" ])
+;;
+
+(* The two vocabularies share "idle" and "offline", so a keeper sitting on a
+   shared value proves nothing about which one a field answers with. Only the
+   words unique to each side can tell them apart. *)
+let health_only_words = [ "healthy"; "stale"; "zombie"; "degraded" ]
+let surface_only_words = [ "active"; "inactive"; "busy"; "listening" ]
+
+let test_health_is_a_health_word_not_a_surface_word () =
+  (* [status] answers with the surface vocabulary, which folds stale, degraded
+     and zombie into "inactive". [health] must answer from the vocabulary those
+     three come from, or the new field is the old fold under a new name. *)
+  detailed_row (fun row ->
+    let health = string_field row "health" in
+    check bool
+      (Printf.sprintf "health %S is never a surface-only word" health)
+      false
+      (List.mem health surface_only_words);
+    check bool
+      (Printf.sprintf "health %S is a keeper_health value" health)
+      true
+      (List.mem health (health_only_words @ [ "idle"; "offline" ])))
+;;
+
+(* What this file cannot show: a keeper seeded here has no keepalive fiber, so
+   its health is "offline" and [status] spells it "offline" too - legitimately
+   the one value both vocabularies share. Publishing [status] under the
+   [health] key passes every assertion above, and did, until the mutation was
+   run. The two fields are told apart in test_keeper_surface_status, which
+   feeds one diagnostic to both readers and pins that "stale", "degraded" and
+   "zombie" survive one and fold to "inactive" in the other. *)
+
+let test_absent_next_action_is_null_not_empty () =
+  (* An action the diagnostic did not name is absent, not the empty string:
+     "" would read as an action whose name happens to be blank. *)
+  detailed_row (fun row ->
+    match Yojson.Safe.Util.member "next_action" row with
+    | `Null -> ()
+    | `String "" -> fail "next_action published an empty string instead of null"
+    | `String value ->
+      check bool
+        (Printf.sprintf "next_action %S is a known action" value)
+        true
+        (List.mem value
+           [ "auto_restart"; "recover"; "probe"; "direct_message" ])
+    | other ->
+      failf "next_action must be a string or null, got %s"
+        (Yojson.Safe.to_string other))
+;;
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -237,7 +314,17 @@ let () =
             test_name_only_shape_carries_the_same_verdict
         ; test_case "default limit is reported" `Quick
             test_default_limit_is_reported_not_assumed
-        ; test_case "detailed row carries lifecycle phase" `Quick
+        ] )
+    ; ( "one axis per field"
+      , [ test_case "row publishes phase, health and paused" `Quick
+            test_detailed_row_carries_every_axis
+        ; test_case "health uses the health vocabulary" `Quick
+            test_health_is_a_health_word_not_a_surface_word
+        ; test_case "an unnamed next action is null" `Quick
+            test_absent_next_action_is_null_not_empty
+        ] )
+    ; ( "lifecycle"
+      , [ test_case "detailed row carries lifecycle phase" `Quick
             test_detailed_row_carries_lifecycle_phase
         ] )
     ]

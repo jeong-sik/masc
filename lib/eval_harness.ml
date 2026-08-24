@@ -495,10 +495,9 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       | Some (`List items) ->
           List.filter_map (fun te ->
             try
-              (* [selector] is the only accepted spelling. The bare [tool] /
-                 [tool_name] strings it replaced are not read, and a selector
+              (* [selector] is the only accepted spelling, and a selector
                  that fails to decode is dropped rather than downgraded to a
-                 name match -- that downgrade turned a malformed selector into
+                 name match -- that downgrade turns a malformed selector into
                  a silently weaker expectation. *)
               let selector =
                 match Json_util.assoc_member_opt "selector" te with

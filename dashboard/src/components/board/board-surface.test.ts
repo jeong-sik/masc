@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   BOARD_DETAIL_WIDTH_DEFAULT,
@@ -63,6 +63,12 @@ vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
+  // The feed asks for its rows together; a bar only fetches its own when this
+  // one fails, which is the path fetchBoardReactionState above still covers.
+  fetchBoardReactionsBatch: vi.fn().mockResolvedValue({
+    byTargetId: new Map(),
     supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
   }),
   toggleReaction: vi.fn(),
@@ -475,6 +481,26 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
+  })
+
+  it('asks for the reactions of every drawn row in one request', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState } = await import('../../api/board')
+    vi.mocked(fetchBoardReactionsBatch).mockClear()
+    vi.mocked(fetchBoardReactionState).mockClear()
+    boardPosts.value = [
+      makePost({ id: 'post-a', title: 'A', body: 'a', author: 'ani1999' }),
+      makePost({ id: 'post-b', title: 'B', body: 'b', author: 'ani1999' }),
+      makePost({ id: 'post-c', title: 'C', body: 'c', author: 'ani1999' }),
+    ]
+
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalled())
+
+    expect(fetchBoardReactionsBatch).toHaveBeenCalledTimes(1)
+    expect(fetchBoardReactionsBatch).toHaveBeenCalledWith('post', ['post-a', 'post-b', 'post-c'])
+    // The per-row read is the fallback for when the batch fails, so a healthy
+    // batch must leave it untouched -- otherwise the batch saved nothing.
+    expect(fetchBoardReactionState).not.toHaveBeenCalled()
   })
 
   it('renders embedded reaction summaries on post cards', () => {

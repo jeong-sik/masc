@@ -340,12 +340,17 @@ let string_enum_property name values description =
       ] )
 ;;
 
+(* An empty ["required"] says nothing an absent one does not, and both readers
+   fold them together: llm_provider/types.ml answers [None] and [`Null] with
+   [Ok []], and tool_input_validation.ml treats a non-matching key the same
+   way. Emitting it spends bytes in every turn's tool list to say nothing. *)
 let object_schema ?(required = []) properties =
   `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc properties
-    ; "required", `List (List.map (fun n -> `String n) required)
-    ]
+    ([ "type", `String "object"; "properties", `Assoc properties ]
+     @
+     match required with
+     | [] -> []
+     | _ :: _ -> [ "required", `List (List.map (fun n -> `String n) required) ])
 ;;
 
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema

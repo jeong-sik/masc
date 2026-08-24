@@ -108,6 +108,18 @@ val control_plane_status_to_string : control_plane_status -> string
     stays a rejected parse rather than an accepted default. *)
 val control_plane_status_of_string_opt : string -> control_plane_status option
 
+val keeper_health_to_string : keeper_health -> string
+(** Wire spelling of a health reading. *)
+
+val keeper_diagnostic_health :
+  diagnostic:Yojson.Safe.t -> source:string -> keeper_health
+(** Health as the diagnostic reports it.
+
+    An unreadable [health_state] resolves to [KH_offline] with a warning, not
+    to a healthy-looking value: the reader could not tell, and a keeper that
+    cannot be read is not a keeper that is fine. [source] names the caller in
+    that warning. *)
+
 val keeper_surface_status :
   diagnostic:Yojson.Safe.t ->
   string

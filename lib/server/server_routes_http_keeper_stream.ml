@@ -313,6 +313,36 @@ let handle_keeper_tool_approval state request reqd =
              ])))
 ;;
 
+(* The waits live only in the registry while their turns are parked, so this
+   is a projection of live state, not a store read. Listing them is what lets
+   an operator answer a turn whose owning stream watcher is gone — without
+   this, such a call could only time out (masc#30034). [asked_at] is the
+   registry clock's epoch reading; the consumer derives display age against
+   its own clock rather than trusting one computed here. *)
+let handle_keeper_tool_approvals_list _state request reqd =
+  let held =
+    Keeper_tool_approval_registry.pending
+      (Keeper_tool_approval_registry.shared ())
+  in
+  respond_json_value_with_cors ~status:`OK request reqd
+    (`Assoc
+       [ ( "pending"
+         , `List
+             (List.map
+                (fun (p : Keeper_tool_approval_registry.pending) ->
+                  `Assoc
+                    [ ("keeper", `String p.keeper_name)
+                    ; ("tool_call_id", `String p.tool_call_id)
+                    ; ("tool", `String p.tool_name)
+                    ; ("args", `String p.args)
+                    ; ("question", `String p.question)
+                    ; ("asked_at", `Float p.asked_at)
+                    ; ("timeout_sec", `Float p.timeout_sec)
+                    ])
+                held) )
+       ])
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in

@@ -276,6 +276,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -283,6 +284,8 @@
   test_run_tool_toml_parity
   test_local_runtime_tool_toml_parity
   test_base_tool_toml_parity
+  test_schedule_tool_toml_parity
+  test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
@@ -597,6 +600,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
   test_keeper_runtime_schemas_toml_parity
   test_taskboard_tool_toml_parity
@@ -604,6 +608,8 @@
   test_run_tool_toml_parity
   test_local_runtime_tool_toml_parity
   test_base_tool_toml_parity
+  test_schedule_tool_toml_parity
+  test_surface_tool_toml_parity
   test_keeper_artifact_read_request
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
@@ -2407,7 +2413,7 @@
 (test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
- (libraries alcotest masc.string_util)
+ (libraries alcotest masc.string_util masc_core yojson)
  (deps
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))

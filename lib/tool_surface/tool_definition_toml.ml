@@ -85,6 +85,18 @@ let as_int ~context = function
     other -> Error (sprintf "%s must be an integer, got %s" context (toml_shape other))
 ;;
 
+(* TOML tells 0.0 from 0, and so does the schema: a float bound serializes as
+   0.0 and an integer one as 0. Accepting an integer here would move the bytes
+   of every declaration that carries one. *)
+let as_float ~context = function
+  | Otoml.TomlFloat value -> Ok value
+  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as
+    other -> Error (sprintf "%s must be a float, got %s" context (toml_shape other))
+;;
+
 let as_table_pairs ~context = function
   | Otoml.TomlTable pairs | Otoml.TomlInlineTable pairs -> Ok pairs
   | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
@@ -112,6 +124,24 @@ let as_string_list ~context value =
     | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
     | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as
     other -> Error (sprintf "%s must be an array of strings, got %s" context (toml_shape other))
+;;
+
+let as_int_list ~context value =
+  let element index item = as_int ~context:(sprintf "%s[%d]" context index) item in
+  match value with
+  | Otoml.TomlArray items ->
+    let rec collect index acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* v = element index item in
+        collect (index + 1) (v :: acc) rest
+    in
+    collect 0 [] items
+  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as
+    other -> Error (sprintf "%s must be an array of integers, got %s" context (toml_shape other))
 ;;
 
 (* ── Shared helpers ───────────────────────────────────────────────────── *)
@@ -202,14 +232,30 @@ let rec param_of_pairs ~context pairs =
       let* text = as_non_empty_string ~context:key_context value in
       Ok (Some ("description", `String text))
     | "enum" ->
-      let* () = only_for ~context:key_context ~declared Ptype_string in
-      let* values = as_string_list ~context:key_context value in
+      (* Members carry the parameter's own type. tool_execute's [fd] enumerates
+         1 and 2, and quoting those would declare a different schema than the
+         executor reads. *)
+      let* items =
+        match declared with
+        | Ptype_string ->
+          let* values = as_string_list ~context:key_context value in
+          Ok (List.map (fun v -> `String v) values)
+        | Ptype_integer ->
+          let* values = as_int_list ~context:key_context value in
+          Ok (List.map (fun v -> `Int v) values)
+        | Ptype_number | Ptype_boolean | Ptype_object | Ptype_array ->
+          Error
+            (sprintf
+               "%s is only valid for type string or integer params, this param is type %s"
+               key_context
+               (param_type_to_string declared))
+      in
       let* () =
-        match values with
+        match items with
         | [] -> Error (sprintf "%s must not be empty" key_context)
         | _ :: _ -> Ok ()
       in
-      Ok (Some ("enum", `List (List.map (fun v -> `String v) values)))
+      Ok (Some ("enum", `List items))
     | "default" ->
       (match declared with
        | Ptype_integer ->
@@ -234,6 +280,13 @@ let rec param_of_pairs ~context pairs =
       let* () = only_for ~context:key_context ~declared Ptype_integer in
       let* v = as_int ~context:key_context value in
       Ok (Some (key, `Int v))
+    | "exclusive_minimum" ->
+      (* A [number] bound, not an [integer] one: tool_execute's timeout_sec and
+         the keeper sandbox durations are seconds, and "greater than zero" is
+         what they mean -- zero is not a timeout. *)
+      let* () = only_for ~context:key_context ~declared Ptype_number in
+      let* v = as_float ~context:key_context value in
+      Ok (Some ("exclusiveMinimum", `Float v))
     | "max_length" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
       let* v = as_int ~context:key_context value in
@@ -255,9 +308,35 @@ let rec param_of_pairs ~context pairs =
       let* v = as_int ~context:key_context value in
       Ok (Some ("minItems", `Int v))
     | "additional_properties" ->
+      (* JSON Schema lets this be a boolean or a schema. [false] closes the
+         object; a schema says what an undeclared key must look like, which is
+         how tool_execute's [env] admits any name and demands a string value.
+         Only the value type is read here -- a nested [params] would be a
+         different key. *)
       let* () = only_for ~context:key_context ~declared Ptype_object in
-      let* v = as_bool ~context:key_context value in
-      Ok (Some ("additionalProperties", `Bool v))
+      (match value with
+       | Otoml.TomlBoolean flag -> Ok (Some ("additionalProperties", `Bool flag))
+       | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+         let* pairs = as_table_pairs ~context:key_context value in
+         let* declared_type =
+           match List.assoc_opt "type" pairs with
+           | None ->
+             Error (sprintf "%s as a schema must declare \"type\"" key_context)
+           | Some v -> as_string ~context:(key_context ^ ".type") v
+         in
+         let* parsed = param_type_of_string declared_type in
+         Ok (Some ("additionalProperties", `Assoc [ "type", `String (param_type_to_string parsed) ]))
+       | _ ->
+         Error
+           (sprintf "%s must be a boolean or a table, got %s" key_context (toml_shape value)))
+    | "min_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("minProperties", `Int v))
+    | "max_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("maxProperties", `Int v))
     | "params" ->
       let* () = only_for ~context:key_context ~declared Ptype_object in
       let* parsed = params_of_value ~context:key_context value in
@@ -351,9 +430,35 @@ and items_json ~context pairs =
       let* v = as_non_empty_string ~context:key_context value in
       Ok (Some ("pattern", `String v))
     | "additional_properties" ->
+      (* JSON Schema lets this be a boolean or a schema. [false] closes the
+         object; a schema says what an undeclared key must look like, which is
+         how tool_execute's [env] admits any name and demands a string value.
+         Only the value type is read here -- a nested [params] would be a
+         different key. *)
       let* () = only_for ~context:key_context ~declared Ptype_object in
-      let* v = as_bool ~context:key_context value in
-      Ok (Some ("additionalProperties", `Bool v))
+      (match value with
+       | Otoml.TomlBoolean flag -> Ok (Some ("additionalProperties", `Bool flag))
+       | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+         let* pairs = as_table_pairs ~context:key_context value in
+         let* declared_type =
+           match List.assoc_opt "type" pairs with
+           | None ->
+             Error (sprintf "%s as a schema must declare \"type\"" key_context)
+           | Some v -> as_string ~context:(key_context ^ ".type") v
+         in
+         let* parsed = param_type_of_string declared_type in
+         Ok (Some ("additionalProperties", `Assoc [ "type", `String (param_type_to_string parsed) ]))
+       | _ ->
+         Error
+           (sprintf "%s must be a boolean or a table, got %s" key_context (toml_shape value)))
+    | "min_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("minProperties", `Int v))
+    | "max_properties" ->
+      let* () = only_for ~context:key_context ~declared Ptype_object in
+      let* v = as_int ~context:key_context value in
+      Ok (Some ("maxProperties", `Int v))
     | "params" ->
       (match declared with
        | Ptype_object ->
@@ -367,14 +472,14 @@ and items_json ~context pairs =
     | other -> Error (sprintf "%s: unknown key %S" context other)
   in
   let* fields = ordered_fields ~field pairs in
-  (* Array items of type object declare their fields or declare nothing: an
-     items table with no [params] is a shape no caller can satisfy. A
-     top-level object parameter is not held to this — the fixture's [meta]
-     is an open bag by design. *)
+  (* An object item may declare its fields or leave them open, the same as a
+     top-level object parameter. The rule here used to demand [params], on the
+     ground that an item with none is a shape no caller can satisfy; that is
+     not what the surface does. keeper_surface_post carries Slack Block Kit
+     blocks as bare {"type": "object"} items and checks their shape at run
+     time, because the set of block types is Slack's to change, not ours. *)
   let* params =
     match declared, List.assoc_opt "params" pairs with
-    | Ptype_object, None ->
-      Error (sprintf "%s of type object must declare params" context)
     | Ptype_object, Some value -> params_of_value ~context value
     | _ -> Ok []
   in
@@ -396,7 +501,80 @@ type loaded =
   ; keeper_projection : Masc_domain.tool_schema option
   }
 
-let assemble_input_schema ~params ~additional_properties : Yojson.Safe.t =
+(* One admitted call shape: these fields present, those absent. [forbidden]
+   says "none of these", which JSON Schema writes two ways -- [not: {required:
+   [x]}] for a single name, and [not: {anyOf: [...]}] for several, because
+   [not: {required: [a; b]}] would only forbid having *both*. The distinction
+   is why the key is a list of names rather than a nested schema. *)
+let alternative_json ~required ~forbidden ~description : Yojson.Safe.t =
+  let one name = `Assoc [ "required", `List [ `String name ] ] in
+  let negated =
+    match forbidden with
+    | [ single ] -> `Assoc [ "required", `List [ `String single ] ]
+    | many -> `Assoc [ "anyOf", `List (List.map one many) ]
+  in
+  `Assoc
+    [ "required", `List (List.map (fun name -> `String name) required)
+    ; "not", negated
+    ; "description", `String description
+    ]
+;;
+
+(* [[one_of]] blocks, in file order. Each names the fields a call must carry
+   and the ones it must not; the shape they build is documented on
+   [alternative_json]. *)
+let alternatives_of_pairs ~context pairs =
+  let blocks =
+    match List.assoc_opt "one_of" pairs with
+    | None -> []
+    | Some (Otoml.TomlTableArray items) -> items
+    | Some other -> [ other ]
+  in
+  let one index block =
+    let ctx = sprintf "%s.one_of[%d]" context index in
+    let* fields = as_table_pairs ~context:ctx block in
+    let* required =
+      match List.assoc_opt "required" fields with
+      | None -> Error (sprintf "%s is missing the required key \"required\"" ctx)
+      | Some value -> as_string_list ~context:(ctx ^ ".required") value
+    in
+    let* forbidden =
+      match List.assoc_opt "forbidden" fields with
+      | None -> Error (sprintf "%s is missing the required key \"forbidden\"" ctx)
+      | Some value -> as_string_list ~context:(ctx ^ ".forbidden") value
+    in
+    let* description =
+      match List.assoc_opt "description" fields with
+      | None -> Error (sprintf "%s is missing the required key \"description\"" ctx)
+      | Some value -> as_non_empty_string ~context:(ctx ^ ".description") value
+    in
+    let* () =
+      match required, forbidden with
+      | [], _ -> Error (sprintf "%s.required must not be empty" ctx)
+      | _, [] -> Error (sprintf "%s.forbidden must not be empty" ctx)
+      | _ :: _, _ :: _ -> Ok ()
+    in
+    let known key =
+      List.exists (String.equal key) [ "required"; "forbidden"; "description" ]
+    in
+    let rec walk = function
+      | [] -> Ok ()
+      | (key, (_ : Otoml.t)) :: rest ->
+        if known key then walk rest else Error (sprintf "%s: unknown key %S" ctx key)
+    in
+    let* () = walk fields in
+    Ok (alternative_json ~required ~forbidden ~description)
+  in
+  let rec collect index acc = function
+    | [] -> Ok (List.rev acc)
+    | block :: rest ->
+      let* json = one index block in
+      collect (index + 1) (json :: acc) rest
+  in
+  collect 0 [] blocks
+;;
+
+let assemble_input_schema ~params ~additional_properties ~alternatives : Yojson.Safe.t =
   let properties = List.map (fun p -> p.param_name, p.param_json) params in
   let required =
     params
@@ -410,7 +588,10 @@ let assemble_input_schema ~params ~additional_properties : Yojson.Safe.t =
         | _ :: _ -> [ "required", `List required ])
      @ (match additional_properties with
         | None -> []
-        | Some flag -> [ "additionalProperties", `Bool flag ]))
+        | Some flag -> [ "additionalProperties", `Bool flag ])
+     @ (match alternatives with
+        | [] -> []
+        | _ :: _ -> [ "oneOf", `List alternatives ]))
 ;;
 
 let keeper_projection_of_pairs ~name pairs =
@@ -453,7 +634,7 @@ let keeper_projection_of_pairs ~name pairs =
   Ok
     { Masc_domain.name
     ; description
-    ; input_schema = assemble_input_schema ~params ~additional_properties
+    ; input_schema = assemble_input_schema ~params ~additional_properties ~alternatives:[]
     }
 ;;
 
@@ -487,6 +668,7 @@ let tool_of_pairs ~name pairs =
     | None -> Ok []
     | Some value -> params_of_value ~context:"params" value
   in
+  let* alternatives = alternatives_of_pairs ~context:"tool" pairs in
   let* keeper_projection =
     match List.assoc_opt "keeper_projection" pairs with
     | None -> Ok None
@@ -505,6 +687,7 @@ let tool_of_pairs ~name pairs =
         ; "description"
         ; "additional_properties"
         ; "params"
+        ; "one_of"
         ; "keeper_projection"
         ]
     in
@@ -519,7 +702,8 @@ let tool_of_pairs ~name pairs =
     { schema =
         { Masc_domain.name = declared_name
         ; description
-        ; input_schema = assemble_input_schema ~params ~additional_properties
+        ; input_schema =
+            assemble_input_schema ~params ~additional_properties ~alternatives
         }
     ; keeper_projection
     }

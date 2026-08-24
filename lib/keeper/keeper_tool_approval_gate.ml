@@ -40,7 +40,10 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
          ; question = request.prompt.question
          });
     let outcome =
-      Registry.await registry ~clock ~keeper_name ~tool_call_id ~timeout_sec
+      Registry.await registry ~clock ~keeper_name ~tool_call_id
+        ~tool_name:request.tool_name
+        ~args:(Yojson.Safe.to_string request.input)
+        ~question:request.prompt.question ~timeout_sec
     in
     let decision, label =
       match outcome with

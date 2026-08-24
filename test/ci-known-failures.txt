@@ -47,12 +47,6 @@ test_server_mcp_session_persist              # persistence: save/forget/load rou
 test_telemetry_task_transition_10358         # telemetry: claim -> start
 test_tools_coverage                          # schema_structure 003, 1 of 40
 
-# --- a guard that is red because the thing it guards happened -------------
-# 58 live keeper identities remain in six TUI test files. Renaming them has to
-# keep the rendered column width, which is what the TUI tests measure, so it is
-# its own change rather than a rename pass.
-test_keeper_toml
-
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a
 # time with Eio.Path.open_dir and never re-reads the path string. The race has

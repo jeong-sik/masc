@@ -48,10 +48,10 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   let events =
     [ agent_core ~tool:"read_file" "analyst"
     ; agent_core ~kind:Observer.Telemetry "analyst"
-    ; heartbeat "taskmaster"
-    ; Observer.Keeper_composite_changed { keeper = "rondo"; at = 100. }
+    ; heartbeat "bandleader"
+    ; Observer.Keeper_composite_changed { keeper = "largo"; at = 100. }
     ; Observer.Snapshot "execution_snapshot"
-    ; settled "rondo"
+    ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "internal_agent_runs_changed"
     ]
@@ -120,11 +120,11 @@ let test_a_return_with_no_start_held_has_no_duration () =
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
-    "\xe2\x96\xa0 rondo turn settled | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
-    (text (Acting.row_of_event ~duration_ms:None (settled "rondo")));
+    "\xe2\x96\xa0 largo turn settled | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    (text (Acting.row_of_event ~duration_ms:None (settled "largo")));
   check string "a heartbeat in a turn says how long it has been in it"
-    "\xc2\xb7 taskmaster heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
-    (text (Acting.row_of_event ~duration_ms:None (heartbeat "taskmaster")))
+    "\xc2\xb7 bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
+    (text (Acting.row_of_event ~duration_ms:None (heartbeat "bandleader")))
 
 let test_a_lane_named_event_is_attributed_by_its_trace () =
   let on_lane =
@@ -142,15 +142,15 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
       }
   in
   let traces =
-    [ ("polisher", "trace-1787333554796-0001d"); ("rondo", "trace-1787333554989-0001e") ]
+    [ ("polisher", "trace-1787333554796-0001d"); ("largo", "trace-1787333554989-0001e") ]
   in
-  check string "the keeper whose trace the event carries" "rondo"
+  check string "the keeper whose trace the event carries" "largo"
     (Acting.keeper_of_event ~traces on_lane);
   check string "an unmatched trace keeps the lane name"
     "agent_core-glm-coding.glm-5-turbo"
     (Acting.keeper_of_event ~traces:[] on_lane);
-  check string "a keeper-named event keeps its keeper" "taskmaster"
-    (Acting.keeper_of_event ~traces (heartbeat "taskmaster"))
+  check string "a keeper-named event keeps its keeper" "bandleader"
+    (Acting.keeper_of_event ~traces (heartbeat "bandleader"))
 
 let test_elapsed_text_picks_a_unit () =
   check (list string) "ms, seconds, minutes"

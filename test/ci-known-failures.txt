@@ -42,10 +42,8 @@ test_keeper_tool_dispatch_runtime            # execute_keeper_tool_call_with_out
 test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
 test_keeper_turn_attempt_observer            # observation-only: 100 same-turn attempts
 test_keeper_turn_up_args                     # autonomous_wake_prompt: persist round-trip
-test_pr_open_script                          # script: the source avoids mapfile
 test_server_mcp_session_persist              # persistence: save/forget/load round-trip
-test_telemetry_task_transition_10358         # telemetry: claim -> start
-test_tools_coverage                          # schema_structure 003, 1 of 40
+test_tools_coverage                          # analyze_image has no masc_/keeper_/tool_ namespace
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a

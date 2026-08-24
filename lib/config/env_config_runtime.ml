@@ -38,6 +38,27 @@ module Sse_connect_guard = struct
   (** Reconnects admitted inside one window. [<= 0] disables the window
       limit. *)
   let connect_max_in_window = get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+
+  (* Re-readable twins of the three bindings above.  They exist so a
+     test can pin the documented disable semantics — [<= 0], negative
+     included — by setting the env-var and calling the thunk, without
+     forking a process (the bindings above are fixed at module init).
+     They deliberately use the raw [get_float]/[get_int] readers, NOT
+     the [*_nonneg] variants: those clamp a negative to the default,
+     which would silently turn "disable" into "default cooldown" — the
+     exact regression this module's contract forbids (task-534).  The
+     transport keeps reading the cached bindings; these thunks are for
+     tests and any future hot-reload call site. *)
+  module Re_read = struct
+    let reconnect_min_interval_seconds () =
+      get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+
+    let connect_window_seconds () =
+      get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
+
+    let connect_max_in_window () =
+      get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+  end
 end
 
 (** {1 Tempo (Polling Interval) Configuration} *)

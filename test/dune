@@ -2872,6 +2872,11 @@
  (libraries alcotest str masc_tui_footer))
 
 (test
+ (name test_tui_help_scroll)
+ (modules test_tui_help_scroll)
+ (libraries alcotest masc_tui_help masc_tui_scroll))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

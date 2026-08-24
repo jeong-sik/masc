@@ -4040,7 +4040,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="event-budgeted Overview",
         interact=assert_overview_event_rows,
-        http_fixtures=overview_event_http_fixtures(),
+        http_fixtures=keeper_runtime_http_fixtures(),
         prepare_workspace=seed_row_budget_workspace,
     )
     run_terminal_scenario(

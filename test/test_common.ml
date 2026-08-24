@@ -124,6 +124,20 @@ let test_frontmatter_tags_accept_both_shapes () =
   check (list string) "bracketed" [ "a"; "b" ] (Frontmatter.list_field bracketed "tags");
   check (list string) "bare" [ "a"; "b" ] (Frontmatter.list_field bare "tags")
 
+(* A block that never closes used to consume the document: every line became
+   a field candidate and the body came back empty, so a prompt whose closing
+   delimiter carried a typo loaded as blank (#26599). It is not frontmatter,
+   so the content comes back unread. *)
+let test_frontmatter_unterminated_block_keeps_the_document () =
+  let content = "---\ndescription: test\nbody without closing delimiter" in
+  let parsed = Frontmatter.parse content in
+  check string "body is the whole input" content parsed.Frontmatter.body;
+  check
+    (list (pair string string))
+    "and nothing was read as a field"
+    []
+    parsed.Frontmatter.fields
+
 let test_frontmatter_line_without_colon_is_skipped () =
   let parsed = Frontmatter.parse "---\njust text\ntitle: T\n---\n" in
   check string "title still read" "T" (Frontmatter.field parsed "title");
@@ -151,5 +165,7 @@ let () =
       test_case "tags accept both shapes" `Quick test_frontmatter_tags_accept_both_shapes;
       test_case "line without colon is skipped" `Quick
         test_frontmatter_line_without_colon_is_skipped;
+      test_case "unterminated block keeps the document" `Quick
+        test_frontmatter_unterminated_block_keeps_the_document;
     ];
   ]

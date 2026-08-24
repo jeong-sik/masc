@@ -12,6 +12,7 @@ val dispatch :
   cors:(string * string) list ->
   path:string ->
   config:Workspace.config option ->
+  with_public_read:((unit -> unit) -> unit) ->
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool

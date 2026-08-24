@@ -566,6 +566,38 @@ let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Keeper_tool_descriptor.all_descriptors () returned []"
 
+let object_schema = `Assoc [ "type", `String "object" ]
+
+let schema_named name : Masc_domain.tool_schema =
+  { name; description = "one line"; input_schema = object_schema }
+;;
+
+let rejects_with what schemas =
+  match Masc.Config.validate_schemas schemas with
+  | () -> Alcotest.failf "validate_schemas accepted %s" what
+  | exception Invalid_argument _ -> ()
+;;
+
+(* The disjointness that [Keeper_tool_descriptor.find_cluster_schema_opt] relies
+   on is enforced here and nowhere else: the six registries it falls through are
+   all concatenated into [Config.raw_all_tool_schemas]. *)
+let test_duplicate_schema_name_is_rejected () =
+  rejects_with
+    "a repeated tool name"
+    [ schema_named "masc_status"; schema_named "masc_status" ]
+;;
+
+let test_distinct_schema_names_are_accepted () =
+  Masc.Config.validate_schemas
+    [ schema_named "masc_status"; schema_named "masc_tasks" ]
+;;
+
+let test_blank_schema_description_is_rejected () =
+  rejects_with
+    "a blank description"
+    [ { name = "masc_status"; description = ""; input_schema = object_schema } ]
+;;
+
 let schema_property_description schema name =
   let open Yojson.Safe.Util in
   schema |> member "properties" |> member name |> member "description"
@@ -1720,6 +1752,18 @@ let () =
         ] )
     ; ( "uniqueness"
       , [ test_case "registry not empty" `Quick test_registry_not_empty
+        ; test_case
+            "a repeated schema name is rejected"
+            `Quick
+            test_duplicate_schema_name_is_rejected
+        ; test_case
+            "distinct schema names are accepted"
+            `Quick
+            test_distinct_schema_names_are_accepted
+        ; test_case
+            "a blank schema description is rejected"
+            `Quick
+            test_blank_schema_description_is_rejected
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness
         ; test_case

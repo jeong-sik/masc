@@ -955,9 +955,14 @@ let decode_goal_proof json =
         | Some "proof_pending" -> Proof_pending
         | Some "idle" -> Proof_idle
         | Some other -> Proof_unreadable (Some other)
-        | None -> Proof_idle))
+        (* The server never leaves this out: a goal with no ledger row gets
+           the default record and a store that will not decode gets the
+           ledger_error marker, precisely so corruption is not dressed up as
+           "not verified yet". Reading an absent state as idle would put that
+           disguise back on this side of the wire. *)
+        | None -> Proof_unreadable (Some "no completion state on the goal")))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-    Proof_idle
+    Proof_unreadable (Some "no verification block on the goal")
 ;;
 
 let decode_planning_goal json =

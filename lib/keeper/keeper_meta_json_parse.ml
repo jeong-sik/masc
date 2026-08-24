@@ -445,6 +445,14 @@ let decode_current_meta fields =
       ; last_runtime_attempt
       }
     in
+    (* The eleven config fields below are placeholders, not decoded values.
+       TOML owns them and [Keeper_meta_contract.effective_meta_of_profile_defaults]
+       overlays the real ones on the way out, so [meta_to_json] never writes
+       them and this decoder has nothing to read back. A caller that writes
+       [{ meta with autoboot_enabled = false }] through [write_keeper_meta]
+       compiles, stores nothing and reads back [true] (#27357). Splitting
+       config out of this record is the fix; until then the round-trip
+       contract is pinned by test_keeper_meta_config_not_durable. *)
     let sandbox_profile = default_sandbox_profile in
     let meta : keeper_meta =
       { id = None

@@ -1,0 +1,33 @@
+Testing `[1mtui_decode[0m'.
+[2mThis run has ID `Z5VTRJ2Y'.
+
+[0m  [32m[OK][0m          [36mdecode_agent[0m                        0   success.
+  [32m[OK][0m          [36mdecode_agent[0m                        1   missing status fails.
+  [32m[OK][0m          [36mdecode_task[0m                         0   missing priority defaults.
+  [32m[OK][0m          [36mdecode_keeper[0m                       0   missing legacy fields default to none.
+  [32m[OK][0m          [36mdecode_keeper[0m                       1   numeric last_turn_ts truncates.
+  [32m[OK][0m          [36mdecode_keeper[0m                       2   null last_turn_ts is empty.
+  [32m[OK][0m          [36mdecode_keeper[0m                       3   rejects invalid models type.
+  [32m[OK][0m          [36mdecode_keeper[0m                       4   rejects non-string model items.
+  [32m[OK][0m          [36mdecode_keeper[0m                       5   rejects non-finite last_turn_ts.
+  [32m[OK][0m          [36mparse_log_entry[0m                     0   success.
+  [32m[OK][0m          [36mparse_log_entry[0m                     1   missing required field fails.
+  [32m[OK][0m          [36mparse_log_entry[0m                     2   partial usage is allowed.
+  [32m[OK][0m          [36mparse_log_entry[0m                     3   missing usage is allowed.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          0   sse delta.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          1   AG-UI SSE.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          2   AG-UI error.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          3   AG-UI empty terminal.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          4   body json.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m          5   json error.
+  [32m[OK][0m          [36mstructured_http_response[0m            0   body rejects error status.
+  [32m[OK][0m          [36mstructured_http_response[0m            1   body allows empty success.
+  [32m[OK][0m          [36mbounded_parent_depth[0m                0   stops on cycle.
+  [32m[OK][0m          [36mfeed_chat[0m                           0   text delta.
+  [32m[OK][0m          [36mfeed_chat[0m                           1   tool call events.
+  [32m[OK][0m          [36mfeed_chat[0m                           2   thinking delta.
+  [32m[OK][0m          [36mfeed_chat[0m                           3   ignores non-data line.
+
+Full test results in `[36m~/me/.masc/playground/sangsu/repos/masc-task-470-producer/_build/_tests/tui_decode[0m'.
+[32mTest Successful[0m in 0.002s. 26 tests run.
+EXIT_CODE=0

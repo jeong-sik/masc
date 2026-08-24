@@ -113,8 +113,28 @@ val resume_pending :
     fail-closed dispatch reconciliation, authorized replay, post-acceptance
     operation reconciliation, and rejected-fence cleanup. *)
 
-val max_reconciliation_polls : int
-val next_reconciliation_poll : remaining:int -> [ `Poll of int | `Stop ]
+val max_absent_operation_polls : int
+(** How many consecutive polls may fail to find the operation before
+    reconciliation reports the outcome as unverified. The budget is for
+    absence: an answer that names the operation is not bounded by it. *)
+
+type reconciliation_step =
+  | Watch_again of int
+  | Report
+
+val after_reconciliation_poll :
+  remaining:int ->
+  ( Masc_tui_keeper_chat_projection.operation_reconciliation
+  , Masc_tui_keeper_chat_projection.error )
+  result ->
+  reconciliation_step
+(** What reconciliation does after one poll, decided from the answer rather
+    than at the call site. [Watch_again budget] polls again carrying that
+    absence budget; [Report] stops and hands the answer to the operator.
+
+    An operation the server names is watched until it settles, because the
+    dispatch is no longer in doubt. Only an operation the server cannot find
+    spends the budget. *)
 
 module For_testing : sig
   type staged_writer =

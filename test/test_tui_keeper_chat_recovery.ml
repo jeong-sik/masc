@@ -127,14 +127,56 @@ let test_v2_record_is_hard_cut () =
         (String.equal detail "Keeper chat recovery schema is unsupported")
   | Ok _ -> fail "v2 recovery record bypassed the dispatching hard cut"
 
-let test_bounded_poll_budget () =
-  check int "positive budget" 40 Recovery.max_reconciliation_polls;
-  check bool "decrement" true
-    (Recovery.next_reconciliation_poll ~remaining:2 = `Poll 1);
+let step ~remaining answer = Recovery.after_reconciliation_poll ~remaining answer
+
+let pending state =
+  Ok (Masc_tui_keeper_chat_projection.Operation_pending state)
+
+let absent =
+  Error
+    (Masc_tui_keeper_chat_projection.Http_error
+       { status = 404; body = "unknown Keeper chat operation" })
+
+(* The budget bounds an operation the server cannot find. *)
+let test_absent_operation_budget () =
+  check int "positive budget" 40 Recovery.max_absent_operation_polls;
+  check bool "decrement" true (step ~remaining:2 absent = Recovery.Watch_again 1);
   check bool "stop at last attempt" true
-    (Recovery.next_reconciliation_poll ~remaining:1 = `Stop);
-  check bool "stop exhausted" true
-    (Recovery.next_reconciliation_poll ~remaining:0 = `Stop)
+    (step ~remaining:1 absent = Recovery.Report);
+  check bool "stop exhausted" true (step ~remaining:0 absent = Recovery.Report)
+
+(* A named operation is not bounded by the absence budget. Before this, one
+   countdown served both answers, so a turn that answered "running" for longer
+   than sixty seconds was reported as an unverified outcome -- which fences
+   the send queue for every keeper. *)
+let test_named_operation_restores_the_budget () =
+  check bool "running keeps watching on the last poll" true
+    (step ~remaining:1 (pending Masc_tui_keeper_chat_projection.Running)
+     = Recovery.Watch_again Recovery.max_absent_operation_polls);
+  check bool "queued keeps watching on the last poll" true
+    (step ~remaining:1 (pending Masc_tui_keeper_chat_projection.Queued)
+     = Recovery.Watch_again Recovery.max_absent_operation_polls);
+  check bool "an exhausted budget is restored, not spent" true
+    (step ~remaining:0 (pending Masc_tui_keeper_chat_projection.Running)
+     = Recovery.Watch_again Recovery.max_absent_operation_polls)
+
+(* A terminal acceptance state arriving under [Operation_pending] is a shape
+   neither side writes; polling again would spin on it. *)
+let test_terminal_answers_are_reported () =
+  List.iter
+    (fun (label, answer) ->
+      check bool label true (step ~remaining:40 answer = Recovery.Report))
+    [ ("succeeded under pending", pending Masc_tui_keeper_chat_projection.Succeeded)
+    ; ("failed under pending", pending Masc_tui_keeper_chat_projection.Failed)
+    ; ("cancelled under pending", pending Masc_tui_keeper_chat_projection.Cancelled)
+    ; ( "settled"
+      , Ok
+          (Masc_tui_keeper_chat_projection.Operation_succeeded
+             { outcome_ref = "op-1" }) )
+    ; ("cancelled", Ok Masc_tui_keeper_chat_projection.Operation_cancelled)
+    ; ( "transport error"
+      , Error (Masc_tui_keeper_chat_projection.Transport_error "closed") )
+    ]
 
 let test_after_rename_retains_prepared_without_dispatch () =
   with_base "after-rename" @@ fun base_path ->
@@ -928,7 +970,11 @@ let () =
         ; test_case "conflict fails closed" `Quick test_conflict_fails_closed
         ; test_case "malformed fails closed" `Quick test_malformed_fails_closed
         ; test_case "v2 recovery is hard cut" `Quick test_v2_record_is_hard_cut
-        ; test_case "bounded poll budget" `Quick test_bounded_poll_budget
+        ; test_case "absent operation budget" `Quick test_absent_operation_budget
+        ; test_case "named operation restores the budget" `Quick
+            test_named_operation_restores_the_budget
+        ; test_case "terminal answers are reported" `Quick
+            test_terminal_answers_are_reported
         ; test_case "after rename retains prepared" `Quick
             test_after_rename_retains_prepared_without_dispatch
         ; test_case "before rename fails closed" `Quick

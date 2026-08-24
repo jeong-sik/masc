@@ -246,6 +246,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |
+| RFC-keeper-external-tools-and-produced-artifacts | keeper 의 바깥 — 접근은 이미 열려 있고, 없는 것은 도구 정의와 증거다 | Draft | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |

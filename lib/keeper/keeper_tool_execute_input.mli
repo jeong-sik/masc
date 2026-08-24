@@ -14,8 +14,6 @@ type timeout_budget =
           apart from a caller's own value because a run stopped at a limit
           nobody chose has to be able to say so. *)
 
-val timeout_budget_seconds : timeout_budget -> float
-
 val typed_input_timeout_budget
   :  Keeper_tool_execute_typed_input.execute_input
   -> timeout_budget

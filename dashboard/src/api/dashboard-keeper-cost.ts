@@ -9,6 +9,21 @@ import { decodeDashboardFeedMetadata, type DashboardFeedMetadata } from './dashb
 
 const REDACTED_RUNTIME_LABEL = 'runtime'
 const UNKNOWN_MODEL_LABEL = 'unknown_model'
+
+// The producer spells lane labels `runtime_lane_<12 hex of a digest>`
+// (lib/model_inference_metrics/model_inference_metrics_json.ml:22-24). The
+// suffix is a digest, so there is nothing to enumerate -- the prefix is the
+// whole shape. What there was nothing of is a check: the literal is written
+// once in OCaml and once here, and if the producer renamed it this side would
+// silently redact every lane to `runtime` with no test going red. The OCaml
+// side is pinned (test/test_model_inference_metrics.ml:98 re-derives the same
+// formula and compares against the emitted JSON); this side is not, and a
+// cross-language pin needs a shared fixture rather than a unit test.
+const RUNTIME_LANE_LABEL_PREFIX = 'runtime_lane_'
+
+function isPublicRuntimeLaneLabel(value: string): boolean {
+  return value.startsWith(RUNTIME_LANE_LABEL_PREFIX)
+}
 const UNKNOWN_PROVIDER_LABEL = 'unknown_provider'
 const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
 
@@ -21,7 +36,7 @@ function normalizedModelEvidence(value: string | null | undefined): string | nul
 function publicRuntimeModelLabel(value: string | null | undefined): string {
   const model = normalizedModelEvidence(value)
   if (model == null) return UNKNOWN_MODEL_LABEL
-  if (model === REDACTED_RUNTIME_LABEL || model.startsWith('runtime_lane_')) return model
+  if (model === REDACTED_RUNTIME_LABEL || isPublicRuntimeLaneLabel(model)) return model
   return REDACTED_RUNTIME_LABEL
 }
 

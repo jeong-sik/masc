@@ -333,6 +333,12 @@
  (modules masc_tui_planning_selection))
 
 (library
+ (name masc_tui_tool_tree)
+ (wrapped false)
+ (modules masc_tui_tool_tree)
+ (libraries masc))
+
+(library
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
@@ -410,6 +416,7 @@
   masc_tui_planning_selection
   masc_tui_task_selection
   masc_tui_render_schedule
+  masc_tui_tool_tree
   masc_tui_terminal_write_repair
   masc.dashboard
   masc.server

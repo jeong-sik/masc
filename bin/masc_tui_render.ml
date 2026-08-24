@@ -17,6 +17,7 @@ module Markdown = Masc_tui_markdown
 module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
+module Tool_tree = Masc_tui_tool_tree
 module Status = Masc.Keeper_status_runtime
 
 let frame_lines buf =
@@ -3135,6 +3136,7 @@ let render_tools (state : state) =
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
+  let tool_rows = Tool_tree.rows tools in
   let shown = List.length tools in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -3167,7 +3169,7 @@ let render_tools (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-30s %-8s %s" "Tool" "Direct" "Surfaces"
+    Printf.sprintf "  %-32s %-8s %s" "Tool" "Direct" "Surfaces"
   in
   box_line_styled buf cols ~style:Ansi.dim col_hdr;
   box_divider buf cols;
@@ -3179,17 +3181,28 @@ let render_tools (state : state) =
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
   let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
+  let drawable = List.length tool_rows in
+  let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
   state.tools_scroll <- scroll;
   if shown = 0 then begin
+    let warming =
+      match state.tools_inventory with
+      | Some { Masc.Tui_decode.ts_freshness = Masc.Tui_decode.Warming; _ } -> true
+      | Some _ | None -> false
+    in
     let empty =
-      match
-        empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
-      with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
-      | Page_empty -> "  (no tools registered)"
+      (* A server still building its inventory answers with an empty list, and
+         reading that as "none" told an operator their workspace had no tools
+         when it has a hundred. The payload says which of the two it is. *)
+      if warming then "  (the server is still building its tool inventory)"
+      else
+        match
+          empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
+        with
+        | Page_failed -> "  (load failed; nothing here is a reading)"
+        | Page_unread -> "  (not loaded yet)"
+        | Page_empty -> "  (no tools registered)"
     in
     box_line_styled buf cols ~style:Ansi.dim empty;
     for _ = 1 to content_height - 1 do
@@ -3199,25 +3212,30 @@ let render_tools (state : state) =
   else
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt tools idx with
+      match List.nth_opt tool_rows idx with
       | None -> box_empty buf cols
-      | Some t ->
+      | Some (Tool_tree.Family { name; count }) ->
+          box_line_styled buf cols ~style:Ansi.bold
+            (Printf.sprintf "  %s  (%d)" (Terminal_text.single_line name) count)
+      | Some (Tool_tree.Tool t) ->
           let open Masc.Tui_decode in
           let surfaces =
             match t.tl_surfaces with
             | [] -> "none"
             | names -> String.concat ", " names
           in
+          (* Indented under the heading above it, so the name column reads as
+             a tree rather than as a hundred equals. *)
           let line =
-            Printf.sprintf "  %-30s %-8s %s"
+            Printf.sprintf "    %-30s %-8s %s"
               (Terminal_text.single_line t.tl_name)
               (if t.tl_direct_call then "yes" else "no")
               (Terminal_text.single_line surfaces)
           in
-          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.reset in
+          let style = if t.tl_surfaces = [] then Ansi.yellow else Ansi.dim in
           box_line_styled buf cols ~style line
     done;
-  if shown > content_height then
+  if drawable > content_height then
     box_line_styled buf cols ~style:Ansi.dim
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;

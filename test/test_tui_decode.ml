@@ -1412,6 +1412,28 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
+(* The server answers a cold cache with its warming placeholder: the same
+   envelope, an empty inventory, and a flag saying so. Reading only the list
+   made that identical to a workspace with no tools, and the pane said "no
+   tools registered" to an operator who has a hundred. *)
+let test_decode_tool_snapshot_keeps_the_warming_flag () =
+  let warming =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (("is_warming", `Bool true) :: fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_tool_snapshot warming with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check bool) "an empty warming inventory is not an answer" true
+         (snapshot.Tui_decode.ts_freshness = Tui_decode.Warming));
+  (* A built inventory does not mention the flag at all. *)
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json []) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok snapshot ->
+      Alcotest.(check bool) "an empty built inventory does mean none" true
+        (snapshot.Tui_decode.ts_freshness = Tui_decode.Settled)
+
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
@@ -1930,6 +1952,8 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_tool_snapshot_reads_the_live_shape;
+        Alcotest.test_case "keeps the warming flag" `Quick
+          test_decode_tool_snapshot_keeps_the_warming_flag;
         Alcotest.test_case "a tool projected nowhere" `Quick
           test_decode_tool_projected_nowhere;
         Alcotest.test_case "absent direct-call is off" `Quick

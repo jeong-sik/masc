@@ -494,13 +494,21 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
    breaks the author wrote survive. A line that wraps to nothing is a blank
    line: a paragraph break, not an absence. The caller supplies [sanitize] so
    this module keeps no terminal vocabulary of its own. *)
-let wrap_body ~max_cells ~sanitize text =
-  text
-  |> String.split_on_char '\n'
-  |> List.concat_map (fun line ->
-         match wrap_words ~max_cells (sanitize line) with
-         | [] -> [ "" ]
-         | rows -> rows)
+let wrap_body ?markdown ~max_cells ~sanitize text =
+  let safe_lines = text |> String.split_on_char '\n' |> List.map sanitize in
+  match markdown with
+  | Some render ->
+    (* Rendering happens after the escaping, not before: markdown is written in
+       printable ASCII, so escaping a control byte first takes nothing the
+       renderer reads, and the renderer never sees a byte that could reach the
+       terminal as a sequence. It owns the wrapping from there -- fenced code
+       keeps its own breaks, which a word wrap would ruin. *)
+    render ~width:max_cells (String.concat "\n" safe_lines)
+  | None ->
+    List.concat_map
+      (fun line ->
+         match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
+      safe_lines
 
 let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in

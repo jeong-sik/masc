@@ -105,7 +105,7 @@ let identity_span_wrapper : span_wrapper =
 let surface_of_tool_name name =
   let name = String.lowercase_ascii (String.trim name) in
   if String.starts_with ~prefix:"masc_" name
-     || String.starts_with ~prefix:"mcp__masc__" name
+     || Tool_transport_prefix.has name
   then "mcp"
   else if String.starts_with ~prefix:"keeper_" name
   then "keeper"

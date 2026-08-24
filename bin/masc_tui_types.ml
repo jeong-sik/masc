@@ -343,6 +343,7 @@ type keeper_mode =
   | Keeper_list
   | Keeper_detail
   | Keeper_logs
+  | Keeper_calls
   | Keeper_message
 
 (** Top-level TUI surface. *)
@@ -422,6 +423,9 @@ type state = {
   mutable last_refresh: float;
   mutable view: surface;
   mutable keeper_cursor: int;
+  mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
+  mutable keeper_calls_error: string option;
+  mutable keeper_calls_scroll: int;
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
@@ -654,6 +658,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Overview;
   keeper_cursor = 0;
+  keeper_calls = None;
+  keeper_calls_error = None;
+  keeper_calls_scroll = 0;
   log_entries = [];
   log_error = None;
   log_scroll = 0;

@@ -2948,6 +2948,73 @@ def autonomous_turn_history_interaction() -> Interaction:
     return interact
 
 
+def keeper_calls_fixture() -> HttpResponse:
+    return (
+        200,
+        {
+            "keeper": "alpha",
+            "count": 2,
+            "health": "ok",
+            "latest_age_s": 8.0,
+            "stale_reason": "fresh",
+            "entries": [
+                {
+                    "ts": 1787534998.4,
+                    "keeper": "alpha",
+                    "tool": "Read",
+                    "input": '{"file_path": "lib/a.ml"}',
+                    "success": True,
+                    "duration_ms": 28.4,
+                    "turn": 2143,
+                },
+                {
+                    "ts": 1787535017.4,
+                    "keeper": "alpha",
+                    "tool": "tool_execute",
+                    "input": '{"argv": ["dune", "build"]}',
+                    "success": False,
+                    "duration_ms": 14534.0,
+                    "turn": 2144,
+                },
+            ],
+        },
+    )
+
+
+def keeper_calls_interaction() -> Interaction:
+    """t on the roster opens the keeper's durable call log."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        pane_start = len(output)
+        send_and_wait(process, master_fd, output, b"t", b"Keeper Calls: alpha")
+        wait_for_output(
+            process, master_fd, output, b"tool_execute", start=pane_start, timeout=5.0
+        )
+        pane = bytes(output[pane_start:])
+        for needle, what in (
+            (b"Keeper Calls: alpha (2)", "the count"),
+            ("ok \u00b7 latest 8s ago".encode(), "the freshness verdict"),
+            ("\u2713 Read".encode(), "the returned call"),
+            (b"28ms", "its duration"),
+            ("\u2717 tool_execute".encode(), "the failed call"),
+            (b"14.5s", "the failure's duration"),
+            (b"lib/a.ml", "the subject the trail names"),
+        ):
+            if needle not in pane:
+                raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
     """A surface that has not been read says so; only a read that came back
     empty says the queue is empty.
@@ -3142,6 +3209,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=autonomous_turn_history_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper tool-call log",
+        interact=keeper_calls_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
         },
     )
     verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))

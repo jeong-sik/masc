@@ -7,7 +7,7 @@ updated: 2026-08-25
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0389", "prompts-and-tool-definitions-outside-ocaml"]
+related: ["0389", "prompts-and-tool-definitions-outside-ocaml", "skills-declared-not-discovered"]
 implementation_prs: []
 ---
 
@@ -21,11 +21,11 @@ masc 는 도구 합성 DAG 실행기를 이미 갖고 있다. 그런데 그 위 
 500건을 만들었다. 모델은 문법이 아니라 **이름과 설명이 붙은 능력**을 고른다.
 
 이 RFC 는 그 관측을 설계로 승격한다. `SKILL.md` 파일 하나가 능력 하나를 선언한다 —
-지시문이면 프롬프트 카탈로그와 `keeper_skill` 도구로, 합성이 담겼으면
-`keeper_compose_<name>` 도구로 표면화된다. Skill 이 Tool 이 되고(합성 스킬), Tool 이
-Skill 을 갖고(도구 도움말의 md 외부화), Async 와 Parallel 은 스킬 선언의 실행 모드가 된다.
-도구 스키마 표면(현재 상한 85,000 B)은 스킬을 아무리 늘려도 `keeper_skill` 도구 1개분만
-쓴다 — 새 능력의 비용이 스키마 표면에서 프롬프트 한 줄로 이동한다.
+지시문이면 task 라우팅(RFC skills-declared-not-discovered)과 `Read` 로 keeper 에게
+닿고, 합성이 담겼으면 `keeper_compose_<name>` 도구로 표면화된다. Skill 이 Tool 이
+되고(합성 스킬), Tool 이 Skill 을 갖고(도구 도움말의 md 외부화), Async 와 Parallel 은
+스킬 선언의 실행 모드가 된다. 지시 스킬은 도구 스키마 표면(현재 상한 85,000 B)을
+0 B 쓴다 — 새 능력의 비용이 스키마 표면에서 프롬프트 한 줄로 이동한다.
 
 ## 1. 관측
 
@@ -88,12 +88,12 @@ SKILL.md 를 읽으면 기존 생태계의 스킬 파일을 그대로 가져올 
 
 ## 2. 설계
 
-### 2.1 선언 — `<config-root>/skills/<name>/SKILL.md`
+### 2.1 선언 — `<base_path>/.masc/skills/<name>/SKILL.md`
 
-파일 하나가 능력 하나다. 저장소 기본값은 `config/skills/<name>/SKILL.md` 로 둔다 —
-`config/` 트리는 이미 ocaml-crunch 로 바이너리에 임베드되고(`lib/embedded_config`),
-`Managed_asset_sync` 가 부팅 때 `<config-root>` 로 수렴시키므로 새 동기화 코드는 없다.
-`Config_dir_resolver` 에 `skills_dir` 를 더한다.
+파일 하나가 능력 하나다. 위치는 RFC skills-declared-not-discovered 가 이미 배송한
+관례를 따른다 — task 의 current-task 블록이 keeper 에게 가리키는 바로 그 경로다
+(`Common.masc_dirname` SSOT). 스킬은 외부에서 설치되는 파일이므로 `config/` 트리
+임베드는 하지 않는다.
 
 ```markdown
 ---
@@ -129,10 +129,11 @@ value = {}
 
 디코드 규칙:
 
-- frontmatter 는 기존 `lib/core/frontmatter` (평면 key:value) 로 읽는다. Agent Skills
-  표준의 필수 두 키 `name`/`description` 이 없거나 비면 기동 오류, 디렉토리 이름과
-  `name` 불일치도 기동 오류(`config/tools/<name>.toml` 과 같은 규칙). 표준대로 모르는
-  frontmatter 키는 무시한다 — 다른 런타임의 네임스페이스가 섞인 파일도 그대로 동작한다.
+- 파일 한 장의 frontmatter 계약(필수 `name`/`description`, 모르는 키 무시, 디렉토리
+  이름 일치)은 **`Skill_definition` 이 단독 소유한다** (RFC
+  skills-declared-not-discovered §4.1). 카탈로그 레이어(`Keeper_skill_catalog`)는
+  frontmatter 를 직접 읽지 않고 그 위에서 합성 감지와 카탈로그 조립만 한다 —
+  같은 SKILL.md 를 읽는 파서는 저장소에 하나다.
 - 스킬의 종류는 frontmatter 키가 아니라 **본문 내용이 결정한다**:
   ```` ```toml composition ```` fenced block 이 0개면 지시 스킬, 1개면 합성 스킬,
   2개 이상이면 기동 오류. block 의 내용은 **기존
@@ -145,19 +146,22 @@ value = {}
 
 ```ocaml
 type surface =
-  | Instruction                                    (* 프롬프트 카탈로그 + keeper_skill *)
+  | Instruction                                    (* task 라우팅 + Read *)
   | Composition of Keeper_tool_composition_catalog.entry
     (* 위에 더해 keeper_compose_<name> 도구로 승격 *)
 ```
 
-1. **프롬프트 카탈로그 (1단계).** `keeper_unified_prompt` 가 `## Skills` 섹션에
-   스킬당 한 줄(`name — description`)을 넣는다. 비용은 프롬프트 쪽이고 스킬당 수십 B 다.
-2. **`keeper_skill` 도구 (2단계).** 입력 `{ name }`, 출력은 해당 SKILL.md 본문(frontmatter
-   제외). 스킬이 몇 개든 도구 스키마 표면 비용은 이 도구 1개분으로 고정된다.
-3. **합성 스킬 = 도구 (Skill as a Tool).** `kind = "composition"` 스킬은 기존
+1. **지시 스킬은 task 가 라우팅한다 (1·2단계).** RFC skills-declared-not-discovered 가
+   배송한 그대로다: `task.skills` 가 이름을 지정하면 current-task 블록에 이름과 경로
+   한 줄이 실리고, keeper 는 기존 `Read` 로 본문을 연다. 전 카탈로그를 프롬프트에
+   늘어놓고 모델이 고르게 하는 방식은 쓰지 않는다 — 이 RFC 초안에 있던 `## Skills`
+   전역 섹션과 `keeper_skill` 읽기 도구는 그 설계에 흡수되어 **만들지 않는다**.
+2. **합성 스킬 = 도구 (Skill as a Tool).** 합성 block 을 가진 스킬은 기존
    `make_tools` 경로로 `keeper_compose_<name>` 도구가 된다. 실행기·텔레메트리·async
-   broker(status/cancel)는 재사용이고 변경이 없다.
-4. **참조 파일 (3단계).** 본문이 스킬 디렉토리의 상대 경로를 가리키면 기존 Read 도구로
+   broker(status/cancel)는 재사용이고 변경이 없다. 도구는 턴 시작에 고정되는
+   전역 표면이므로(RFC-0389 §3.3) 합성 스킬은 task 라우팅과 무관하게 전원에게 실린다 —
+   지시는 task 단위, 능력은 fleet 단위라는 분리다.
+3. **참조 파일 (3단계).** 본문이 스킬 디렉토리의 상대 경로를 가리키면 기존 Read 도구로
    읽는다. 새 도구는 없다.
 
 ### 2.3 파라미터 — 카탈로그 합성의 0-인자 제한을 푼다
@@ -199,8 +203,8 @@ type t = private
 
 ### 2.6 관측성
 
-- `keeper_skill` 호출은 도구 호출이므로 `tool_calls` 스토어에 자동 기록된다 — 스킬별
-  사용 횟수는 추가 생산자 없이 집계된다.
+- 스킬 본문 읽기는 `Read` 호출이므로 `tool_calls` 스토어에 자동 기록된다 — 스킬별
+  사용은 경로(`.masc/skills/<name>/`)로 추가 생산자 없이 집계된다.
 - 합성 실행은 기존 `composition_run_id` 노드 텔레메트리 + SSE
   (`keeper_tool_call_evidence_committed`) 를 그대로 쓴다.
 - 대시보드: `/api/v1/skills` (카탈로그: name, description, kind, source file, 최근 사용
@@ -229,22 +233,24 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
 
 ## 4. 마이그레이션 — PR 사슬
 
-| # | 브랜치 | 내용 | 크기 |
-|---|---|---|---|
-| 1 | `rfc/agent-skills-duality` | 이 RFC | docs만 |
-| 2 | `feat/skill-catalog` | `Keeper_skill_catalog` 로더: frontmatter + fenced composition 파싱(기존 Catalog.parse 재사용), 오류 합타입, 픽스처 테스트 | lib 1 + test 1 |
-| 3 | `feat/skill-surface` | boot 배선 + `keeper_skill` 도구 + `## Skills` 프롬프트 섹션 + 합성 스킬 → make_tools | lib 3-4 + test |
-| 4 | `feat/composition-params` | `Json_template.Param` + `[[compositions.params]]` + input schema 생성 | lib 2 + test |
-| 5 | `feat/skills-hard-cut` | 라이브 합성 2개 이전, `tool-compositions.toml` 경로 삭제 | lib 1 + config |
-| 6 | `feat/tool-help-md` | `config/tools/<name>.help.md` + registry 서빙 전환 | lib 1 + config 다수 |
-| 7 | `feat/dashboard-skills` | `/api/v1/skills` + Skills 패널 + 합성 run 뷰 | server + dashboard |
-| 8 | (runtime) | 라이브 `<config-root>/skills/` 배치, keeper 재기동, 사용 실측·스크린샷 | 코드 없음 |
+| # | 상태 | 내용 |
+|---|---|---|
+| 1 | 병합 (#30177) | 이 RFC |
+| 2 | 병합 (#30183) | `Keeper_skill_catalog`: fenced composition 감지 + 카탈로그 조립 |
+| 2b | 병합 (#30189, 병렬 세션) | `Skill_definition` 파서 + `task.skills` 라우팅 + current-task 한 줄 |
+| 3 | 진행 | 파싱 SSOT 통합: 카탈로그가 `Skill_definition` 에 위임 + 이 RFC 정합 |
+| 4 | 예정 | 스킬 디렉토리 스캔 + 합성 스킬 → make_tools 배선 + projection 기대 목록 |
+| 5 | 예정 | `Json_template.Param` + `[[compositions.params]]` + input schema 생성 |
+| 6 | 예정 | 라이브 합성 2개 이전, `tool-compositions.toml` 경로 삭제 |
+| 7 | 예정 | `config/tools/<name>.help.md` + registry 서빙 전환 |
+| 8 | 예정 | `/api/v1/skills` + Skills 패널 + 합성 run 뷰 |
+| 9 | 예정 | 라이브 `<base_path>/.masc/skills/` 배치, keeper 재기동, 사용 실측·스크린샷 |
 
-2→3→4→5 는 순서 의존(stacked), 6·7 은 2 이후 독립.
+4→5→6 은 순서 의존, 7·8 은 독립.
 
 ## 5. 수용 기준
 
-- 스킬 N개를 추가해도 도구 스키마 표면 증가분은 `keeper_skill` 1개 + 합성 스킬 도구뿐이다.
+- 지시 스킬 N개는 도구 스키마 표면을 0 B 늘린다. 합성 스킬만 도구가 된다.
   `test_keeper_tool_schema_bytes` 상한 85,000 B 유지.
 - 깨진 SKILL.md(frontmatter 필수 키 누락, name 불일치, fenced block 문법 오류, block
   2개 이상)는 각각 파일·위치를 가리키는 기동 오류다 — 테스트로 고정.
@@ -252,16 +258,21 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
   이전과 동일하다(스키마 diff 테스트).
 - 파라미터 합성: `[[compositions.params]]` 선언이 input schema 에 반영되고, 라이브에서
   인자 있는 호출이 `tool_calls` 에 기록된다.
-- 라이브 실측: keeper 가 `keeper_skill` 를 최소 1회 자발 호출하고, 합성 스킬 실행이
+- 라이브 실측: task 가 지정한 스킬을 keeper 가 `Read` 로 실제로 열고, 합성 스킬 실행이
   대시보드에서 보인다(스크린샷 + `tool_calls` 발췌).
 
 ## 6. 기존 RFC 와의 관계
 
+- **RFC skills-declared-not-discovered (#30156, 구현 #30189)**: 같은 파일 형식의 아랫층.
+  그 RFC 가 파일 한 장의 파싱(`Skill_definition`)과 지시 스킬의 task 라우팅을 소유하고,
+  이 RFC 는 그 위에서 합성 스킬의 도구 승격과 파라미터를 소유한다. 초안에 있던
+  `keeper_skill` 도구·`## Skills` 전역 섹션·`config/skills` 임베드는 그 설계에 맞춰
+  제거했다 (§2.2).
 - **RFC-0389 (Keeper 별 도구 표면, Draft)**: 충돌 없음. 이 RFC 의 스킬 카탈로그는 0389 의
   `compositions = [...]` 선언이 참조할 이름 공간을 skills 로 바꾼다. 0389 구현 시
   `[keeper.skills]` 를 같은 선언에 더한다.
 - **RFC-prompts-and-tool-definitions-outside-ocaml (Draft)**: 같은 방향의 이웃. §3.8 의
   `tool_help_registry → [help]` 항목을 이 RFC §2.4 가 md 파일로 개정·흡수한다. 나머지
   항목(프롬프트 키, 도구 TOML)은 그대로다.
-- **RFC-0386 (tool_kind 닫힌 합타입)**: `keeper_skill` 은 새 tool_kind 가 아니라 기존
-  분류를 따른다. 합성 스킬은 기존 `Composition_tool`/`Async_composition_tool` 그대로.
+- **RFC-0386 (tool_kind 닫힌 합타입)**: 새 tool_kind 는 없다. 합성 스킬은 기존
+  `Composition_tool`/`Async_composition_tool` 그대로.

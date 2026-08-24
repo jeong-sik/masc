@@ -124,7 +124,10 @@ let test_composition_skill_materializes_entry () =
 
 let test_directory_name_mismatch_rejected () =
   match rejected ~directory:"another-name" instruction_document with
-  | Skill_catalog.Directory_name_mismatch { directory; declared } ->
+  | Skill_catalog.Definition_rejected
+      { directory
+      ; error = Masc.Skill_definition.Name_mismatch { declared; directory = _ }
+      } ->
     check string "directory" "another-name" directory;
     check string "declared" "release-checklist" declared
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
@@ -133,12 +136,14 @@ let test_directory_name_mismatch_rejected () =
 let test_missing_required_frontmatter_rejected () =
   let no_name = "---\ndescription: something\n---\nbody\n" in
   (match rejected ~directory:"anything" no_name with
-   | Skill_catalog.Missing_name { directory } ->
+   | Skill_catalog.Definition_rejected
+       { directory; error = Masc.Skill_definition.Missing_name } ->
      check string "directory" "anything" directory
    | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error));
   let no_description = "---\nname: quiet\n---\nbody\n" in
   match rejected ~directory:"quiet" no_description with
-  | Skill_catalog.Missing_description { skill } -> check string "skill" "quiet" skill
+  | Skill_catalog.Definition_rejected
+      { error = Masc.Skill_definition.Missing_description; directory = _ } -> ()
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
@@ -219,6 +224,18 @@ let test_of_documents_sorts_and_rejects_duplicates () =
        "composition"
        (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
    | None -> fail "find missed an existing skill");
+  (match Skill_catalog.composition_entries catalog with
+   | [ entry ] ->
+     check
+       string
+       "composition entries surface the validated tool"
+       "keeper_compose_time-memory-query"
+       (Catalog.tool_name entry)
+   | entries ->
+     fail
+       (Printf.sprintf
+          "expected 1 composition entry, got %d"
+          (List.length entries)));
   match
     Skill_catalog.of_documents
       [ "release-checklist", instruction_document

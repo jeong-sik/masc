@@ -1,9 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-02
-code_refs:
-  - docs/spec/
-  - dune-project
 ---
 
 # MASC Specification Index

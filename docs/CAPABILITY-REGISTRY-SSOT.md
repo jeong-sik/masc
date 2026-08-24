@@ -1,8 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-23
-code_refs:
-  - lib/capability_registry.ml
 ---
 
 # Capability Registry SSOT

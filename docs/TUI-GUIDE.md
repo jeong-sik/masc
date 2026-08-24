@@ -1,12 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-08-24
-code_refs:
-  - bin/masc_tui.ml
-  - bin/masc_tui_render.ml
-  - bin/masc_tui_loader.ml
-  - bin/masc_tui_http.ml
-  - bin/masc_tui_types.ml
 ---
 
 # MASC TUI Guide
@@ -390,6 +383,29 @@ running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
 
+#### Pasting
+
+The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a
+terminal delivers a paste as the keys it looks like, and the line break in
+pasted text is the same byte Return sends: a three-line paste becomes three
+messages, and during a turn, three queued fragments. With it the payload
+arrives as text and lands in the draft whole, so Markdown blocks, URLs, and
+log excerpts keep the shape they were copied in.
+
+A paste while the composer row is idle takes focus for it, so pasted text
+always lands somewhere visible and addressed to the keeper the row named. With
+no keeper to send to, the paste is refused out loud in Recent Events rather
+than dropped.
+
+Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
+was copied; all three become one LF in the draft. Everything else that is not
+printable becomes a space - a paste is the one way a terminal escape sequence
+could reach a message, since typed keys are filtered one scalar at a time.
+
+A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
+has to be consumed, or the tail of the paste arrives as keystrokes - and
+counted, and Recent Events says how many bytes are not in the draft.
+
 #### Lines typed during a turn
 
 Enter during a running turn holds the line for the next one rather than
@@ -427,39 +443,6 @@ reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders
 `Keeper roster is unavailable` and the footer reads
 `Enter:disabled (roster unavailable)`.
-
-#### Dispatch fence
-
-Before any POST the TUI writes a `prepared` recovery fence and requires the new
-directory chain, the file, and the parent directory entry to be durably synced.
-`prepared` means no process has durably claimed a POST. The sender then acquires
-the cross-process dispatch lock, rechecks the exact identity, and advances the
-fence to `dispatching` before crossing the network boundary. Only that lock
-holder may POST, and it holds the lock until the main TUI has applied the result
-and acknowledged its recovery mutation.
-
-`dispatching` never authorizes a later POST. After a crash, cancellation, or
-failed result-phase write, recovery only reads the exact operation. Only an
-outcome-unverified result durably advanced to `replayable` may be claimed for
-another exact-ID POST, and that replay claim first returns the fence to
-fail-closed `dispatching`. A stale retry never recreates a missing `prepared`
-fence: it goes through the serialized claim and stops if the fence was already
-removed.
-
-Once the stream proves server acceptance the fence becomes `accepted`. If
-delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the
-exact durable operation until it settles - it does not mint a fresh ID or issue
-another chat POST. A definitive pre-acceptance rejection advances the fence to
-`rejected`, which is cleanup-only. Only the current pre-handler statuses `400`,
-`401`, `403`, and `404` qualify as definitive; timeouts, conflicts, rate limits,
-`5xx`, and unknown statuses stay outcome-unverified because an intermediary may
-have forwarded the POST before returning them.
-
-If a fail-closed `dispatching` fence repeatedly returns operation `404`, the TUI
-stays blocked on purpose: it cannot prove whether the POST crossed the boundary,
-and it offers no force-replay or force-clear shortcut. Verify the exact
-operation and the runtime logs before an operator removes that fence. Clearing
-it without that proof can permit overlapping work.
 
 ### Approvals
 

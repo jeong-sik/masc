@@ -1,9 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-07-16
-code_refs:
-  - lib/keeper/keeper_keepalive.ml
-  - lib/keeper/keeper_supervisor.ml
 ---
 
 # MASC 고가용성 서버 로드맵

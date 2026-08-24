@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - ROADMAP.md
-  - dune-project
-  - CHANGELOG.md
 ---
 
 # masc Versioned Roadmap — Feature Trains First

@@ -1,15 +1,5 @@
 ---
 status: reference
-last_verified: 2026-06-13
-code_refs:
-  - lib/keeper/keeper_unified_turn.ml
-  - lib/keeper/keeper_unified_turn_success.ml
-  - lib/keeper/keeper_agent_run_turn_helpers.ml
-  - lib/keeper/keeper_turn.ml
-  - lib/keeper/keeper_agent_run.ml
-  - lib/keeper/keeper_execution_receipt.ml
-  - lib/turn_fsm/turn_fsm.mli
-  - specs/keeper-turn-fsm/KeeperTurnFSM.tla
 ---
 
 # MASC Turn FSM Drift / SSOT Gap Audit

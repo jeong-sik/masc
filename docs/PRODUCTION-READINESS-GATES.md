@@ -1,11 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-05-13
-code_refs:
-  - scripts/keeper-production-readiness-gate.py
-  - scripts/keeper-runtime-truth-gate.sh
-  - docs/RELEASE-EVIDENCE.md
-  - docs/PERFORMANCE-SLO.md
 ---
 
 # Production Readiness Gates

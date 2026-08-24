@@ -1,12 +1,5 @@
 ---
 status: active
-last_verified: 2026-08-24
-code_refs:
-  - bin/masc_tui.ml
-  - bin/masc_tui_types.ml
-  - bin/masc_tui_render.ml
-  - docs/TUI-GUIDE.md
-  - docs/design/tui/TUI-SPEC.md
 ---
 
 # MASC TUI Roadmap — 키퍼 작업대 캠페인 (2026-08-24)

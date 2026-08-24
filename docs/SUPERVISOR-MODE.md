@@ -1,9 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-04-23
-code_refs:
-  - lib/tool_operator.ml
-  - lib/operator/operator_control.ml
 ---
 
 # Supervisor Mode

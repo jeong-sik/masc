@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-01
-code_refs:
-  - lib/types/types_core.mli
-  - lib/goal/goal_phase.mli
-  - lib/tool_schemas/tool_schemas_schedule.ml
-  - lib/keeper/keeper_sandbox_control.mli
 ---
 
 # MASC Glossary

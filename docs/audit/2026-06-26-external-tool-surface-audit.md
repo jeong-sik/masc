@@ -1,13 +1,5 @@
 ---
 status: draft
-last_verified: 2026-06-26
-code_refs:
-  - docs/rfc/RFC-0290-keeper-background-wait-tool.md
-  - docs/KEEPER-CAPABILITY-MATRIX.md
-  - lib/keeper/keeper_tool_descriptor.ml
-  - lib/keeper/keeper_world_observation.ml
-  - lib/keeper/keeper_heartbeat_stimulus_intake.ml
-  - lib/process/process_eio_detached.ml
 ---
 
 # External Tool Surface Audit

@@ -1,21 +1,5 @@
 ---
 status: reference
-last_verified: 2026-06-21
-code_refs:
-  - lib/keeper_tooling/execute_shell_ir.ml
-  - lib/keeper/keeper_tool_execute_runtime.ml
-  - lib/exec_policy/exec_policy.ml
-  - lib/config/env_config_core.ml
-  - lib/config/env_config_runtime.ml
-  - lib/config/feature_flag_registry.ml
-  - lib/config/env_config_sandbox.ml
-  - lib/keeper/keeper_tool_surface_ops.ml
-  - lib/workspace/workspace_gc.ml
-  - lib/workspace/workspace_utils_paths_backend.ml
-  - lib/keeper/keeper_msg_async.ml
-  - scripts/check-feature-flag-consistency.sh
-  - scripts/check-ssot.sh
-  - scripts/audit-path-ssot.sh
 ---
 
 # Productization Blockers Adversarial Audit

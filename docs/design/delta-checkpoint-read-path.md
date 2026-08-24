@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/keeper/keeper_checkpoint_store.ml
-  - lib/keeper/keeper_fs.ml
-  - lib/keeper/
 ---
 
 # Delta Checkpoint Read Path (Stage 3)

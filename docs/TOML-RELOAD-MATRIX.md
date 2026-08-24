@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-17
-code_refs:
-  - scripts/check-doc-truth.sh
-  - config/
-  - lib/fusion/
 ---
 
 # TOML Reload Matrix

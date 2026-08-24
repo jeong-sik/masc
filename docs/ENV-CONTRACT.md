@@ -1,9 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/config/env_config.mli
-  - lib/config/
 ---
 
 # Environment Variable Contract

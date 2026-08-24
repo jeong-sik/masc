@@ -1,14 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-06-11
-code_refs:
-  - lib/core/exec_buffer.ml
-  - lib/exec_core.ml
-  - lib/exec/exec_dispatch.ml
-  - lib/process/process_eio.ml
-  - lib/exec/command_gate/shell_command_gate.ml
-  - lib/exec_policy/exec_policy.ml
-  - lib/keeper/keeper_tool_execute_runtime.ml
 ---
 
 # Execute Runbook

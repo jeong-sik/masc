@@ -2419,19 +2419,10 @@ let render_lanes (state : state) =
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
-let render_keeper_detail (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  let buf = Buffer.create 4096 in
-
-  if state.keeper_cursor >= List.length state.keepers then begin
-    Buffer.add_string buf "No keeper selected.\n";
-    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
-      ~cols buf
-  end else begin
-    let k = List.nth state.keepers state.keeper_cursor in
+(* The detail box alone -- borders, title, scrolled content -- written into
+   [buf] at [cols] wide, footer excluded so a caller can lay it beside the
+   roster pane. Returns the scroll the frame actually used. *)
+let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
     let inner = cols - 4 in  (* width inside borders *)
 
     (* Build all detail lines first, then apply scroll *)
@@ -2609,16 +2600,86 @@ let render_keeper_detail (state : state) =
 
     (* Bottom border *)
     box_bottom buf cols;
+    scroll
 
-    (* Footer. The lifecycle keys work here as well as on the roster, so the
-       footer names the same actions with the same keys; a detail view that
-       listed a different set would read as a different set of powers. *)
-    Buffer.add_string buf
-      (keeper_action_hints state (Some (keeper_reading state k)) ^ "\n");
+(* A narrow roster beside the detail: position context, not a second input
+   surface -- the keys keep their detail meaning. The window follows the
+   cursor the way the detail follows the selection. *)
+let keeper_roster_pane (state : state) ~rows ~cols buf =
+  box_top buf cols;
+  box_line buf cols (Ansi.bold ^ " Keepers" ^ Ansi.reset);
+  box_divider buf cols;
+  let content_height = max 0 (rows - 5) in
+  let first =
+    if state.keeper_cursor < content_height then 0
+    else state.keeper_cursor - content_height + 1
+  in
+  for i = 0 to content_height - 1 do
+    match List.nth_opt state.keepers (first + i) with
+    | Some (k : keeper) ->
+        let selected = first + i = state.keeper_cursor in
+        let name = Terminal_text.single_line k.k_name in
+        let line =
+          if selected then
+            Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8 " ^ name ^ Ansi.reset
+          else "  " ^ name
+        in
+        box_line buf cols line
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols
 
-    finish_surface state ~clamped:(Keeper_detail scroll)
-      ~surface_key:"keeper-detail" ~rows:terminal_rows
+let keeper_split_threshold_cols = 110
+let keeper_roster_pane_cols = 30
+
+let render_keeper_detail (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  if state.keeper_cursor >= List.length state.keepers then begin
+    Buffer.add_string buf "No keeper selected.\n";
+    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
       ~cols buf
+  end else begin
+    let k = List.nth state.keepers state.keeper_cursor in
+    let footer =
+      keeper_action_hints state (Some (keeper_reading state k))
+    in
+    if cols < keeper_split_threshold_cols then begin
+      let scroll = keeper_detail_pane state k ~rows ~cols buf in
+      Buffer.add_string buf (footer ^ "\n");
+      finish_surface state ~clamped:(Keeper_detail scroll)
+        ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
+    end
+    else begin
+      (* Wide terminals keep the roster in sight beside the detail. Both
+         panes draw the same number of rows, so the zip below is a plain
+         row-by-row join. *)
+      let left_cols = keeper_roster_pane_cols in
+      let right_cols = cols - left_cols in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      keeper_roster_pane state ~rows ~cols:left_cols left_buf;
+      let scroll = keeper_detail_pane state k ~rows ~cols:right_cols right_buf in
+      let blank_left = String.make left_cols ' ' in
+      let rec zip left right =
+        match left, right with
+        | [], [] -> []
+        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+        | l :: lt, [] -> l :: zip lt []
+      in
+      List.iter
+        (fun line ->
+          Buffer.add_string buf line;
+          Buffer.add_char buf '\n')
+        (zip (frame_lines left_buf) (frame_lines right_buf));
+      Buffer.add_string buf (footer ^ "\n");
+      finish_surface state ~clamped:(Keeper_detail scroll)
+        ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
+    end
   end
 
 (** Render keeper log view *)

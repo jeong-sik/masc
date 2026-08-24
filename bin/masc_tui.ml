@@ -3610,7 +3610,13 @@ let main () =
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
        | Render_schedule.Render ->
-           let frame = render state in
+           let frame, clamped = render state in
+           (* The frame is what the operator will act on next, so the scroll it
+              had to clamp is the scroll the next keypress moves from. Applied
+              here rather than inside the drawing: a surface whose row count
+              only exists once the frame is built cannot be bounded before it,
+              but the drawing does not have to be the thing that stores it. *)
+           Option.iter (apply_clamped_scroll state) clamped;
            Frame_presenter.present frame_presenter
              ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)

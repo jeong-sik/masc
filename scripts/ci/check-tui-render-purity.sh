@@ -5,17 +5,19 @@
 # the same four lines copied once per surface, with the key handler moving the
 # scroll unbounded and the drawing correcting it on the way past.
 #
-# The bound now lives with the move for every surface the state can count
-# (Masc_tui_types.scrolled_surface). What is left are the surfaces whose row
-# count the drawing builds out of text it formats; counting those outside the
-# drawing would be a second copy of the formatting.
+# Two things fixed it. A surface the state can count declares its rows and its
+# chrome in Masc_tui_types.scrolled_surface, and the key handler clamps against
+# that. A surface whose row count only exists once the frame is built -- lines
+# of a board post, of a task's notes -- reports the value it used as a
+# clamped_scroll beside the frame, and the loop stores it.
 #
-# This is a ratchet, not a gate on zero: the number may fall and may not rise.
-# Lower it in the same change that removes a write.
+# The budget is zero and there is no reason for it to rise. A surface that
+# needs to clamp has both of those doors; if neither fits, the answer is a
+# third door, not a write from inside the drawing.
 set -euo pipefail
 
 RENDER="bin/masc_tui_render.ml"
-BUDGET=7
+BUDGET=0
 
 if [ ! -f "$RENDER" ]; then
   echo "[tui-render-purity] $RENDER not found" >&2
@@ -33,16 +35,11 @@ echo "[tui-render-purity] state writes in $RENDER: $found (budget $BUDGET)"
 
 if [ "$found" -gt "$BUDGET" ]; then
   echo "[tui-render-purity] FAIL: the renderer gained a state write." >&2
-  echo "  A surface's scroll bound belongs with the keypress that moves it:" >&2
-  echo "  declare the surface in Masc_tui_types.scrolled_surface and let" >&2
-  echo "  move_surface_scroll clamp it. The drawing then only reads." >&2
+  echo "  If the state can count the surface's rows, declare it in" >&2
+  echo "  Masc_tui_types.scrolled_surface and let move_surface_scroll clamp" >&2
+  echo "  it. If the count only exists once the frame is built, report it as" >&2
+  echo "  a clamped_scroll beside the frame and let the loop store it." >&2
   printf '%s\n' "$writes" >&2
-  exit 1
-fi
-
-if [ "$found" -lt "$BUDGET" ]; then
-  echo "[tui-render-purity] FAIL: $found writes left but the budget still says $BUDGET." >&2
-  echo "  Lower BUDGET in this script to $found in the same change." >&2
   exit 1
 fi
 

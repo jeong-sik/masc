@@ -25,14 +25,18 @@ let frame_lines buf =
   | "" :: reversed -> List.rev reversed
   | reversed -> List.rev reversed
 
-let finish_frame ~surface_key ~cursor ~rows ~cols buf :
-    Frame_presenter.frame =
-  { surface_key;
-    terminal_rows = rows;
-    terminal_cols = cols;
-    cursor;
-    lines = frame_lines buf;
-  }
+(* A frame, and what it had to clamp to build itself. The clamp travels beside
+   the frame rather than being written into the state mid-draw; see
+   [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
+let finish_frame ?clamped ~surface_key ~cursor ~rows ~cols buf :
+    Frame_presenter.frame * clamped_scroll option =
+  ( { surface_key;
+      terminal_rows = rows;
+      terminal_cols = cols;
+      cursor;
+      lines = frame_lines buf;
+    }
+  , clamped )
 
 (* Terminal dress for the markdown a keeper writes. The marker is the noise:
    a backticked identifier should read as the identifier, and a fenced diff
@@ -191,7 +195,7 @@ let composer_cursor state ~rows ~cols =
    height, and one that came out short used to leave its footer stranded
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
-let finish_surface (state : state) ~surface_key ~rows ~cols buf =
+let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let body_rows = max 0 (rows - Composer.rows_for ~terminal_rows:rows) in
   let drawn = frame_lines buf in
   let body =
@@ -211,8 +215,8 @@ let finish_surface (state : state) ~surface_key ~rows ~cols buf =
        Buffer.add_char framed '\n')
     body;
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
-  finish_frame ~surface_key ~cursor:(composer_cursor state ~rows ~cols) ~rows
-    ~cols framed
+  finish_frame ?clamped ~surface_key
+    ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -420,7 +424,6 @@ let render_overview (state : state) =
     Render_schedule.project_overview_event_window ~event_count
       ~visible_rows:row_budget.attention_rows state.overview_event_scroll
   in
-  state.overview_event_scroll <- event_window.oew_offset;
   let events_title =
     let title =
       if event_window.oew_first_position = 0 then " Recent Events "
@@ -531,7 +534,7 @@ let render_overview (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  %s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim overview_hint state.refresh_interval state.port Ansi.reset);
 
-  finish_surface state ~surface_key:"overview" ~rows:terminal_rows
+  finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
       ~cols buf
 
 (** Render one backlog task in full, from the same load the Overview list was
@@ -662,11 +665,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
      status note lines vary by state -- a verification id or cancellation
      reason must shrink the body, not push rows off the bottom. *)
   let content_height = max 1 (rows - 10 - List.length note_lines) in
-  state.task_detail_scroll <-
+  let offset =
     min state.task_detail_scroll
-      (Metrics_tail.maximum_scroll ~entry_count:total_lines
-         ~content_height);
-  let offset = state.task_detail_scroll in
+      (Metrics_tail.maximum_scroll ~entry_count:total_lines ~content_height)
+  in
   for i = 0 to content_height - 1 do
     let line_index = i + offset in
     let text =
@@ -685,7 +687,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        Ansi.dim (Terminal_text.single_line task.id)
        state.refresh_interval Ansi.reset);
 
-  finish_surface state ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
 let render_approvals (state : state) =
@@ -1091,7 +1093,6 @@ let render_board_read (state : state) (list_post : board_post) =
       ~comment_count:detail_line_count
       ~comment_rows:comment_height state.board_scroll
   in
-  state.board_scroll <- scroll.normalized_scroll;
   for i = 0 to content_height - 1 do
     let idx = i + scroll.body_offset in
     if idx < total_lines then
@@ -1113,7 +1114,7 @@ let render_board_read (state : state) (list_post : board_post) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  finish_surface state ~surface_key:"board-read" ~rows:terminal_rows
+  finish_surface state ~clamped:(Board_read scroll.normalized_scroll) ~surface_key:"board-read" ~rows:terminal_rows
       ~cols buf
 
 let planning_phase_label phase = Goal_phase.to_string phase
@@ -2112,7 +2113,6 @@ let render_keeper_detail (state : state) =
       Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
         ~content_height state.detail_scroll
     in
-    state.detail_scroll <- scroll;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
@@ -2142,7 +2142,8 @@ let render_keeper_detail (state : state) =
     Buffer.add_string buf
       (keeper_action_hints state (Some (keeper_reading state k)) ^ "\n");
 
-    finish_surface state ~surface_key:"keeper-detail" ~rows:terminal_rows
+    finish_surface state ~clamped:(Keeper_detail scroll)
+      ~surface_key:"keeper-detail" ~rows:terminal_rows
       ~cols buf
   end
 
@@ -3361,7 +3362,6 @@ let render_autonomy (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.autonomy_scroll max_scroll) in
-  state.autonomy_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.autonomy ~error:state.autonomy_error with
@@ -3388,7 +3388,7 @@ let render_autonomy (state : state) =
   Buffer.add_string buf
     (Printf.sprintf "%s  j/k:scroll  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
-  finish_surface state ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Autonomy scroll) ~surface_key:"autonomy" ~rows:terminal_rows ~cols buf
 
 (* One keeper's durable tool-call log, the row vocabulary the chat pane
    uses: the finished glyph for a call that returned, the failure glyph for
@@ -3485,7 +3485,6 @@ let render_keeper_calls (state : state) =
       (List.map (fun (_, digest) -> if Option.is_some digest then 2 else 1) rows)
   in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
-  state.keeper_calls_scroll <- scroll;
   (* How many calls the rows below actually reached. Filled by the drawing so
      the count under the table cannot disagree with the table. *)
   let drawn = ref 0 in
@@ -3577,7 +3576,7 @@ let render_keeper_calls (state : state) =
     (Printf.sprintf
        "%s  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
-  finish_surface state ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at
    once. Rows are built from the events the TUI holds; the filter decides
@@ -3685,7 +3684,6 @@ let render_acting (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.acting_scroll max_scroll) in
-  state.acting_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match state.observer with
@@ -3742,7 +3740,7 @@ let render_acting (state : state) =
     (Printf.sprintf
        "%s  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
-  finish_surface state ~surface_key:"acting" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =
   match state.view with

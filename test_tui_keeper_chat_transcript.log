@@ -1,0 +1,35 @@
+Testing `[1mtui_keeper_chat_transcript[0m'.
+[2mThis run has ID `DARLMTSV'.
+
+[0m  [32m[OK][0m          [36mcontent[0m                  0   text and reasoning accumulate separately.
+  [32m[OK][0m          [36mcontent[0m                  1   the whole reasoning trail is kept.
+  [32m[OK][0m          [36mtrail[0m                    0   arrival order is kept.
+  [32m[OK][0m          [36mtrail[0m                    1   consecutive calls are one block.
+  [32m[OK][0m          [36mtrail[0m                    2   a call updates after later stretches open.
+  [32m[OK][0m          [36mtrail[0m                    3   blank stretches are dropped.
+  [32m[OK][0m          [36mtool calls[0m               0   named as the other surfaces name it.
+  [32m[OK][0m          [36mtool calls[0m               1   kept in stream order.
+  [32m[OK][0m          [36mtool calls[0m               2   a snapshot replaces the fragments.
+  [32m[OK][0m          [36mtool calls[0m               3   a fragment with no open call is dropped.
+  [32m[OK][0m          [36mterminal safety[0m          0   control bytes never reach the pane.
+  [32m[OK][0m          [36mheld calls[0m               0   a held call shows its question.
+  [32m[OK][0m          [36mheld calls[0m               1   a held turn does not say it is working.
+  [32m[OK][0m          [36mheld calls[0m               2   an answer clears the prompt.
+  [32m[OK][0m          [36mheld calls[0m               3   a timeout clears the prompt too.
+  [32m[OK][0m          [36mheld calls[0m               4   a settle for another call leaves the prompt.
+  [32m[OK][0m          [36mheld calls[0m               5   the arguments reach the call row.
+  [32m[OK][0m          [36mstatus rows[0m              0   rows grow only with what they report.
+  [32m[OK][0m          [36mstatus rows[0m              1   the progress row counts tool calls.
+  [32m[OK][0m          [36mstatus rows[0m              2   the progress row reports a context checkpoint.
+  [32m[OK][0m          [36mstatus rows[0m              3   an interrupt row does not claim the turn stopped.
+  [32m[OK][0m          [36mstatus rows[0m              4   a declined interrupt carries its reason.
+  [32m[OK][0m          [36mstatus rows[0m              5   tool rows mark how far each call got.
+  [32m[OK][0m          [36mstatus rows[0m              6   the progress row carries the turn age.
+  [32m[OK][0m          [36mphase[0m                    0   failure and finish are distinct.
+  [32m[OK][0m          [36mphase[0m                    1   a finished run stays finished.
+  [32m[OK][0m          [36mphase[0m                    2   an interrupt signal is not an outcome.
+  [32m[OK][0m          [36mphase[0m                    3   unreadable lines are counted.
+
+Full test results in `[36m~/me/.masc/playground/sangsu/repos/masc-wtask-470/_build/_tests/tui_keeper_chat_transcript[0m'.
+[32mTest Successful[0m in 0.003s. 28 tests run.
+EXIT_CODE=0

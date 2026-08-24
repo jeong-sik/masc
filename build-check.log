@@ -1,1 +1,2 @@
+COMMAND=dune build @check
 EXIT_CODE=0

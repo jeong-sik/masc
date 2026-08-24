@@ -1,33 +1,93 @@
 Testing `[1mtui_decode[0m'.
-[2mThis run has ID `Z5VTRJ2Y'.
+[2mThis run has ID `BHYJ6UPJ'.
 
-[0m  [32m[OK][0m          [36mdecode_agent[0m                        0   success.
-  [32m[OK][0m          [36mdecode_agent[0m                        1   missing status fails.
-  [32m[OK][0m          [36mdecode_task[0m                         0   missing priority defaults.
-  [32m[OK][0m          [36mdecode_keeper[0m                       0   missing legacy fields default to none.
-  [32m[OK][0m          [36mdecode_keeper[0m                       1   numeric last_turn_ts truncates.
-  [32m[OK][0m          [36mdecode_keeper[0m                       2   null last_turn_ts is empty.
-  [32m[OK][0m          [36mdecode_keeper[0m                       3   rejects invalid models type.
-  [32m[OK][0m          [36mdecode_keeper[0m                       4   rejects non-string model items.
-  [32m[OK][0m          [36mdecode_keeper[0m                       5   rejects non-finite last_turn_ts.
-  [32m[OK][0m          [36mparse_log_entry[0m                     0   success.
-  [32m[OK][0m          [36mparse_log_entry[0m                     1   missing required field fails.
-  [32m[OK][0m          [36mparse_log_entry[0m                     2   partial usage is allowed.
-  [32m[OK][0m          [36mparse_log_entry[0m                     3   missing usage is allowed.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          0   sse delta.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          1   AG-UI SSE.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          2   AG-UI error.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          3   AG-UI empty terminal.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          4   body json.
-  [32m[OK][0m          [36mparse_keeper_chat_response[0m          5   json error.
-  [32m[OK][0m          [36mstructured_http_response[0m            0   body rejects error status.
-  [32m[OK][0m          [36mstructured_http_response[0m            1   body allows empty success.
-  [32m[OK][0m          [36mbounded_parent_depth[0m                0   stops on cycle.
-  [32m[OK][0m          [36mfeed_chat[0m                           0   text delta.
-  [32m[OK][0m          [36mfeed_chat[0m                           1   tool call events.
-  [32m[OK][0m          [36mfeed_chat[0m                           2   thinking delta.
-  [32m[OK][0m          [36mfeed_chat[0m                           3   ignores non-data line.
+[0m  [32m[OK][0m          [36mdecode_runtime_surface[0m                0   joins projection and observation in lane order.
+  [32m[OK][0m          [36mdecode_runtime_surface[0m                1   rejects an unknown provider status.
+  [32m[OK][0m          [36mdecode_runtime_surface[0m                2   rejects status/reachability disagreement.
+  [32m[OK][0m          [36mdecode_runtime_surface[0m                3   rejects half a sticky preference.
+  [32m[OK][0m          [36mdecode_runtime_surface[0m                4   keeps resolved rows without a probe.
+  [32m[OK][0m          [36mdecode_runtime_resolved[0m               0   carries runtimes and assignments.
+  [32m[OK][0m          [36mdecode_keeper_tool_approvals[0m          0   carries the whole ask.
+  [32m[OK][0m          [36mdecode_keeper_tool_approvals[0m          1   rejects a thin row.
+  [32m[OK][0m          [36mdecode_tools[0m                          0   reads the live shape.
+  [32m[OK][0m          [36mdecode_tools[0m                          1   keeps the warming flag.
+  [32m[OK][0m          [36mdecode_tools[0m                          2   a tool projected nowhere.
+  [32m[OK][0m          [36mdecode_tools[0m                          3   absent direct-call is off.
+  [32m[OK][0m          [36mdecode_tools[0m                          4   no inventory is an error.
+  [32m[OK][0m          [36mdecode_connectors[0m                     0   reads the live shape.
+  [32m[OK][0m          [36mdecode_connectors[0m                     1   configured is not reachable.
+  [32m[OK][0m          [36mdecode_connectors[0m                     2   absent flags are off.
+  [32m[OK][0m          [36mdecode_repositories[0m                   0   reads the live shape.
+  [32m[OK][0m          [36mdecode_repositories[0m                   1   absent auto-sync is off.
+  [32m[OK][0m          [36mdecode_repositories[0m                   2   a repository with no keepers.
+  [32m[OK][0m          [36mdecode_keeper_lanes[0m                   0   reads the live shape and keeps unknown values.
+  [32m[OK][0m          [36mdecode_keeper_lanes[0m                   1   requires the table fields.
+  [32m[OK][0m          [36mdecode_fusion[0m                         0   keeps typed origin and panel-to-judge order.
+  [32m[OK][0m          [36mdecode_harness[0m                        0   reads the live shape.
+  [32m[OK][0m          [36mdecode_harness[0m                        1   keeps the fallback reason.
+  [32m[OK][0m          [36mdecode_harness[0m                        2   an empty harness is a reading.
+  [32m[OK][0m          [36mdecode_verification[0m                   0   reads the live shape.
+  [32m[OK][0m          [36mdecode_verification[0m                   1   no evidence is not unreadable evidence.
+  [32m[OK][0m          [36mdecode_verification[0m                   2   carries a next action.
+  [32m[OK][0m          [36mdecode_system_logs[0m                    0   reads the live shape.
+  [32m[OK][0m          [36mdecode_system_logs[0m                    1   warn and warning are one level.
+  [32m[OK][0m          [36mdecode_system_logs[0m                    2   an unnamed level stays itself.
+  [32m[OK][0m          [36mdecode_system_logs[0m                    3   null keeper is absent.
+  [32m[OK][0m          [36mdecode_system_logs[0m                    4   message is required.
+  [32m[OK][0m          [36mdecode_agent[0m                          0   success.
+  [32m[OK][0m          [36mdecode_agent[0m                          1   missing status fails.
+  [32m[OK][0m          [36mdecode_task[0m                           0   missing priority defaults.
+  [32m[OK][0m          [36mdecode_task[0m                           1   active projection filters and sorts.
+  [32m[OK][0m          [36mdecode_keeper[0m                         0   projects current schema.
+  [32m[OK][0m          [36mdecode_keeper[0m                         1   formats last turn timestamp.
+  [32m[OK][0m          [36mdecode_keeper[0m                         2   zero last turn is empty.
+  [32m[OK][0m          [36mdecode_keeper[0m                         3   rejects retired fields.
+  [32m[OK][0m          [36mdecode_keeper[0m                         4   preserves dotted metadata name.
+  [32m[OK][0m          [36mdecode_keeper[0m                         5   rejects missing current field.
+  [32m[OK][0m          [36mdecode_planning[0m                       0   current contract.
+  [32m[OK][0m          [36mdecode_planning[0m                       1   rejects running alias.
+  [32m[OK][0m          [36mdecode_planning[0m                       2   goal carries the judge verdict.
+  [32m[OK][0m          [36mdecode_planning[0m                       3   unreadable is not unreviewed.
+  [32m[OK][0m          [36mdecode_planning[0m                       4   keeps the last review note.
+  [32m[OK][0m          [36mdecode_fleet_safety[0m                   0   carries both name lists.
+  [32m[OK][0m          [36mdecode_fleet_safety[0m                   1   a full fleet leaves the difference empty.
+  [32m[OK][0m          [36mdecode_fleet_safety[0m                   2   a body without the section is refused.
+  [32m[OK][0m          [36mterminal_text[0m                         0   escapes control sequences.
+  [32m[OK][0m          [36mterminal_text[0m                         1   preserves printable UTF-8.
+  [32m[OK][0m          [36mterminal_text[0m                         2   escapes malformed UTF-8 bytes.
+  [32m[OK][0m          [36mterminal_text[0m                         3   is idempotent and single-line.
+  [32m[OK][0m          [36mterminal_text[0m                         4   sanitizes timestamp slices after selection.
+  [32m[OK][0m          [36mkeeper_calls[0m                          0   rejects rows naming another keeper.
+  [32m[OK][0m          [36mkeeper_calls[0m                          1   requires the envelope.
+  [32m[OK][0m          [36mkeeper_calls[0m                          2   carries what the call answered.
+  [32m[OK][0m          [36mparse_log_entry[0m                       0   current turn contract.
+  [32m[OK][0m          [36mparse_log_entry[0m                       1   all current turn variants.
+  [32m[OK][0m          [36mparse_log_entry[0m                       2   current heartbeat contract.
+  [32m[OK][0m          [36mparse_log_entry[0m                       3   retired and unknown rows fail closed.
+  [32m[OK][0m          [36mcontext_observation[0m                   0   observed and partial current context.
+  [32m[OK][0m          [36mcontext_observation[0m                   1   closed unavailable reasons.
+  [32m[OK][0m          [36mcontext_observation[0m                   2   hybrid and prior trace fail closed.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            0   sse delta.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            1   AG-UI SSE.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            2   AG-UI error.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            3   AG-UI empty terminal.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            4   body json.
+  [32m[OK][0m          [36mparse_keeper_chat_response[0m            5   json error.
+  [32m[OK][0m          [36mstructured_http_response[0m              0   body rejects error status.
+  [32m[OK][0m          [36mstructured_http_response[0m              1   body allows empty success.
+  [32m[OK][0m          [36mstructured_http_response[0m              2   tool envelope ok carries the message.
+  [32m[OK][0m          [36mstructured_http_response[0m              3   tool envelope ok without message defaults.
+  [32m[OK][0m          [36mstructured_http_response[0m              4   tool envelope rejection carries the message.
+  [32m[OK][0m          [36mstructured_http_response[0m              5   tool envelope rejects unexpected shapes.
+  [32m[OK][0m          [36msgr_mouse[0m                             0   wheel up claims its own key.
+  [32m[OK][0m          [36msgr_mouse[0m                             1   wheel down claims its own key.
+  [32m[OK][0m          [36msgr_mouse[0m                             2   clicks, releases, horizontal wheel stay unclaimed.
+  [32m[OK][0m          [36mx10_mouse[0m                             0   wheel up claims its own key.
+  [32m[OK][0m          [36mx10_mouse[0m                             1   wheel down claims its own key.
+  [32m[OK][0m          [36mx10_mouse[0m                             2   clicks and drags stay unclaimed.
+  [32m[OK][0m          [36mx10_mouse[0m                             3   agrees with the SGR decoder.
+  [32m[OK][0m          [36mbounded_parent_depth[0m                  0   stops on cycle.
 
-Full test results in `[36m~/me/.masc/playground/sangsu/repos/masc-task-470-producer/_build/_tests/tui_decode[0m'.
-[32mTest Successful[0m in 0.002s. 26 tests run.
+Full test results in `[36m~/me/.masc/playground/sangsu/repos/masc-wtask-470/_build/_tests/tui_decode[0m'.
+[32mTest Successful[0m in 0.014s. 86 tests run.
 EXIT_CODE=0

@@ -1,0 +1,20 @@
+Testing `[1mtui_keeper_chat_live[0m'.
+[2mThis run has ID `CHMN75IL'.
+
+[0m  [32m[OK][0m          [36mdeltas[0m              0   coding turn, whole body.
+  [32m[OK][0m          [36mdeltas[0m              1   chunk size does not change the deltas.
+  [32m[OK][0m          [36mdeltas[0m              2   a partial line is held.
+  [32m[OK][0m          [36mdeltas[0m              3   args snapshot stays a snapshot.
+  [32m[OK][0m          [36mdeltas[0m              4   checkpoint and external effect are drawn.
+  [32m[OK][0m          [36mheld calls[0m          0   an approval request is read whole.
+  [32m[OK][0m          [36mheld calls[0m          1   a request with no arguments is still a prompt.
+  [32m[OK][0m          [36mheld calls[0m          2   the settled event carries its outcome.
+  [32m[OK][0m          [36mheld calls[0m          3   a request missing its question is reported.
+  [32m[OK][0m          [36mreporting[0m           0   an unreadable line is reported, the stream continues.
+  [32m[OK][0m          [36mreporting[0m           1   a missing field names its event.
+  [32m[OK][0m          [36mreporting[0m           2   a run error with no message still fails.
+  [32m[OK][0m          [36mreporting[0m           3   undrawn events stay silent.
+
+Full test results in `[36m~/me/.masc/playground/sangsu/repos/masc-wtask-470/_build/_tests/tui_keeper_chat_live[0m'.
+[32mTest Successful[0m in 0.005s. 13 tests run.
+EXIT_CODE=0

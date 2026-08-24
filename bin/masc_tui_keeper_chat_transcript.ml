@@ -230,7 +230,11 @@ let pad_to width text =
 let render_activity_rows (activities : tool_activity list) =
   let name_width =
     List.fold_left
-      (fun widest activity ->
+      (* [awaiting_approval] is declared after [tool_activity] and also carries
+         [tool_name], so the bare field resolves to the later record and drags
+         the fold's element type with it. Naming the type here is what keeps
+         this reading [tool_activity]. *)
+      (fun widest (activity : tool_activity) ->
         max widest (String.length activity.tool_name))
       0 activities
   in

@@ -27,6 +27,35 @@ let with_config f =
       let config = Lib.Workspace.default_config dir in
       f config)
 
+(* The store used to spell the YYYY-MM/DD.jsonl layout out for itself, and it
+   read the clock once for the month directory and once more for the day file,
+   so a write crossing midnight on the last of a month could land the new
+   day's file under the old month's directory (#27143). The layout comes from
+   Jsonl_writer now; this pins that it still does. *)
+let test_day_file_follows_the_shared_layout () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"agent.joined"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~payload:(`Assoc [])
+           ());
+      let path = Activity_graph.For_testing.current_day_path config in
+      check bool "the emitted day file exists" true (Sys.file_exists path);
+      let expected =
+        (Jsonl_writer.dated_path_now
+           ~base_dir:
+             (Filename.concat
+                (Workspace_utils.masc_dir config)
+                "activity-events"))
+          .Jsonl_writer.path
+      in
+      check string "and Jsonl_writer names the same file" expected path;
+      check bool
+        "its directory is the one the writer would make"
+        true
+        (Sys.is_directory (Filename.dirname path)))
+;;
+
 let test_emit_and_list_events () =
   with_config (fun config ->
       ignore
@@ -827,6 +856,8 @@ let () =
     [
       ( "core",
         [
+          test_case "day file follows the shared layout" `Quick
+            test_day_file_follows_the_shared_layout;
           test_case "emit and list events" `Quick test_emit_and_list_events;
           test_case "events json derives IDE context" `Quick
             test_events_json_derives_ide_context;

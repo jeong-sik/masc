@@ -41,30 +41,17 @@ type section = {
   empty_msg: string;
 }
 
-type scope =
-  | All
-  | Current
+(* The schema enum and this parser used to spell the same vocabulary
+   separately, on opposite sides of the cut that keeps the descriptor
+   generator out of its own consumer (#27069). Tool_schemas_specs_types is on
+   the generator's side and depends on nothing here, so both can take it. *)
+type scope = Tool_schemas_specs_types.dashboard_scope =
+  | Dashboard_scope_all
+  | Dashboard_scope_current
 
-(** Issue #8592: SSOT helpers for [scope]. The witness function and
-    canonical string list are mirrored in the JSON Schema layer
-    ([Tool_schemas_misc.dashboard_scope_enum_strings]) — direct
-    dependency would cycle. No suite asserts the mirror stays in sync:
-    [dashboard_scope_ssot] does not exist. Adding a new constructor here
-    forces a compile error in [scope_to_string], which is the only thing
-    standing between a new scope and silently dropping
-    from the enum. *)
-let scope_to_string = function
-  | All -> "all"
-  | Current -> "current"
-
-let all_scopes = [ All; Current ]
-
-let valid_scope_strings = List.map scope_to_string all_scopes
-
-let scope_of_string_opt = function
-  | "all" -> Some All
-  | "current" -> Some Current
-  | _ -> None
+let scope_to_string = Tool_schemas_specs_types.dashboard_scope_to_string
+let valid_scope_strings = Tool_schemas_specs_types.dashboard_scope_strings
+let scope_of_string_opt = Tool_schemas_specs_types.dashboard_scope_of_string_opt
 
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
@@ -353,7 +340,7 @@ let attention_section now (snapshots : workspace_snapshot list) : section =
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
-let generate ?(scope = All) (config : Workspace_utils.config) : string =
+let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -395,7 +382,7 @@ let generate ?(scope = All) (config : Workspace_utils.config) : string =
   let section_strs = List.map format_section sections in
   String.concat "\n\n" ([header] @ section_strs @ [footer])
 
-let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
+let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
   let _scope = scope in
   let now = Time_compat.now () in
   let snapshots = [ workspace_snapshot config ] in

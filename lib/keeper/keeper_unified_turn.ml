@@ -668,6 +668,17 @@ let run_keeper_cycle
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_of_store ~config
                in
+               (* The briefing is pinned, so it is bounded here rather than
+                  left to the model input projection, which can only cut the
+                  conversation window. Sized from the runtime's own declared
+                  input ceiling: a runtime that declares none gets no bound,
+                  the same answer its projection gives it. Rotation to a larger
+                  lane only makes this conservative. *)
+               let context_budget_bytes =
+                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
+                 |> Option.map (fun cap ->
+                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+               in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
                    ~meta
@@ -676,6 +687,7 @@ let run_keeper_cycle
                    ~turn_decision
                    ~current_task
                    ~active_goal_summaries
+                   ?context_budget_bytes
                    ~observation
                    ()
                in

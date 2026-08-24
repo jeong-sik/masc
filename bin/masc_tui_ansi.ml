@@ -173,42 +173,69 @@ let ctx_bar ratio width =
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
 
-(** Shared helper: draw box top border *)
-let box_top buf cols =
+(* The framed family keeps the full border box. Modals (palette, help) and
+   side-by-side panes still need it: a border is what separates an overlay
+   from the surface under it, and two panes from each other. *)
+
+let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset)
 
-(** Shared helper: draw box bottom border *)
-let box_bottom buf cols =
+let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset)
 
-(** Shared helper: draw box divider *)
-let box_divider buf cols =
+let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
 
-(** Shared helper: draw a line inside a box *)
-let box_line buf cols content =
+let framed_line buf cols content =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Fit plain content first, then add style bytes so ANSI escapes never count
-    toward the terminal width. *)
-let box_line_styled buf cols ~style content =
+let framed_line_styled buf cols ~style content =
   let inner = cols - 4 in
   let content = fit_width content inner in
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
        Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Shared helper: empty line inside a box *)
-let box_empty buf cols =
+let framed_empty buf cols =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (String.make inner ' ')
     Ansi.gray Ansi.box_v Ansi.reset)
+
+(* Full-screen surfaces draw without the outer box: the terminal edge is
+   already the frame, and a border around everything separates nothing (the
+   clutter audit's first offender). Every helper keeps its old geometry --
+   one row per call, content width [cols - 4] -- so no surface's row budget
+   or wrap math moves. *)
+
+let box_top buf _cols = Buffer.add_char buf '\n'
+let box_bottom buf _cols = Buffer.add_char buf '\n'
+
+let box_divider buf cols =
+  Buffer.add_string buf
+    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset)
+
+(* Rows keep the framed geometry -- two margin cells each side, content
+   width [cols - 4] -- and still span the full [cols], so anything that
+   measures a row (the PTY suite does) reads the same width either way. *)
+let box_line buf cols content =
+  let inner = cols - 4 in
+  Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
+
+let box_line_styled buf cols ~style content =
+  let inner = cols - 4 in
+  let content = fit_width content inner in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
+
+let box_empty buf cols =
+  Buffer.add_string buf (String.make cols ' ');
+  Buffer.add_char buf '\n' 

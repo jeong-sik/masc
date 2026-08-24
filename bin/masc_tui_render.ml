@@ -610,14 +610,11 @@ let render_overview (state : state) =
     in
     fit_width title (max 0 panel_width)
   in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
+  Buffer.add_string buf (Printf.sprintf " %s%s%s%s%s%s\n"
     Ansi.bold attention_title Ansi.reset
     (String.make (max 0 (panel_width - String.length attention_title)) ' ')
     (Ansi.gray ^ Ansi.box_v ^ Ansi.reset)
-    events_title
-    (String.make (max 0 (right_panel_width - String.length events_title)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
+    events_title);
 
   for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
@@ -646,22 +643,17 @@ let render_overview (state : state) =
           (Terminal_text.single_line e.content)
       else ""
     in
-    Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
+    Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"
       (fit_width attention_str (panel_width - 2))
       Ansi.gray Ansi.box_v Ansi.reset
-      (fit_width event_str (right_panel_width - 2))
-      Ansi.gray Ansi.box_v Ansi.reset)
+      (fit_width event_str (right_panel_width - 2)))
   done;
 
   box_divider buf cols;
 
   (* Tasks section *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %sTasks%s %s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.bold Ansi.reset
-    (String.make (max 0 (cols - 10)) ' ')
-    Ansi.gray Ansi.box_v Ansi.reset);
+  Buffer.add_string buf
+    (Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset);
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -2062,9 +2054,7 @@ let render_keeper_list (state : state) =
     Option.map (keeper_reading state) (selected_keeper state)
   in
 
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_tl
-       (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
+  Buffer.add_char buf '\n';
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -2100,8 +2090,7 @@ let render_keeper_list (state : state) =
     (heading ^ String.make gap ' ' ^ Ansi.dim ^ timestamp ^ Ansi.reset);
 
   Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_l (draw_hline (cols - 2))
-       Ansi.box_r Ansi.reset);
+    (Printf.sprintf " %s%s%s\n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset);
 
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
@@ -2165,8 +2154,7 @@ let render_keeper_list (state : state) =
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
   box_line_styled buf cols ~style:Ansi.dim (keeper_column_header columns);
   Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_l (draw_hline (cols - 2))
-       Ansi.box_r Ansi.reset);
+    (Printf.sprintf " %s%s%s\n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset);
 
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
   (match keepers_error with
@@ -2450,7 +2438,14 @@ let render_lanes (state : state) =
 (* The detail box alone -- borders, title, scrolled content -- written into
    [buf] at [cols] wide, footer excluded so a caller can lay it beside the
    roster pane. Returns the scroll the frame actually used. *)
-let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
+let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
+    (* Beside the roster pane the box is the pane separator; alone on the
+       surface it is the redundant outer frame, dropped. *)
+    let box_top = if framed then framed_top else box_top in
+    let box_divider = if framed then framed_divider else box_divider in
+    let box_line = if framed then framed_line else box_line in
+    let box_empty = if framed then framed_empty else box_empty in
+    let box_bottom = if framed then framed_bottom else box_bottom in
     let inner = cols - 4 in  (* width inside borders *)
 
     (* Build all detail lines first, then apply scroll *)
@@ -2590,11 +2585,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
         (Terminal_text.single_line k.k_name)
         Ansi.reset
     in
-    Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      title
-      (String.make (max 0 (inner - String.length title + 10)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset);
+    box_line buf cols title;
 
     (* Divider *)
     box_divider buf cols;
@@ -2634,9 +2625,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~rows ~cols buf =
    surface -- the keys keep their detail meaning. The window follows the
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
-  box_top buf cols;
-  box_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
-  box_divider buf cols;
+  framed_top buf cols;
+  framed_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
+  framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
     if state.keeper_cursor < content_height then 0
@@ -2656,10 +2647,10 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
             ^ Ansi.reset
           else " " ^ name
         in
-        box_line buf cols line
-    | None -> box_empty buf cols
+        framed_line buf cols line
+    | None -> framed_empty buf cols
   done;
-  box_bottom buf cols
+  framed_bottom buf cols
 
 let keeper_split_threshold_cols = 110
 let keeper_roster_pane_cols = 30
@@ -2680,7 +2671,7 @@ let render_keeper_detail (state : state) =
       keeper_action_hints state (Some (keeper_reading state k))
     in
     if cols < keeper_split_threshold_cols then begin
-      let scroll = keeper_detail_pane state k ~rows ~cols buf in
+      let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -2694,7 +2685,9 @@ let render_keeper_detail (state : state) =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       keeper_roster_pane state ~rows ~cols:left_cols left_buf;
-      let scroll = keeper_detail_pane state k ~rows ~cols:right_cols right_buf in
+      let scroll =
+        keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
+      in
       let blank_left = String.make left_cols ' ' in
       let rec zip left right =
         match left, right with
@@ -4943,12 +4936,12 @@ let render_palette (state : state) =
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  box_top buf cols;
-  box_line buf cols
+  framed_top buf cols;
+  framed_line buf cols
     (Printf.sprintf "%s:%s %s%s" Ansi.bold Ansi.reset
        (Terminal_text.single_line state.palette_query)
        (Ansi.cyan ^ "\xe2\x96\x8c" ^ Ansi.reset));
-  box_divider buf cols;
+  framed_divider buf cols;
   let content_height = max 1 (rows - 5) in
   let first =
     if cursor < content_height then 0
@@ -4967,10 +4960,10 @@ let render_palette (state : state) =
            ^ Ansi.reset
          else " " ^ label
        in
-       box_line buf cols line);
+       framed_line buf cols line);
   if total = 0 then
-    box_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
-  box_bottom buf cols;
+    framed_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
+  framed_bottom buf cols;
   Buffer.add_string buf
     (Printf.sprintf
        "%s  %d/%d  Enter:jump  Esc:close  | Port: %d%s\n"
@@ -4983,10 +4976,10 @@ let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
-  box_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
+  framed_top buf cols;
+  framed_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
     ^ "Esc or ? to close" ^ Ansi.reset);
-  box_divider buf cols;
+  framed_divider buf cols;
   let lines = help_lines () in
   (* Two columns when they fit; the split point keeps groups readable by
      cutting at the overall middle rather than balancing exact heights. *)
@@ -5018,8 +5011,8 @@ let render_help (state : state) =
   let scroll = max 0 (min state.help_scroll max_scroll) in
   rendered_rows
   |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun line -> box_line buf cols line);
-  box_bottom buf cols;
+  |> List.iter (fun line -> framed_line buf cols line);
+  framed_bottom buf cols;
   Buffer.add_string buf
     (Printf.sprintf "%s  j/k:scroll  Esc:close  | Port: %d%s\n" Ansi.dim
        state.port Ansi.reset);

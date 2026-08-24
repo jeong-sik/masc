@@ -197,6 +197,8 @@ let the_turn_can_read_the_answer () =
            (WO.is_board_activity_event event);
          check string "the row is attributed to the Keeper that answered" delegate
            event.WO.author;
+         check string "the row states who answered and how" (delegate ^ " replied")
+           event.WO.title;
          check
            bool
            "the reply text is what the turn reads"

@@ -43,7 +43,13 @@ let deliver ~base_path ~asked_by ~operation_id ~delegate ~terminal =
       reason;
     Error reason
   | Ok () ->
-    Log.Keeper.info
+    (* The level comes from the outcome, as it does at the intake side: the
+       commit succeeded either way, but a delegation that could not finish is
+       not routine for the Keeper still waiting on it. *)
+    (match terminal with
+     | Keeper_event_queue.Delegate_failed _ -> Log.Keeper.warn
+     | Keeper_event_queue.Delegate_replied _ | Keeper_event_queue.Delegate_no_reply ->
+       Log.Keeper.info)
       ~keeper_name:asked_by
       "delegation answer committed operation_id=%s from=%s outcome=%s"
       operation_id

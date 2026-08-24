@@ -15,8 +15,9 @@ let base_path () = Sys.getenv "MASC_BASE_PATH"
 let register_keeper keeper =
   let meta =
     match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc [ "name", `String keeper; "agent_name", `String keeper ])
+      (* agent_name is omitted: the fixture derives the canonical
+         keeper-<name>-agent form, and the registry refuses any other. *)
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper ])
     with
     | Ok meta -> meta
     | Error error -> Alcotest.failf "register_keeper %s: %s" keeper error

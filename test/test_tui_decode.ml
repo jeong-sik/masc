@@ -271,6 +271,49 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       Alcotest.(check string) "health verbatim" "ok"
         snapshot.Tui_decode.kcs_health
 
+(* The envelope has always carried what a call answered; the row did not read
+   it, so a call that failed said so without saying why. Absent and empty stay
+   absent: a row that carried no result is not a call that answered "". *)
+let test_keeper_calls_carry_what_the_call_answered () =
+  let row ~output =
+    `Assoc
+      [ "ts", `Float 1787534998.4
+      ; "keeper", `String "rondo"
+      ; "tool", `String "Execute"
+      ; "input", `String {|{"argv": ["ls"]}|}
+      ; "success", `Bool true
+      ; "output", output
+      ]
+  in
+  let payload entries =
+    `Assoc
+      [ "keeper", `String "rondo"
+      ; "count", `Int (List.length entries)
+      ; "health", `String "ok"
+      ; "entries", `List entries
+      ]
+  in
+  let outputs entries =
+    match
+      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+        (payload entries)
+    with
+    | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
+    | Ok snapshot ->
+        List.map
+          (fun (call : Tui_decode.keeper_call) -> call.Tui_decode.kc_output)
+          snapshot.Tui_decode.kcs_entries
+  in
+  Alcotest.(check (list (option string)))
+    "text kept, absent and blank stay absent, a non-string is serialised"
+    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    (outputs
+       [ row ~output:(`String "a.ml  b.ml")
+       ; row ~output:`Null
+       ; row ~output:(`String "   ")
+       ; row ~output:(`Assoc [ "code", `Int 0 ])
+       ])
+
 let test_keeper_calls_require_the_envelope () =
   Alcotest.(check bool) "no entries list is an error" true
     (Result.is_error
@@ -2013,6 +2056,8 @@ let () =
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
           test_keeper_calls_require_the_envelope
+      ; Alcotest.test_case "carries what the call answered" `Quick
+          test_keeper_calls_carry_what_the_call_answered
       ] );
     ( "parse_log_entry",
       [

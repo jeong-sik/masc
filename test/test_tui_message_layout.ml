@@ -502,6 +502,28 @@ let test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping () =
     (Layout.scrolled_rows ~inner_width:40 ~height:6 ~from_bottom:100 ten_entries
      |> text_of)
 
+(* A scroll bound for rows that are not one per item. Bounding by
+   [count - height] leaves the tail unreachable as soon as an item costs two
+   rows, which is what a call that answered something costs. *)
+let test_last_page_start_counts_rows_not_items () =
+  check int "one row each is the plain bound" 4
+    (Layout.last_page_start ~height:6 (List.init 10 (fun _ -> 1)));
+  check int "two rows each halves what fits" 7
+    (Layout.last_page_start ~height:6 (List.init 10 (fun _ -> 2)));
+  check int "a mixed list stops where the height runs out" 2
+    (Layout.last_page_start ~height:5 [ 1; 1; 2; 1; 2 ]);
+  check int "everything fits" 0
+    (Layout.last_page_start ~height:40 [ 1; 2; 1 ]);
+  check int "nothing to place" 0 (Layout.last_page_start ~height:6 [])
+
+(* The last item stays reachable even when it alone is taller than the pane:
+   drawn as far as the height allows beats not drawn at all. *)
+let test_last_page_start_keeps_the_last_item_reachable () =
+  check int "an oversized last item" 2
+    (Layout.last_page_start ~height:1 [ 1; 1; 9 ]);
+  check int "a zero cost still spends a row" 1
+    (Layout.last_page_start ~height:1 [ 0; 0 ])
+
 let () =
   run "tui_message_layout"
     [ ( "message rows"
@@ -519,6 +541,10 @@ let () =
             test_input_viewport_keeps_latest_complete_scalars
         ; test_case "input cursor uses visible cells" `Quick
             test_input_cursor_uses_visible_terminal_cells
+        ; test_case "last page start counts rows" `Quick
+            test_last_page_start_counts_rows_not_items
+        ; test_case "last page keeps the last item reachable" `Quick
+            test_last_page_start_keeps_the_last_item_reachable
         ; test_case "history wraps by cells without byte loss" `Quick
             test_history_wraps_by_cells_without_losing_bytes
         ; test_case "history never splits grapheme clusters" `Quick

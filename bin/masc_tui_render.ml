@@ -3420,9 +3420,26 @@ let render_keeper_calls (state : state) =
   in
   let chrome_rows = 8 + extra_rows in
   let content_height = max 1 (rows - chrome_rows) in
-  let max_scroll = max 0 (shown - content_height) in
+  (* Digested once, for the bound and for the drawing both. Working it out
+     twice would let the scroll bound believe in a different table than the
+     one on screen. *)
+  let rows =
+    List.map
+      (fun (call : Masc.Tui_decode.keeper_call) ->
+        ( call
+        , Option.bind call.Masc.Tui_decode.kc_output (fun result ->
+              Masc.Keeper_chat_tool_trail.tool_result_digest ~result) ))
+      entries
+  in
+  let max_scroll =
+    Message_layout.last_page_start ~height:content_height
+      (List.map (fun (_, digest) -> if Option.is_some digest then 2 else 1) rows)
+  in
   let scroll = max 0 (min state.keeper_calls_scroll max_scroll) in
   state.keeper_calls_scroll <- scroll;
+  (* How many calls the rows below actually reached. Filled by the drawing so
+     the count under the table cannot disagree with the table. *)
+  let drawn = ref 0 in
   if shown = 0 then begin
     let empty =
       match (state.keeper_calls, state.keeper_calls_error) with
@@ -3435,12 +3452,20 @@ let render_keeper_calls (state : state) =
       box_empty buf cols
     done
   end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt entries idx with
-      | None -> box_empty buf cols
-      | Some call ->
+  else begin
+    (* Rows are spent, not indexed: a call draws one row and, when it answered
+       something, a second for what it said. Walking the height rather than
+       looping over it keeps [scroll] counting calls, so j/k still moves by
+       call and the footer's count still means what it says. *)
+    let remaining = ref content_height in
+    let idx = ref scroll in
+    while !remaining > 0 do
+      match List.nth_opt rows !idx with
+      | None ->
+          box_empty buf cols;
+          decr remaining
+      | Some (call, digest) ->
+          incr idx;
           let open Masc.Tui_decode in
           let glyph, style =
             if call.kc_success then ("✓", Ansi.reset)
@@ -3472,11 +3497,31 @@ let render_keeper_calls (state : state) =
               duration turn
               (Terminal_text.single_line subject)
           in
-          box_line_styled buf cols ~style line
+          box_line_styled buf cols ~style line;
+          decr remaining;
+          (* What the call answered. The row above says one ran and what it
+             was called with; this is the only place that says what came
+             back, which is the question a failed call leaves open. It takes
+             a failed call's colour so a reason does not read as ordinary
+             output. A call that answered nothing draws no row rather than an
+             empty one. *)
+          (match digest with
+           | Some digest when !remaining > 0 ->
+               box_line_styled buf cols
+                 ~style:(if call.kc_success then Ansi.dim else Ansi.red)
+                 (Printf.sprintf "  %-8s %s   %s" "" " "
+                    (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)));
+               decr remaining
+           | Some _ | None -> ())
     done;
-  if shown > content_height then
+    (* How many calls the height actually reached, not how many would fit if
+       each took one row. A call that answered something takes two, so
+       counting rows as calls hid the hint exactly when the screen needed it. *)
+    drawn := !idx - scroll
+  end;
+  if scroll > 0 || !drawn < shown then
     box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d calls, scroll %d]" shown scroll)
+      (Printf.sprintf "[%d calls, showing %d from %d]" shown !drawn scroll)
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

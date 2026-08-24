@@ -1039,6 +1039,7 @@ type keeper_call = {
   kc_at : float;
   kc_tool : string;
   kc_input : string;
+  kc_output : string option;
   kc_success : bool;
   kc_duration_ms : float option;
   kc_turn : int option;
@@ -1443,6 +1444,18 @@ let decode_keeper_call json =
     | `String value -> value
     | other -> Yojson.Safe.to_string other
   in
+  (* What came back, as the server serves it. The row already said a call ran
+     and what it was called with; without this it never said what the call
+     answered, which is the question a failed call leaves open. The server
+     bounds it (the envelope carries [truncated_to]), so this is a read, not a
+     second budget. A row that carries no result says nothing rather than an
+     empty string: "returned nothing" and "was not recorded" are different. *)
+  let kc_output =
+    match member "output" json with
+    | `String value when String.trim value <> "" -> Some value
+    | `String _ | `Null -> None
+    | other -> Some (Yojson.Safe.to_string other)
+  in
   let kc_duration_ms =
     match member "duration_ms" json with
     | `Float value -> Some value
@@ -1460,6 +1473,7 @@ let decode_keeper_call json =
     , { kc_at
       ; kc_tool
       ; kc_input
+      ; kc_output
       ; kc_success
       ; kc_duration_ms
       ; kc_turn

@@ -106,6 +106,21 @@ let test_both_readers_share_one_disposition () =
     ]
 ;;
 
+(* The Keeper Calls table says a call ran and what it was called with. What
+   it answered is the question a failed call leaves open, and the digest is
+   computed where it can be tested; this pins that the table asks for it. *)
+let test_the_calls_table_says_what_came_back () =
+  let n =
+    calls ~module_path:"bin/masc_tui_render.ml"
+      ~callee:"Masc.Keeper_chat_tool_trail.tool_result_digest"
+  in
+  if n < 1 then
+    failf
+      "bin/masc_tui_render.ml must draw what a call answered; \
+       tool_result_digest is called %d time(s)"
+      n
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -118,6 +133,8 @@ let () =
             test_the_row_budget_counts_the_queue
         ; test_case "both readers share one disposition" `Quick
             test_both_readers_share_one_disposition
+        ; test_case "the calls table says what came back" `Quick
+            test_the_calls_table_says_what_came_back
         ] )
     ; ( "queue"
       , [ test_case "take_newest returns the last and keeps order" `Quick

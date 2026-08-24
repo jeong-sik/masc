@@ -101,21 +101,16 @@ let terminal_size_cache =
 let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
-let probe_terminal_size () =
-  let read_tput arg =
-    try
-      let line, status =
-        With_process.with_process_args_in "tput" [| "tput"; arg |]
-          input_line
-      in
-      match status with
-      | Unix.WEXITED 0 -> int_of_string_opt (String.trim line)
-      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
-    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
-  in
-  match read_tput "cols", read_tput "lines" with
-  | Some cols, Some rows -> Some (rows, cols)
-  | _ -> None
+(* Asked of the tty, not of [tput]. [tput] reads the size from TIOCGWINSZ on
+   its own stdout, and this probe captured that stdout through a pipe, so the
+   ioctl never saw a terminal and [tput] answered from the static terminfo
+   entry instead -- 80x24 for most terminals. The frame then drew at 80x24
+   inside whatever window the operator actually had, and only an exported
+   COLUMNS/LINES pair made it right by accident. Measured 2026-08-25 in a
+   120x40 pane: 24x80 without those variables, 40x120 with them.
+
+   Two processes per resize become none. *)
+let probe_terminal_size () = Terminal_size.get ()
 
 (** Get terminal size (fallback to 80x24). *)
 let get_terminal_size () =

@@ -1,51 +1,48 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-let network_error_kind_user_label = function
-  | Llm_provider.Http_client.Connection_refused -> "connection refused"
-  | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"
-  | Llm_provider.Http_client.Tls_error -> "TLS handshake failed"
-  | Llm_provider.Http_client.Timeout -> "network timeout"
-  | Llm_provider.Http_client.Local_resource_exhaustion ->
-    "local network resources exhausted"
-  | Llm_provider.Http_client.End_of_file -> "connection closed"
-  | Llm_provider.Http_client.Unknown -> "network error"
-;;
-
-let network_error_kind_user_action = function
-  | Llm_provider.Http_client.Dns_failure ->
-    "Check network/DNS or select another runtime."
-  | Llm_provider.Http_client.Connection_refused ->
-    "Check that the runtime endpoint is running or select another runtime."
-  | Llm_provider.Http_client.Tls_error ->
-    "Check the provider TLS endpoint or select another runtime."
-  | Llm_provider.Http_client.Timeout ->
-    "Check provider health or select another runtime."
-  | Llm_provider.Http_client.Local_resource_exhaustion ->
-    "Reduce concurrent requests or select another runtime."
-  | Llm_provider.Http_client.End_of_file
-  | Llm_provider.Http_client.Unknown ->
-    "Check provider health or select another runtime."
-;;
-
 let runtime_provider_label provider =
   match Option.map String.trim provider with
   | Some provider when provider <> "" -> Printf.sprintf "Runtime provider '%s'" provider
   | _ -> "Runtime provider"
 ;;
 
-let detail_suffix detail =
-  match String.trim detail with
-  | "" -> ""
-  | detail -> " Detail: " ^ detail
-;;
+(* One sentence, naming the failure once.
 
+   The stacked form read "Runtime provider unavailable: connection closed.
+   Check provider health or select another runtime. Detail: End_of_file" --
+   the same failure named four times at decreasing abstraction, ending in
+   OCaml's vocabulary rather than the operator's. Each layer prepended its own
+   framing without reading what the layer below had already said.
+
+   Two kinds let the detail speak instead of a condition phrase: a name
+   resolution failure is about one host, and [Unknown] has no label worth the
+   name. Writing both would repeat the fact -- "could not be resolved: failed
+   to resolve hostname" -- which is the shape being removed. Every other kind
+   states the condition and drops the exception, which restates it in OCaml's
+   words ([End_of_file] renders exactly the constructor the kind already is)
+   and stays in the typed error for logs regardless.
+
+   Guidance stays only where the action is specific and not implied by the
+   condition. A refused connection means nothing is listening; exhausted local
+   resources mean too many requests at once. "Check provider health" after a
+   dropped connection is not an instruction. *)
 let provider_network_user_message ?provider ~kind ~detail () =
-  Printf.sprintf
-    "%s unavailable: %s. %s%s"
-    (runtime_provider_label provider)
-    (network_error_kind_user_label kind)
-    (network_error_kind_user_action kind)
-    (detail_suffix detail)
+  let who = runtime_provider_label provider in
+  let detail_speaks fallback =
+    match String.trim detail with
+    | "" -> who ^ " " ^ fallback
+    | detail -> who ^ ": " ^ detail
+  in
+  match kind with
+  | Llm_provider.Http_client.Connection_refused ->
+    who ^ " refused the connection; nothing is listening on the runtime endpoint"
+  | Llm_provider.Http_client.Dns_failure -> detail_speaks "could not be resolved"
+  | Llm_provider.Http_client.Tls_error -> who ^ " failed the TLS handshake"
+  | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
+  | Llm_provider.Http_client.Local_resource_exhaustion ->
+    "Local network resources are exhausted; fewer requests at once are needed"
+  | Llm_provider.Http_client.End_of_file -> who ^ " closed the connection"
+  | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;
 
 let structured_internal_error_user_message err =

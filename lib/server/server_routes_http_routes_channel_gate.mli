@@ -13,15 +13,17 @@ val add_routes :
 
 val record_validation_error_metric :
   duration_ms:int -> string -> string -> unit
-(** Record a [Validation_error] attempt against [Channel_gate_metrics]
-    using the channel/workspace/keeper extracted from the request body
-    (best-effort: invalid JSON falls back to [unknown / empty / empty]).
-    Exposed so [test_channel_gate_metrics] can lock the request-metadata
-    extraction contract independently from the HTTP route. *)
 
 val resolve_connector_status_name : ?name:string -> unit -> string option
-(** Pick the connector identity for the [/connector/status] endpoint from the
-    canonical [?name] form; [None] when it is absent, empty, or blank. The
-    [?channel] alias it replaced is no longer read. Result is trimmed and
-    lowercased. Exposed so [test_channel_gate_connector_routes] can pin the
-    extraction contract. *)
+
+val keeper_exists : Mcp_server.server_state -> string -> (bool, string) result
+
+val respond_keeper_tool_json :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  tool_name:string ->
+  args:Yojson.Safe.t ->
+  unit

@@ -166,7 +166,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let current_keeper_mode =
     match state.view with
     | Keepers mode -> Some mode
-    | Overview | Board | Approvals | Planning | Schedules | Verification
+    | Overview | Acting | Board | Approvals | Planning | Schedules | Verification
     | Harness | Repositories | Connectors | Tools | Autonomy | System_logs ->
         None
   in
@@ -184,6 +184,12 @@ let load_from_masc_dir (state : state) (base_path : string) =
              Keeper_selection.Logs_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_calls ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Calls_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
     | Some Keeper_message ->
         (match state.msg_target_keeper_name with
          | Some keeper_name ->
@@ -198,7 +204,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs) ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls) ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
@@ -220,10 +226,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
    | Keeper_selection.List_cursor cursor ->
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with
-        | Some (Keeper_detail | Keeper_logs | Keeper_message) ->
+        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
             state.view <- Keepers Keeper_list;
             state.detail_scroll <- 0;
-            state.log_scroll <- 0
+            state.log_scroll <- 0;
+            state.keeper_calls_scroll <- 0
         | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
@@ -231,6 +238,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
    | Keeper_selection.Logs_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_logs
+   | Keeper_selection.Calls_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_calls
    | Keeper_selection.Message_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_message);
@@ -509,6 +519,7 @@ let load_overview ~(host : string) ~(port : int) :
         decode_attention_items items
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
+      let* keeper_briefs = optional_list_field json "keeper_briefs" in
       let* top_attention =
         let fallback =
           match incidents with
@@ -529,21 +540,36 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* ov_cluster = required_string_field summary "cluster" in
       let* ov_project = required_string_field summary "project" in
-      let* ov_active_agents =
-        int_field_or summary "active_agents" ~default:(List.length agent_briefs)
-      in
-      let* ov_incident_count =
-        int_field_or summary "incident_count" ~default:(List.length incidents)
-      in
+      (* Counted from the lists the briefing carries. The summary object
+         holds workspace_health, cluster, and project and nothing else --
+         [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
+         a count read from there was a default dressed as a reading. *)
+      let ov_keepers = List.length keeper_briefs in
+      let ov_mcp_agents = List.length agent_briefs in
+      let ov_incident_count = List.length incidents in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
         {
           ov_workspace_health;
           ov_cluster;
           ov_project;
-          ov_active_agents;
+          ov_keepers;
+          ov_mcp_agents;
           ov_incident_count;
-          ov_attention_items = incidents @ attention_queue @ attention_items;
+          (* The briefing projects one fact onto two lists: an incident is
+             also queued for operator attention, as the same JSON row. On the
+             live runtime all three incidents came back on both lists and the
+             panel drew each twice. One fact, one row: a later item
+             structurally equal to an earlier one is the same projection
+             again, not a second fact. Items that differ in any field keep
+             both rows. *)
+          ov_attention_items =
+            (incidents @ attention_queue @ attention_items
+            |> List.fold_left
+                 (fun kept item ->
+                   if List.mem item kept then kept else item :: kept)
+                 []
+            |> List.rev);
           ov_top_attention = top_attention;
           ov_generated_at;
         }

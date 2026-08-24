@@ -96,6 +96,10 @@ val is_loopback_host : string -> bool
 (** Convenience for [Uri.host]-style inputs. [None] → [false]. *)
 val is_loopback_host_opt : string option -> bool
 
+val is_unspecified_host : string -> bool
+(** [true] for the wildcard bind addresses 0.0.0.0 and ::. A wildcard means
+    "every interface", so it is not a peer any caller can reach back on. *)
+
 val normalize_loopback_base_url : string -> string
 (** Strip trailing slashes from [base_url] and canonicalize loopback
     aliases that can resolve to IPv6-only sockets in client libraries:

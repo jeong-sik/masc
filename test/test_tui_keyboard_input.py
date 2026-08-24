@@ -23,7 +23,29 @@ from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpResponse = tuple[int, object]
-HttpFixture = HttpResponse | Callable[[], HttpResponse]
+
+
+class RawHttpResponse:
+    """A response the fixture sends byte for byte: its own content type and
+    headers, no JSON encoding. The MCP transport answers ``initialize`` with
+    the session id in a header, and the observer feed is an SSE body, so
+    neither fits the JSON tuple."""
+
+    def __init__(
+        self,
+        status: int,
+        body: bytes,
+        *,
+        content_type: str,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        self.status = status
+        self.body = body
+        self.content_type = content_type
+        self.headers = headers
+
+
+HttpFixture = HttpResponse | RawHttpResponse | Callable[[], HttpResponse]
 HttpFixtures = dict[str, HttpFixture]
 HttpRequests = list[tuple[str, bytes]]
 WorkspaceSetup = Callable[[str], None]
@@ -74,10 +96,21 @@ def test_http_endpoint(
                 self.path,
                 (503, {"error": "fixture endpoint unavailable"}),
             )
-            status, payload = fixture() if callable(fixture) else fixture
-            body = json.dumps(payload).encode()
+            resolved = fixture() if callable(fixture) else fixture
+            extra_headers: tuple[tuple[str, str], ...] = ()
+            if isinstance(resolved, RawHttpResponse):
+                status = resolved.status
+                body = resolved.body
+                content_type = resolved.content_type
+                extra_headers = resolved.headers
+            else:
+                status, payload = resolved
+                body = json.dumps(payload).encode()
+                content_type = "application/json"
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
+            for name, value in extra_headers:
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Connection", "close")
             self.end_headers()
@@ -649,8 +682,6 @@ def row_budget_http_fixtures() -> HttpFixtures:
                     "workspace_health": "ok",
                     "cluster": "cluster-a",
                     "project": "project-a",
-                    "active_agents": 2,
-                    "incident_count": 6,
                 },
                 "generated_at": "2026-08-22T00:00:00Z",
                 "incidents": attention_items,
@@ -673,8 +704,6 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
             "workspace_health": "ok",
             "cluster": cluster,
             "project": "project-a",
-            "active_agents": 2,
-            "incident_count": 0,
         },
         "generated_at": "2026-08-22T00:00:00Z",
         "incidents": [],
@@ -746,11 +775,18 @@ PLANNING_PATH = "/api/v1/dashboard/planning"
 
 
 def planning_goal(goal_id: str, title: str) -> dict[str, object]:
+    # The verification block is not optional on the wire. The server writes a
+    # default completion record for a goal with no ledger row precisely so an
+    # absent state cannot be read as "not verified yet", and the TUI marks a
+    # goal whose block is missing rather than guessing. A fixture that leaves
+    # it out is not a smaller server response, it is one the server never
+    # sends -- and it puts a warning mark on every row here.
     return {
         "id": goal_id,
         "title": title,
         "phase": "executing",
         "priority": 1,
+        "verification": {"completion": {"state": "idle"}},
     }
 
 
@@ -1200,6 +1236,51 @@ def navigate_with_arrows_and_quit(
     )
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+
+
+def wheel_scrolls_and_clicks_do_not(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # The enable sequence must be out before any wheel can arrive: without it
+    # the terminal keeps the wheel for its own scrollback and the TUI never
+    # sees the report at all.
+    wait_for_output(
+        process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # An SGR wheel report moves the cursor exactly as the arrow key does.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<65;5;5M",
+        keeper_row_selected(b"beta"),
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<64;5;5M",
+        keeper_row_selected(b"alpha"),
+    )
+    # Click press and release must not leak into a key: after both, the next
+    # wheel-down still starts from alpha and lands on beta.
+    read_available(master_fd, output)
+    os.write(master_fd, b"\x1b[<0;5;5M")
+    os.write(master_fd, b"\x1b[<0;5;5m")
+    time.sleep(0.3)
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[<65;5;5M",
+        keeper_row_selected(b"beta"),
+    )
     send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
 
     resize_and_wait(
@@ -1888,6 +1969,34 @@ def oldest_window(height: int, total: int) -> bytes:
     return event_range(max(1, total - height + 1), total, total)
 
 
+# Rows the Overview's event panel may take, mirroring
+# Render_schedule.overview_panel_row_cap.
+OVERVIEW_PANEL_ROW_CAP = 6
+
+
+def event_range_span(frame: bytes, where: str) -> int:
+    """How many event rows the panel is drawing, read off its own range line."""
+    match = EVENT_RANGE_RE.search(frame)
+    if match is None:
+        raise AssertionError(f"{where} drew no event range: {frame!r}")
+    first, last, _total = (int(g) for g in match.groups())
+    return last - first + 1
+
+
+def clamped_window(visible: int, scroll: int, total: int) -> bytes:
+    """The range the panel draws for [scroll], mirroring
+    Render_schedule.project_overview_event_window.
+
+    The offset is clamped to total - visible, so a scroll made in a short
+    viewport survives into a tall one only as far as the taller panel allows.
+    Where the list is no longer than the panel that clamp is 0 and every
+    window is the newest one -- which is why pinning "1-2" here held while
+    the TUI raised exactly six events and stopped when it raised more.
+    """
+    offset = max(0, min(scroll, total - visible))
+    return event_range(offset + 1, offset + min(visible, total - offset), total)
+
+
 def assert_event_window_at_newest(frame: bytes, where: str) -> None:
     """The event window sits at the newest end of the list.
 
@@ -1920,14 +2029,20 @@ def assert_overview_event_rows(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    def scroll_to_oldest() -> None:
-        for first in range(2, 6):
+    def scroll_to_oldest(total: int, window: int = 2) -> None:
+        """Press j until the window rests against the oldest event.
+
+        How many presses that takes follows the event total, which the TUI
+        raises itself. Four presses against a literal "/6" held only while
+        the startup event count happened to equal the panel.
+        """
+        for first in range(2, total - window + 2):
             send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"j",
-                f"Recent Events {first}-{first + 1}/6".encode(),
+                event_range(first, first + window - 1, total),
             )
 
     wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
@@ -1960,13 +2075,18 @@ def assert_overview_event_rows(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"TUI started", b"task-1", b"task-5", b"q:quit"):
+    # "Manual refresh" and not "TUI started": nothing has scrolled yet, so the
+    # panel rests on the newest events and the oldest one need not be drawn.
+    # That it was drawn held only while the total equalled the panel's rows.
+    for expected in (b"Manual refresh", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
     assert_event_window_at_newest(overview, "23-row Overview")
-    if overview.count(b"Manual refresh") != 5:
+    span = event_range_span(overview, "23-row Overview")
+    if span != OVERVIEW_PANEL_ROW_CAP:
         raise AssertionError(
-            f"22-row Overview did not show all five refresh events: {overview!r}"
+            f"23-row Overview drew {span} event rows, not the "
+            f"{OVERVIEW_PANEL_ROW_CAP} it has room for: {overview!r}"
         )
 
     overview = resize_and_wait(
@@ -1985,16 +2105,18 @@ def assert_overview_event_rows(
     total = event_total(overview, "14-row Overview")
     if newest_window(2, total) not in overview:
         raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
-    if overview.count(b"Manual refresh") != 2:
+    span = event_range_span(overview, "14-row Overview")
+    if span != 2:
         raise AssertionError(
-            f"14-row Overview did not cap the shared panel at two events: {overview!r}"
+            f"14-row Overview drew {span} event rows, not the two it has room "
+            f"for: {overview!r}"
         )
     if b"TUI started" in overview or b"task-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
     if "└".encode() not in overview:
         raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
 
-    scroll_to_oldest()
+    scroll_to_oldest(total)
     oldest = resize_and_wait(
         process,
         master_fd,
@@ -2056,7 +2178,7 @@ def assert_overview_event_rows(
         output,
         rows=22,
         columns=100,
-        needle=b"Recent Events 1-",
+        needle=clamped_window(OVERVIEW_PANEL_ROW_CAP, total, total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
@@ -2069,11 +2191,11 @@ def assert_overview_event_rows(
         output,
         rows=14,
         columns=100,
-        needle=newest_window(2, total),
+        needle=clamped_window(2, max(0, total - OVERVIEW_PANEL_ROW_CAP), total),
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    scroll_to_oldest()
+    scroll_to_oldest(total)
     send_and_wait(process, master_fd, output, b"r", oldest_window(2, total + 1))
     anchored = resize_and_wait(
         process,
@@ -2795,6 +2917,8 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "content": "",
                 "ts": 1787348490.3,
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
+                # The server writes null, not "", when the turn said nothing.
+                # (content is set above; the marker is what the decoder keys on.)
                 "blocks": [
                     {
                         "t": "trace",
@@ -2811,7 +2935,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                                 "kind": "tool",
                                 "name": "tool_execute",
                                 "status": "err",
-                                "dur": "1.2s",
+                                "dur": "1200ms",
                             },
                         ],
                     }
@@ -2849,13 +2973,274 @@ def autonomous_turn_history_interaction() -> Interaction:
         for needle, what in (
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
-            ("\u2717 tool_execute \u00b7 1.2s".encode(), "the failed call"),
+            ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
         ):
             if needle not in pane:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def keeper_calls_fixture() -> HttpResponse:
+    return (
+        200,
+        {
+            "keeper": "alpha",
+            "count": 2,
+            "health": "ok",
+            "latest_age_s": 8.0,
+            "stale_reason": "fresh",
+            "entries": [
+                {
+                    "ts": 1787534998.4,
+                    "keeper": "alpha",
+                    "tool": "Read",
+                    "input": '{"file_path": "lib/a.ml"}',
+                    "success": True,
+                    "duration_ms": 28.4,
+                    "turn": 2143,
+                },
+                {
+                    "ts": 1787535017.4,
+                    "keeper": "alpha",
+                    "tool": "tool_execute",
+                    "input": '{"argv": ["dune", "build"]}',
+                    "success": False,
+                    "duration_ms": 14534.0,
+                    "turn": 2144,
+                },
+            ],
+        },
+    )
+
+
+def keeper_calls_interaction() -> Interaction:
+    """t on the roster opens the keeper's durable call log."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        pane_start = len(output)
+        send_and_wait(process, master_fd, output, b"t", b"Keeper Calls: alpha")
+        wait_for_output(
+            process, master_fd, output, b"tool_execute", start=pane_start, timeout=5.0
+        )
+        pane = bytes(output[pane_start:])
+        for needle, what in (
+            (b"Keeper Calls: alpha (2)", "the count"),
+            ("ok \u00b7 latest 8s ago".encode(), "the freshness verdict"),
+            ("\u2713 Read".encode(), "the returned call"),
+            (b"28ms", "its duration"),
+            ("\u2717 tool_execute".encode(), "the failed call"),
+            (b"14.5s", "the failure's duration"),
+            (b"lib/a.ml", "the subject the trail names"),
+        ):
+            if needle not in pane:
+                raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
+    """A surface that has not been read says so; only a read that came back
+    empty says the queue is empty.
+
+    The Verification surface used to print "(nothing waiting on a verdict)"
+    under a header that still said "(not loaded)", so the two rows disagreed
+    about whether anything had been asked. The fixture holds the response
+    until the first frame has been read off.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        unread = tab_until(process, master_fd, output, b"MASC Verification")
+        if b"(not loaded)" not in unread:
+            raise AssertionError(
+                f"Verification header did not say not loaded: {unread!r}"
+            )
+        if b"(not loaded yet)" not in unread:
+            raise AssertionError(
+                f"Verification body claimed a reading before one was made: {unread!r}"
+            )
+        if b"nothing waiting" in unread:
+            raise AssertionError(
+                f"Verification body read an empty queue off no reading: {unread!r}"
+            )
+        if not gate.requested.wait(timeout=3.0):
+            raise AssertionError("Verification surface did not ask for its queue")
+        loaded = release_and_wait_for_frame(
+            process, master_fd, output, gate, b"(nothing waiting on a verdict)"
+        )
+        # The title and the count are asserted apart: a style reset may sit
+        # between them once surface titles carry their own styling.
+        if b"MASC Verification" not in loaded or b"(0 of 0)" not in loaded:
+            raise AssertionError(
+                f"Verification header did not report the read: {loaded!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+OBSERVER_TOOL_CALLED_FRAME = (
+    b"id: 1\n"
+    b"event: message\n"
+    b'data: {"type":"agent_core:tool_called","event_type":"tool_called",'
+    b'"event_id":"evt-1","ts_unix":1787505641.28,"correlation_id":"trace-1",'
+    b'"run_id":"wr-1","parent_event_id":null,"agent_name":"alpha",'
+    b'"task_id":"task-1","tool_name":"read_file","payload":{"agent_name":"alpha",'
+    b'"tool_name":"read_file","tool_use_id":"tu-1","turn":7}}\n\n'
+)
+
+
+def observer_http_fixtures() -> HttpFixtures:
+    """The MCP session handshake and a one-frame observer stream."""
+
+    return {
+        # The feed opens only after a refresh reaches the server, and the
+        # connection reading counts the overview, board, planning, and
+        # approval loads - so one of those must answer.
+        "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+        "/api/v1/board": (200, {"posts": []}),
+        "/mcp": RawHttpResponse(
+            200,
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),
+            content_type="application/json",
+            headers=(("Mcp-Session-Id", "mcp_fixture_session"),),
+        ),
+        "/mcp?sse_kind=observer": RawHttpResponse(
+            200,
+            OBSERVER_TOOL_CALLED_FRAME,
+            content_type="text/event-stream",
+        ),
+    }
+
+
+def observer_feed_interaction(requests: HttpRequests) -> Interaction:
+    """The TUI opens an MCP session after its first refresh reaches the
+    server, subscribes to the observer feed with that session, and counts
+    the frames it receives on the Overview row."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The fixture closes the stream right after its one frame, so the
+        # row the test can rely on is the closed one; it keeps the count.
+        wait_for_output(
+            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+        )
+        initialize = [body for path, body in requests if path == "/mcp"]
+        if len(initialize) != 1:
+            raise AssertionError(
+                f"expected one MCP initialize, saw {len(initialize)}: {requests!r}"
+            )
+        payload = json.loads(initialize[0])
+        if payload.get("method") != "initialize":
+            raise AssertionError(f"MCP POST was not an initialize: {payload!r}")
+        # The one frame the fixture streamed is a row on the Acting surface.
+        acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Acting")
+        for needle, what in (
+            (b"(1 of 1 held, actions)", "the held and shown counts"),
+            (b"alpha", "the keeper that acted"),
+            ("\u25b6 call".encode(), "the call glyph and label"),
+            (b"read_file", "the tool"),
+            (b"turn 7", "the turn"),
+            (b"task-1", "the task"),
+        ):
+            if needle not in acting:
+                raise AssertionError(f"Acting did not draw {what}: {acting!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def duplicated_attention_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "sangsu has external attention from discord",
+        "target_type": "keeper",
+        "target_id": "sangsu",
+    }
+    other = dict(item, summary="analyst needs operator attention")
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-08-24T00:00:00Z",
+            # The same row on both lists, the way the live briefing serves an
+            # incident that is also queued for attention.
+            "incidents": [item, other],
+            "attention_queue": [item],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+        },
+    )
+
+
+def attention_drawn_once_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"sangsu has external attention",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process, master_fd, output, b"analyst needs operator", start=0, timeout=3.0
+        )
+        # One full repaint to count rows in: the ordinary paints are row
+        # diffs, so counting in the raw stream would count repaints.
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=99,
+            needle=b"sangsu has external attention",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        repeated = frame.count(b"sangsu has external attention")
+        if repeated != 1:
+            raise AssertionError(
+                f"an attention fact on two briefing lists drew {repeated} rows: {frame!r}"
+            )
+        if frame.count(b"analyst needs operator") != 1:
+            raise AssertionError(f"the distinct item vanished: {frame!r}")
         os.write(master_fd, b"q")
 
     return interact
@@ -2945,6 +3330,39 @@ def run_keyboard_regression(executable: str) -> None:
         interact=autonomous_turn_history_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper tool-call log",
+        interact=keeper_calls_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
+        },
+    )
+    verification_gate = GatedHttpResponse((200, {"requests": [], "total": 0}))
+    run_terminal_scenario(
+        executable,
+        description="Verification unread before read",
+        interact=verification_unread_interaction(verification_gate),
+        http_fixtures={
+            "/api/v1/verification/requests?limit=200": verification_gate,
+        },
+    )
+    observer_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Observer feed subscription",
+        interact=observer_feed_interaction(observer_requests),
+        http_fixtures=observer_http_fixtures(),
+        http_requests=observer_requests,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Attention drawn once",
+        interact=attention_drawn_once_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
         },
     )
     composer_requests: HttpRequests = []
@@ -3067,6 +3485,11 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="q",
         interact=navigate_with_arrows_and_quit,
+    )
+    run_terminal_scenario(
+        executable,
+        description="wheel scrolls, clicks do not",
+        interact=wheel_scrolls_and_clicks_do_not,
     )
     run_terminal_scenario(
         executable,

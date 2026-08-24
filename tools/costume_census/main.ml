@@ -10,6 +10,7 @@
    printed would be about itself. *)
 
 module Costume = Keeper_tooling.Shell_costume
+module Execute_input = Masc.Keeper_tool_execute_typed_input
 module Rewrite = Keeper_tooling.Subset_rewrite
 module Gate = Masc_exec_command_gate.Shell_command_gate
 
@@ -37,6 +38,7 @@ let bump table key =
 let () =
   let files = List.tl (Array.to_list Sys.argv) in
   let executes = ref 0 in
+  let lowered = ref 0 in
   let argv_form = ref 0 in
   let costumes = ref 0 in
   let unreadable = ref 0 in
@@ -70,6 +72,27 @@ let () =
                         costume
                     in
                     bump findings (Costume.finding_tag finding);
+                    (* Not an estimate of what step 4 lowers: the real
+                       lowering is called, so the guards it applies are the
+                       ones counted. A costume still wearing its shell after
+                       lowering was held back by one of them. *)
+                    (match Yojson.Safe.Util.member "input" json with
+                     | `Assoc _ as input ->
+                       (match Execute_input.of_json input with
+                        | Ok parsed ->
+                          (match Execute_input.to_shell_ir_unvalidated parsed with
+                           | Ok (Masc_exec.Shell_ir.Simple simple) ->
+                             if not
+                                  (List.exists
+                                     (String.equal
+                                        (Masc_exec.Exec_program.to_string
+                                           simple.Masc_exec.Shell_ir.bin))
+                                     [ "sh"; "bash"; "zsh"; "dash"; "ksh" ])
+                             then incr lowered
+                           | Ok _ -> incr lowered
+                           | Error _ -> ())
+                        | Error _ -> ())
+                     | _ -> ());
                     (match finding with
                      | Costume.Outside_the_subset reason ->
                        bump rewrites (Rewrite.tag (Rewrite.of_reason reason))
@@ -87,11 +110,12 @@ let () =
     |> List.iter (fun (key, count) -> Printf.printf "%8d  %s\n" count key)
   in
   Printf.printf
-    "files=%d execute=%d argv_form=%d costumes=%d unreadable_lines=%d\n"
+    "files=%d execute=%d argv_form=%d costumes=%d lowered=%d unreadable_lines=%d\n"
     (List.length files)
     !executes
     !argv_form
     !costumes
+    !lowered
     !unreadable;
   report "what the gate would have said" findings;
   report "what the caller should have called" rewrites;

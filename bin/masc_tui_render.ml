@@ -2196,7 +2196,6 @@ let render_keeper_logs (state : state) =
       Metrics_tail.normalize_scroll ~entry_count:total_entries ~content_height
         state.log_scroll
     in
-    state.log_scroll <- scroll;
 
     if total_entries = 0 then begin
       box_line_styled buf cols ~style:Ansi.dim
@@ -2645,7 +2644,6 @@ let render_system_logs (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min state.system_logs_scroll max_scroll) in
-  state.system_logs_scroll <- scroll;
   if total_entries = 0 then begin
     let empty =
       match
@@ -2741,7 +2739,6 @@ let render_verification (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.verification_scroll max_scroll) in
-  state.verification_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match
@@ -2870,7 +2867,6 @@ let render_harness (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.harness_scroll max_scroll) in
-  state.harness_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
@@ -2971,7 +2967,6 @@ let render_repositories (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.repositories_scroll max_scroll) in
-  state.repositories_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match
@@ -3073,7 +3068,6 @@ let render_connectors (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.connectors_scroll max_scroll) in
-  state.connectors_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match
@@ -3181,7 +3175,6 @@ let render_tools (state : state) =
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
-  state.tools_scroll <- scroll;
   if shown = 0 then begin
     let empty =
       match

@@ -53,9 +53,30 @@ let require_interactive_terminal () =
     exit 2
   end
 
+(* The bound comes from [scrolled_surface], which the drawing reads too, so a
+   keypress cannot move past what the frame can show. Surfaces the state
+   cannot count keep their old unbounded step; the drawing still clamps those
+   on the way past. *)
+let move_surface_scroll (state : state) ~rows ~delta ~current =
+  match scrolled_surface state state.view with
+  | None -> current + delta
+  | Some { sc_count; sc_chrome } ->
+      let height = max 1 (rows - sc_chrome) in
+      if delta >= 0 then Masc_tui_scroll.down ~count:sc_count ~height current
+      else Masc_tui_scroll.up ~count:sc_count ~height current
+
+(* The rows a surface has to draw in: the terminal's, less the composer's,
+   which owns the last row. The same arithmetic the drawing does -- a bound
+   worked out from a different height than the frame uses is not a bound.
+   Reading the terminal's own rows here, as this did, left the log surface's
+   keypress bound one row looser than the frame it moved within. *)
+let surface_rows () =
+  let terminal_rows, _columns = get_terminal_size () in
+  max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
+
 let keeper_log_content_height (state : state) =
-  let rows, _columns = get_terminal_size () in
-  Metrics_tail.content_height ~terminal_rows:rows ~error:state.log_error
+  Metrics_tail.content_height ~terminal_rows:(surface_rows ())
+    ~error:state.log_error
 
 (** Read a single byte from stdin, returning Some char or None. *)
 let read_byte_unix ?(timeout = 0.1) () : char option =
@@ -3144,16 +3165,28 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                state.verification_scroll <- state.verification_scroll + 1
-            | Harness -> state.harness_scroll <- state.harness_scroll + 1
+                state.verification_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.verification_scroll
+            | Harness -> state.harness_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.harness_scroll
             | Repositories ->
-                state.repositories_scroll <- state.repositories_scroll + 1
+                state.repositories_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.repositories_scroll
             | Connectors ->
-                state.connectors_scroll <- state.connectors_scroll + 1
-            | Tools -> state.tools_scroll <- state.tools_scroll + 1
+                state.connectors_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.connectors_scroll
+            | Tools -> state.tools_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.tools_scroll
             | Autonomy -> state.autonomy_scroll <- state.autonomy_scroll + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | System_logs -> state.system_logs_scroll <- state.system_logs_scroll + 1
+            | System_logs -> state.system_logs_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.system_logs_scroll
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
@@ -3222,19 +3255,29 @@ let main () =
                 end
             | Verification ->
                 if state.verification_scroll > 0 then
-                  state.verification_scroll <- state.verification_scroll - 1
+                  state.verification_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.verification_scroll
             | Harness ->
                 if state.harness_scroll > 0 then
-                  state.harness_scroll <- state.harness_scroll - 1
+                  state.harness_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.harness_scroll
             | Repositories ->
                 if state.repositories_scroll > 0 then
-                  state.repositories_scroll <- state.repositories_scroll - 1
+                  state.repositories_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.repositories_scroll
             | Connectors ->
                 if state.connectors_scroll > 0 then
-                  state.connectors_scroll <- state.connectors_scroll - 1
+                  state.connectors_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.connectors_scroll
             | Tools ->
                 if state.tools_scroll > 0 then
-                  state.tools_scroll <- state.tools_scroll - 1
+                  state.tools_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.tools_scroll
             | Autonomy ->
                 if state.autonomy_scroll > 0 then
                   state.autonomy_scroll <- state.autonomy_scroll - 1
@@ -3245,7 +3288,9 @@ let main () =
                 end
             | System_logs ->
                 if state.system_logs_scroll > 0 then
-                  state.system_logs_scroll <- state.system_logs_scroll - 1
+                  state.system_logs_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                    ~current:state.system_logs_scroll
             | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)

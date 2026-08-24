@@ -407,6 +407,30 @@ let surface_needs : surface -> surface_needs = function
   | Tools | Autonomy ->
       nothing
 
+(** How far a surface's list can scroll, given the terminal's height.
+
+    A bound belongs where the move happens, and the move is a keypress. The
+    drawing used to work it out mid-frame and write the clamped value back
+    into the state -- the same four lines copied once per surface -- so
+    drawing a frame corrected the state it was drawing from. Declared here,
+    the key handler and the drawing read one answer and the drawing only
+    reads.
+
+    [None] is a surface whose rows the state cannot count: its row count is
+    built by the drawing, out of text the drawing formats. Those still clamp
+    where they draw, and [scripts/ci/check-tui-render-purity.sh] counts them
+    so the number can only fall. *)
+type scrolled = {
+  sc_count : int;  (** rows of content the surface has *)
+  sc_chrome : int;  (** rows it spends on its own frame *)
+}
+
+(* These six draw the same frame: a title, a column row, three dividers, the
+   scroll line and the footer -- and two more rows when a load error is on
+   screen. The number is the drawing's; a surface whose chrome moves has to
+   move it here in the same change. *)
+let listing_chrome ~error = if Option.is_some error then 9 else 7
+
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.
    The instant rides with the request rather than in a second structure keyed
@@ -837,6 +861,47 @@ let composer_extra_rows (state : state) =
       (Buffer.contents state.msg_input)
   in
   max 0 (List.length lines - 1)
+
+let scrolled_surface (state : state) : surface -> scrolled option =
+  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  function
+  | System_logs ->
+      listing ~error:state.system_logs_error
+        (match state.system_logs with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.sys_entries)
+  | Verification ->
+      listing ~error:state.verification_error
+        (match state.verification with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.vs_requests)
+  | Harness ->
+      listing ~error:state.harness_error
+        (match state.harness with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.hs_verdicts)
+  | Repositories ->
+      listing ~error:state.repositories_error
+        (match state.repositories with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Connectors ->
+      listing ~error:state.connectors_error
+        (match state.connectors with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Tools ->
+      listing ~error:state.tools_error
+        (match state.tools_inventory with
+         | None -> 0
+         | Some s -> List.length s.Tui_decode.ts_tools)
+  (* Autonomy and Acting count rows the drawing builds out of formatted text,
+     not rows the state holds; counting them here would be a second copy of
+     the formatting. Overview, Keepers, Board, Planning and Schedules move a
+     cursor or a detail pane rather than a plain list. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Autonomy ->
+      None
 
 let keeper_message_status_rows (state : state) =
   let unavailable_target =

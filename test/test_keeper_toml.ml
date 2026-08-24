@@ -581,6 +581,66 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
     ; "mention_targets", "true", "string array"
     ]
 
+
+(* RFC-0390: [keeper.tools] carries exactly one key. The declared kind list
+   makes any sibling an unknown key, so a typo cannot silently keep the
+   runtime's default posture. *)
+let test_profile_parses_tools_native () =
+  List.iter
+    (fun (raw, expected) ->
+       let input = Printf.sprintf "[keeper.tools]\nnative = %S\n" raw in
+       match TL.parse_toml input with
+       | Error error -> fail error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Error e -> fail e
+          | Ok d ->
+            check bool
+              (Printf.sprintf "native %s parses" raw)
+              true
+              (d.native_tool_posture = Some expected)))
+    [ "none", Runtime_native_tools.Native_none
+    ; "read", Runtime_native_tools.Native_read
+    ; "full", Runtime_native_tools.Native_full
+    ]
+
+let test_profile_absent_tools_native_is_none () =
+  let input = "[keeper]\nproactive_enabled = true\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check bool "absent native is None" true (d.native_tool_posture = None))
+
+let test_profile_rejects_invalid_tools_native () =
+  let input = "[keeper.tools]\nnative = \"yolo\"\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "invalid keeper.tools.native must fail closed"
+     | Error detail ->
+       check bool "names the key" true
+         (String_util.contains_substring detail "keeper.tools.native");
+       check bool "lists allowed values" true
+         (String_util.contains_substring detail "none, read, full"))
+
+let test_profile_rejects_unknown_tools_sibling_key () =
+  let input = "[keeper.tools]\ngroup = [\"board\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "unknown [keeper.tools] key must fail closed"
+     | Error detail ->
+       check bool "generic unknown-key error" true
+         (String_util.contains_substring detail "unknown keeper TOML keys");
+       check bool "names unknown key" true
+         (String_util.contains_substring detail "keeper.tools.group"))
+
+
 let test_profile_full () =
   let input = {|
 [keeper]
@@ -1599,6 +1659,14 @@ let () =
         [
           test_case "rejects unknown key" `Quick
             test_profile_rejects_unknown_key;
+          test_case "parses tools.native postures" `Quick
+            test_profile_parses_tools_native;
+          test_case "absent tools.native is None" `Quick
+            test_profile_absent_tools_native_is_none;
+          test_case "rejects invalid tools.native" `Quick
+            test_profile_rejects_invalid_tools_native;
+          test_case "rejects unknown [keeper.tools] sibling" `Quick
+            test_profile_rejects_unknown_tools_sibling_key;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick
             test_profile_rejects_wrong_known_field_shape;

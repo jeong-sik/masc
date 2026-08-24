@@ -462,8 +462,18 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        [Host.prepare_turn] returns the same list it was given -- it only
        validates forced tool choice -- so hashing the input here is the digest
        that reaches [claim]. *)
+    let* native_posture =
+      Host.resolve_native_posture
+        ~base_path
+        ~keeper_name
+        ~client_label:"Codex"
+        ~default:Runtime_native_tools.codex_default
+        ~none_supported:false
+    in
     let tool_surface_sha256 =
-      Keeper_official_client_session_store.tool_surface_sha256 tools
+      Keeper_official_client_session_store.tool_surface_sha256
+        ~native_posture
+        tools
     in
     let claim_plan =
       Keeper_official_client_session_store.reconcile_tool_surface
@@ -528,6 +538,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
       ; model = config.model
+      ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
       ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and

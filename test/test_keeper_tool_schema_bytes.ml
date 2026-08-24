@@ -64,9 +64,11 @@ let measured ~surface =
 
 (* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools] declaration
    (surface = All) must keep the exact same tool surface it had before this
-   feature. Pinned on 2026-08-23 from the pre-feature surface. *)
+   feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
+   2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
+   surface by 567 bytes (count unchanged at 82). *)
 let all_surface_golden_count = 82
-let all_surface_golden_bytes = 68_314
+let all_surface_golden_bytes = 68_881
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

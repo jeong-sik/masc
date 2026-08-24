@@ -71,6 +71,14 @@ let test_missing_field_is_error () =
     (`Assoc [ ("kind", `String "discord"); ("channel_id", `String "C") ])
 
 let test_smart_constructors_reject_blank_coordinates () =
+  (* [keeper] refuses a blank name and nothing else. Callers lean on that:
+     keeper_tool_surface_ops.delegate_continuation_channel rules out the blank
+     name up front and then treats an [Error] here as unreachable, so if this
+     constructor ever grew a second refusal that caller would raise on it. *)
+  assert (Result.is_error (keeper ~keeper_name:" "));
+  assert (Result.is_error (keeper ~keeper_name:""));
+  assert (Result.is_ok (keeper ~keeper_name:"a"));
+  assert (Result.is_ok (keeper ~keeper_name:" padded name "));
   assert (Result.is_error (dashboard ~thread_id:" "));
   assert (
     Result.is_error

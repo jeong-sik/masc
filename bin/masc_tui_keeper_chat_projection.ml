@@ -202,8 +202,12 @@ let stream_error_to_string = function
 
 let error_to_string = function
   | Transport_error detail ->
-      "Keeper chat transport ended with an unverified operation outcome: "
-      ^ detail
+      (* Where the failure happened, not what it means for the turn. Certainty
+         is [error_certainty]'s answer -- [Transport_error] is always
+         [Outcome_unverified] -- and the caller that renders that says so in its
+         own sentence. Saying it here too put "unverified" in the same line
+         twice and pushed the one useful part, the cause, to the far end. *)
+      "Keeper chat transport: " ^ detail
   | Http_error { status; body } ->
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error

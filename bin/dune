@@ -332,7 +332,7 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_render_schedule)

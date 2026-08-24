@@ -25,19 +25,31 @@ type log_cells = {
   work : string;
 }
 
+(* Cells, not bytes. [String.length] counts bytes, and a Korean label spends
+   three of them a character, so an eight-character name measured twenty and
+   every one of them came back cut with a tilde -- in a column it fits. The cut
+   was a byte offset too, which lands inside a character and hands the terminal
+   a broken one.
+
+   [Message_layout.fit_width] already measures display cells and keeps grapheme
+   clusters whole, with this same tilde marker. These three were a second copy
+   of it that could not read anything but ASCII. *)
+let cells = Masc_tui_message_layout.display_width
+
+(* [fit_width] pads on the right as it fits, which is exactly [pad_right]. *)
+let pad_right width value = Masc_tui_message_layout.fit_width value width
+
 let fit width value =
-  let length = String.length value in
-  if length <= width then value
-  else if width <= 1 then String.make width '~'
-  else String.sub value 0 (width - 1) ^ "~"
+  if width <= 0 then ""
+  else if cells value <= width then value
+  else
+    (* Over the budget, so [fit_width] truncates rather than pads and the
+       result already measures [width]. *)
+    Masc_tui_message_layout.fit_width value width
 
 let pad_left width value =
   let value = fit width value in
-  String.make (width - String.length value) ' ' ^ value
-
-let pad_right width value =
-  let value = fit width value in
-  value ^ String.make (width - String.length value) ' '
+  String.make (max 0 (width - cells value)) ' ' ^ value
 
 let log_kind_label = function
   | Tui_decode.Log_turn -> "turn"

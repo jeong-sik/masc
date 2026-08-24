@@ -15,7 +15,7 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
 Board, Planning, Schedules, Verification, Harness, Fusion, Repositories,
-Connectors, Tools, System Logs.
+Connectors, Runtime, Tools, System Logs.
 
 ## Quick Start
 
@@ -59,6 +59,7 @@ decides whether launching one is worth it.
 | Planning | unavailable | `GET /api/v1/dashboard/planning` |
 | Schedules | unavailable | `GET /api/v1/dashboard/scheduled-automation` |
 | Fusion | unavailable | `GET /api/v1/dashboard/fusion-runs`, then exact `/:run_id` detail |
+| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` |
 | Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
 | System Logs | unavailable | `GET /api/v1/dashboard/logs` |
 
@@ -523,6 +524,44 @@ claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
 
+### Runtime
+
+Runtime lanes and their ordered candidates, joined to the latest provider
+metadata reachability reading by exact `runtime_id`.
+
+```
+ MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
+   SSOT: runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
+   LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
+   primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
+   local          1/1 local.codex            Codex / codex           ready / CLI not probed
+```
+
+The authority is `runtime.toml`, read through two server-owned views.
+`GET /api/v1/runtime/resolved` projects lane order, candidate identity,
+provider/model labels, dispatchability, and sticky preference. The sticky
+timestamp means **last successful
+candidate**, so the row says `last success`; it is never presented as failure
+history. `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
+metadata-endpoint reachability reading. It does not send a completion, execute a CLI
+runtime, or report lane failover history.
+
+`CLI not probed` is neutral, and a candidate absent from a stale probe is
+`unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
+provider, and ordinary row text use the terminal foreground. A blocked route,
+probe failure, and missing authentication remain distinct typed states.
+
+The freshness badge is the server's closed value: `fresh`, `recent`, `stale`
+(`served_stale` on the wire), or `warming` (`warming_up`). `r` sends
+`force=1`, but the route remains non-blocking: a stale or warming response
+means background work was scheduled and a later poll carries the new value.
+Only one joined load may be in flight, so a slow authenticated request cannot
+stack every two-second refresh tick. A manual refresh pressed during a periodic
+read is coalesced into one force request when that read settles. If only the
+probe read fails, resolved lanes still render: a last-good probe is retained,
+or cold candidates are `unobserved`. If the resolved identity read fails, the
+last joined rows stay visible under the error.
+
 ### System Logs
 
 The server's log ring, the same source the dashboard `logs` tab reads.
@@ -564,7 +603,7 @@ Per surface:
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
 | `j` / `k` | Keepers, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
-| `j` / `k` | Lanes, System Logs | Scroll the page |
+| `j` / `k` | Lanes, Runtime, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
@@ -589,7 +628,7 @@ Tab cycles the surfaces:
 
   Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning
            -> Schedules -> Verification -> Harness -> Fusion -> Repositories
-           -> Connectors -> Tools -> System Logs -> Overview
+           -> Connectors -> Runtime -> Tools -> System Logs -> Overview
 
 Within a surface:
 

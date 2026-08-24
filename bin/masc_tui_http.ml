@@ -14,6 +14,7 @@ let observer_stream_path = "/mcp?sse_kind=observer"
 let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
+let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -559,6 +560,14 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
+
+(** GET /api/v1/dashboard/runtime-probe — cached provider metadata
+    reachability. [force] schedules a background refresh past the route's
+    recent-value window; the returned [refresh_state] remains authoritative. *)
+let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
+    (Yojson.Safe.t, string) result =
+  let path = if force then runtime_probe_path ^ "?force=1" else runtime_probe_path in
+  get_json ~host ~port ~path
 
 (** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
     [runtime_id = None] clears the explicit assignment back to the default. *)

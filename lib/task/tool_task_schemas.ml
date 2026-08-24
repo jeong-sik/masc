@@ -129,74 +129,10 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
       ("required", `List [`String "tasks"]);
     ];
   };
-  {
-    name = "masc_task_history";
-    description = "Fetch recent task transition history from event logs. Useful for audits or debugging transitions.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID to filter (e.g., 'task-001')");
-        ]);
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max events to return (default: 50)");
-          ("default", `Int 50);
-        ]);
-      ]);
-      ("required", `List [`String "task_id"]);
-    ];
-  };
-  {
-    name = "masc_tasks";
-    description = "List tasks in backlog with their status and assignee. \
-Defaults to active tasks (todo/claimed/in_progress/awaiting_verification). \
-Use include_done/include_cancelled or status to filter. \
-awaiting_verification tasks are pending a completion-authority verdict and are not claimable agent work. \
-Output includes task ID, title, priority, assignee, timestamps. \
-Tip: Look for status='todo' tasks to claim.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("status", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional status filter: todo|claimed|in_progress|awaiting_verification|done|cancelled");
-        ]);
-        ("include_done", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include done tasks (default: false)");
-          ("default", `Bool false);
-        ]);
-        ("include_cancelled", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include cancelled tasks (default: false)");
-          ("default", `Bool false);
-        ]);
-      ]);
-    ];
-  };
+  Tool_task_schemas_toml.task_history;
+  Tool_task_schemas_toml.tasks;
 
-  {
-    name = "masc_update_priority";
-    description = "Change the priority of a task. Priority 1 is highest (most urgent), 5 is lowest. Use this to reprioritize work based on new information or urgency changes.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID to update");
-        ]);
-        ("priority", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "New priority (1=highest, 5=lowest)");
-          ("minimum", `Int 1);
-          ("maximum", `Int 5);
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "priority"]);
-    ];
-  };
+  Tool_task_schemas_toml.update_priority;
   {
     name = "masc_transition";
     description =
@@ -278,22 +214,5 @@ Tip: Look for status='todo' tasks to claim.";
     ];
   };
   (* RFC-0267 Phase 2: assign an existing goalless task to a goal. *)
-  {
-    name = "masc_task_set_goal";
-    description = "Assign an existing, currently goalless task to a goal. Both task_id and goal_id are required and validated against the backlog and the goal store; an unknown id is rejected (never silently ignored or auto-picked). A task that already has a goal is rejected — reassignment is out of scope.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the task to assign");
-        ]);
-        ("goal_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the goal to assign the task to");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "goal_id"]);
-    ];
-  };
+  Tool_task_schemas_toml.task_set_goal;
 ]

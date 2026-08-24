@@ -139,6 +139,7 @@ type runtime_handler =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_masc_spawn_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -258,6 +259,7 @@ let runtime_handler_to_string = function
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
+  | Tool_masc_spawn_dispatch -> "tool_masc_spawn_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -280,6 +282,9 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  (* Spawn starts a process, so it answers to the same group Execute does
+     rather than to the workspace tools it sits beside alphabetically. *)
+  | Tool_masc_spawn_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -490,6 +495,7 @@ let descriptor
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
+      | Tool_masc_spawn_dispatch
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
@@ -1672,6 +1678,21 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     ()
 ;;
 
+let masc_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.spawn." ^ definition.id)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_masc_spawn_dispatch
+    ~readonly:definition.read_only
+    ()
+;;
+
 let masc_keeper_descriptor
     ?(polling_read = false)
     ~keeper_model_projection
@@ -2187,6 +2208,7 @@ let internal_descriptors : t list =
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  @ List.map masc_spawn_descriptor Tool_schemas_spawn.definitions
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"

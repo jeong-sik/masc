@@ -1596,6 +1596,24 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
   |> dispatch_option_to_execution ~name
 ;;
 
+(* The registry and the switch are bound together on the turn's fiber, so a
+   call that finds one finds the other. Outside a turn there is nowhere for a
+   process to live that the caller could reach again, and saying that beats
+   creating a registry no later call can find. *)
+let handle_masc_spawn_with_outcome ~name ~args =
+  match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
+  | Some registry, Some sw ->
+    Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
+    |> dispatch_option_to_execution ~name
+  | (Some _ | None), (Some _ | None) ->
+    Keeper_tool_execution.failure
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ "error", `String "spawn is only available inside a keeper turn"
+             ; "tool", `String name
+             ]))
+;;
+
 let handle_masc_schedule_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)

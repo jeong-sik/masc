@@ -14,11 +14,9 @@ type skill =
 type t = skill list
 
 type error =
-  | Missing_name of { directory : string }
-  | Missing_description of { skill : string }
-  | Directory_name_mismatch of
+  | Definition_rejected of
       { directory : string
-      ; declared : string
+      ; error : Skill_definition.load_error
       }
   | Unterminated_composition_block of { skill : string }
   | Multiple_composition_blocks of
@@ -83,26 +81,18 @@ let composition_of_block ~skill block =
 ;;
 
 let parse_skill ~directory content =
-  let document = Frontmatter.parse content in
-  let name = String.trim (Frontmatter.field document "name") in
-  let description = String.trim (Frontmatter.field document "description") in
-  if String.equal name ""
-  then Error (Missing_name { directory })
-  else if not (String.equal name directory)
-  then Error (Directory_name_mismatch { directory; declared = name })
-  else if String.equal description ""
-  then Error (Missing_description { skill = name })
-  else (
-    let body = document.Frontmatter.body in
-    match composition_blocks body with
-    | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
-    | Ok [] -> Ok { name; description; body; surface = Instruction }
-    | Ok [ block ] ->
-      (match composition_of_block ~skill:name block with
-       | Error _ as error -> error
-       | Ok entry -> Ok { name; description; body; surface = Composition entry })
-    | Ok blocks ->
-      Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))
+  match Skill_definition.load ~directory_name:directory ~contents:content with
+  | Error error -> Error (Definition_rejected { directory; error })
+  | Ok { Skill_definition.name; description; body } ->
+    (match composition_blocks body with
+     | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
+     | Ok [] -> Ok { name; description; body; surface = Instruction }
+     | Ok [ block ] ->
+       (match composition_of_block ~skill:name block with
+        | Error _ as error -> error
+        | Ok entry -> Ok { name; description; body; surface = Composition entry })
+     | Ok blocks ->
+       Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))
 ;;
 
 let empty = []
@@ -131,25 +121,26 @@ let find catalog name =
   List.find_opt (fun skill -> String.equal skill.name name) catalog
 ;;
 
+let composition_entries catalog =
+  List.filter_map
+    (fun skill ->
+       match skill.surface with
+       | Instruction -> None
+       | Composition entry -> Some entry)
+    catalog
+;;
+
 let surface_to_string = function
   | Instruction -> "instruction"
   | Composition _ -> "composition"
 ;;
 
 let error_to_string = function
-  | Missing_name { directory } ->
+  | Definition_rejected { directory; error } ->
     Printf.sprintf
-      "skill directory %S: SKILL.md frontmatter must declare a non-empty name"
+      "skill directory %S: %s"
       directory
-  | Missing_description { skill } ->
-    Printf.sprintf
-      "skill %S: SKILL.md frontmatter must declare a non-empty description"
-      skill
-  | Directory_name_mismatch { directory; declared } ->
-    Printf.sprintf
-      "skill directory %S: frontmatter name %S must equal the directory name"
-      directory
-      declared
+      (Skill_definition.load_error_to_string error)
   | Unterminated_composition_block { skill } ->
     Printf.sprintf
       "skill %S: a %s block is never closed"

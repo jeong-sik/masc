@@ -1,9 +1,11 @@
 (** SKILL.md-backed catalog of Keeper skills (RFC skills-as-tools).
 
-    One directory declares one skill: [<skills-dir>/<name>/SKILL.md]. The
-    frontmatter carries the Agent Skills required pair ([name] /
-    [description]); unknown frontmatter keys from other runtimes are ignored
-    so a skill file shared with Claude Code or OpenClaw loads unchanged.
+    {!Skill_definition} is the parse authority for one SKILL.md file: it owns
+    the frontmatter contract (required [name] / [description], unknown keys
+    ignored per the Agent Skills standard, directory-name agreement). This
+    module never reads frontmatter itself. What it adds is the layer above one
+    file: assembling documents into a duplicate-free, name-sorted catalog, and
+    detecting the composition surface.
 
     What kind of skill a file is comes from its body, not from a declared
     field: a body with no [```toml composition] fenced block is an
@@ -21,18 +23,16 @@ type skill = private
   ; description : string
   ; body : string
         (** Everything after the frontmatter, including any composition
-            fence. [keeper_skill] serves this text verbatim. *)
+            fence, exactly as {!Skill_definition} returned it. *)
   ; surface : surface
   }
 
 type t
 
 type error =
-  | Missing_name of { directory : string }
-  | Missing_description of { skill : string }
-  | Directory_name_mismatch of
+  | Definition_rejected of
       { directory : string
-      ; declared : string
+      ; error : Skill_definition.load_error
       }
   | Unterminated_composition_block of { skill : string }
   | Multiple_composition_blocks of
@@ -55,9 +55,9 @@ type error =
 
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
-    the declared frontmatter [name] must equal it exactly, so a copied file
-    cannot silently ship under two names. A composition block must declare
-    exactly one composition and its [name] must equal the skill name. *)
+    {!Skill_definition.load} enforces the frontmatter contract against it. A
+    composition block must declare exactly one composition and its [name]
+    must equal the skill name. *)
 
 val of_documents : (string * string) list -> (t, error) result
 (** Build the catalog from [(directory, content)] pairs. The first failing
@@ -68,6 +68,11 @@ val of_documents : (string * string) list -> (t, error) result
 val empty : t
 val skills : t -> skill list
 val find : t -> string -> skill option
+
+val composition_entries : t -> Keeper_tool_composition_catalog.entry list
+(** The validated composition entries declared by composition skills, in
+    catalog (name) order. The tool surface materializes these exactly like
+    entries from [tool-compositions.toml]. *)
 
 val surface_to_string : surface -> string
 (** ["instruction"] or ["composition"] — diagnostics and dashboard wire. *)

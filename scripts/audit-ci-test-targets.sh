@@ -132,7 +132,15 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # stanzas gated on MASC_E2E_TESTS, 1 plain executable), test_fusion_wake
 # times out in CI (#29064), and the remainder is unmeasured. The declared
 # count also includes those 5 non-test aliases.
-UNWIRED_BASELINE=39
+#
+# 39 -> 33: six suites that #29880/#29883/#29887 repaired. Each had rotted
+# behind a hard cut that made a field required while CI never ran the suite,
+# so only the fixture stayed in the old shape. They were fixed and left
+# unwired, which is the same as not fixed -- nothing runs them. Verified
+# against merged main before listing: voice_runtime_overlay, wake_telemetry,
+# lifecycle_hooks, lane_mentions and north_star_task_lifecycle report Test
+# Successful, sandbox_read_backend reports 49 tests successful.
+UNWIRED_BASELINE=33
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

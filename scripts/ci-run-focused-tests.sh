@@ -580,9 +580,11 @@ newly_wired_targets=(
   @test/runtest-test_keeper_identity_outcome_label
   @test/runtest-test_keeper_identity_parse
   @test/runtest-test_keeper_invalid_request_auto_recover
+  @test/runtest-test_keeper_lane_mentions
   @test/runtest-test_keeper_latched_reason
   @test/runtest-test_keeper_lifecycle_chaos
   @test/runtest-test_keeper_lifecycle_gate
+  @test/runtest-test_keeper_lifecycle_hooks
   @test/runtest-test_keeper_lifecycle_registry_dispatch
   @test/runtest-test_keeper_local_profile_docker_playground
   @test/runtest-test_keeper_long_turn_9943
@@ -618,6 +620,7 @@ newly_wired_targets=(
   @test/runtest-test_keeper_runtime_observation_boundaries
   @test/runtest-test_keeper_runtime_trust_snapshot
   @test/runtest-test_keeper_sandbox_containment
+  @test/runtest-test_keeper_sandbox_read_backend
   @test/runtest-test_keeper_sandbox_read_runner
   @test/runtest-test_keeper_sandbox_runner
   @test/runtest-test_keeper_secret_projection
@@ -665,6 +668,7 @@ newly_wired_targets=(
   @test/runtest-test_keeper_usage_trust_counter
   @test/runtest-test_keeper_visible_path_projection
   @test/runtest-test_keeper_waiting_inventory
+  @test/runtest-test_keeper_wake_telemetry
   @test/runtest-test_keeper_wire_capture_suppression
   @test/runtest-test_keeper_workspace_ops
   @test/runtest-test_keeper_yield_observability
@@ -706,6 +710,7 @@ newly_wired_targets=(
   @test/runtest-test_normalized_actor
   @test/runtest-test_notify_coverage
   @test/runtest-test_observability_redact_private_material
+  @test/runtest-test_ocaml_north_star_task_lifecycle
   @test/runtest-test_operator_control_judgment
   @test/runtest-test_orchestrator_coverage
   @test/runtest-test_orphan_surfacer
@@ -872,6 +877,7 @@ newly_wired_followup_targets=(
   @test/runtest-test_verify_handoff_tool
   @test/runtest-test_voice_bridge_error
   @test/runtest-test_voice_config
+  @test/runtest-test_voice_runtime_overlay
   @test/runtest-test_web_dashboard_coverage
   @test/runtest-test_with_cleanups_on_release
   @test/runtest-test_with_process_coverage

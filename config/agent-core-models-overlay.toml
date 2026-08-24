@@ -247,8 +247,13 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = false
-thinking_control_format = "reasoning_effort"
-# Measured 2026-08-24; the endpoint rejects "minimal" and "xhigh".
+# See the runtime.toml capability block for why this is "none" and not
+# "reasoning_effort": the dialect cannot move without a declared effort, or
+# every enable_thinking=true turn is rejected before dispatch.
+thinking_control_format = "none"
+# The ladder the endpoint itself names when it rejects an unknown value
+# (measured 2026-08-24; "minimal" and "xhigh" are refused). Kept declared so
+# whoever supplies an effort does not have to re-probe for the legal set.
 accepted_reasoning_efforts = ["none", "low", "medium", "high", "max"]
 supports_multimodal_inputs = false
 supports_image_input = false

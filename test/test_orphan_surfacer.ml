@@ -29,6 +29,7 @@ let make_task ~id ~status : MD.task =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 let count_of cls counts =

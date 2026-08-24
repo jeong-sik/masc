@@ -40,6 +40,7 @@ let task ?created_by ?(task_status = Masc_domain.Todo) id : Masc_domain.task =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 ;;
 

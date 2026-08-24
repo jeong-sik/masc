@@ -279,6 +279,8 @@
   test_web_tool_toml_parity
   test_search_files_toml_parity
   test_filesystem_shard_toml_parity
+  test_operator_tool_toml_parity
+  test_workspace_core_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -308,6 +310,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_skill_catalog
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -365,6 +368,7 @@
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
   test_keeper_librarian_retry
+  test_keeper_skill_catalog
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection
@@ -609,6 +613,8 @@
   test_web_tool_toml_parity
   test_search_files_toml_parity
   test_filesystem_shard_toml_parity
+  test_operator_tool_toml_parity
+  test_workspace_core_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -638,6 +644,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_skill_catalog
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -2953,3 +2960,13 @@
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
  (libraries alcotest yojson masc.tool_schemas masc_types))
+
+(test
+ (name test_skill_definition)
+ (modules test_skill_definition)
+ (libraries alcotest masc))
+
+(test
+ (name test_keeper_task_skill_block)
+ (modules test_keeper_task_skill_block)
+ (libraries alcotest masc masc_types))

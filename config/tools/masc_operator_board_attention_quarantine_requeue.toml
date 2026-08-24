@@ -1,0 +1,42 @@
+name = "masc_operator_board_attention_quarantine_requeue"
+description = """
+Acknowledge and requeue exactly one Board-attention quarantine. The observed \
+keeper, partition, candidate, and opaque quarantine id must all match; this \
+tool never auto-retries."""
+additional_properties = false
+
+[[params]]
+name = "schema"
+type = "string"
+required = true
+enum = ["keeper.board_attention.quarantine.recovery.command.v1"]
+
+[[params]]
+name = "keeper_name"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "partition_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "candidate_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "expected_quarantine_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "decision"
+type = "string"
+required = true
+enum = ["acknowledge_and_requeue"]

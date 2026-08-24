@@ -187,6 +187,7 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
+    skills = [];
   }
 
 let user_message ?turn_decision ?current_task ?active_goal_summaries observation =

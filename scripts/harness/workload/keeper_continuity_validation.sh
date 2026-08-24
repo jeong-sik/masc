@@ -4,6 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+# shellcheck source=../../lib/keeper-store-layout.sh
+source "$REPO_ROOT/scripts/lib/keeper-store-layout.sh"
+
+# The OCaml owner declares this dirname; naming one it dropped fails here
+# instead of looking for a manifest under a directory that does not exist and
+# returning "no divergence" on the miss (#27583).
+MANIFEST_STORE_DIR="$(keeper_store_dirname "$REPO_ROOT" runtime-manifests)"
+
+
 source "$REPO_ROOT/scripts/harness/lib/mcp_jsonrpc.sh"
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
 
@@ -373,7 +382,7 @@ runtime_terminal_summary() {
   local trace_id manifest_path summary
   trace_id="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""' 2>/dev/null || true)"
   [[ -n "$trace_id" && "$trace_id" != "null" ]] || return 0
-  manifest_path="$BASE_PATH/.masc/keepers/$KEEPER_NAME/runtime-manifests/${trace_id}.jsonl"
+  manifest_path="$BASE_PATH/.masc/keepers/$KEEPER_NAME/$MANIFEST_STORE_DIR/${trace_id}.jsonl"
   [[ -f "$manifest_path" ]] || return 0
   summary="$(jq -sr --argjson turn "$expected_turn" '
     [ .[] | select(.keeper_turn_id == $turn or (.keeper_turn_id == null and .event == "turn_finished")) ] as $rows

@@ -10,6 +10,7 @@ type target =
 type t =
   | File of { fd : int; target : target; mode : mode }
   | Fd_to_fd of { src : int; dst : int }
+  | Literal of { bytes : string }
 
 let on_this_host as_written path = On_this_host { path; as_written }
 
@@ -23,3 +24,7 @@ let pp fmt = function
       Format.fprintf fmt "%d%s%a" fd op Path_scope.pp (target_as_written target)
   | Fd_to_fd { src; dst } ->
       Format.fprintf fmt "%d>&%d" src dst
+  | Literal { bytes } ->
+      (* The bytes are the caller's content and can hold anything, so the
+         rendering says how many there are and not what they say. *)
+      Format.fprintf fmt "0<<(%d bytes)" (String.length bytes)

@@ -513,6 +513,62 @@ describe('LogViewer Code links', () => {
       expect((toolRow as HTMLDivElement).querySelector('.v2-logs-kind-grid')?.textContent).toContain('tool'),
     )
   })
+
+  it('kind chip clicks yield the same rows as the server category filter', async () => {
+    // The chips are the only classification control (the category dropdown is
+    // gone). Each kind is a projection of the producer's typed category, so a
+    // chip click must surface exactly the rows the server `?category=` filter
+    // would for that kind's categories — no more, no less.
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
+        entry({ seq: 1, module: 'keeper_tool', category: 'tool', message: 'tool event' }),
+        entry({ seq: 2, module: 'keeper_turn', category: 'turn', message: 'turn event' }),
+        entry({ seq: 3, module: 'keeper_fsm', category: 'fsm', message: 'fsm event' }),
+        entry({ seq: 4, module: 'keeper_lifecycle', category: 'lifecycle', message: 'lifecycle event' }),
+        entry({ seq: 5, module: 'keeper_heartbeat', category: 'heartbeat', message: 'heartbeat event' }),
+        entry({ seq: 6, module: 'keeper_directive', category: 'directive', message: 'directive event' }),
+        entry({ seq: 7, module: 'keeper_broadcast', category: 'broadcast', message: 'broadcast event' }),
+        entry({ seq: 8, module: 'keeper_routine', category: 'routine', message: 'routine event' }),
+      ]))
+
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+
+    // tool kind == server ?category=tool (single category).
+    const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(toolChip) })
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('fsm event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    // lifecycle kind == server ?category=lifecycle|fsm|heartbeat (three categories).
+    const lifecycleChip = container.querySelector('[data-testid="logs-filter-lifecycle"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(lifecycleChip) })
+    await waitFor(() => expect(container.textContent).toContain('fsm event'))
+    expect(container.textContent).toContain('lifecycle event')
+    expect(container.textContent).toContain('heartbeat event')
+    expect(container.textContent).not.toContain('tool event')
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('directive event')
+    expect(container.textContent).not.toContain('broadcast event')
+    expect(container.textContent).not.toContain('routine event')
+
+    // approval kind == server ?category=directive|boundary.
+    const approvalChip = container.querySelector('[data-testid="logs-filter-approval"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(approvalChip) })
+    await waitFor(() => expect(container.textContent).toContain('directive event'))
+    expect(container.textContent).not.toContain('fsm event')
+    expect(container.textContent).not.toContain('tool event')
+
+    // broadcast kind == server ?category=broadcast (single category).
+    const broadcastChip = container.querySelector('[data-testid="logs-filter-broadcast"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(broadcastChip) })
+    await waitFor(() => expect(container.textContent).toContain('broadcast event'))
+    expect(container.textContent).not.toContain('directive event')
+    expect(container.textContent).not.toContain('routine event')
+  })
 })
 
 describe('LogViewer kind column', () => {

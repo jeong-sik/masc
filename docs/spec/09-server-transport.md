@@ -724,9 +724,9 @@ sequenceDiagram
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | 최소 재연결 간격 |
-| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | Rate limit window |
-| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | Window 내 최대 연결 수 |
+| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | 최소 재연결 간격 (`<= 0`이면 비활성화) |
+| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | Rate limit window (`<= 0`이면 비활성화) |
+| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | Window 내 최대 연결 수 (`<= 0`이면 비활성화) |
 
 ### 15.5 HTTP Compression
 

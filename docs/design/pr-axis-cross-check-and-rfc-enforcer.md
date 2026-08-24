@@ -61,8 +61,13 @@ def check_pr_axis_stale(pr_number: int, repo: str) -> List[AxisRisk]:
                     confidence=compute_confidence(pr, merged)
                 ))
 
-        # 4. Check build dependency: if merged PR changed dune/libraries
-        if merged.touches_dune_deps() and pr.depends_on(merged):
+        # 4. Check build dependency: compare the (libraries ...) stanzas of
+        #    the dune files both PRs touched, across the merge. The file
+        #    being named `dune` is not the property; what it links is.
+        dune_overlap = {f for f in overlap if f.endswith("/dune") or f == "dune"}
+        if dune_overlap and dune_deps_changed(
+            dune_overlap, merged.merge_commit, merged.merge_parent
+        ) is not False:
             risks.append(AxisRisk(
                 type="BUILD_DEP_BREAK",
                 merged_pr=merged.number,
@@ -77,7 +82,7 @@ def check_pr_axis_stale(pr_number: int, repo: str) -> List[AxisRisk]:
 | Type | Description | Example |
 |------|-------------|---------|
 | `SUPERSEDED` | Merged PR's fix makes this PR's change unnecessary | PR A fixes bug X, PR B (merged) also fixes bug X |
-| `BUILD_DEP_BREAK` | Merged PR changed dune deps, this PR's build may fail | cdal_runtime migration adds new library |
+| `BUILD_DEP_BREAK` | Merged PR changed a `(libraries ...)` or `(pps ...)` stanza in a dune file this PR also touched | cdal_runtime migration adds new library |
 | `TYPE_CONFLICT` | Merged PR changed type definitions this PR uses | `Runtime_ref.runtime_item` field change |
 | `API_SIGNATURE_CHANGE` | Merged PR changed function signature this PR calls | `run_keeper_cycle` added `unit` param |
 

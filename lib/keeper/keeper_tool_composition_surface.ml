@@ -41,7 +41,66 @@ let plan_execute_input_schema =
                   [ "type", `String "array"
                   ; "items", `Assoc [ "type", `String "string" ]
                   ] )
-            ; "input", `Assoc [ "type", `String "object" ]
+              (* The four template shapes were spelled out in the tool's
+                 description because the schema said only "object". A reader
+                 had to learn them from prose while the validator knew them
+                 exactly. Stating them here puts the shape where a model
+                 reads structure rather than prose. It does not make them
+                 enforced: [validate_args] descends no further than the
+                 top-level schema, so [Keeper_tool_plan] is still what refuses
+                 a malformed template. Recursive shapes are named
+                 through [$ref] so [object] and [array] can hold any input. *)
+            ; ( "input"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "oneOf"
+                    , `List
+                        [ `Assoc
+                            [ "required", `List [ `String "kind"; `String "value" ]
+                            ; ( "properties"
+                              , `Assoc
+                                  [ ( "kind"
+                                    , `Assoc
+                                        [ "const", `String "literal" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List
+                                  [ `String "kind"
+                                  ; `String "node"
+                                  ; `String "pointer"
+                                  ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "output" ]
+                                  ; "node", `Assoc [ "type", `String "string" ]
+                                  ; ( "pointer"
+                                    , `Assoc [ "type", `String "string" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "fields" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "object" ]
+                                  ; ( "fields"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ; `Assoc
+                            [ ( "required"
+                              , `List [ `String "kind"; `String "items" ] )
+                            ; ( "properties"
+                              , `Assoc
+                                  [ "kind", `Assoc [ "const", `String "array" ]
+                                  ; ( "items"
+                                    , `Assoc [ "type", `String "array" ] )
+                                  ] )
+                            ]
+                        ] )
+                  ] )
             ] )
       ; "required", `List [ `String "id"; `String "tool" ]
       ; "additionalProperties", `Bool false
@@ -56,19 +115,29 @@ let plan_execute_input_schema =
     ]
 ;;
 
+(* What it buys, then how to say it. Measured over 2026-08-21..23: this tool
+   sat in all 87 tool surfaces of 368 turns and was chosen zero times, while
+   [keeper_compose_mission-snapshot] -- 254 bytes that open "Read clock,
+   board, and tool state concurrently, then search durable memory with the
+   exact clock output" -- was chosen eight. The old text opened with the DAG
+   and spent its length on template grammar, so a reader learned how to write
+   a plan without learning when one is worth writing.
+
+   The grammar stays, shorter. It cannot leave: [input] is typed
+   `{"type":"object"}` in the schema, so the template shapes live in this
+   string and nowhere else. *)
 let plan_execute_description =
   String.concat
     ""
-    [ "Execute a plan you define in this turn: a list of tool nodes run as one "
-    ; "dependency DAG (independent nodes overlap when their tools allow "
-    ; "concurrent execution; \"after\" edges and output references order the "
-    ; "rest). Only tools that declare a composable JSON output can feed a "
-    ; "downstream node; reference one with "
-    ; "{\"kind\":\"output\",\"node\":\"<id>\",\"pointer\":\"/field\"}. Input "
-    ; "templates: {\"kind\":\"literal\",\"value\":...} | output | "
-    ; "{\"kind\":\"object\",\"fields\":[{\"name\":...,\"value\":<template>}]} | "
-    ; "{\"kind\":\"array\",\"items\":[...]}. A node without \"input\" receives "
-    ; "{}. Terminal tools are rejected. Example: "
+    [ "Take one result from a tool and hand it to the next without spending a "
+    ; "turn on the round trip. Nodes with no dependency between them run at "
+    ; "the same time. Reach for this when a later call needs an earlier "
+    ; "call's output; when the calls are independent, issue them as separate "
+    ; "tool calls in one turn instead -- that already runs them concurrently "
+    ; "and costs nothing to write. Order comes from \"after\" and from output "
+    ; "references. Only a tool that declares a composable JSON output can feed "
+    ; "a downstream node; terminal tools are rejected. Example -- search "
+    ; "memory for whatever the clock just returned: "
     ; "{\"nodes\":[{\"id\":\"clock\",\"tool\":\"keeper_time_now\"},"
     ; "{\"id\":\"memory\",\"tool\":\"keeper_memory_search\",\"after\":[\"clock\"],"
     ; "\"input\":{\"kind\":\"object\",\"fields\":[{\"name\":\"query\","

@@ -17,12 +17,6 @@ type mention_record = {
   read_at: float;
 }
 
-(** {1 ID Generation} *)
-
-(* RNG for mention-id generation.  [Random.State.t] is NOT fiber-safe —
-   the previous doc comment claiming otherwise was incorrect.  Guard
-   the shared state with an [Eio.Mutex] and route every RNG access
-   through [with_mention_rng]. *)
 (** {1 JSON Serialization} *)
 
 let mention_record_to_json (r : mention_record) : Yojson.Safe.t =

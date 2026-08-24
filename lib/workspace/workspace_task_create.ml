@@ -171,6 +171,7 @@ let add_task_with_result
              ; reclaim_policy = None
              ; execution_links = Masc_domain.no_execution_links
              ; do_not_reclaim_reason = None
+             ; skills = []
              }
            in
            (* [write_backlog] stamps version/last_updated at the commit point. *)
@@ -291,6 +292,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; reclaim_policy = None
                   ; execution_links = Masc_domain.no_execution_links
                   ; do_not_reclaim_reason = None
+                  ; skills = []
                   }
                 in
                 (task, goal_id))

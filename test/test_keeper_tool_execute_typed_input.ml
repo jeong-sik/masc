@@ -1606,6 +1606,40 @@ let test_hidden_script_findings_ignores_what_hides_nothing () =
     (List.length (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ])))
 ;;
 
+(* A heredoc is stdin, and until [literal] existed the tool could tell a caller
+   so while the stdin field had nowhere to put the bytes. *)
+let test_stdin_takes_a_literal () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "argv", `List [ `String "cat" ]
+          ; "stdin", `Assoc [ "literal", `String "line one\nline two\n" ]
+          ])
+  in
+  match input.Execute_input.source with
+  | Execute_input.Staged { program; next = [] } ->
+    (match program.Execute_input.head.Execute_input.stdin with
+     | Execute_input.Literal_input { bytes } ->
+       Alcotest.(check string) "the bytes survive the decode" "line one\nline two\n" bytes
+     | _ -> Alcotest.fail "stdin must decode to a literal")
+  | _ -> Alcotest.fail "argv must decode to a single staged program"
+;;
+
+let test_stdin_literal_excludes_the_other_shapes () =
+  (* One key names one source. Two would leave the decoder choosing. *)
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "argv", `List [ `String "cat" ]
+          ; "stdin", `Assoc [ "literal", `String "x"; "discard", `Bool true ]
+          ])
+  in
+  Alcotest.(check bool)
+    ("the refusal names literal as an option -- got: " ^ msg)
+    true
+    (Astring.String.is_infix ~affix:"literal" msg)
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1885,6 +1919,11 @@ let suite =
           "hidden_script_findings ignores what hides nothing"
           `Quick
           test_hidden_script_findings_ignores_what_hides_nothing
+      ; Alcotest.test_case "stdin takes a literal" `Quick test_stdin_takes_a_literal
+      ; Alcotest.test_case
+          "stdin literal excludes the other shapes"
+          `Quick
+          test_stdin_literal_excludes_the_other_shapes
       ])
 ;;
 

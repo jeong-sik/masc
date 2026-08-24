@@ -387,7 +387,7 @@ let test_is_valid_utf8_basic () =
   check bool "truncated three-byte sequence" false
     (String_util.is_valid_utf8 "\xec\x9d")
 
-(* 2026-08-24 23:23:13, on a live keeper turn. [Voice_bridge] cut this message at 50
+(* 2026-08-24, live keeper turn 23:23:13. [Voice_bridge] cut this message at 50
    bytes to build [message_preview]. The cut landed inside the third byte of
    the 17th syllable, and the codex app-server exited while decoding the tool
    result as UTF-8, taking the turn with it. Both cuts are asserted so a

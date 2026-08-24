@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import re
 import sys
 import time
@@ -19,6 +20,21 @@ from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+from keeper_store_layout import (  # noqa: E402
+    StoreLayoutUnavailable,
+    load_store_layout,
+    store_dirname,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The OCaml owner declares every keeper runtime store dirname; naming one it
+# dropped raises here instead of listing a directory that does not exist and
+# reporting the empty result as clean (#27583).
+_STORE_LAYOUT = load_store_layout(_REPO_ROOT)
 from typing import Any
 
 import tomllib
@@ -560,13 +576,16 @@ def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     history = root / "keepers" / name / ".playground_pr_history.jsonl"
     if history.exists():
         paths.append(history)
-    for subdir in ("metrics", "execution-receipts"):
+    for subdir in (
+        store_dirname(_STORE_LAYOUT, "metrics"),
+        store_dirname(_STORE_LAYOUT, "execution-receipts"),
+    ):
         base = root / "keepers" / name / subdir
         if base.is_dir():
             paths.extend(
                 sorted(path for path in base.rglob("*.jsonl") if path.is_file())
             )
-    trajectories = root / "trajectories" / name
+    trajectories = root / store_dirname(_STORE_LAYOUT, "trajectories") / name
     if trajectories.is_dir():
         paths.extend(
             sorted(path for path in trajectories.glob("*.jsonl") if path.is_file())
@@ -796,7 +815,13 @@ def scan_keeper_web_search_evidence(
 
 
 def runtime_manifest_paths(base_path: Path, name: str) -> list[Path]:
-    manifest_dir = base_path / ".masc" / "keepers" / name / "runtime-manifests"
+    manifest_dir = (
+        base_path
+        / ".masc"
+        / "keepers"
+        / name
+        / store_dirname(_STORE_LAYOUT, "runtime-manifests")
+    )
     if not manifest_dir.is_dir():
         return []
     candidates: list[tuple[float, str, Path]] = []

@@ -96,6 +96,7 @@ let make_task ~id ~status =
   ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 (** Write a minimal backlog with one task. *)

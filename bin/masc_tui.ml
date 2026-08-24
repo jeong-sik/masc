@@ -218,6 +218,23 @@ let read_key ?(timeout = 0.1) reader () : string option =
                    match Masc.Tui_decode.sgr_wheel_key params final with
                    | Some key -> Some key
                    | None -> Some "unknown-esc")
+               (* A bare [CSI M] is the legacy X10 mouse report: three raw
+                  bytes follow and belong to the report, not to the typist.
+                  Terminals that ignore the SGR half of the [?1006;1000h]
+                  request answer in this shape -- Apple Terminal, the macOS
+                  default, is one -- so leaving the bytes unread typed three
+                  characters into the composer on every wheel notch. They are
+                  consumed whether or not the button means anything. *)
+               | Some ("", 'M') ->
+                   let button = take_input_byte reader ~timeout:0.05 in
+                   let _column = take_input_byte reader ~timeout:0.05 in
+                   let _row = take_input_byte reader ~timeout:0.05 in
+                   (match button with
+                    | None -> Some "unknown-esc"
+                    | Some button -> (
+                        match Masc.Tui_decode.x10_wheel_key button with
+                        | Some key -> Some key
+                        | None -> Some "unknown-esc"))
                | Some (_, _) -> Some "unknown-esc")
           | Some _ | None -> Some "esc")
       | Some byte -> (
@@ -333,21 +350,40 @@ let keeper_message_page_rows state =
   let chrome = Masc_tui_message_layout.composer_max_rows + 6 in
   max 1 (rows - chrome - keeper_message_status_rows state)
 
-(* What this pane has sent to the keeper on screen, oldest first. The arrows
-   walk it the way a shell walks its own history. That is why the wheel no
-   longer arrives as the same key: one of the two had to be wrong while they
-   shared it, and scrolling has the wheel and the page keys. *)
-let own_sent_messages (state : state) =
+(* What this pane has of the operator's own lines for the keeper on screen,
+   oldest first. The arrows walk it the way a shell walks its own history.
+   That is why the wheel no longer arrives as the same key: one of the two had
+   to be wrong while they shared it, and scrolling has the wheel and the page
+   keys.
+
+   Sent lines come from [msg_history], which is written when a line is
+   dispatched. A line typed during a turn has not been dispatched, so it is
+   not there -- it is in the queue, and it is the newest thing the operator
+   typed. Walking only the sent ones stepped straight past it, which is how a
+   queued line could be neither read back nor edited. *)
+let own_typed_messages (state : state) =
   let target = Option.value ~default:"" state.msg_target_keeper_name in
-  state.msg_history
-  |> List.filter (fun entry ->
-         (match entry.me_role with
-          | Message_user label -> String.equal label "you"
-          | Message_keeper | Message_status | Message_error | Message_tool
-          | Message_thinking ->
-              false)
-         && String.equal entry.me_keeper_name target)
-  |> List.map (fun entry -> entry.me_text)
+  let sent =
+    state.msg_history
+    |> List.filter (fun entry ->
+           (match entry.me_role with
+            | Message_user label -> String.equal label "you"
+            | Message_keeper | Message_status | Message_error | Message_tool
+            | Message_thinking ->
+                false)
+           && String.equal entry.me_keeper_name target)
+    |> List.map (fun entry -> entry.me_text)
+  in
+  (* Newest last, same as [sent], so one walk crosses both without a seam.
+     A line leaves the queue and enters the history in the same step it is
+     dispatched, so it is in exactly one of the two lists at any moment. *)
+  let queued =
+    Chat_queue.waiting state.msg_queued
+    |> List.filter (fun (queued_keeper, _) ->
+           String.equal queued_keeper target)
+    |> List.map snd
+  in
+  sent @ queued
 
 let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
@@ -357,7 +393,7 @@ let set_composer_text (state : state) text =
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
 let recall_older (state : state) =
-  let sent = own_sent_messages state in
+  let sent = own_typed_messages state in
   let count = List.length sent in
   if count = 0 then ()
   else begin
@@ -379,7 +415,7 @@ let recall_newer (state : state) =
       state.msg_recall_at <- None;
       set_composer_text state state.msg_recall_draft
   | Some at ->
-      let sent = own_sent_messages state in
+      let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
       let count = List.length sent in
@@ -2216,6 +2252,10 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    (* Held tool calls ride every tick, not just the Approvals surface: the
+       strip's Approvals badge is drawn from every surface, and a stale count
+       there would be worse than none. The payload is a handful of rows. *)
+    launch_keeper_tool_approvals_load state ~mailbox;
 
     let run_refresh () =
       try
@@ -3490,6 +3530,19 @@ let request_console_write_repair render_schedule =
 let mouse_tracking_enable = "\x1b[?1006;1000h"
 let mouse_tracking_disable = "\x1b[?1006;1000l"
 
+(* Tracking is what the wheel costs the terminal: with reports on, a drag is a
+   report and the terminal never highlights anything, so there is no way to
+   copy a line off the screen. Ctrl-T hands the mouse back and takes it again.
+   A letter would not do -- in the composer every letter is text. *)
+let mouse_tracking_on = Atomic.make true
+let toggle_mouse_tracking_key = "\020"
+
+let toggle_mouse_tracking () =
+  let on = not (Atomic.get mouse_tracking_on) in
+  Atomic.set mouse_tracking_on on;
+  output_string stdout (if on then mouse_tracking_enable else mouse_tracking_disable);
+  flush stdout
+
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
   at_exit cleanup;
@@ -3775,6 +3828,7 @@ let main () =
         && (not state.help_open)
         && (not state.palette_open)
         && state.view <> Keepers Keeper_message
+        && key <> Some toggle_mouse_tracking_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -3786,6 +3840,12 @@ let main () =
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
               && Option.is_none state.roster_search ->
            raise Break
+       (* Above the modals on purpose: the reason to reach for this is to copy
+          something already on the screen, and the help overlay is one of the
+          screens worth copying from. *)
+       | Some k when String.equal k toggle_mouse_tracking_key ->
+           toggle_mouse_tracking ();
+           Render_schedule.request render_schedule Render_schedule.Force
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)

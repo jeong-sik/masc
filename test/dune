@@ -308,6 +308,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_skill_catalog
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -2953,3 +2954,13 @@
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
  (libraries alcotest yojson masc.tool_schemas masc_types))
+
+(test
+ (name test_skill_definition)
+ (modules test_skill_definition)
+ (libraries alcotest masc))
+
+(test
+ (name test_keeper_task_skill_block)
+ (modules test_keeper_task_skill_block)
+ (libraries alcotest masc masc_types))

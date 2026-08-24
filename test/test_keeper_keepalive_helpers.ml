@@ -68,6 +68,7 @@ let make_in_progress_task ~id ~assignee : Types.task =
     reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
+    skills = [];
   }
 
 let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =

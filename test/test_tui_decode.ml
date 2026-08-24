@@ -1288,6 +1288,44 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
            Alcotest.failf "report %S should stay unclaimed, got %s" params other)
     cases
 
+(* Apple Terminal, the macOS default, answers [?1006;1000h] with the legacy X10
+   shape instead of SGR. The button byte carries the same numbers offset by 32,
+   so the wheel has to be readable from it or the notch is lost -- and the three
+   bytes after [CSI M] have to be consumed by the caller either way, which is
+   what stopped them being typed into the composer. *)
+let test_x10_wheel_up_is_its_own_key () =
+  match Tui_decode.x10_wheel_key (Char.chr (32 + 64)) with
+  | Some "wheel-up" -> ()
+  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
+  | None -> Alcotest.fail "wheel up should claim a key"
+
+let test_x10_wheel_down_is_its_own_key () =
+  match Tui_decode.x10_wheel_key (Char.chr (32 + 65)) with
+  | Some "wheel-down" -> ()
+  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
+  | None -> Alcotest.fail "wheel down should claim a key"
+
+let test_x10_clicks_and_drags_stay_unclaimed () =
+  List.iter
+    (fun button ->
+       match Tui_decode.x10_wheel_key (Char.chr (32 + button)) with
+       | None -> ()
+       | Some other ->
+           Alcotest.failf "button %d should stay unclaimed, got %s" button other)
+    [ 0; 1; 2; 3; 32; 35; 66; 67 ]
+
+(* The two decoders answer the same physical notch, so they must agree. A
+   terminal that switches encodings between sessions must not change what the
+   wheel does. *)
+let test_x10_and_sgr_agree_on_the_wheel () =
+  List.iter
+    (fun (button, params) ->
+       let x10 = Tui_decode.x10_wheel_key (Char.chr (32 + button)) in
+       let sgr = Tui_decode.sgr_wheel_key params 'M' in
+       Alcotest.(check (option string))
+         (Printf.sprintf "button %d" button) sgr x10)
+    [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
+
 type parent_node = {
   node_id : string;
   parent_id : string option;
@@ -2598,6 +2636,17 @@ let () =
         Alcotest.test_case "clicks, releases, horizontal wheel stay unclaimed"
           `Quick
           test_sgr_click_and_horizontal_wheel_stay_unclaimed;
+      ] );
+    ( "x10_mouse",
+      [
+        Alcotest.test_case "wheel up claims its own key" `Quick
+          test_x10_wheel_up_is_its_own_key;
+        Alcotest.test_case "wheel down claims its own key" `Quick
+          test_x10_wheel_down_is_its_own_key;
+        Alcotest.test_case "clicks and drags stay unclaimed" `Quick
+          test_x10_clicks_and_drags_stay_unclaimed;
+        Alcotest.test_case "agrees with the SGR decoder" `Quick
+          test_x10_and_sgr_agree_on_the_wheel;
       ] );
     ( "bounded_parent_depth",
       [

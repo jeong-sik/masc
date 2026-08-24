@@ -390,6 +390,38 @@ running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
 
+#### Lines typed during a turn
+
+Enter during a running turn holds the line for the next one rather than
+refusing it. The pane draws every waiting line in full, oldest first, under the
+sending rows:
+
+```
+   (sending tui-..d3530056 · 12s…)
+   queued 1: check the CI run too
+   queued 2 -> polisher: and the rebase
+   > _
+  Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
+```
+
+A count on its own is not enough - an operator who typed three lines during a
+turn needs to see which three. Only the first line of a queued message is
+shown, with `…` where it was cut; the rest goes with it when it is sent.
+
+A queued line travels with the keeper it was written to, so switching keepers
+mid-turn cannot redirect it; a line addressed elsewhere names its keeper after
+the number. `Ctrl-K` drops the newest waiting line and `Ctrl-P` pulls it back
+into the composer. Nothing has been dispatched, so both are local.
+
+Each waiting line takes its row from the conversation above it, never from the
+terminal: the pane ends on the same row whether the queue is empty or full.
+
+The arrows walk what the operator typed for this keeper, newest first, and the
+waiting lines come before the sent ones. `Up` on a fresh composer therefore
+hands back the line that is waiting rather than stepping over it into what was
+already delivered. The draft is put aside on the first step back and returned
+on the way forward past the newest.
+
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders

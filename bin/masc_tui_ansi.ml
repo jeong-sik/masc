@@ -64,6 +64,24 @@ module Ansi = struct
   let box_r = "\xe2\x94\xa4"  (* right tee *)
 end
 
+(** Semantic styles for state.
+
+    A fact about health, phase, or attention draws through these names, so
+    one remap -- a theme, a colourblind palette -- moves every reading at
+    once. The boundary: state goes through [Theme]; prose emphasis and
+    syntax colouring keep raw [Ansi] styles, because "this word is green"
+    is sometimes the content itself (a diff, a code literal) rather than a
+    reading of state. *)
+module Theme = struct
+  let ok = Ansi.green
+  let warn = Ansi.yellow
+  let bad = Ansi.red
+  let info = Ansi.cyan
+  let muted = Ansi.dim
+  let selection = Ansi.reverse
+  let border_focus = Ansi.cyan
+end
+
 (** A screen title.
 
     Emphasis belongs to the words that name the screen, not to the whole header
@@ -84,6 +102,30 @@ let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
 let probe_terminal_size () =
+  (* The size lives on the controlling terminal. Since #30160 pointed stderr
+     at a file, a child probe inherits no tty fd at all -- stdout is the pipe
+     this read comes from -- so tput fell back to the terminfo default and
+     every real terminal drew as 80x24 (#30181). stty asks /dev/tty by name,
+     which no redirect can take away. *)
+  let read_stty_size () =
+    try
+      let line, status =
+        With_process.with_process_args_in "/bin/sh"
+          [| "/bin/sh"; "-c"; "stty size </dev/tty" |]
+          input_line
+      in
+      match status with
+      | Unix.WEXITED 0 -> (
+          match String.split_on_char ' ' (String.trim line) with
+          | [ rows; cols ] -> (
+              match int_of_string_opt rows, int_of_string_opt cols with
+              | Some rows, Some cols when rows > 0 && cols > 0 ->
+                  Some (rows, cols)
+              | _ -> None)
+          | _ -> None)
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+    with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
+  in
   let read_tput arg =
     try
       let line, status =
@@ -95,6 +137,9 @@ let probe_terminal_size () =
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
     with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
   in
+  match read_stty_size () with
+  | Some (rows, cols) -> Some (rows, cols)
+  | None ->
   match read_tput "cols", read_tput "lines" with
   | Some cols, Some rows -> Some (rows, cols)
   | _ -> None
@@ -173,42 +218,69 @@ let ctx_bar ratio width =
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
 
-(** Shared helper: draw box top border *)
-let box_top buf cols =
+(* The framed family keeps the full border box. Modals (palette, help) and
+   side-by-side panes still need it: a border is what separates an overlay
+   from the surface under it, and two panes from each other. *)
+
+let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset)
 
-(** Shared helper: draw box bottom border *)
-let box_bottom buf cols =
+let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset)
 
-(** Shared helper: draw box divider *)
-let box_divider buf cols =
+let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
 
-(** Shared helper: draw a line inside a box *)
-let box_line buf cols content =
+let framed_line buf cols content =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Fit plain content first, then add style bytes so ANSI escapes never count
-    toward the terminal width. *)
-let box_line_styled buf cols ~style content =
+let framed_line_styled buf cols ~style content =
   let inner = cols - 4 in
   let content = fit_width content inner in
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
        Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
-(** Shared helper: empty line inside a box *)
-let box_empty buf cols =
+let framed_empty buf cols =
   let inner = cols - 4 in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (String.make inner ' ')
     Ansi.gray Ansi.box_v Ansi.reset)
+
+(* Full-screen surfaces draw without the outer box: the terminal edge is
+   already the frame, and a border around everything separates nothing (the
+   clutter audit's first offender). Every helper keeps its old geometry --
+   one row per call, content width [cols - 4] -- so no surface's row budget
+   or wrap math moves. *)
+
+let box_top buf _cols = Buffer.add_char buf '\n'
+let box_bottom buf _cols = Buffer.add_char buf '\n'
+
+let box_divider buf cols =
+  Buffer.add_string buf
+    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset)
+
+(* Rows keep the framed geometry -- two margin cells each side, content
+   width [cols - 4] -- and still span the full [cols], so anything that
+   measures a row (the PTY suite does) reads the same width either way. *)
+let box_line buf cols content =
+  let inner = cols - 4 in
+  Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
+
+let box_line_styled buf cols ~style content =
+  let inner = cols - 4 in
+  let content = fit_width content inner in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
+
+let box_empty buf cols =
+  Buffer.add_string buf (String.make cols ' ');
+  Buffer.add_char buf '\n' 

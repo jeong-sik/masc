@@ -275,45 +275,6 @@ type verification_snapshot = {
   vs_total : int;  (** Requests the server holds, not the number returned. *)
 }
 
-type feature_proof_status =
-  | Fp_pass
-  | Fp_warn
-  | Fp_fail
-  | Fp_unreadable of string
-      (** A status word this build was not taught. Kept rather than folded
-          into a neighbour: the operator asked whether the feature is proven,
-          and "I cannot read the answer" is not "yes". It counts as a gap. *)
-
-type feature_proof = {
-  fp_id : string;
-  fp_label : string;
-  fp_status : feature_proof_status;
-  fp_summary : string;  (** The server's one-line reading, e.g. "3/9 keepers". *)
-  fp_next_action : string;  (** What would turn the gap into evidence. *)
-  fp_keeper_count : int;
-  fp_observed : string list;  (** Keepers with behaviour evidence for it. *)
-  fp_missing : string list;  (** Keepers with none. *)
-  fp_read_errors : string list;
-      (** Keepers whose evidence could not be read at all. Kept apart from
-          [fp_missing]: a keeper that failed to exercise the feature and a
-          keeper whose record would not open are different problems, and
-          counting the second as the first blames the keeper for a read
-          failure. *)
-}
-
-type autonomy_snapshot = {
-  au_generated_at : string;
-  au_status : feature_proof_status;  (** The worst status among the features. *)
-  au_features : feature_proof list;
-  au_feature_count : int;
-  au_pass_count : int;
-  au_gap_count : int;  (** Features the server counted as warn or fail. *)
-  au_keeper_count : int;
-  au_window_hours : float option;
-      (** The window the report was computed over, when it was given one.
-          [None] means the report looked at everything it holds. *)
-}
-
 type keeper_runtime = {
   kr_name : string;
   kr_status : Keeper_status_runtime.surface_status;
@@ -443,19 +404,6 @@ val decode_harness_snapshot :
 
 val decode_verification_snapshot :
   Yojson.Safe.t -> (verification_snapshot, string) result
-
-val decode_autonomy_snapshot :
-  Yojson.Safe.t -> (autonomy_snapshot, string) result
-(** Reads [GET /api/v1/dashboard/keeper-feature-proof]: which autonomy
-    features have current behaviour evidence and which still need it. *)
-
-val feature_proof_status_label : feature_proof_status -> string
-(** Fixed-width label for the status column. *)
-
-val feature_proof_is_gap : feature_proof_status -> bool
-(** Whether the status leaves the feature unproven. An unreadable status
-    counts as a gap, so a status word this build does not know can never be
-    drawn as evidence that the feature works. *)
 
 val decode_system_log_snapshot :
   Yojson.Safe.t -> (system_log_snapshot, string) result

@@ -15,7 +15,7 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in this order: Overview, Keepers, Approvals, Board,
 Planning, Schedules, Verification, Harness, Repositories, Connectors, Tools,
-Autonomy, System Logs.
+System Logs.
 
 ## Quick Start
 
@@ -506,7 +506,7 @@ Tab cycles the surfaces:
 
   Overview -> Keepers -> Approvals -> Board -> Planning -> Schedules
            -> Verification -> Harness -> Repositories -> Connectors
-           -> Tools -> Autonomy -> System Logs -> Overview
+           -> Tools -> System Logs -> Overview
 
 Within a surface:
 

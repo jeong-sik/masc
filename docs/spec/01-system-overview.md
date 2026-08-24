@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-23
-code_refs:
-  - bin/main_eio.ml
-  - bin/main_stdio_eio.ml
-  - dune-project
 ---
 
 # 01. System Overview

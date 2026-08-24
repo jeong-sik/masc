@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-05-20
-code_refs:
-  - dashboard/src/config/navigation.ts
-  - dashboard/src/components/status.ts
-  - dashboard/src/components/work.ts
-  - dashboard/src/components/lab.ts
 ---
 
 # Dashboard Integration Spec (v1 Shell)

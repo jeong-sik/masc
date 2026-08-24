@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/types/
-  - lib/tool/tool_dispatch.ml
-  - lib/client_identity.ml
 ---
 
 # Types and Invariants

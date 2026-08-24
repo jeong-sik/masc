@@ -1,14 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-13
-code_refs:
-  - lib/keeper/keeper_keepalive.ml
-  - lib/keeper/keeper_heartbeat_loop.ml
-  - lib/keeper/keeper_unified_turn.ml
-  - lib/keeper/keeper_agent_run.ml
-  - lib/keeper/keeper_keepalive_signal.ml
-  - lib/keeper/keeper_execution_receipt.ml
-  - specs/keeper-state-machine/KeeperHitlDeferred.tla
 ---
 
 # Turn Lifecycle

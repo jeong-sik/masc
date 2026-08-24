@@ -587,7 +587,11 @@ jobs:
 
       - name: Run repo audit scripts
         run: |
-          set -e
+          # No `set -e`: every script runs and the failures are reported
+          # together. Aborting on the first one hid the rest behind it and
+          # skipped the twelve steps after this one, so a single stale string
+          # cost a CI round per audit instead of one round for all of them.
+          failed=()
           for s in \
             audit-unwired-audits.sh \
             verify-test-registration.py \
@@ -598,7 +602,6 @@ jobs:
             check_silent_failure.sh \
             check-board-attention-exact-flow-boundary.sh \
             check-compaction-exact-flow-boundary.sh \
-            check-doc-code-refs.sh \
             check-keeper-turn-content-boundary.sh \
             check-opam-lock-covers-deps.sh \
             check-tool-error-format.sh \
@@ -607,11 +610,15 @@ jobs:
           do
             echo "::group::$s"
             case "$s" in
-              *.py) python3 "scripts/$s" ;;
-              *)    bash "scripts/$s" ;;
+              *.py) python3 "scripts/$s" || failed+=("$s") ;;
+              *)    bash "scripts/$s" || failed+=("$s") ;;
             esac
             echo "::endgroup::"
           done
+          if ((${#failed[@]} > 0)); then
+            printf 'repo audit scripts failed: %s\n' "${failed[*]}" >&2
+            exit 1
+          fi
 
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'

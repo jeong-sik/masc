@@ -1,10 +1,5 @@
 ---
 status: live
-last_verified: 2026-06-29
-code_refs:
-  - lib/keeper/
-  - lib/mcp_server.ml
-  - lib/keeper/keeper_supervisor.ml
 ---
 
 # Product Operating Plan

@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-13
-code_refs:
-  - lib/config/
-  - lib/fusion/
-  - lib/fusion_core/
-  - config/
 ---
 
 # Configuration

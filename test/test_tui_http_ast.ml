@@ -121,7 +121,8 @@ let test_keeper_chat_uses_current_async_contract () =
          >= 1))
     (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
        longer writes a cursor escape inline. It hands the position to
-       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
+       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)] through the
+       strip wrapper, and the frame
        presenter emits the move when it paints. Asserting the old escape here
        would pin the pre-differential-frame renderer.
 
@@ -129,12 +130,18 @@ let test_keeper_chat_uses_current_async_contract () =
        predicted the caret's row by repeating the pane's layout arithmetic,
        which only stayed true while every row the pane drew was also counted
        in the row budget. The renderer now reads the rows it has already put
-       in the frame, so [frame_lines] is what this list pins instead. *)
+       in the frame, so [frame_lines] is what this list pins instead.
+
+       [finish_frame_with_strip] is the same handoff one layer along: #30141
+       put a surface strip above every frame, and the wrapper shifts the
+       cursor down a row for it before calling [finish_frame] itself
+       ([masc_tui_render.ml] "finish_frame_with_strip"). Pinning the inner
+       name here would ask this binding to bypass the strip. *)
     [ "Message_layout.input_viewport"
     ; "frame_lines"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-    ; "finish_frame"
+    ; "finish_frame_with_strip"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path

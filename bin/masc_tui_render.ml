@@ -3066,6 +3066,37 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
+    (* What is waiting, in the order it will go. Drawn in full rather than as
+       a count: an operator who typed three lines during a turn needs to see
+       which three, and a queue that only says "3 waiting" is the same silence
+       that made a refused send look like a sent one.
+
+       [keeper_message_status_rows] has always reserved one row per waiting
+       line. #29818 rewrote the in-flight block above and took these rows out
+       with it, leaving the reservation behind: the history was sized as if
+       the queue were drawn, so each line typed during a turn took a row off
+       the conversation and put nothing in its place. *)
+    List.iteri
+      (fun index (queued_keeper, text) ->
+        (* First line only. A queued line can be a pasted paragraph, and the
+           budget counts one row for it, so this row has one row to fit in. *)
+        let body =
+          match String.index_opt text '\n' with
+          | None -> text
+          | Some cut -> String.sub text 0 cut ^ " …"
+        in
+        (* The operator can switch keepers while a turn runs, and a queued
+           line travels with the keeper it was written to. Naming the ones
+           that are not this pane's keeps a line from looking like it will go
+           to whoever is on screen. *)
+        let addressed =
+          if String.equal queued_keeper keeper_name then ""
+          else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
+        in
+        box_line_styled buf cols ~style:Ansi.dim
+          (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
+             (Keeper_chat.terminal_safe_text body)))
+      (Masc_tui_keeper_chat_queue.waiting state.msg_queued);
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

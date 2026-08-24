@@ -220,6 +220,34 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
       check int "the cancelled wait is not still registered" 0
         (List.length (Registry.pending registry)))
 
+(* The per-keeper stance the gate consults. Auto is the absent default, so
+   setting it back removes the override rather than storing a synonym. *)
+module Mode = Masc.Keeper_tool_approval_mode
+
+let test_mode_defaults_to_auto_and_yolo_is_an_override () =
+  let modes = Mode.create () in
+  check bool "unspoken keeper is auto" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto);
+  Mode.set modes ~keeper_name:"alpha" Mode.Yolo;
+  check bool "set stance resolves" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Yolo);
+  check (list string) "only moved keepers are listed" [ "alpha" ]
+    (List.map fst (Mode.overrides modes));
+  Mode.set modes ~keeper_name:"alpha" Mode.Auto;
+  check bool "auto removes the override" true (Mode.overrides modes = []);
+  check bool "and resolves as the default again" true
+    (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto)
+
+let test_mode_labels_round_trip () =
+  List.iter
+    (fun mode ->
+      match Mode.mode_of_string (Mode.mode_to_string mode) with
+      | Some decoded -> check bool "round trip" true (decoded = mode)
+      | None -> fail "mode label failed to decode")
+    [ Mode.Auto; Mode.Yolo ];
+  check bool "unknown label is refused" true
+    (Mode.mode_of_string "chaotic" = None)
+
 let test_decision_labels_round_trip () =
   List.iter
     (fun decision ->
@@ -240,6 +268,12 @@ let () =
             test_a_denial_is_carried_as_itself
         ; test_case "decision labels round-trip" `Quick
             test_decision_labels_round_trip
+        ] )
+    ; ( "gate stance"
+      , [ test_case "auto is the absent default; yolo is an override" `Quick
+            test_mode_defaults_to_auto_and_yolo_is_an_override
+        ; test_case "mode labels round-trip" `Quick
+            test_mode_labels_round_trip
         ] )
     ; ( "nobody answers"
       , [ test_case "a wait nobody answers times out" `Quick

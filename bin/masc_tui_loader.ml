@@ -555,6 +555,13 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("tool approvals load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_tool_approvals json
 
+(** Load the keepers whose approval gate is moved off [auto]. *)
+let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    ((string * string) list, string) result =
+  match fetch_keeper_tool_approval_modes ~host ~port with
+  | Error err -> Error ("tool approval modes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json
+
 (** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
 let load_transport_health ~(host : string) ~(port : int) :
     (Tui_decode.transport_health, string) result =

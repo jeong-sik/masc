@@ -343,6 +343,83 @@ let handle_keeper_tool_approvals_list _state request reqd =
        ])
 ;;
 
+(* The per-keeper approval stance. GET lists the overrides — a keeper absent
+   from the list is [auto] — and POST sets one. Setting is logged at the
+   server, not only echoed to the caller: [yolo] means every tool call runs
+   unasked, and the operator who set it is not always the operator reading
+   the logs later. *)
+let handle_keeper_tool_approval_mode_get _state request reqd =
+  let overrides =
+    Keeper_tool_approval_mode.overrides (Keeper_tool_approval_mode.shared ())
+  in
+  respond_json_value_with_cors ~status:`OK request reqd
+    (`Assoc
+       [ ( "overrides"
+         , `List
+             (List.map
+                (fun (keeper_name, mode) ->
+                  `Assoc
+                    [ ("keeper", `String keeper_name)
+                    ; ( "mode"
+                      , `String (Keeper_tool_approval_mode.mode_to_string mode)
+                      )
+                    ])
+                overrides) )
+       ; ("default", `String "auto")
+       ])
+;;
+
+let handle_keeper_tool_approval_mode_set state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          let field name =
+            match List.assoc_opt name fields with
+            | Some (`String value) -> Ok (String.trim value)
+            | Some _ | None ->
+              Error (Printf.sprintf "%s (string) is required" name)
+          in
+          let ( let* ) = Result.bind in
+          let* keeper_name = field "name" in
+          let* mode_raw = field "mode" in
+          (match Keeper_tool_approval_mode.mode_of_string mode_raw with
+           | Some mode -> Ok (keeper_name, mode)
+           | None ->
+             Error
+               (Printf.sprintf "mode must be auto or yolo, got %S" mode_raw))
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match parsed with
+    | Error msg ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json msg)
+    | Ok (keeper_name, mode) ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        Keeper_tool_approval_mode.set
+          (Keeper_tool_approval_mode.shared ())
+          ~keeper_name
+          mode;
+        Log.Keeper.info
+          "keeper_tool_approval_mode: keeper=%s mode=%s"
+          keeper_name
+          (Keeper_tool_approval_mode.mode_to_string mode);
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+             [ ("keeper", `String keeper_name)
+             ; ( "mode"
+               , `String (Keeper_tool_approval_mode.mode_to_string mode) )
+             ])))
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in

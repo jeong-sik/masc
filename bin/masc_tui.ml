@@ -488,6 +488,8 @@ type async_msg =
       (Tui_decode.keeper_tool_approval list, string) result
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
+  | Keeper_tool_modes_loaded of ((string * string) list, string) result
+  | Keeper_tool_mode_set of string * string * (unit, string) result
       (** keeper, tool call id, allow, and whether a wait was released — the
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
@@ -679,6 +681,50 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_tool_modes_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_modes_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
+
+let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_tool_approval_mode ~host ~port ~keeper_name
+          ~mode
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_tool_mode_set (keeper_name, mode, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_tool_mode_set
+           (keeper_name, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
@@ -2480,6 +2526,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          shows. *)
       (match state.view with
        | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+       | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
         ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
@@ -2752,6 +2799,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Keeper_tool_modes_loaded result ->
+      (match result with
+       | Ok overrides ->
+           state.keeper_yolo_names <-
+             List.filter_map
+               (fun (keeper, mode) ->
+                 if String.equal mode "yolo" then Some keeper else None)
+               overrides
+       | Error _ ->
+           (* The stance listing is advisory colouring; a failed fetch keeps
+              the last known set rather than flashing every name back. *)
+           ())
+  | Keeper_tool_mode_set (keeper_name, mode, result) ->
+      (match result with
+       | Ok () ->
+           state.keeper_yolo_names <-
+             (let without =
+                List.filter
+                  (fun name -> not (String.equal name keeper_name))
+                  state.keeper_yolo_names
+              in
+              if String.equal mode "yolo" then keeper_name :: without
+              else without);
+           add_event state "system"
+             (if String.equal mode "yolo" then
+                Printf.sprintf
+                  "%s runs every tool call unasked (YOLO) until restart or g"
+                  keeper_name
+              else
+                Printf.sprintf "%s is back on the approval policy (auto)"
+                  keeper_name)
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
   | Surface_tool_approval_answered (keeper_name, tool_call_id, allow, result) ->
       (* The listing is stale the moment an answer lands, so the settled call
          leaves the local list at once rather than waiting for a refresh. *)
@@ -3733,6 +3814,22 @@ let main () =
        | Some "g" when state.view = Acting ->
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
+       | Some "g"
+         when (match state.view with
+               | Keepers Keeper_list | Keepers Keeper_detail -> true
+               | _ -> false)
+              && state.keeper_cursor < List.length state.keepers ->
+           (* Toggle the approval gate for the keeper under the cursor. One
+              press: the stance is in-memory and a restart returns it to
+              auto, and the event line plus the red roster name say loudly
+              what was armed. *)
+           let keeper = List.nth state.keepers state.keeper_cursor in
+           let mode =
+             if List.mem keeper.k_name state.keeper_yolo_names then "auto"
+             else "yolo"
+           in
+           launch_keeper_tool_mode_set state ~mailbox:async_messages
+             ~keeper_name:keeper.k_name ~mode
        | Some "G" when state.view = Acting ->
            (* Past the end on purpose; the frame clamps it to the last page.
               The held count rather than max_int, because an event arriving

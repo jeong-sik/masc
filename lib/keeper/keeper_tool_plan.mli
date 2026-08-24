@@ -53,6 +53,11 @@ module Json_template : sig
         { node_id : Node_id.t
         ; pointer : Json_pointer.t
         }
+    | Param of { name : string }
+        (** A declared composition parameter, bound per invocation. A plan may
+            hold [Param] leaves indefinitely; execution requires a
+            param-free plan produced by {!substitute_params} first, and
+            {!resolve} refuses an unsubstituted leaf rather than guessing. *)
     | Object of (string * t) list
     | Array of t list
 
@@ -64,12 +69,28 @@ module Json_template : sig
         { node_id : Node_id.t
         ; error : Json_pointer.resolution_error
         }
+    | Param_not_substituted of string
+
+  type substitution_error = Missing_param of string
 
   val literal : Yojson.Safe.t -> t
   val output : node_id:Node_id.t -> pointer:Json_pointer.t -> t
+  val param : name:string -> t
   val object_ : (string * t) list -> (t, object_error) result
   val array : t list -> t
   val dependencies : t -> Node_id.t list
+
+  val param_names : t -> string list
+  (** Every distinct [Param] name in the template, in first-appearance
+      order. The catalog checks this set against the composition's declared
+      parameter list in both directions. *)
+
+  val substitute_params
+    :  lookup:(string -> Yojson.Safe.t option)
+    -> t
+    -> (t, substitution_error) result
+  (** Replace every [Param] leaf with the caller's value as a [Literal].
+      Structure is otherwise preserved, so validity carries over. *)
 
   val resolve
     :  lookup:(Node_id.t -> Yojson.Safe.t option)

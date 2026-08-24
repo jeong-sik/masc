@@ -1,17 +1,6 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 
-(* No ["required"] key: an empty one says nothing an absent one does not, and
-   both readers fold them together. *)
-let empty_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc []
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
-
 let plan_execute_tool_name = "keeper_plan_execute"
 
 let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
@@ -402,6 +391,9 @@ let template_resolution_error_to_json = function
       ; "source_node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
       ; "error", pointer_resolution_error_to_json error
       ]
+  | Keeper_tool_plan.Json_template.Param_not_substituted name ->
+    `Assoc
+      [ "kind", `String "param_not_substituted"; "param", `String name ]
 ;;
 
 let plan_execution_error_to_json = function
@@ -936,12 +928,12 @@ let make_tools
                 ^ entry.name
                 ^ " and return its durable request id.")
            entry.description)
-      ~input_schema:empty_input_schema
+      ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
         let start_time = Time_compat.now () in
         match
           Tool_input_validation.validate_args
-            ~schema:empty_input_schema
+            ~schema:(Catalog.input_schema_of_params entry.params)
             ~name:tool_name
             ~args:input
             ()
@@ -977,11 +969,41 @@ let make_tools
                   ?clock
                   ()
               | Catalog.Inline ->
+                (match
+                   Catalog.instantiate
+                     ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                     ~args:input
+                     entry
+                 with
+                 | Error error ->
+                   (* Unreachable through the validated schema — required
+                      params are enforced there — but total: a rejected
+                      binding names the argument instead of executing a
+                      half-bound plan. *)
+                   let message = Catalog.instantiation_error_to_string error in
+                   let class_ =
+                     match error with
+                     | Catalog.Missing_argument _ -> Tool_result.Policy_rejection
+                     | Catalog.Instantiated_plan_rejected _ ->
+                       Tool_result.Runtime_failure
+                   in
+                   Tool_result.make_err
+                     ~tool_name
+                     ~class_
+                     ~start_time
+                     ~data:
+                       (`Assoc
+                           [ "composition_tool", `String tool_name
+                           ; tool_kind_field (Catalog.tool_kind entry)
+                           ; "error", `String message
+                           ])
+                     message
+                 | Ok plan ->
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let execution =
                Executor.execute_keeper
-                 ~plan:entry.plan
+                 ~plan
                  ~run_id
                  ~composition_run_id
                  ~parent_invocation
@@ -1078,7 +1100,7 @@ let make_tools
                   ~tool_name
                   ~class_:Tool_result.Runtime_failure
                   ~start_time
-                  "composition result manifest persistence failed")))))
+                  "composition result manifest persistence failed"))))))
   in
   let plan_execute_tool =
     let tool_name = plan_execute_tool_name in

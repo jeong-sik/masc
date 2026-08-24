@@ -89,7 +89,7 @@ let build_request_artifact
         ("Backend_ollama.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_ollama" projection;
+      Reasoning_history_projection.observe ~component:"backend_ollama" ~stream projection;
       projection.messages
   in
   let provider_messages =

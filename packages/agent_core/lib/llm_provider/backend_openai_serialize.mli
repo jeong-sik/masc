@@ -63,6 +63,7 @@ val project_history
 val dialect_messages_of_history
   :  ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
   -> replay_capability:Reasoning_dialect.replay_capability
+  -> stream:bool
   -> Reasoning_dialect.t
   -> Types.message list
   -> (Yojson.Safe.t list, Reasoning_history_projection.error) result

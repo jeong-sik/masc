@@ -1590,11 +1590,21 @@ let launch_observer state ~host ~port ~mailbox =
    one, and that row is meant to say the stream dropped, not that there was
    never a server. Once closed it is reopened on the next refresh that
    reaches the server, which is the cadence the operator already chose. *)
-let open_observer_if_due state ~host ~port ~mailbox =
+(* [retry_closed] separates the first open from a retry. A feed that has never
+   run is opened as soon as the server answers, because the row is meant to say
+   the stream dropped and there is nothing to say yet. A feed that ran and
+   closed waits for the operator's cadence: retrying it once per finished
+   refresh made the retry rate whatever the refresh rate was, and a refresh
+   also goes out when the open surface needs something the last one did not
+   fetch -- so walking the surfaces retried a refused feed once per surface and
+   filled the eleven-entry event panel with its own refusals. *)
+let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
-  | (Connected | Degraded), (Observer_off | Observer_closed _) ->
+  | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_opening | Observer_live _)
+  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+      launch_observer state ~host ~port ~mailbox
+  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
   | (Disconnected | Connecting | Reconnecting), _ ->
       ()
 
@@ -2278,8 +2288,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Http_refresh_done results ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
-      open_observer_if_due state ~host:(Env_config_core.masc_host ())
-        ~port:state.port ~mailbox
+      open_observer_if_due state ~retry_closed:false
+        ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
   | Observer_opened session_id ->
       state.mcp_session <- Some session_id;
       state.observer <-
@@ -3563,6 +3573,9 @@ let main () =
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in
+        (* The retry a closed feed waits for. *)
+        open_observer_if_due state ~retry_closed:true ~host ~port
+          ~mailbox:async_messages;
         start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages;

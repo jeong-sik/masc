@@ -3246,6 +3246,97 @@ def message_origin_history_fixture() -> HttpResponse:
     )
 
 
+LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
+
+## 정확한 5개 git 명령 (task478 worktree에서 실행):
+
+```bash
+cd <task478 worktree path>   # 저도 경로를 잃어버렸습니다 — branch: task478-server-unreadable-store
+git status --short
+git add lib/keeper/keeper_meta_store.ml lib/keeper/keeper_meta_store.mli
+git commit --amend -m 'feat(keeper): extend Problem_report_state with unreadable-store entries (task-478)'
+git fetch origin && git rebase origin/main
+git push --force-with-lease
+```
+
+## 작업 내역 (이미 working tree에 적용됨):
+- `keeper_meta_store.ml`: Problem_report_state에 entry type (detail+first_observed), snapshot(), snapshot_to_yojson(), unreadable_store_snapshot_to_yojson 추가
+- `keeper_meta_store.mli`: unreadable_store_snapshot_to_yojson 노출
+- `store_unreadable.ml`, `test_store_unreadable.ml`, `test_store_unreadable.inc`: `git rm`으로 삭제 (이미 staged)
+- `test/dune`: include 제거, entangled hunk revert
+
+## 참고:
+- task-470 릴리스는 operator에게 요청해야 할 수 있습니다 (제가 제3자 task를 릴리스하는 도구가 없음)
+- worktree 경로는 `git worktree list`로 찾을 수 있을 것입니다
+- PR #29815가 업데이트됩니다. CI는 이미 복구됨 (#29837 merged)"""
+
+
+def live_markdown_history_fixture() -> HttpResponse:
+    # Production reply msg-1787516761351436-321. The concrete Keeper identity
+    # is replaced with the same-length fixture identity required by the suite.
+    return (
+        200,
+        [
+            {
+                "id": "msg-1787516761351436-321",
+                "role": "assistant",
+                "content": LIVE_MARKDOWN_REPLY,
+                "ts": 1787516761.351436,
+            }
+        ],
+    )
+
+
+def live_markdown_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=80,
+        columns=90,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    pane_start = len(output)
+    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    tail = b"task478-server-unreadable-store"
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        tail,
+        start=pane_start,
+        timeout=5.0,
+    )
+    frame = frame_containing(bytes(output[pane_start:]), tail)
+    plain = CSI_RE.sub(b"", frame)
+    header = "┌─ bash".encode()
+    footer = "└".encode()
+    prose = "작업 내역".encode()
+    positions = [plain.find(needle) for needle in (header, tail, footer, prose)]
+    if any(position < 0 for position in positions):
+        raise AssertionError(
+            "live Markdown frame omitted its language header, complete long line, "
+            f"closing border, or following prose: {frame!r}"
+        )
+    if positions != sorted(positions):
+        raise AssertionError(f"live Markdown rows were reordered: {frame!r}")
+    if b"\x1b[7m" + header not in frame:
+        raise AssertionError(f"language header has no neutral background: {frame!r}")
+    if b"```bash" in plain:
+        raise AssertionError(f"raw fence marker leaked into the chat: {frame!r}")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    os.write(master_fd, b"q")
+
+
 def message_origin_badge_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -4649,6 +4740,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=message_origin_badge_interaction,
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper live Markdown code frame",
+        interact=live_markdown_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
         },
     )
     run_terminal_scenario(

@@ -7,7 +7,6 @@ code_refs:
   - bin/masc_tui_loader.ml
   - bin/masc_tui_http.ml
   - bin/masc_tui_types.ml
-  - bin/masc_tui_keeper_chat_recovery.ml
 ---
 
 # MASC TUI Guide

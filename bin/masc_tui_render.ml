@@ -2639,8 +2639,14 @@ let render_keeper_message (state : state) =
     box_line buf cols header;
     box_divider buf cols;
 
-    (* Message history *)
-    let history_height = max 0 (rows - 10 - status_rows) in
+    (* Message history. The fixed chrome is 7 rows — box top, header, its
+       divider, the input divider, the composer's first line, box bottom and
+       the footer — and every variable row (status, sending, queue, errors,
+       composer growth) is in [status_rows]. The old constant 10 reserved
+       three rows nothing drew, so the pane stopped three short of the
+       terminal's bottom edge. [message_viewport_supported] already states
+       the same chrome as [8 + status_rows]: 7 plus one history row. *)
+    let history_height = max 0 (rows - 7 - status_rows) in
     let messages = chat_rows_for state keeper_name in
     let layout_entries =
       List.map

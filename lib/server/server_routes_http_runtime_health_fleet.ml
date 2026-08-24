@@ -223,6 +223,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       | Health_status.Timeout ->
         true
       | Health_status.Ok
+      | Health_status.Idle
       | Health_status.Warming
       | Health_status.Snapshot_not_ready
       | Health_status.Degraded

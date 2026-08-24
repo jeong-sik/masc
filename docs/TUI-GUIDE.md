@@ -281,11 +281,20 @@ when chat opened from detail.
 
 ```
  Message to: sangsu  (port 8935)
-   [14:35:01] you:    hello, how are you?  [tui-019...]
-   [14:35:03] sangsu: ...reply text...     [tui-019...]
+   [14:35:01] From [you             ] tui-019...
+     hello, how are you?
+   [14:35:03] From [sangsu          ] tui-019...
+     ...reply text...
    > type here_
   Enter:send  Esc:list  Ctrl-U:clear line
 ```
+
+`From` is a fixed-width reverse-video badge: operator sources are cyan,
+Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is
+the colour pointer; ordinary operator and Keeper prose uses the terminal's
+default foreground so Markdown, code, links, and emphasis keep their own
+hierarchy. Connector and agent origins remain in the badge label (`vincent ·
+slack`, `taskmaster · agent`) instead of being inferred from row position.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line: a `thinking` row with

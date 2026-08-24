@@ -81,6 +81,44 @@ let chat_markdown_palette : Markdown.palette =
 let chat_markdown ~width body =
   Markdown.render ~palette:chat_markdown_palette ~width body
 
+(* Conversation colour names the source, not the prose. A keeper can return a
+   page of Markdown; painting every byte green turns syntax, emphasis, links,
+   and ordinary text into one undifferentiated status light. The compact
+   reverse-video badge gives the source a background that works with the
+   terminal's own light or dark palette, while the body keeps its semantic
+   Markdown colours. *)
+let chat_origin_style : Message_layout.style -> string = function
+  | Message_layout.User -> Ansi.cyan
+  | Message_layout.Keeper -> Ansi.blue
+  | Message_layout.Status -> Ansi.yellow
+  | Message_layout.Error -> Ansi.red
+  | Message_layout.Tool -> Ansi.magenta
+  | Message_layout.Thinking -> Ansi.gray
+
+let chat_body_style : Message_layout.style -> string = function
+  | Message_layout.User | Message_layout.Keeper -> Ansi.reset
+  | Message_layout.Status -> Ansi.yellow
+  | Message_layout.Error -> Ansi.red
+  | Message_layout.Tool | Message_layout.Thinking -> Ansi.dim
+
+let render_chat_row buf cols (row : Message_layout.row) =
+  match row.kind with
+  | Message_layout.Body ->
+      box_line_styled buf cols ~style:(chat_body_style row.style) row.text
+  | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
+      box_line_styled buf cols ~style:Ansi.dim
+        (Printf.sprintf "[%s]" timestamp)
+  | Message_layout.Metadata
+      (Message_layout.Origin { timestamp; role_label; request_label }) ->
+      let badge =
+        Printf.sprintf "%s%s %s %s" (chat_origin_style row.style) Ansi.reverse
+          role_label Ansi.reset
+      in
+      box_line buf cols
+        (Printf.sprintf "%s[%s]%s %sFrom%s %s %s%s%s" Ansi.dim timestamp
+           Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
+           Ansi.reset)
+
 (* The composer row every surface carries on its last terminal line.
 
    The recipient is whichever keeper the roster cursor points at. That cursor
@@ -2413,17 +2451,7 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (fun (row : Message_layout.row) ->
-          let style =
-            match row.style with
-            | Message_layout.User -> Ansi.cyan
-            | Message_layout.Keeper -> Ansi.green
-            | Message_layout.Status -> Ansi.yellow
-            | Message_layout.Error -> Ansi.red
-            | Message_layout.Tool -> Ansi.dim
-            | Message_layout.Thinking -> Ansi.dim
-          in
-          box_line_styled buf cols ~style row.text)
+        (render_chat_row buf cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do
@@ -2533,7 +2561,7 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line_styled buf cols ~style:Ansi.cyan (prefix ^ line))
+        box_line buf cols (Ansi.cyan ^ prefix ^ Ansi.reset ^ line))
       composer;
 
     let input_row =

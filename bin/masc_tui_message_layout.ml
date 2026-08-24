@@ -14,8 +14,21 @@ type entry = {
   body : string;
 }
 
+type metadata =
+  | Origin of {
+      timestamp : string;
+      role_label : string;
+      request_label : string;
+    }
+  | Continued_at of { timestamp : string }
+
+type row_kind =
+  | Metadata of metadata
+  | Body
+
 type row = {
   style : style;
+  kind : row_kind;
   text : string;
 }
 
@@ -335,10 +348,10 @@ let input_cursor_column ~terminal_cols ~input =
   min last_column
     (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
 
-(* Metadata rows read down the pane as a column: [timestamp] speaker request.
-   Speakers vary in width, so every role label is padded to one fixed column
-   and a too-long speaker truncates with an ellipsis rather than pushing the
-   column out for everyone else. *)
+(* Metadata rows read down the pane as a column: [timestamp] From [origin]
+   request. Origins vary in width, so every label is padded to one fixed badge
+   and a too-long label truncates with an ellipsis rather than pushing the
+   request column out for everyone else. *)
 let chat_role_label_column = 16
 
 let align_role_label label =
@@ -436,10 +449,10 @@ let wrap_words ~max_cells text =
 
    What a continuation keeps depends on what changed. A different moment is
    worth a row -- it says the pause between two things the same keeper said --
-   and the name column is left blank there, because that column is what the
-   eye follows down the pane and a blank in it reads as "still them". Two
-   messages stamped the same second have nothing left to say, so they get no
-   heading and read as the one message they look like. *)
+   but repeating an empty origin badge would look like an unnamed source, so
+   that continuation carries only its timestamp. Two messages stamped the
+   same second have nothing left to say, so they get no heading and read as
+   the one message they look like. *)
 let continues_previous ~(previous : entry option) (entry : entry) =
   match previous with
   | None -> false
@@ -449,24 +462,29 @@ let continues_previous ~(previous : entry option) (entry : entry) =
       && String.equal previous.request_label entry.request_label
 
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
-  let text =
+  let metadata =
     if not (continues_previous ~previous entry) then
-      Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label
-        entry.request_label
+      Some
+        ( Origin
+            { timestamp = entry.timestamp;
+              role_label = entry.role_label;
+              request_label = entry.request_label;
+            }
+        , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
+            entry.request_label )
     else
       match previous with
-      | Some previous when String.equal previous.timestamp entry.timestamp -> ""
+      | Some previous when String.equal previous.timestamp entry.timestamp -> None
       | Some _ | None ->
-          (* As wide as this row's own label rather than the shared column
-             width: the blank lines up with the name above it without this
-             having to assume the caller padded to that column. *)
-          Printf.sprintf "[%s] %s" entry.timestamp
-            (String.make (display_width entry.role_label) ' ')
+          Some
+            ( Continued_at { timestamp = entry.timestamp }
+            , Printf.sprintf "[%s]" entry.timestamp )
   in
-  if String.equal text "" then None
-  else
+  match metadata with
+  | None -> None
+  | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
-    Some { style = entry.style; text = fitted }
+    Some { style = entry.style; kind = Metadata metadata; text = fitted }
 
 let rows_of_entry ?markdown ~inner_width ~previous entry =
   let body_width = max 4 (inner_width - 2) in
@@ -491,7 +509,8 @@ let rows_of_entry ?markdown ~inner_width ~previous entry =
   in
   let body_rows =
     body_chunks
-    |> List.map (fun chunk -> { style = entry.style; text = "  " ^ chunk })
+    |> List.map (fun chunk ->
+      { style = entry.style; kind = Body; text = "  " ^ chunk })
   in
   match metadata_row ~previous ~inner_width entry with
   | None -> body_rows

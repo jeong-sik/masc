@@ -68,9 +68,15 @@ type kind =
                 was not taught — unlabelled beats guessed. *)
       }
   | Said_by_keeper
-  | Delivery_failed
+  | Delivery_failed of { origin_request_id : string option }
       (** An assistant row the server marked [transport_failure]: the reply
-          did not reach its destination. Not keeper speech. *)
+          did not reach its destination. Not keeper speech.
+
+          [origin_request_id] is the operation the server persisted this row
+          under, which is the id the client dispatched the turn with. It is
+          what lets a session drop its own row for the same failure once this
+          one arrives, rather than drawing both. [None] for a row the server
+          wrote under another producer's key, or under none. *)
   | Tool_calls of string list
       (** One block of finished calls, already formatted as rows. Either
           consecutive [role: "tool"] rows, or the tool steps of one

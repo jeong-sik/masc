@@ -28,7 +28,7 @@ type kind =
       ; surface : Surface.t option
       }
   | Said_by_keeper
-  | Delivery_failed
+  | Delivery_failed of { origin_request_id : string option }
   | Tool_calls of string list
   | Reasoning of string list
 
@@ -306,7 +306,22 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
       | Some "assistant" -> (
           match string_field fields "kind" with
           | Some "transport_failure" ->
-              [ Utterance { at; kind = Delivery_failed; text = content } ]
+              (* The server already sends the append-once identity it stored
+                 the row under. Only an operation key names a turn this client
+                 dispatched; the other producers get [None] rather than a
+                 borrowed id. *)
+              let origin_request_id =
+                match List.assoc_opt "delivery_key" fields with
+                | Some (`Assoc key_fields) -> (
+                    match string_field key_fields "kind" with
+                    | Some "operation" -> string_field key_fields "operation_id"
+                    | Some _ | None -> None)
+                | Some _ | None -> None
+              in
+              [ Utterance
+                  { at; kind = Delivery_failed { origin_request_id }
+                  ; text = content }
+              ]
           | Some _ | None ->
               (* An autonomous turn persists what it did as a trace block and
                  often says nothing in [content]: on one live keeper 32 of

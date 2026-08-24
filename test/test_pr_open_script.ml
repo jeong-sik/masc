@@ -231,9 +231,12 @@ let test_source_avoids_mapfile_only_bash4_features () =
   check bool "script no longer uses mapfile" false
     (String_util.contains_substring content "mapfile ");
   check bool "script no longer uses readarray" false
-    (String_util.contains_substring content "readarray ");
-  check bool "script has bash-compatible changed file loader" true
-    (String_util.contains_substring content "load_changed_files()")
+    (String_util.contains_substring content "readarray ")
+(* load_changed_files() was the third check: the bash-3 replacement for the
+   mapfile call this test removed. The script does not read changed files any
+   more, so asking for the replacement by name asks a deleted function to
+   still be there. What the check is for -- no bash-4-only builtins -- is the
+   two above it. *)
 
 let test_script_runs_under_system_bash_without_watch () =
   with_temp_dir "pr-open-script" (fun dir ->
@@ -285,11 +288,13 @@ let test_script_runs_under_system_bash_without_watch () =
         (String_util.contains_substring synced_body "<!-- COMMIT-LINEAGE:START -->");
       check bool "writes commit lineage commit subject" true
         (String_util.contains_substring synced_body "feature commit");
-      let labels = read_file gh_labels in
-      check bool "adds enhancement label for code changes" true
-        (String_util.contains_substring labels "\"enhancement\"");
-      check bool "does not add docs label for code-only change" false
-        (String_util.contains_substring labels "\"docs\""))
+      (* The label assertions were here. They read a file the fake gh writes
+         only when the script calls the labels endpoint, and the script calls
+         it only for labels passed on the command line: #29309 replaced the
+         labels this script used to derive from the changed files with a
+         declarative taxonomy. The derivation is gone, so is the loader that
+         fed it, and so is what these two checked. *)
+      ())
 
 let test_script_restores_draft_when_create_returns_ready () =
   with_temp_dir "pr-open-script-draft-restore" (fun dir ->

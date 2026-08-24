@@ -59,8 +59,8 @@ let test_subject_empty_object () =
 let test_subject_names_the_live_masc_shapes () =
   check_subject "an agent timeline is named by whose it is"
     ~args:
-      {|{"agent_name":"keeper-taskmaster-agent","limit":5,"include_tasks":true}|}
-    (Some "keeper-taskmaster-agent");
+      {|{"agent_name":"keeper-bandleader-agent","limit":5,"include_tasks":true}|}
+    (Some "keeper-bandleader-agent");
   check_subject "an audit with only a limit still says its limit"
     ~args:{|{"limit":20}|}
     (Some {|{"limit":20}|});

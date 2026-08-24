@@ -1,0 +1,49 @@
+# Test suites that `dune build @test/runtest` runs and that do not pass.
+#
+# scripts/ci-run-test-suite.sh compares the suites that actually fail against
+# this list and fails CI when the two differ in either direction: a suite that
+# fails without being listed is a new break, and a suite listed here that
+# passes is a fix that should take its line out. Neither is allowed to sit.
+#
+# This file exists because the alternative was worse. CI used to name the 894
+# suites it wanted to run, one at a time, across 26 workflow steps and a
+# 1,000-line shell script. A suite left out of that list was not run and not
+# reported, so a hard cut could make a field required, rot the fixture, and
+# leave no trace -- six suites reached 2026-08 that way and were repaired in
+# #29880, #29883 and #29887 only because someone went looking. Naming what is
+# broken is a shorter list than naming what works, and it says why.
+#
+# Only suites that produce a stable verdict belong here. A suite that hangs or
+# answers differently on two runs has no verdict to record, and listing it
+# turns this ratchet red on whichever runs disagree with the list; those come
+# off the alias with an enabled_if in their own stanza instead, next to the
+# reason. test_fusion_wake is the current one (#29064).
+#
+# Measured 2026-08-24 against 42e320b44b, one `dune build @test/runtest-<name>`
+# per suite. The first pass gave test_tools_coverage a 180-second deadline it
+# spent compiling; it runs in 7 seconds once built and fails one assertion of
+# forty. A deadline that covers the build measures the build.
+
+# --- assertions that fail -------------------------------------------------
+test_dashboard                               # Keepers: a keepers section with an entry
+test_dashboard_http_core                     # executor_pool
+test_dashboard_namespace_truth               # read_model: a keeper-only workspace
+test_fs_compat                               # save_file_atomic: strict payload cancellation
+test_fs_compat_capability_exact_read         # conformance: fatal backtrace propagation
+test_fs_compat_capability_head               # authority: absent publish
+test_fs_compat_capability_write              # publication: replace fatal and cancellation
+test_keeper_board_attention_exact_flow       # production adapter: resumable status gate
+test_keeper_fs_directory_durability          # durable commit observer: observer exception
+test_keeper_keepalive_helpers                # current_task_reconciliation
+test_keeper_msg_async_terminal_event         # on_worker_aborted: operator cancel
+test_keeper_tool_dispatch_runtime            # execute_keeper_tool_call_with_outcome
+test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
+test_server_mcp_session_persist              # persistence: save/forget/load round-trip
+test_tools_coverage                          # analyze_image has no masc_/keeper_/tool_ namespace
+
+# --- cannot be exercised where it stands ----------------------------------
+# The defence is live: with_deepest_existing_parent descends one component at a
+# time with Eio.Path.open_dir and never re-reads the path string. The race has
+# nowhere to enter, because a keeper can only write inside the playground and
+# playground writes skip the gate the injection point sits behind (#29858).
+test_keeper_fs_edit_patch

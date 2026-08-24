@@ -276,6 +276,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_web_tool_toml_parity
+  test_search_files_toml_parity
+  test_filesystem_shard_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -324,6 +327,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_exec_shell_command_gate
+  test_shell_costume
   test_keeper_classifier_helper
   test_turn_id_propagation
   test_auth_strict_mode
@@ -601,6 +605,9 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
+  test_web_tool_toml_parity
+  test_search_files_toml_parity
+  test_filesystem_shard_toml_parity
   test_library_tool_toml_parity
   test_execute_tool_toml_parity
   test_keeper_schema_toml_parity
@@ -650,6 +657,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_exec_shell_command_gate
+  test_shell_costume
   test_keeper_classifier_helper
   test_turn_id_propagation
   test_auth_strict_mode
@@ -1977,6 +1985,8 @@
 
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
+
+(include stanzas/test_keeper_meta_config_not_durable.inc)
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 

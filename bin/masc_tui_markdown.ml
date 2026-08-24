@@ -13,6 +13,8 @@ type palette = {
   rule : span;
   bullet : string;
   code_gutter : string;
+  code_header : span;
+  code_border : span;
   quote_gutter : string;
   table_header : span;
   table_gutter : string;
@@ -38,6 +40,8 @@ let plain_palette =
   ; rule = ("", "")
   ; bullet = "-"
   ; code_gutter = "| "
+  ; code_header = ("", "")
+  ; code_border = ("", "")
   ; quote_gutter = "> "
   ; table_header = ("", "")
   ; table_gutter = " | "
@@ -754,18 +758,42 @@ let styled_piece palette (text, kind) =
    row falls back to the single-span cell split -- a code row keeps its
    alignment before it keeps its colours, because the alignment is why it
    was fenced. *)
-let styled_code_row palette ~width pieces =
+let styled_code_rows palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
   let plain = String.concat "" (List.map fst pieces) in
   let cells = Layout.display_width plain in
   if cells <= body_width then
-    gutter ^ String.concat "" (List.map (styled_piece palette) pieces)
+    [ gutter ^ String.concat "" (List.map (styled_piece palette) pieces) ]
   else
     let opening, closing = palette.code in
     Layout.split_cells ~max_cells:body_width plain
     |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
-    |> String.concat ""
+
+let horizontal cells =
+  String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))
+
+let styled_span (opening, closing) text = opening ^ text ^ closing
+
+(* The tag was previously consumed only to choose a lexer, so [```bash] and an
+   untagged fence looked identical. Fill the row so reverse video can provide a
+   terminal-theme-safe background without choosing a light- or dark-only
+   colour. A very long tag is clipped as one row; it cannot push the frame. *)
+let code_header palette ~width language =
+  let stem = "\xe2\x94\x8c\xe2\x94\x80 " ^ language ^ " " in
+  let stem =
+    if Layout.display_width stem <= width then stem
+    else
+      match Layout.split_cells ~max_cells:width stem with
+      | first :: _ -> first
+      | [] -> ""
+  in
+  let remaining = max 0 (width - Layout.display_width stem) in
+  styled_span palette.code_header (stem ^ horizontal remaining)
+
+let code_footer palette ~width =
+  styled_span palette.code_border
+    ("\xe2\x94\x94" ^ horizontal (max 0 (width - 1)))
 
 (* Fenced code is not wrapped at spaces: the alignment is the reason it was
    fenced. A line wider than the row is split where the row ends. *)
@@ -1007,33 +1035,42 @@ let render ~palette ~width text =
      an unclosed fence still renders what it holds -- because the lexer reads
      the body whole; its state, a comment opened rows ago, decides the colour
      of rows it has not reached yet. *)
-  let emit_fence lexer rev_body =
+  let emit_fence ~closed language lexer rev_body =
     let body = List.rev rev_body in
-    match lexer with
-    | Some lexer ->
-        fence_rows_of_segments (lexer (String.concat "\n" body))
-        |> List.iter
-             (fun pieces -> emit_all [ styled_code_row palette ~width pieces ])
-    | None -> List.iter (fun line -> emit_all (code_rows palette ~width line)) body
+    Option.iter
+      (fun language -> emit_all [ code_header palette ~width language ])
+      language;
+    (match lexer with
+     | Some lexer ->
+         fence_rows_of_segments (lexer (String.concat "\n" body))
+         |> List.iter
+              (fun pieces -> emit_all (styled_code_rows palette ~width pieces))
+     | None ->
+         List.iter (fun line -> emit_all (code_rows palette ~width line)) body);
+    if closed && Option.is_some language then
+      emit_all [ code_footer palette ~width ]
   in
   let rec walk fence rev_body = function
     | [] -> (
         match fence with
-        | Some (_, lexer) -> emit_fence lexer rev_body
+        | Some (_, language, lexer) ->
+            emit_fence ~closed:false language lexer rev_body
         | None -> ())
     | line :: rest -> (
         match fence with
-        | Some (marker, lexer) when closes_fence line ~opened:(Some marker) ->
-            emit_fence lexer rev_body;
+        | Some (marker, language, lexer)
+          when closes_fence line ~opened:(Some marker) ->
+            emit_fence ~closed:true language lexer rev_body;
             walk None [] rest
         | Some _ -> walk fence (line :: rev_body) rest
         | None -> (
             match fence_marker line with
             | Some marker ->
+                let language = fence_language line in
                 let lexer =
-                  Option.bind (fence_language line) lexer_of_language
+                  Option.bind language lexer_of_language
                 in
-                walk (Some (marker, lexer)) [] rest
+                walk (Some (marker, language, lexer)) [] rest
             | None -> (
                 match table_at line rest with
                 | Some (header, alignments, body, remaining) ->

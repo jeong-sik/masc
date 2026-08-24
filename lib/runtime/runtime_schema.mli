@@ -193,6 +193,8 @@ type binding =
   ; price_output : float option
   ; keep_alive : string option
   ; num_ctx : int option
+  ; repeat_penalty : float option
+  ; repeat_last_n : int option
   ; return_progress : bool option
   }
 [@@deriving show, eq]

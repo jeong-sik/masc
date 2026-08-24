@@ -25,7 +25,7 @@ let schema_of_name name : tool_schema =
      | Error message -> failwith message)
 ;;
 
-let read_file = schema_of_name "tool_read_file"
-let edit_file = schema_of_name "tool_edit_file"
-let write_file = schema_of_name "tool_write_file"
-let search_files = schema_of_name "tool_search_files"
+let read_file = schema_of_name "Read"
+let edit_file = schema_of_name "Edit"
+let write_file = schema_of_name "Write"
+let search_files = schema_of_name "Grep"

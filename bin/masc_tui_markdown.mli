@@ -33,6 +33,9 @@ type palette = {
   rule : span;
   bullet : string;  (** Drawn in place of the source's [-], [*] or [+]. *)
   code_gutter : string;  (** Drawn left of every fenced-code row. *)
+  code_header : span;
+      (** Style for the width-filling header of a language-tagged fence. *)
+  code_border : span;  (** Style for that fence's closing border. *)
   quote_gutter : string;
   table_header : span;
   table_gutter : string;
@@ -56,9 +59,10 @@ val render : palette:palette -> width:int -> string -> string list
 
     Fenced code keeps its own line breaks — wrapping a diff at a word boundary
     destroys the alignment that made it worth fencing — and is hard-split only
-    where a line is wider than the row (a row past the width also keeps the
-    single code span: alignment outranks colour). Everything else wraps at
-    spaces.
+    where a line is wider than the row. Every split chunk is a separate terminal
+    row; concatenating them recovers the complete source line. A tagged fence
+    also draws a header containing its language, and a closed tagged fence draws
+    a closing border. Everything else wraps at spaces.
 
     A fence whose tag names a language this module lexes — [ocaml], [ml],
     [bash] or friends, [json] — has its body tokenised whole: reserved words

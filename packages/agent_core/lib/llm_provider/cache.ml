@@ -68,6 +68,8 @@ let request_fingerprint
                      ; previous_response_id
                      ; connect_timeout_s
                      ; max_concurrent_requests
+                     ; repeat_penalty
+                     ; repeat_last_n
                      }
     =
     config

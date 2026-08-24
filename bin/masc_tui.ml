@@ -555,6 +555,8 @@ type async_msg =
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Runtime_surface_loaded of
+      int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of (Masc.Tui_decode.tool_snapshot, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
@@ -922,6 +924,33 @@ let launch_connectors_load state ~mailbox =
   | None ->
       enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
 
+let launch_runtime_surface_load state ~mailbox ~force =
+  match state.runtime_surface_inflight with
+  | Some _ -> if force then state.runtime_surface_force_pending <- true
+  | None ->
+      state.runtime_surface_generation <- state.runtime_surface_generation + 1;
+      let generation = state.runtime_surface_generation in
+      state.runtime_surface_inflight <- Some generation;
+      let host = Env_config_core.masc_host () in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_runtime_surface ~host ~port ~force with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Runtime_surface_loaded (generation, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Runtime_surface_loaded
+                (generation, Error "Eio switch is unavailable")))
+
 let launch_repositories_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -1055,6 +1084,37 @@ let launch_verification_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+
+(* Move to a surface, fetching what that surface shows on arrival. Tab,
+   Shift-Tab, and any future jump go through here so no direction can forget
+   a load the other performs. Surfaces not listed refresh on the periodic
+   cadence ([surface_needs]); the ones here are snapshots that would
+   otherwise read as empty until the next tick. *)
+let goto_surface state ~mailbox (destination : surface) =
+  (match destination with
+   | Lanes -> launch_lanes_load state ~mailbox
+   | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+   | Schedules -> launch_schedules_load state ~mailbox
+   | Verification -> launch_verification_load state ~mailbox
+   | Harness -> launch_harness_load state ~mailbox
+   | Fusion ->
+       launch_fusion_runs_load state ~mailbox;
+       (match state.fusion_mode with
+        | Fusion_list -> ()
+        | Fusion_detail run_id ->
+            launch_fusion_detail_load state ~mailbox ~run_id)
+   | Repositories -> launch_repositories_load state ~mailbox
+   | Connectors -> launch_connectors_load state ~mailbox
+   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+   | Tools -> launch_tools_load state ~mailbox
+   | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
+  (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
+     arm did on the Approvals -> Board step. *)
+  (match state.view with
+   | Approvals when destination <> Approvals ->
+       state.pending_approval_action <- None
+   | _ -> ());
+  state.view <- destination
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   let host = Env_config_core.masc_host () in
@@ -3229,6 +3289,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.connectors <- Some snapshot;
           state.connectors_error <- None
       | Error detail -> state.connectors_error <- Some detail)
+  | Runtime_surface_loaded (generation, result) ->
+      let is_current = generation = state.runtime_surface_generation in
+      (match state.runtime_surface_inflight with
+       | Some inflight when inflight = generation ->
+           state.runtime_surface_inflight <- None
+       | Some _ | None -> ());
+      if is_current then
+        (match result with
+         | Ok load ->
+             let previous_probe =
+               Option.bind state.runtime_surface (fun snapshot ->
+                   snapshot.Tui_decode.rss_probe)
+             in
+             let probe, probe_error =
+               match load.Masc_tui_loader.rsl_probe with
+               | Ok current -> Some current, None
+               | Error detail -> previous_probe, Some detail
+             in
+             (match
+                Tui_decode.join_runtime_surface ~probe ~probe_error
+                  ~resolved:load.rsl_resolved
+              with
+              | Ok snapshot ->
+                  state.runtime_surface <- Some snapshot;
+                  state.runtime_surface_error <- None
+              | Error detail -> state.runtime_surface_error <- Some detail)
+         | Error detail ->
+             (* The last joined reading remains visible. An authority read or
+                decode failure is not an empty lane inventory. *)
+             state.runtime_surface_error <- Some detail);
+      if is_current && state.runtime_surface_force_pending then begin
+        state.runtime_surface_force_pending <- false;
+        launch_runtime_surface_load state ~mailbox ~force:true
+      end
   | Repositories_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -3755,6 +3849,9 @@ let main () =
             | Repositories ->
                 launch_repositories_load state ~mailbox:async_messages
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
+            | Runtime ->
+                launch_runtime_surface_load state ~mailbox:async_messages
+                  ~force:true
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
@@ -3762,59 +3859,18 @@ let main () =
             | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
-       | Some "\t" ->
-           (* Tab cycles through primary surfaces *)
-           (match state.view with
-            | Overview -> state.view <- Acting
-            | Acting -> state.view <- Keepers Keeper_list
-            | Keepers _ ->
-                launch_lanes_load state ~mailbox:async_messages;
-                state.view <- Lanes
-            | Lanes ->
-                (* Loaded on arrival: a held call is on a short clock, and
-                   showing none until the next periodic refresh reads as
-                   "nothing is waiting". *)
-                launch_keeper_tool_approvals_load state
-                  ~mailbox:async_messages;
-                state.view <- Approvals
-            | Approvals ->
-                state.pending_approval_action <- None;
-                state.view <- Board
-            | Board -> state.view <- Planning
-            | Planning ->
-                (* Loaded on arrival: the schedule page is a snapshot of the
-                   store, and a stale one would answer "why is this keeper
-                   awake" with yesterday's rows. *)
-                launch_schedules_load state ~mailbox:async_messages;
-                state.view <- Schedules
-            | Schedules ->
-                (* Loaded on arrival: the queue is what the surface is, so
-                   showing it empty until a refresh would read as "nothing is
-                   waiting". *)
-                launch_verification_load state ~mailbox:async_messages;
-                state.view <- Verification
-            | Verification ->
-                launch_harness_load state ~mailbox:async_messages;
-                state.view <- Harness
-            | Harness ->
-                launch_fusion_runs_load state ~mailbox:async_messages;
-                (match state.fusion_mode with
-                 | Fusion_list -> ()
-                 | Fusion_detail run_id ->
-                     launch_fusion_detail_load state ~mailbox:async_messages
-                       ~run_id);
-                state.view <- Fusion
-            | Fusion ->
-                launch_repositories_load state ~mailbox:async_messages;
-                state.view <- Repositories
-            | Repositories ->
-                launch_connectors_load state ~mailbox:async_messages;
-                state.view <- Connectors
-            | Connectors ->
-                launch_tools_load state ~mailbox:async_messages;
-                state.view <- Tools
-            | Tools -> state.view <- System_logs
-            | System_logs -> state.view <- Overview)
+       | Some "\t" | Some "shift-tab" ->
+           (* Tab and Shift-Tab walk the ring the surface strip draws, in the
+              two directions. Arrival loads live in [goto_surface] so both
+              directions (and any future jump) fetch the same things. *)
+           let ring = Masc_tui_types.surface_ring in
+           let count = List.length ring in
+           let step = if key = Some "\t" then 1 else count - 1 in
+           let index =
+             (Masc_tui_types.surface_ring_index state.view + step) mod count
+           in
+           goto_surface state ~mailbox:async_messages
+             (fst (List.nth ring index))
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
@@ -3885,7 +3941,7 @@ let main () =
                 end
                 else state.task_focus <- false
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Verification | Harness | Repositories | Connectors | Tools
+            | Verification | Harness | Repositories | Connectors | Runtime | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -3988,6 +4044,10 @@ let main () =
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.connectors_scroll
+            | Runtime ->
+                state.runtime_surface_scroll <-
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                    ~current:state.runtime_surface_scroll
             | Tools -> state.tools_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.tools_scroll
@@ -4104,6 +4164,11 @@ let main () =
                   state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.connectors_scroll
+            | Runtime ->
+                if state.runtime_surface_scroll > 0 then
+                  state.runtime_surface_scroll <-
+                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                      ~current:state.runtime_surface_scroll
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
@@ -4213,7 +4278,7 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Tools | System_logs -> ())
+            | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -4285,7 +4350,7 @@ let main () =
                  | None -> ())
             | Overview | Acting | Keepers (Keeper_logs | Keeper_calls | Keeper_message)
             | Lanes | Board | Approvals | Planning | Schedules
-            | Verification | Harness | Fusion | Repositories | Connectors | Tools
+            | Verification | Harness | Fusion | Repositories | Connectors | Runtime | Tools
             | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -4351,7 +4416,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -4381,7 +4446,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -4404,7 +4469,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4414,7 +4479,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
               "wake up" on a keeper row. The surface decides which one is
@@ -4436,7 +4501,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs
             -> ())
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
@@ -4448,7 +4513,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
        | Some "a" | Some "A" ->
            (match state.view with
             | Keepers Keeper_runtime_pick -> ()
@@ -4456,7 +4521,7 @@ let main () =
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Connectors | Tools | System_logs -> ())
+            | Fusion | Repositories | Connectors | Runtime | Tools | System_logs -> ())
       | _ -> ());
 
       (* A refresh already running was asked for what the surface open when it
@@ -4531,6 +4596,11 @@ let main () =
          | Connectors ->
              (* Reachability is the column that moves on its own. *)
              launch_connectors_load state ~mailbox:async_messages
+         | Runtime ->
+             (* Both authorities can move independently. Single-flight keeps
+                a slow authenticated read from stacking across ticks. *)
+             launch_runtime_surface_load state ~mailbox:async_messages
+               ~force:false
          | Tools ->
              (* The inventory is near-static, but a tool whose projection
                 changes is exactly what this surface is read for. *)

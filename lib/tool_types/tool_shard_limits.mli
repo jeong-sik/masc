@@ -18,12 +18,6 @@ val read_file_default_max_bytes : int
     [Keeper_tool_filesystem_runtime]. Surfacing it here keeps both consumers
     locked to the same number. *)
 
-val read_file_default_max_bytes_string : string
-(** [string_of_int read_file_default_max_bytes]. Pre-rendered
-    so the schema description string can include it without a
-    per-schema-render allocation, and so the schema stays a
-    structural constant rather than a function call result. *)
-
 val read_file_max_max_bytes : int
 (** Ceiling for an explicit [max_bytes] on [Read]. A caller asking for more is
     clamped to this. *)

@@ -2054,7 +2054,7 @@ let keeper_tool_approvals_json =
     [ ( "pending"
       , `List
           [ `Assoc
-              [ ("keeper", `String "sangsu")
+              [ ("keeper", `String "orbiter")
               ; ("tool_call_id", `String "call-1")
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
@@ -2069,7 +2069,7 @@ let test_decode_keeper_tool_approvals () =
   match Tui_decode.decode_keeper_tool_approvals keeper_tool_approvals_json with
   | Error err -> Alcotest.fail err
   | Ok [ held ] ->
-      Alcotest.(check string) "keeper" "sangsu" held.Tui_decode.kta_keeper;
+      Alcotest.(check string) "keeper" "orbiter" held.Tui_decode.kta_keeper;
       Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
@@ -2080,36 +2080,56 @@ let test_decode_keeper_tool_approvals () =
 
 let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   let thin =
-    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "sangsu") ] ]) ]
+    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "orbiter") ] ]) ]
   in
   match Tui_decode.decode_keeper_tool_approvals thin with
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
 
-(* GET /api/v1/runtime/resolved, the picker's slice. *)
+(* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
+let picker_default_runtime =
+  `Assoc
+    [ ("id", `String "ollama_cloud.deepseek")
+    ; ("provider", `String "Ollama Cloud")
+    ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("keeper_dispatchable", `Bool true)
+    ; ("keeper_dispatch_blocked_reason", `Null)
+    ; ("is_default", `Bool false)
+    ]
+
 let runtime_resolved_json =
   `Assoc
-    [ ( "runtimes"
+    [ ("generated_at_iso", `String "2026-08-24T10:20:02Z")
+    ; ("source", `String "/api/v1/runtime/resolved")
+    ; ("config_path", `String "/workspace/config/runtime.toml")
+    ; ("default_runtime", picker_default_runtime)
+    ; ( "runtimes"
       , `List
-          [ `Assoc
-              [ ("id", `String "ollama_cloud.deepseek")
-              ; ("provider", `String "Ollama Cloud")
-              ; ("model", `String "deepseek-v4-flash:0731")
-              ; ("keeper_dispatchable", `Bool true)
-              ; ("is_default", `Bool true)
-              ]
+          [ picker_default_runtime
           ; `Assoc
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
               ; ("model", `String "embed")
               ; ("keeper_dispatchable", `Bool false)
+              ; ("keeper_dispatch_blocked_reason", `String "not a keeper model")
               ; ("is_default", `Bool false)
+              ]
+          ] )
+    ; ( "lanes"
+      , `List
+          [ `Assoc
+              [ ("id", `String "ollama_cloud.deepseek")
+              ; ( "runtime_ids"
+                , `List
+                    [ `String "ollama_cloud.deepseek"; `String "exact.embed" ] )
+              ; ("preferred_candidate", `Null)
+              ; ("preferred_at_ts", `Null)
               ]
           ] )
     ; ( "assignments"
       , `List
           [ `Assoc
-              [ ("keeper", `String "sangsu")
+              [ ("keeper", `String "orbiter")
               ; ("assignment_source", `String "explicit")
               ; ( "resolved"
                 , `Assoc
@@ -2130,19 +2150,239 @@ let test_decode_runtime_resolved () =
            Alcotest.(check string) "id" "ollama_cloud.deepseek"
              first.Tui_decode.ro_id;
            Alcotest.(check bool) "dispatchable" true first.ro_dispatchable;
-           Alcotest.(check bool) "default" true first.ro_is_default
+           Alcotest.(check bool) "top-level default" true first.ro_is_default
        | [] -> Alcotest.fail "no runtimes");
       (match assignments with
        | [ a ] ->
-           Alcotest.(check string) "keeper" "sangsu" a.Tui_decode.ra_keeper;
+           Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
            Alcotest.(check string) "source" "explicit" a.ra_source;
            Alcotest.(check (option string)) "resolved id"
-             (Some "ollama_cloud.deepseek") a.ra_runtime_id
+             (Some "ollama_cloud.deepseek") a.ra_target_id
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
 
+let runtime_probe_provider ?(status = "reachable") ?(reachable = `Bool true)
+    ?(transport = "http") ?(http_status = `Int 200)
+    ?(latency_ms = `Float 12.5) ?(error = `Null) runtime_id =
+  `Assoc
+    [ "runtime_id", `String runtime_id
+    ; "provider_id", `String ("provider-" ^ runtime_id)
+    ; "provider_display_name", `String "Probe provider label"
+    ; "model_id", `String ("probe-model-" ^ runtime_id)
+    ; "model_api_name", `String ("probe-api-" ^ runtime_id)
+    ; "protocol", `String "openai"
+    ; "runtime_kind", `String (if String.equal transport "cli" then "cli" else "http")
+    ; "transport", `String transport
+    ; "auth_kind", `String "none"
+    ; "credential_required", `Bool false
+    ; "auth_present", `Bool false
+    ; "status", `String status
+    ; "reachable", reachable
+    ; "http_status", http_status
+    ; "latency_ms", latency_ms
+    ; "model_count", (if String.equal status "reachable" then `Int 7 else `Null)
+    ; "content_type", (if String.equal status "reachable" then `String "application/json" else `Null)
+    ; "downloaded_bytes", (if String.equal status "reachable" then `Int 128 else `Null)
+    ; "endpoint_url", (if String.equal transport "cli" then `Null else `String "https://runtime.invalid/v1")
+    ; "probe_url", (if String.equal transport "cli" then `Null else `String "https://runtime.invalid/v1/models")
+    ; "error", error
+    ; "checked_at", `String "2026-08-24T10:20:00Z"
+    ]
+
+let runtime_probe_surface_json ?(first_status = "reachable")
+    ?(first_reachable = `Bool true) () =
+  let providers =
+    [ runtime_probe_provider ~status:first_status ~reachable:first_reachable
+        "runtime-a"
+    ; runtime_probe_provider ~status:"skipped_cli" ~reachable:`Null
+        ~transport:"cli" ~http_status:`Null ~latency_ms:`Null
+        ~error:(`String "CLI runtimes do not expose an HTTP reachability endpoint")
+        "runtime-b"
+    ; runtime_probe_provider ~status:"network_error" ~reachable:(`Bool false)
+        ~http_status:`Null ~latency_ms:(`Float 45.0)
+        ~error:(`String "connection refused") "runtime-c"
+    ]
+  in
+  `Assoc
+    [ "generated_at", `String "2026-08-24T10:20:01Z"
+    ; "refreshed_at_unix", `Float 1787566800.0
+    ; "cache_ttl_sec", `Float 15.0
+    ; "cache_age_sec", `Float 16.0
+    ; "cache_hit", `Bool false
+    ; "refresh_state", `String "served_stale"
+    ; ( "probe"
+      , `Assoc
+          [ "source", `String "runtime.toml"
+          ; "status", `String "degraded"
+          ; "probe_ok", `Bool false
+          ; "checked_at", `String "2026-08-24T10:20:00Z"
+          ; ( "summary"
+            , `Assoc
+                [ "runtimes", `Int 3
+                ; "probed", `Int 2
+                ; "reachable", `Int 1
+                ; "failed", `Int 1
+                ; "skipped", `Int 1
+                ; "default_runtime_id", `String "runtime-a"
+                ] )
+          ; "providers", `List providers
+          ; "errors", `List [ `String "runtime-c: network_error" ]
+          ; "observations", `List [ `String "metadata endpoints only" ]
+          ; "limitations", `List [ `String "no completion request" ]
+          ] )
+    ]
+
+let resolved_runtime id provider model =
+  `Assoc
+    [ "id", `String id
+    ; "provider", `String provider
+    ; "model", `String model
+    ; "effective_max_context", `Int 200000
+    ; "max_context_source", `String "capability"
+    ; "max_output_tokens", `Int 8192
+    ; "is_local", `Bool false
+    ; "is_default", `Bool false
+    ; "keeper_dispatchable", `Bool true
+    ; "keeper_dispatch_blocked_reason", `Null
+    ]
+
+let runtime_lane ?(preferred = None) ?(preferred_at = None) id runtime_ids =
+  `Assoc
+    [ "id", `String id
+    ; "runtime_ids", `List (List.map (fun runtime_id -> `String runtime_id) runtime_ids)
+    ; "preferred_candidate", (match preferred with Some value -> `String value | None -> `Null)
+    ; "preferred_at_ts", (match preferred_at with Some value -> `Float value | None -> `Null)
+    ]
+
+let runtime_resolved_surface_json ?(broken_preference = false) () =
+  let runtime_a = resolved_runtime "runtime-a" "Resolved A" "model-a" in
+  let runtimes =
+    [ runtime_a
+    ; resolved_runtime "runtime-b" "Resolved B" "model-b"
+    ; resolved_runtime "runtime-c" "Resolved C" "model-c"
+    ; resolved_runtime "runtime-d" "Resolved D" "model-d"
+    ]
+  in
+  let preferred_at = if broken_preference then None else Some 1787566700.0 in
+  `Assoc
+    [ "generated_at_iso", `String "2026-08-24T10:20:02Z"
+    ; "source", `String "/api/v1/runtime/resolved"
+    ; "config_path", `String "/workspace/config/runtime.toml"
+    ; "default_runtime", runtime_a
+    ; "runtimes", `List runtimes
+    ; ( "lanes"
+      , `List
+          [ runtime_lane ~preferred:(Some "runtime-b") ~preferred_at
+              "primary" [ "runtime-a"; "runtime-b" ]
+          ; runtime_lane "degraded" [ "runtime-c" ]
+          ; runtime_lane "unobserved" [ "runtime-d" ]
+          ] )
+    ; ( "assignments"
+      , `List
+          [ `Assoc
+              [ "keeper", `String "orbiter"
+              ; "assignment_source", `String "default"
+              ; ( "resolved"
+                , `Assoc [ "kind", `String "lane"; "id", `String "primary" ] )
+              ]
+          ] )
+    ]
+
+let test_decode_and_join_runtime_surface () =
+  match
+    Tui_decode.decode_runtime_surface_snapshot
+      ~probe_json:(runtime_probe_surface_json ())
+      ~resolved_json:(runtime_resolved_surface_json ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+      Alcotest.(check int) "all lane candidates" 4
+        (List.length snapshot.Tui_decode.rss_candidates);
+      Alcotest.(check int) "no probe-only rows" 0
+        snapshot.rss_unassigned_probe_count;
+      (match snapshot.rss_probe with
+       | Some probe ->
+           Alcotest.(check string) "freshness stays producer-owned"
+             "served_stale"
+             (Tui_decode.runtime_probe_refresh_state_to_string
+                probe.rps_refresh_state)
+       | None -> Alcotest.fail "fixture probe became unavailable");
+      (match snapshot.rss_candidates with
+       | first :: preferred :: failed :: unobserved :: [] ->
+           Alcotest.(check string) "lane order" "primary" first.rcr_lane_id;
+           Alcotest.(check int) "candidate position" 2 preferred.rcr_position;
+           Alcotest.(check string) "resolved provider wins" "Resolved A"
+             first.rcr_runtime.ro_provider;
+           Alcotest.(check (option (float 0.001))) "last success stays typed"
+             (Some 1787566700.0) preferred.rcr_preferred_at_ts;
+           (match failed.rcr_probe with
+            | Some row ->
+                Alcotest.(check string) "failure kind" "network_error"
+                  (Tui_decode.runtime_provider_status_to_string row.rpp_status)
+            | None -> Alcotest.fail "network failure became unobserved");
+           Alcotest.(check bool) "stale absence is unobserved" true
+             (Option.is_none unobserved.rcr_probe)
+       | rows -> Alcotest.failf "expected four candidate rows, got %d" (List.length rows))
+
+let test_runtime_probe_rejects_unknown_status () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~first_status:"ok" ())
+  with
+  | Ok _ -> Alcotest.fail "unknown provider status decoded"
+  | Error _ -> ()
+
+let test_runtime_probe_rejects_status_reachability_disagreement () =
+  match
+    Tui_decode.decode_runtime_probe_snapshot
+      (runtime_probe_surface_json ~first_reachable:(`Bool false) ())
+  with
+  | Ok _ -> Alcotest.fail "reachable status with false reachability decoded"
+  | Error _ -> ()
+
+let test_runtime_resolved_rejects_half_preference () =
+  match
+    Tui_decode.decode_runtime_resolved_snapshot
+      (runtime_resolved_surface_json ~broken_preference:true ())
+  with
+  | Ok _ -> Alcotest.fail "preferred candidate without its timestamp decoded"
+  | Error _ -> ()
+
+let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
+  match
+    Tui_decode.decode_runtime_resolved_snapshot (runtime_resolved_surface_json ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok resolved ->
+      (match
+         Tui_decode.join_runtime_surface ~probe:None
+           ~probe_error:(Some "probe permission denied") ~resolved
+       with
+       | Error detail -> Alcotest.fail detail
+       | Ok snapshot ->
+           Alcotest.(check int) "all resolved candidates remain" 4
+             (List.length snapshot.rss_candidates);
+           Alcotest.(check (option string)) "probe failure remains visible"
+             (Some "probe permission denied") snapshot.rss_probe_error;
+           Alcotest.(check bool) "every candidate is unobserved" true
+             (List.for_all
+                (fun row -> Option.is_none row.Tui_decode.rcr_probe)
+                snapshot.rss_candidates))
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_runtime_surface",
+      [ Alcotest.test_case "joins projection and observation in lane order" `Quick
+          test_decode_and_join_runtime_surface
+      ; Alcotest.test_case "rejects an unknown provider status" `Quick
+          test_runtime_probe_rejects_unknown_status
+      ; Alcotest.test_case "rejects status/reachability disagreement" `Quick
+          test_runtime_probe_rejects_status_reachability_disagreement
+      ; Alcotest.test_case "rejects half a sticky preference" `Quick
+          test_runtime_resolved_rejects_half_preference
+      ; Alcotest.test_case "keeps resolved rows without a probe" `Quick
+          test_runtime_surface_keeps_resolved_rows_without_a_probe
+      ] );
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved

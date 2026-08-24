@@ -1208,6 +1208,56 @@ let test_rotation_policy_drives_incompatible_drop () =
        (run ~rotation:Reasoning_replay_contract.Allow_endpoint_rotation other_contract))
 ;;
 
+(* One request is serialized twice: exact-output planning runs with
+   [stream:false], then admission runs with the transport's real flag. Both
+   project the same history, so this summary fires twice with what used to be
+   byte-identical payloads -- a pair that said nothing about which stage
+   produced it (#28636). The flag is what tells them apart. *)
+let test_drop_summary_names_its_serialization () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:non_replaying_capabilities
+      ()
+  in
+  let messages = history_with_reasoning (source_for_config config) in
+  let captured = ref [] in
+  Diag.set_sink (fun _level ~ctx:_ line -> captured := line :: !captured);
+  let build stream =
+    ignore (Backend_openai.build_request ~stream ~config ~messages ~tools:[] () : string)
+  in
+  build false;
+  build true;
+  Diag.set_sink (fun _ ~ctx:_ _ -> ());
+  let drop_payloads =
+    !captured
+    |> List.filter (fun line ->
+      match String.index_opt line '{' with
+      | None -> false
+      | Some i ->
+        (match Yojson.Safe.from_string (String.sub line i (String.length line - i)) with
+         | `Assoc fields ->
+           List.assoc_opt "event" fields = Some (`String "reasoning_replay_dropped")
+         | _ | (exception _) -> false))
+  in
+  check_int "both serializations reported a drop" 2 (List.length drop_payloads);
+  let stream_flags =
+    drop_payloads
+    |> List.filter_map (fun line ->
+      let i = String.index line '{' in
+      match Yojson.Safe.from_string (String.sub line i (String.length line - i)) with
+      | `Assoc fields -> List.assoc_opt "stream" fields
+      | _ | (exception _) -> None)
+    |> List.sort compare
+  in
+  check_bool
+    "the pair is distinguishable by its stream flag"
+    true
+    (stream_flags = [ `Bool false; `Bool true ])
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
@@ -1312,6 +1362,10 @@ let () =
             "every codec answers its own contract"
             `Quick
             test_every_codec_answers_its_own_contract
+        ; Alcotest.test_case
+            "the drop summary names its serialization"
+            `Quick
+            test_drop_summary_names_its_serialization
         ] )
     ]
 ;;

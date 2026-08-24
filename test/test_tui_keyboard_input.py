@@ -880,6 +880,8 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "runtime_class": "keeper",
                     "name": "alpha",
                     "status": "active",
+                    "health": "healthy",
+                    "paused": False,
                     "phase": "running",
                     "keepalive_running": True,
                     "autoboot_enabled": True,
@@ -890,6 +892,8 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "runtime_class": "keeper",
                     "name": "beta",
                     "status": "idle",
+                    "health": "idle",
+                    "paused": True,
                     "phase": "paused",
                     "keepalive_running": True,
                     "autoboot_enabled": True,
@@ -1494,7 +1498,7 @@ def wheel_scrolls_and_clicks_do_not(
     os.write(master_fd, b"\x1b")
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
     resize_and_wait(
         process,
         master_fd,
@@ -1511,12 +1515,12 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         rows=30,
         columns=100,
-        needle=b"Keeper: \x1b[1mbeta",
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
 
-    send_and_wait(process, master_fd, output, b"l", b"Keeper Logs: beta")
+    send_and_wait(process, master_fd, output, b"l", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 logs")
     resize_and_wait(
         process,
         master_fd,
@@ -1533,7 +1537,7 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         rows=30,
         columns=100,
-        needle=b"Keeper Logs: beta",
+        needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 logs",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
@@ -1604,7 +1608,7 @@ def keeper_detail_overscroll_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"Keeper: \x1b[1malpha",
+                b"Keepers \xe2\x96\xb8 \x1b[1malpha",
             )
             detail = resize_and_wait(
                 process,
@@ -1612,7 +1616,7 @@ def keeper_detail_overscroll_interaction(
                 output,
                 rows=14,
                 columns=100,
-                needle=b"Keeper: \x1b[1malpha",
+                needle=b"Keepers \xe2\x96\xb8 \x1b[1malpha",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -1670,7 +1674,7 @@ def keeper_detail_overscroll_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"Keeper: \x1b[1mbeta",
+                b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
             top = f"[1/{position_count}]".encode()
             if top not in beta:
@@ -1712,7 +1716,7 @@ def keeper_selection_identity_interaction(
         b"j",
         keeper_row_selected(b"beta"),
     )
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
     beta_metadata = keeper_metadata("beta")
@@ -1726,8 +1730,8 @@ def keeper_selection_identity_interaction(
         json.dumps(keeper_metadata("aardvark")), encoding="utf-8"
     )
     send_and_wait(process, master_fd, output, b"r", b"29453")
-    send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
+    send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
     (keepers_path / "beta.json").write_text("{", encoding="utf-8")
     read_available(master_fd, output)
@@ -1747,11 +1751,11 @@ def keeper_selection_identity_interaction(
         output,
         rows=30,
         columns=99,
-        needle=b"Keeper: \x1b[1mbeta",
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    if b"Keeper: \x1b[1malpha" in unreliable:
+    if b"Keepers \xe2\x96\xb8 \x1b[1malpha" in unreliable:
         raise AssertionError(
             f"unreliable Keeper snapshot retargeted beta detail: {unreliable!r}"
         )
@@ -1760,13 +1764,13 @@ def keeper_selection_identity_interaction(
         master_fd,
         output,
         b"ml",
-        b"Keeper Logs: beta",
+        b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 logs",
     )
-    if b"Message to: beta" in CSI_RE.sub(b"", stale_gate):
+    if b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat" in CSI_RE.sub(b"", stale_gate):
         raise AssertionError(
             f"unreliable Keeper snapshot opened message mode: {stale_gate!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
     alpha_metadata = keeper_metadata("alpha")
     alpha_metadata["current_task_id"] = "task-29454"
     (keepers_path / "alpha.json").write_text(
@@ -1787,11 +1791,11 @@ def keeper_selection_identity_interaction(
         master_fd,
         output,
         b"\r",
-        b"Keeper: \x1b[1malpha",
+        b"Keepers \xe2\x96\xb8 \x1b[1malpha",
     )
     after_selection_plain = CSI_RE.sub(b"", after_selection)
-    if b"Message to: alpha" in after_selection_plain:
-        failures.append("m opened Message to: alpha after beta disappeared")
+    if b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat" in after_selection_plain:
+        failures.append("m opened Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat after beta disappeared")
     if failures:
         raise AssertionError("; ".join(failures))
     os.write(master_fd, b"q")
@@ -1816,8 +1820,8 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             b"j",
             keeper_row_selected(b"beta"),
         )
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
-        send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
 
         read_available(master_fd, output)
@@ -1849,13 +1853,13 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
             output,
             rows=30,
             columns=99,
-            needle=b"Message to: beta",
+            needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         refreshed_plain = CSI_RE.sub(b"", refreshed)
         for expected in (
-            b"Message to: beta",
+            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             unavailable,
             b"Enter:disabled (Keeper unavailable)",
             b"> " + draft,
@@ -1865,7 +1869,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
                     f"periodic refresh lost Keeper message state {expected!r}: "
                     f"{refreshed!r}"
                 )
-        if b"Message to: alpha" in refreshed_plain:
+        if b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat" in refreshed_plain:
             raise AssertionError(
                 f"periodic refresh retargeted the draft to alpha: {refreshed!r}"
             )
@@ -1920,8 +1924,8 @@ def keeper_message_unreliable_roster_interaction(
             b"j",
             keeper_row_selected(b"beta"),
         )
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1mbeta")
-        send_and_wait(process, master_fd, output, b"m", b"Message to: beta")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
 
         read_available(master_fd, output)
@@ -1942,13 +1946,13 @@ def keeper_message_unreliable_roster_interaction(
             output,
             rows=30,
             columns=99,
-            needle=b"Message to: beta",
+            needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         unreliable_plain = CSI_RE.sub(b"", unreliable)
         for expected in (
-            b"Message to: beta",
+            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             b"Keeper roster is unavailable",
             b"Enter:disabled (roster unavailable)",
             b"> " + draft,
@@ -1993,8 +1997,8 @@ def quit_from_compact_message(
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
-    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     resize_and_wait(
         process,
         master_fd,
@@ -3016,13 +3020,13 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
-        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
         ascii_frame = send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
         assert_message_input_frame(
             ascii_frame,
-            row=25,
+            row=28,
             columns=100,
             input_text="A",
             cursor_column=8,
@@ -3039,7 +3043,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             combining_frame,
-            row=25,
+            row=28,
             columns=100,
             input_text=combining_text,
             cursor_column=8,
@@ -3052,7 +3056,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         typed_frame.decode("utf-8")
         assert_message_input_frame(
             typed_frame,
-            row=25,
+            row=28,
             columns=100,
             input_text=expected_text,
             cursor_column=13,
@@ -3069,7 +3073,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             narrow_frame,
-            row=25,
+            row=28,
             columns=16,
             input_text=expected_text,
             cursor_column=13,
@@ -3110,7 +3114,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
             output,
             rows=29,
             columns=100,
-            needle=b"Message to: alpha",
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
@@ -3132,7 +3136,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         if payload.get("message") != expected_text:
             raise AssertionError(f"Keeper chat changed UTF-8 message bytes: {body!r}")
 
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -3195,9 +3199,9 @@ def autonomous_turn_history_interaction() -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         pane_start = len(output)
-        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         # The transcript is fetched on a background fiber once the pane opens,
         # so the rows land in a later frame than the header.
         wait_for_output(
@@ -3218,7 +3222,7 @@ def autonomous_turn_history_interaction() -> Interaction:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -3246,6 +3250,97 @@ def message_origin_history_fixture() -> HttpResponse:
     )
 
 
+LIVE_MARKDOWN_REPLY = """@keeper-haneul-agent — 고마워요! Execute가 작동하는 세션이 있다면 정말 큰 도움이 됩니다.
+
+## 정확한 5개 git 명령 (task478 worktree에서 실행):
+
+```bash
+cd <task478 worktree path>   # 저도 경로를 잃어버렸습니다 — branch: task478-server-unreadable-store
+git status --short
+git add lib/keeper/keeper_meta_store.ml lib/keeper/keeper_meta_store.mli
+git commit --amend -m 'feat(keeper): extend Problem_report_state with unreadable-store entries (task-478)'
+git fetch origin && git rebase origin/main
+git push --force-with-lease
+```
+
+## 작업 내역 (이미 working tree에 적용됨):
+- `keeper_meta_store.ml`: Problem_report_state에 entry type (detail+first_observed), snapshot(), snapshot_to_yojson(), unreadable_store_snapshot_to_yojson 추가
+- `keeper_meta_store.mli`: unreadable_store_snapshot_to_yojson 노출
+- `store_unreadable.ml`, `test_store_unreadable.ml`, `test_store_unreadable.inc`: `git rm`으로 삭제 (이미 staged)
+- `test/dune`: include 제거, entangled hunk revert
+
+## 참고:
+- task-470 릴리스는 operator에게 요청해야 할 수 있습니다 (제가 제3자 task를 릴리스하는 도구가 없음)
+- worktree 경로는 `git worktree list`로 찾을 수 있을 것입니다
+- PR #29815가 업데이트됩니다. CI는 이미 복구됨 (#29837 merged)"""
+
+
+def live_markdown_history_fixture() -> HttpResponse:
+    # Production reply msg-1787516761351436-321. The concrete Keeper identity
+    # is replaced with the same-length fixture identity required by the suite.
+    return (
+        200,
+        [
+            {
+                "id": "msg-1787516761351436-321",
+                "role": "assistant",
+                "content": LIVE_MARKDOWN_REPLY,
+                "ts": 1787516761.351436,
+            }
+        ],
+    )
+
+
+def live_markdown_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=80,
+        columns=90,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    pane_start = len(output)
+    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    tail = b"task478-server-unreadable-store"
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        tail,
+        start=pane_start,
+        timeout=5.0,
+    )
+    frame = frame_containing(bytes(output[pane_start:]), tail)
+    plain = CSI_RE.sub(b"", frame)
+    header = "┌─ bash".encode()
+    footer = "└".encode()
+    prose = "작업 내역".encode()
+    positions = [plain.find(needle) for needle in (header, tail, footer, prose)]
+    if any(position < 0 for position in positions):
+        raise AssertionError(
+            "live Markdown frame omitted its language header, complete long line, "
+            f"closing border, or following prose: {frame!r}"
+        )
+    if positions != sorted(positions):
+        raise AssertionError(f"live Markdown rows were reordered: {frame!r}")
+    if b"\x1b[7m" + header not in frame:
+        raise AssertionError(f"language header has no neutral background: {frame!r}")
+    if b"```bash" in plain:
+        raise AssertionError(f"raw fence marker leaked into the chat: {frame!r}")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    os.write(master_fd, b"q")
+
+
 def message_origin_badge_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -3255,9 +3350,9 @@ def message_origin_badge_interaction(
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
-    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
-    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
     wait_for_output(
         process,
         master_fd,
@@ -3270,8 +3365,8 @@ def message_origin_badge_interaction(
     for needle, description in (
         (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
         (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
-        (b"\x1b[0m  operator-body-neutral", "neutral operator body"),
-        (b"\x1b[0m  keeper-body-neutral", "neutral Keeper body"),
+        (b"\x1b[36m\xe2\x94\x82\x1b[0m \x1b[0moperator-body-neutral", "gutter-marked operator body"),
+        (b"\x1b[34m\xe2\x94\x82\x1b[0m \x1b[0mkeeper-body-neutral", "gutter-marked Keeper body"),
     ):
         if needle not in frame:
             raise AssertionError(f"chat frame omitted {description}: {frame!r}")
@@ -3290,7 +3385,7 @@ def message_origin_badge_interaction(
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     os.write(master_fd, b"q")
 
 
@@ -3358,8 +3453,8 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             b"2",
             b"running claude-opus-5",
         )
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
-        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         if not alpha_history.requested.wait(timeout=3.0):
             raise AssertionError("alpha history request did not reach its fixture")
         send_and_wait(
@@ -3371,7 +3466,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x07", b"Message to: beta")
+        send_and_wait(process, master_fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         wait_for_output(
             process,
             master_fd,
@@ -3386,13 +3481,13 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             output,
             rows=31,
             columns=140,
-            needle=b"Message to: beta",
+            needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         beta_plain = CSI_RE.sub(b"", beta_frame)
         for expected in (
-            b"Message to: beta",
+            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             b"idle \xc2\xb7 paused claude-sonnet-4",
             b"Ctrl-G:next Keeper",
             b"beta-current-history-marker",
@@ -3412,7 +3507,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         alpha_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x07", b"Message to: alpha")
+        send_and_wait(process, master_fd, output, b"\x07", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         wait_for_output(
             process,
             master_fd,
@@ -3427,13 +3522,13 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             output,
             rows=30,
             columns=140,
-            needle=b"Message to: alpha",
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
         for expected in (
-            b"active \xc2\xb7 running claude-opus-5",
+            b"healthy \xc2\xb7 running claude-opus-5",
             b"alpha-current-history-marker",
             b"> alpha-draft",
         ):
@@ -3455,7 +3550,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             output,
             rows=31,
             columns=140,
-            needle=b"Message to: alpha",
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
@@ -3470,7 +3565,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             )
 
         beta_again_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x07", b"Message to: beta")
+        send_and_wait(process, master_fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         wait_for_output(
             process,
             master_fd,
@@ -3485,7 +3580,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             output,
             rows=30,
             columns=140,
-            needle=b"Message to: beta",
+            needle=b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25h",
         )
@@ -3495,7 +3590,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
                 raise AssertionError(
                     f"beta chat did not restore {expected!r}: {beta_again!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1mbeta")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
         os.write(master_fd, b"q")
 
     return interact
@@ -3562,7 +3657,7 @@ def keeper_calls_interaction() -> Interaction:
         ):
             if needle not in pane:
                 raise AssertionError(f"Keeper Calls did not draw {what}: {pane!r}")
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -3781,6 +3876,340 @@ def keeper_lanes_interaction(
                 f"{stale_plain!r}"
             )
         os.write(master_fd, b"q")
+
+    return interact
+
+
+RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
+RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
+RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
+
+
+def runtime_probe_provider(
+    runtime_id: str,
+    *,
+    status: str,
+) -> dict[str, object]:
+    cli = status == "skipped_cli"
+    reachable = status == "reachable"
+    failed = not cli and not reachable
+    return {
+        "runtime_id": runtime_id,
+        "provider_id": f"probe-{runtime_id}",
+        "provider_display_name": "Probe label must not render",
+        "model_id": f"probe-model-{runtime_id}",
+        "model_api_name": f"probe-api-{runtime_id}",
+        "protocol": "openai",
+        "runtime_kind": "cli" if cli else "http",
+        "transport": "cli" if cli else "http",
+        "auth_kind": "none",
+        "credential_required": False,
+        "auth_present": False,
+        "status": status,
+        "reachable": None if cli else reachable,
+        "http_status": 200 if reachable else None,
+        "latency_ms": None if cli else (18.0 if reachable else 41.0),
+        "model_count": 4 if reachable else None,
+        "content_type": "application/json" if reachable else None,
+        "downloaded_bytes": 256 if reachable else None,
+        "endpoint_url": None if cli else "https://runtime.invalid/v1",
+        "probe_url": None if cli else "https://runtime.invalid/v1/models",
+        "error": (
+            "CLI runtimes do not expose an HTTP reachability endpoint"
+            if cli
+            else ("connection refused" if failed else None)
+        ),
+        "checked_at": "2026-08-24T10:20:00Z",
+    }
+
+
+def runtime_probe_response(*, fresh: bool) -> HttpResponse:
+    providers = [
+        runtime_probe_provider("runtime-a", status="reachable"),
+        runtime_probe_provider("runtime-b", status="skipped_cli"),
+        runtime_probe_provider(
+            "runtime-c",
+            status="reachable" if fresh else "network_error",
+        ),
+    ]
+    failed = 0 if fresh else 1
+    return (
+        200,
+        {
+            "generated_at": "2026-08-24T10:20:01Z",
+            "refreshed_at_unix": 1787566800.0,
+            "cache_ttl_sec": 15.0,
+            "cache_age_sec": 1.0 if fresh else 16.0,
+            "cache_hit": fresh,
+            "refresh_state": "fresh" if fresh else "served_stale",
+            "probe": {
+                "source": "runtime.toml",
+                "status": "reachable" if fresh else "degraded",
+                "probe_ok": fresh,
+                "checked_at": "2026-08-24T10:20:00Z",
+                "summary": {
+                    "runtimes": 3,
+                    "probed": 2,
+                    "reachable": 2 if fresh else 1,
+                    "failed": failed,
+                    "skipped": 1,
+                    "default_runtime_id": "runtime-a",
+                },
+                "providers": providers,
+                "errors": [] if fresh else ["runtime-c: network_error"],
+                "observations": ["provider metadata endpoints only"],
+                "limitations": ["no completion request"],
+            },
+        },
+    )
+
+
+def runtime_resolved_runtime(
+    runtime_id: str,
+    provider: str,
+    model: str,
+) -> dict[str, object]:
+    return {
+        "id": runtime_id,
+        "provider": provider,
+        "model": model,
+        "effective_max_context": 200_000,
+        "max_context_source": "capability",
+        "max_output_tokens": 8192,
+        "is_local": False,
+        # This binding flag is independent of the fleet's top-level default.
+        "is_default": False,
+        "keeper_dispatchable": True,
+        "keeper_dispatch_blocked_reason": None,
+    }
+
+
+def runtime_resolved_response() -> HttpResponse:
+    runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
+    return (
+        200,
+        {
+            "generated_at_iso": "2026-08-24T10:20:02Z",
+            "source": RUNTIME_RESOLVED_PATH,
+            "config_path": "/workspace/config/runtime.toml",
+            "default_runtime": runtime_a,
+            "runtimes": [
+                runtime_a,
+                runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
+                runtime_resolved_runtime("runtime-c", "Resolved C", "model-c"),
+                runtime_resolved_runtime("runtime-d", "Resolved D", "model-d"),
+            ],
+            "lanes": [
+                {
+                    "id": "primary",
+                    "runtime_ids": ["runtime-a", "runtime-b"],
+                    "preferred_candidate": "runtime-b",
+                    "preferred_at_ts": 1787566700.0,
+                },
+                {
+                    "id": "degraded",
+                    "runtime_ids": ["runtime-c"],
+                    "preferred_candidate": None,
+                    "preferred_at_ts": None,
+                },
+                {
+                    "id": "unobserved",
+                    "runtime_ids": ["runtime-d"],
+                    "preferred_candidate": None,
+                    "preferred_at_ts": None,
+                },
+            ],
+            "assignments": [
+                {
+                    "keeper": "sangsu",
+                    "assignment_source": "default",
+                    "resolved": {"kind": "lane", "id": "primary"},
+                }
+            ],
+        },
+    )
+
+
+def runtime_http_fixtures() -> tuple[
+    HttpFixtures,
+    GatedHttpResponse,
+    SequencedHttpResponse,
+]:
+    fixtures = overview_event_http_fixtures()
+    initial_probe = GatedHttpResponse(
+        runtime_probe_response(fresh=False),
+        subsequent_response=runtime_probe_response(fresh=True),
+    )
+    force_probe = SequencedHttpResponse(
+        [(503, {"error": "forced probe refresh failed"})]
+    )
+    fixtures[RUNTIME_PROBE_PATH] = initial_probe
+    fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+    return fixtures, initial_probe, force_probe
+
+
+def runtime_surface_interaction(
+    fixtures: HttpFixtures,
+    initial_probe: GatedHttpResponse,
+    force_probe: SequencedHttpResponse,
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        completed = False
+        try:
+            tab_until(process, master_fd, output, b"MASC Connectors")
+            read_available(master_fd, output)
+            start = len(output)
+            os.write(master_fd, b"\t")
+            if not initial_probe.requested.wait(timeout=3.0):
+                raise AssertionError("Runtime did not request provider probe")
+            # Several 50 ms ticks pass while the authenticated probe is held.
+            # The resolved request may finish, but the joined generation must
+            # remain single-flight until both authorities settle.
+            time.sleep(0.2)
+            if initial_probe.calls != 1:
+                raise AssertionError(
+                    "Runtime stacked probe reads while one was in flight: "
+                    f"{initial_probe.calls} calls"
+                )
+            initial_probe.release.set()
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"network_error",
+                start=start,
+                timeout=3.0,
+            )
+            stale_end = output.find(b"network_error", start) + len(b"network_error")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                FRAME_END,
+                start=stale_end,
+                timeout=3.0,
+            )
+            stale_frame_end = output.find(FRAME_END, stale_end) + len(FRAME_END)
+            stale_plain = CSI_RE.sub(b"", bytes(output[start:stale_frame_end])).decode(
+                "utf-8"
+            )
+            for needle in (
+                "MASC Runtime",
+                "LANE",
+                "CANDIDATE",
+                "PROVIDER / MODEL",
+                "ROUTE / PROBE",
+                "primary",
+                "1/2 runtime-a",
+                "Resolved A / model-a",
+                "ready / reachable",
+                "CLI not probed",
+                "last success",
+                "unobserved",
+                "single candidate",
+            ):
+                if needle not in stale_plain:
+                    raise AssertionError(
+                        f"Runtime did not draw {needle!r}: {stale_plain!r}"
+                    )
+            if "Probe label must not render" in stale_plain:
+                raise AssertionError(
+                    f"Runtime used probe identity instead of resolved SSOT: {stale_plain!r}"
+                )
+
+            # The next ordinary poll carries the refreshed cache value. This
+            # proves served_stale is a state, not a local health inference.
+            fresh_start = stale_frame_end
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"fresh",
+                start=fresh_start,
+                timeout=3.0,
+            )
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                re.compile(
+                    rb"reachable(?:\x1b\[[0-9;]*m)* / "
+                    rb"(?:\x1b\[[0-9;]*m)*fresh"
+                ),
+                start=fresh_start,
+                timeout=3.0,
+            )
+
+            # The overflow scroll hint is unreachable with this fixture: it
+            # renders only when candidates exceed the listing height, but the
+            # compact-frame gate (minimum_fixed_chrome_rows = 14) replaces any
+            # viewport short enough for 4 candidates to overflow. A hint
+            # assertion would need a 6+ candidate fixture at a viable height.
+            # A shorter-but-viable pass proves the listing survives resize.
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=20,
+                columns=100,
+                needle=b"MASC Runtime",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=100,
+                needle=b"MASC Runtime",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+
+            fixtures[RUNTIME_PROBE_PATH] = (503, {"error": "probe refresh failed"})
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"r",
+                b"forced probe refresh failed",
+            )
+            if force_probe.served != 1:
+                raise AssertionError(
+                    "Runtime did not coalesce manual refresh into one force request: "
+                    f"{force_probe.served} calls"
+                )
+            preserved = resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=99,
+                needle=b"runtime-a",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+            preserved_plain = CSI_RE.sub(b"", preserved)
+            for needle in (b"runtime probe load failed", b"runtime-a", b"runtime-d"):
+                if needle not in preserved_plain:
+                    raise AssertionError(
+                        f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
+                    )
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Tools")
+            os.write(master_fd, b"q")
+            completed = True
+        finally:
+            initial_probe.release.set()
+            if not completed and process.poll() is None:
+                kill_process_group(process)
 
     return interact
 
@@ -4129,7 +4558,7 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         # The dispatch lands the operator in the keeper's chat, where the
         # send (and its 503 from the fixture) is on screen; the POST bodies
         # above are the proof of what went out.
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -4226,8 +4655,8 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
-        send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
         send_and_wait(process, master_fd, output, b"first", composer_showing(b"first"))
         # Ctrl-J. The prompt stays on the first line and the second is indented
@@ -4260,7 +4689,7 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         # The fixture answers 503, so the turn settles rather than streaming.
         # Esc then leaves the pane instead of interrupting, and q quits from
         # the detail view -- in the pane it would be typed into the composer.
-        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
     return interact
@@ -4287,6 +4716,9 @@ def run_keyboard_regression(executable: str) -> None:
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
+        runtime_http_fixtures()
+    )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
     run_terminal_scenario(
         executable,
@@ -4318,6 +4750,14 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="Keeper live Markdown code frame",
+        interact=live_markdown_interaction,
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper message Ctrl-G switch",
         interact=keeper_message_switch_interaction(alpha_history),
         http_fixtures=message_switch_fixtures,
@@ -4327,6 +4767,17 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper lanes unread, failed, empty, and populated",
         interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
         http_fixtures=lanes_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Runtime lane candidates from joined projections",
+        interact=runtime_surface_interaction(
+            runtime_fixtures,
+            runtime_initial_probe,
+            runtime_force_probe,
+        ),
+        refresh=0.05,
+        http_fixtures=runtime_fixtures,
     )
     run_terminal_scenario(
         executable,

@@ -377,8 +377,41 @@ type surface =
   | Fusion
   | Repositories
   | Connectors
+  | Runtime
   | Tools
   | System_logs
+
+(* The Tab cycle and the strip drawn above every surface share this order,
+   so the strip cannot disagree with where Tab actually goes. Labels are the
+   strip's spelling; the Keepers entry stands for every keeper sub-mode. *)
+let surface_ring : (surface * string) list =
+  [ (Overview, "Overview");
+    (Acting, "Acting");
+    (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
+    (Approvals, "Approvals");
+    (Board, "Board");
+    (Planning, "Planning");
+    (Schedules, "Schedules");
+    (Verification, "Verify");
+    (Harness, "Harness");
+    (Fusion, "Fusion");
+    (Repositories, "Repos");
+    (Connectors, "Connectors");
+    (Runtime, "Runtime");
+    (Tools, "Tools");
+    (System_logs, "Logs");
+  ]
+
+(* Ring position of the family a view belongs to. Keeper sub-modes collapse
+   onto the Keepers entry; every other surface is its own entry. *)
+let surface_ring_index (view : surface) =
+  let family = match view with Keepers _ -> Keepers Keeper_list | v -> v in
+  let rec find i = function
+    | [] -> 0
+    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
+  in
+  find 0 surface_ring
 
 (** What a surface needs loaded to draw itself.
 
@@ -436,7 +469,7 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Connectors | Tools ->
+  | Repositories | Connectors | Runtime | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -462,6 +495,7 @@ type scrolled = {
    screen. The number is the drawing's; a surface whose chrome moves has to
    move it here in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
+let runtime_listing_chrome ~error = listing_chrome ~error + 2
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out.
@@ -604,6 +638,14 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
+  (* Two server-owned documents joined by exact runtime id: resolved owns
+     lanes/provider/model identity, probe owns cached reachability. *)
+  mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
+  mutable runtime_surface_error: string option;
+  mutable runtime_surface_scroll: int;
+  mutable runtime_surface_generation: int;
+  mutable runtime_surface_inflight: int option;
+  mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
@@ -872,6 +914,12 @@ let create_state ~workspace ~port ~refresh_interval = {
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
+  runtime_surface = None;
+  runtime_surface_error = None;
+  runtime_surface_scroll = 0;
+  runtime_surface_generation = 0;
+  runtime_surface_inflight = None;
+  runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
@@ -1043,6 +1091,14 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         (match state.connectors with
          | None -> 0
          | Some s -> List.length s.Tui_decode.cs_connectors)
+  | Runtime ->
+      Some
+        { sc_count =
+            (match state.runtime_surface with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.rss_candidates)
+        ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        }
   | Tools ->
       listing ~error:state.tools_error
         (match state.tools_inventory with

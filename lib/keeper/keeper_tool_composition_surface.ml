@@ -871,6 +871,7 @@ let make_request_control_tool
 
 let make_tools
       ?catalog
+      ?(skill_composition_entries = [])
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -889,12 +890,19 @@ let make_tools
       ?on_externalization_error
       ()
   =
+  (* Skill-declared entries went through the same [Catalog.parse] as the
+     TOML catalog, so materialization cannot tell them apart — one closure
+     serves both. Name collisions across the two sources are refused where
+     both catalogs are loaded, before this point. *)
+  let declared_entries =
+    (match catalog with
+     | None -> []
+     | Some catalog -> Catalog.entries catalog)
+    @ skill_composition_entries
+  in
   let composition_tools =
-    match catalog with
-    | None -> []
-    | Some catalog ->
-      Catalog.entries catalog
-      |> List.map (fun (entry : Catalog.entry) ->
+    declared_entries
+    |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
@@ -1240,11 +1248,9 @@ let make_tools
                         "composition result manifest persistence failed")))))
   in
   let has_async =
-    match catalog with
-    | None -> false
-    | Some catalog ->
-      Catalog.entries catalog
-      |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+    List.exists
+      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+      declared_entries
   in
   let composition_tools = composition_tools @ [ plan_execute_tool ] in
   if not has_async

@@ -53,6 +53,28 @@ pointer = "/now_iso"
 |}
 ;;
 
+let async_composition_document =
+  {|---
+name: quiet-clock
+description: Read the clock through the durable async broker.
+---
+
+```toml composition
+[[compositions]]
+name = "quiet-clock"
+description = "Read the clock through the durable async broker."
+execution = "async"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+;;
+
 let parsed ~directory document =
   match Skill_catalog.parse_skill ~directory document with
   | Ok skill -> skill
@@ -248,6 +270,114 @@ let test_of_documents_sorts_and_rejects_duplicates () =
   | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let write_file path content =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel content)
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
+let test_loader_scans_the_skills_directory () =
+  let base_path = Filename.temp_file "keeper-skill-loader" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
+        | Ok catalog ->
+          check
+            int
+            "missing skills dir loads an empty catalog"
+            0
+            (List.length (Skill_catalog.skills catalog))
+        | Error _ -> fail "missing skills directory did not load as empty");
+       let skills_dir =
+         Masc.Keeper_run_tools_setup.skills_dir_of_base_path ~base_path
+       in
+       Unix.mkdir (Filename.dirname skills_dir) 0o755;
+       Unix.mkdir skills_dir 0o755;
+       let skill_dir = Filename.concat skills_dir "release-checklist" in
+       Unix.mkdir skill_dir 0o755;
+       write_file (Filename.concat skill_dir "SKILL.md") instruction_document;
+       Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
+       write_file (Filename.concat skills_dir "README.md") "not a skill\n";
+       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
+        | Ok catalog ->
+          (match Skill_catalog.skills catalog with
+           | [ skill ] ->
+             check
+               string
+               "the SKILL.md-carrying directory is the only skill"
+               "release-checklist"
+               skill.Skill_catalog.name
+           | skills ->
+             fail
+               (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
+        | Error _ -> fail "valid skills directory failed to load");
+       write_file
+         (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
+         "---\ndescription: no name\n---\n";
+       match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
+       | Error
+           (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "skills"; detail })) ->
+         check bool "detail names the defect" true (String.length detail > 0)
+       | Ok _ | Error _ ->
+         fail "broken SKILL.md did not return a typed config error")
+;;
+
+let skill_catalog_of documents =
+  match Skill_catalog.of_documents documents with
+  | Ok catalog -> catalog
+  | Error error ->
+    fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
+;;
+
+let test_composition_skill_joins_projection () =
+  let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
+  let expected =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~skill_catalog:
+        (skill_catalog_of [ "time-memory-query", composition_document ])
+      ~model_visible_descriptors:descriptors
+      ~composition_catalog:None
+  in
+  check
+    bool
+    "composition skill joins the descriptor projection"
+    true
+    (List.mem "keeper_compose_time-memory-query" expected);
+  check
+    bool
+    "inline-only skills add no async controls"
+    false
+    (List.mem Catalog.status_tool_name expected);
+  let expected_async =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~skill_catalog:(skill_catalog_of [ "quiet-clock", async_composition_document ])
+      ~model_visible_descriptors:descriptors
+      ~composition_catalog:None
+  in
+  check
+    bool
+    "async skill adds the shared status and cancel controls"
+    true
+    (List.mem Catalog.status_tool_name expected_async
+     && List.mem Catalog.cancel_tool_name expected_async)
+;;
+
 let () =
   run
     "keeper_skill_catalog"
@@ -281,6 +411,14 @@ let () =
             "of_documents sorts by name and rejects duplicates"
             `Quick
             test_of_documents_sorts_and_rejects_duplicates
+        ; test_case
+            "loader scans the skills directory"
+            `Quick
+            test_loader_scans_the_skills_directory
+        ; test_case
+            "composition skill joins the model projection"
+            `Quick
+            test_composition_skill_joins_projection
         ] )
     ]
 ;;

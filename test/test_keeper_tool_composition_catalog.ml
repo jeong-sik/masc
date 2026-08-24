@@ -349,6 +349,7 @@ let test_catalog_tools_join_runtime_projection_authority () =
   in
   let expected =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~skill_catalog:Masc.Keeper_skill_catalog.empty
       ~model_visible_descriptors:descriptors
       ~composition_catalog:(Some catalog)
   in

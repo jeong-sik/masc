@@ -145,20 +145,166 @@ let load_composition_catalog ~config_root =
     Error (composition_catalog_config_error "catalog path kind is unavailable")
 ;;
 
-let expected_model_tool_names ~model_visible_descriptors ~composition_catalog =
+let skill_catalog_config_error detail =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig { field = "skills"; detail })
+;;
+
+let skill_catalog_io_error ~op ~path exn =
+  Agent_core.Error.Io
+    (Agent_core.Error.FileOpFailed
+       { op; path; detail = Printexc.to_string exn })
+;;
+
+let skills_dir_of_base_path ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
+;;
+
+(* A directory under skills/ that carries no SKILL.md is not a skill and is
+   skipped: in the Agent Skills layout the file is the declaration, and a
+   half-installed directory should not take the whole tool surface down. A
+   SKILL.md that exists but fails to parse is a config error — the operator
+   declared a skill and masc cannot honour it. *)
+let load_skill_catalog ~base_path =
+  let skills_dir = skills_dir_of_base_path ~base_path in
+  match
+    try Ok (Fs_compat.exact_path_kind skills_dir) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (skill_catalog_io_error ~op:"inspect" ~path:skills_dir exn)
+  with
+  | Error _ as error -> error
+  | Ok Fs_compat.Exact_missing -> Ok Keeper_skill_catalog.empty
+  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
+    (match
+       try Ok (List.sort String.compare (Fs_compat.read_dir skills_dir)) with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error (skill_catalog_io_error ~op:"read_dir" ~path:skills_dir exn)
+     with
+     | Error _ as error -> error
+     | Ok entries ->
+       let rec collect documents = function
+         | [] -> Ok (List.rev documents)
+         | entry :: rest ->
+           let skill_md =
+             Filename.concat (Filename.concat skills_dir entry) "SKILL.md"
+           in
+           (match
+              try Ok (Fs_compat.exact_path_kind skill_md) with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Error (skill_catalog_io_error ~op:"inspect" ~path:skill_md exn)
+            with
+            | Error _ as error -> error
+            | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
+              (match
+                 try Ok (Fs_compat.load_file skill_md) with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   Error (skill_catalog_io_error ~op:"read" ~path:skill_md exn)
+               with
+               | Error _ as error -> error
+               | Ok contents -> collect ((entry, contents) :: documents) rest)
+            | Ok
+                ( Fs_compat.Exact_missing
+                | Fs_compat.Exact_unknown
+                | Fs_compat.Exact_kind
+                    ( Unix.S_DIR
+                    | Unix.S_CHR
+                    | Unix.S_BLK
+                    | Unix.S_LNK
+                    | Unix.S_FIFO
+                    | Unix.S_SOCK ) ) -> collect documents rest)
+       in
+       (match collect [] entries with
+        | Error _ as error -> error
+        | Ok documents ->
+          (match Keeper_skill_catalog.of_documents documents with
+           | Ok catalog -> Ok catalog
+           | Error error ->
+             Error
+               (skill_catalog_config_error
+                  (Keeper_skill_catalog.error_to_string error)))))
+  | Ok
+      (Fs_compat.Exact_kind
+        ( Unix.S_REG
+        | Unix.S_CHR
+        | Unix.S_BLK
+        | Unix.S_LNK
+        | Unix.S_FIFO
+        | Unix.S_SOCK )) ->
+    Error (skill_catalog_config_error "skills path is not a directory")
+  | Ok Fs_compat.Exact_unknown ->
+    Error (skill_catalog_config_error "skills path kind is unavailable")
+;;
+
+(* Both sources materialize as [keeper_compose_<name>], so one name declared
+   by both would put two tools with one name on the surface. Refused here,
+   where both catalogs are first in one hand. *)
+let reject_composition_name_collisions ~composition_catalog ~skill_catalog =
+  match composition_catalog with
+  | None -> Ok ()
+  | Some catalog ->
+    let catalog_names =
+      Keeper_tool_composition_catalog.entries catalog
+      |> List.map
+           (fun (entry : Keeper_tool_composition_catalog.entry) -> entry.name)
+    in
+    (match
+       Keeper_skill_catalog.composition_entries skill_catalog
+       |> List.find_opt
+            (fun (entry : Keeper_tool_composition_catalog.entry) ->
+              List.mem entry.name catalog_names)
+     with
+     | None -> Ok ()
+     | Some entry ->
+       Error
+         (skill_catalog_config_error
+            (Printf.sprintf
+               "composition %S is declared by both tool-compositions.toml and \
+                a skill"
+               entry.name)))
+;;
+
+let expected_model_tool_names
+      ~skill_catalog
+      ~model_visible_descriptors
+      ~composition_catalog
+  =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
-  let composition_names =
+  let catalog_entries =
     match composition_catalog with
     | None -> []
-    | Some catalog -> Keeper_tool_composition_catalog.model_tool_names catalog
+    | Some catalog -> Keeper_tool_composition_catalog.entries catalog
+  in
+  let entries =
+    catalog_entries @ Keeper_skill_catalog.composition_entries skill_catalog
+  in
+  let composition_names =
+    List.map Keeper_tool_composition_catalog.tool_name entries
+  in
+  (* Mirrors [Keeper_tool_composition_catalog.model_tool_names], which cannot
+     see skill-declared entries: the shared async controls join the surface
+     when either source declares an async composition. *)
+  let control_names =
+    if
+      List.exists
+        (fun (entry : Keeper_tool_composition_catalog.entry) ->
+          entry.execution = Keeper_tool_composition_catalog.Async)
+        entries
+    then
+      [ Keeper_tool_composition_catalog.status_tool_name
+      ; Keeper_tool_composition_catalog.cancel_tool_name
+      ]
+    else []
   in
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: (descriptor_names @ composition_names))
+     :: (descriptor_names @ composition_names @ control_names))
 ;;
 
 let prepare_agent_setup
@@ -208,6 +354,8 @@ let prepare_agent_setup
   in
   let agent_name = meta.agent_name in
   let* composition_catalog = load_composition_catalog ~config_root in
+  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
+  let* () = reject_composition_name_collisions ~composition_catalog ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -243,6 +391,7 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ?composition_catalog
+      ~skill_catalog
       ~turn_ctx_cell
       ()
   in
@@ -368,6 +517,7 @@ let prepare_agent_setup
   in
   let expected_model_names =
     expected_model_tool_names
+      ~skill_catalog
       ~model_visible_descriptors
       ~composition_catalog
   in

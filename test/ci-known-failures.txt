@@ -53,14 +53,6 @@ test_tools_coverage                          # schema_structure 003, 1 of 40
 # its own change rather than a rename pass.
 test_keeper_toml
 
-# --- suites that assert a rename that already happened --------------------
-# Both check that an old identifier is gone and a new one is present. The tree
-# they read moved on: pr16 opens lib/server, which no longer exists. A one-time
-# migration assertion outlives its migration; these two are candidates for
-# deletion rather than repair.
-test_rfc_0085_pr16_dashboard_http_core_rename
-test_rfc_0085_pr18_execution_surfaces_rename
-
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a
 # time with Eio.Path.open_dir and never re-reads the path string. The race has

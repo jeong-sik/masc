@@ -16,7 +16,10 @@ open Alcotest
 let dir = "lib/server"
 
 let files =
-  Sys.readdir dir
+  (* Ast_grep resolves a repo-relative path against DUNE_SOURCEROOT; the
+     listing has to start from the same place or it reads the sandbox the test
+     runs in, where lib/server does not exist and the glob finds nothing. *)
+  Sys.readdir (Ast_grep.resolve_module_path dir)
   |> Array.to_list
   |> List.filter (fun name ->
        String.starts_with ~prefix:"server_dashboard_http_core" name
@@ -29,8 +32,11 @@ let renamed_identifiers =
   [ "_shell_warmed", "shell_warmed"
   ; "_shell_warming", "shell_warming"
   ; "_last_good_shell", "last_good_shell"
-  ; "_operator_snapshot_broadcast_ref", "operator_snapshot_broadcast_ref"
-  ; "_operator_digest_broadcast_ref", "operator_digest_broadcast_ref"
+  (* operator_snapshot_broadcast_ref and operator_digest_broadcast_ref were
+     here too. #28167 replaced the mutable refs with immutable snapshots and
+     both bindings went with them, so the half of this guard that asks for the
+     new name was asking a deleted line to still be there. A rename guard
+     covers renames; a removal is not one. *)
   ; "_operator_digest_cache", "operator_digest_cache"
   ; "_mission_cache", "mission_cache"
   ]

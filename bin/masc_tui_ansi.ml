@@ -10,6 +10,10 @@ module Ansi = struct
   let reset = "\027[0m"
   let bold = "\027[1m"
   let dim = "\027[2m"
+  (* A third weight between bold and dim. The renderer had only two, so a
+     heading and the paragraph under it could differ by nothing an eye reads
+     as rank. *)
+  let underline = "\027[4m"
 
   let red = "\027[31m"
   let green = "\027[32m"

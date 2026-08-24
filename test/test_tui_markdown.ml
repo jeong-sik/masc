@@ -7,7 +7,8 @@ let tagged : Markdown.palette =
   { strong = ("<b>", "</b>")
   ; emphasis = ("<i>", "</i>")
   ; code = ("<c>", "</c>")
-  ; heading = ("<h>", "</h>")
+    (* The level is in the tag so a test can say which heading it got. *)
+  ; heading = (fun level -> (Printf.sprintf "<h%d>" level, Printf.sprintf "</h%d>" level))
   ; quote = ("<q>", "</q>")
   ; link_text = ("<a>", "</a>")
   ; link_target = ("<u>", "</u>")
@@ -15,6 +16,8 @@ let tagged : Markdown.palette =
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   ; quote_gutter = "\xe2\x96\x8f "
+  ; table_header = ("<th>", "</th>")
+  ; table_gutter = " | "
   ; code_keyword = ("<k>", "</k>")
   ; code_string = ("<s>", "</s>")
   ; code_comment = ("<m>", "</m>")
@@ -97,8 +100,51 @@ let test_inline_segments_names_each_marker () =
 
 (* {1 Blocks} *)
 
+(* Which heading is inside which is the only thing a level says, and it used
+   to be parsed and thrown away: every heading in a keeper's answer came out
+   drawn the same, so a document arrived with no shape. *)
+let test_a_heading_carries_its_level () =
+  check_rows "top level" [ "<h1>Findings</h1>" ] (render "# Findings");
+  check_rows "third level" [ "<h3>Findings</h3>" ] (render "### Findings");
+  check_rows "sixth level" [ "<h6>Findings</h6>" ] (render "###### Findings");
+  check_rows "seven hashes is not a heading" [ "####### Findings" ]
+    (render "####### Findings")
+;;
+
+(* Keepers answer in tables. Without this the source arrived as its own
+   pipes, one row per line, each one fitted and marked truncated -- the
+   least readable form of the most structured thing they write. *)
+let test_a_table_becomes_columns () =
+  check_rows "header, rule, and body"
+    [ "<th>kind  | count</th>"
+    ; "<r>\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80 | \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80</r>"
+    ; "bug   |     3"
+    ; "spike |    12"
+    ]
+    (render ~width:40
+       "| kind | count |\n| --- | ----: |\n| bug | 3 |\n| spike | 12 |")
+;;
+
+let test_a_table_needs_its_delimiter_row () =
+  (* An OCaml match arm pasted outside a fence is not a table. *)
+  check_rows "pipes alone are not a table" [ "| Some x -> y" ]
+    (render "| Some x -> y")
+;;
+
+let test_a_table_column_gives_up_cells_to_fit () =
+  (* The widest column shrinks first: taking it evenly would cut a column
+     that costs nothing to keep. *)
+  check_rows "the wide column is the one that loses"
+    [ "<th>id | what           </th>"
+    ; "<r>\xe2\x94\x80\xe2\x94\x80 | \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80</r>"
+    ; "a1 | a very long ce~"
+    ]
+    (render ~width:20 "| id | what |\n| -- | ---- |\n| a1 | a very long cell |")
+;;
+
+
 let test_heading_drops_its_hashes () =
-  check_rows "atx heading" [ "<h>Findings</h>" ] (render "## Findings");
+  check_rows "atx heading" [ "<h2>Findings</h2>" ] (render "## Findings");
   check_rows "a hash without a space is not a heading" [ "#29655 is open" ]
     (render "#29655 is open")
 
@@ -275,7 +321,15 @@ let () =
             test_inline_segments_names_each_marker
         ] )
     ; ( "blocks"
-      , [ Alcotest.test_case "a heading drops its hashes" `Quick
+      , [ Alcotest.test_case "a heading carries its level" `Quick
+            test_a_heading_carries_its_level
+        ; Alcotest.test_case "a table becomes columns" `Quick
+            test_a_table_becomes_columns
+        ; Alcotest.test_case "a table needs its delimiter row" `Quick
+            test_a_table_needs_its_delimiter_row
+        ; Alcotest.test_case "a table column gives up cells to fit" `Quick
+            test_a_table_column_gives_up_cells_to_fit
+        ; Alcotest.test_case "a heading drops its hashes" `Quick
             test_heading_drops_its_hashes
         ; Alcotest.test_case "bullets are normalised and hang" `Quick
             test_bullets_are_normalised_and_hang

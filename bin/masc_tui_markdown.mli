@@ -21,7 +21,12 @@ type palette = {
   strong : span;
   emphasis : span;
   code : span;
-  heading : span;
+  heading : int -> span;
+      (** The codes for a heading of the given level, 1 for [#] through 6.
+          A function rather than one span because the level is the only thing
+          that says which heading is inside which, and dropping it drew a
+          document's every heading the same. Which levels differ, and how, is
+          terminal vocabulary and stays with the caller. *)
   quote : span;
   link_text : span;
   link_target : span;
@@ -29,6 +34,9 @@ type palette = {
   bullet : string;  (** Drawn in place of the source's [-], [*] or [+]. *)
   code_gutter : string;  (** Drawn left of every fenced-code row. *)
   quote_gutter : string;
+  table_header : span;
+  table_gutter : string;
+  (** Drawn between a table's columns. *)
   (* Styles for fenced code that names a language this module lexes
      (ocaml, bash/sh, json). A fence with no tag, or one naming anything
      else, keeps the single [code] span for the whole body. *)

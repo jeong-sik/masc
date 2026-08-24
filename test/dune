@@ -3007,3 +3007,8 @@
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
  (libraries alcotest masc masc_types))
+
+(test
+ (name test_asset_sync_report)
+ (modules test_asset_sync_report)
+ (libraries alcotest masc))

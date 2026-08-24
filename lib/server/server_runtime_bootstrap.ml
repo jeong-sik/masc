@@ -1063,10 +1063,12 @@ let initialize_owner_state_blocking
     (Domain_pool.domain_count domain_pool);
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
-(* Cap the per-boot file list in the sync log line; full counts are always
-   logged, names are illustrative. *)
-let max_logged_asset_sync_entries = 10
-
+(* Copies and deletions are two events, so they get two lines with two
+   sample budgets. One line held both and cut the shared sample at ten: a
+   version bump copies enough to fill it, and the deleted paths never
+   reached the line. For [Tools] those names are the whole message, since a
+   definition an operator drops into the runtime directory is deleted at the
+   next boot and nothing else says so. *)
 let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   let sync =
     Managed_asset_sync.sync
@@ -1076,26 +1078,12 @@ let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
       ~dest_dir
       ()
   in
-  (match
-     sync.Managed_asset_sync.copied,
-     sync.Managed_asset_sync.overwritten,
-     sync.Managed_asset_sync.removed
-   with
-   | [], [], [] -> ()
-   | copied, overwritten, removed ->
-       let names = copied @ overwritten @ removed in
-       let shown =
-         List.filteri (fun i _ -> i < max_logged_asset_sync_entries) names
-       in
-       Log.Misc.info
-         "%s assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
-         label
-         (List.length copied)
-         (List.length overwritten)
-         (List.length removed)
-         (String.concat ", " shown)
-         (if List.length names > max_logged_asset_sync_entries then ", …"
-          else ""));
+  Option.iter
+    (fun line -> Log.Misc.info "%s" line)
+    (Managed_asset_sync.distribution_line ~label sync);
+  Option.iter
+    (fun line -> Log.Misc.warn "%s" line)
+    (Managed_asset_sync.removed_line ~label sync);
   List.iter
     (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
     sync.Managed_asset_sync.failed

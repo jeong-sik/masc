@@ -55,3 +55,30 @@ val sync
     an unreadable runtime tree records an explicit [failed] entry and no
     path is removed. [Eio.Cancel.Cancelled] propagates; per-file
     [Sys_error] is recorded in [failed] without aborting the pass. *)
+
+val sample_budget : int
+(** How many paths either report line names before it says how many more
+    there were. Each line spends this separately. *)
+
+val distribution_line : label:string -> sync_result -> string option
+(** The copies this pass made, or [None] when it made none.
+
+    Counts only — [copied] and [overwritten] are the distribution doing its
+    job, and on a version bump there are hundreds of them. *)
+
+val removed_line : label:string -> sync_result -> string option
+(** The paths this pass deleted from the runtime directory, or [None] when
+    it deleted none.
+
+    Its own line and its own {!sample_budget}, because a removal is a
+    different event from a copy. A copy is the distribution converging; a
+    removal is a file that was in the runtime tree and is not in the
+    manifest, which for [Tools] is the only way an operator's own definition
+    can end — tool definitions have no runtime edit layer, so a file placed
+    there is deleted at the next boot.
+
+    Sharing one budget with the copies hid exactly that: a version bump
+    copies enough assets to fill the sample, and the deleted paths never
+    reach the line at all. The operator reads a count with no names.
+
+    The caller logs this above [info]. *)

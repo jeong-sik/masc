@@ -98,9 +98,12 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
   })
 
-  it('paused operator cause when only status === paused', () => {
+  // 예전에는 phase 가 없고 `status === 'paused'` 이기만 하면 flag 가 false 여도
+  // 일시정지로 봤다. 서버는 그 단어를 flag 와 같은 `ld_paused` 로 만들지만
+  // `Stopped` 이벤트에서 단어만 남겨두므로, 이미 멈춘 키퍼가 재개 가능으로 보였다.
+  it('phase 가 없으면 flag 가 판정한다', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status: 'paused', phase: null, paused: false }),
+      keeper: makeKeeper({ status: 'active', phase: null, paused: true }),
       composite: null,
     })
     expect(state).toMatchObject({

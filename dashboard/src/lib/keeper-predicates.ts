@@ -38,19 +38,27 @@ export interface KeeperPausedInput {
   phase?: Keeper['phase'] | string | null
   pipeline_stage?: Keeper['pipeline_stage'] | string | null
   pause_state?: Keeper['pause_state'] | string | null
+  /** Read by `isKeeperOperatorTargetable` through `KeeperOfflineInput`.
+   *  `isKeeperPaused` itself no longer looks at it — see below. */
   status?: string | null
 }
 
-/** Operator considers the keeper paused on any of: explicit `paused`
- *  flag, FSM phase `Paused`, pipeline stage `paused`, or lowercased
- *  status `paused`. */
+/** Operator considers the keeper paused on the explicit `paused` flag, FSM
+ *  phase `Paused`, pipeline stage `paused`, or pause state `paused`.
+ *
+ *  `status = 'paused'` is not one of them. The server builds that word from
+ *  the same `ld_paused` the flag comes from, so it carries nothing new — and
+ *  it can outlive the flag: the execution-cache override keeps an existing
+ *  `Cp_paused` when a `Stopped` phase event arrives
+ *  (server_dashboard_http_execution_surfaces.ml), leaving `paused: false`
+ *  next to `status: 'paused'` on one row. Reading the word there shows a
+ *  stopped keeper as resumable. */
 export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
   if (keeper.paused === true) return true
   if (lowerToken(keeper.lifecycle_phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.pipeline_stage) === PAUSED_LOWER_TOKEN) return true
   if (lowerToken(keeper.pause_state) === PAUSED_LOWER_TOKEN) return true
-  if (lowerToken(keeper.status) === PAUSED_LOWER_TOKEN) return true
   return false
 }
 

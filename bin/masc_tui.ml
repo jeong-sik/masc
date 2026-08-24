@@ -129,6 +129,21 @@ type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
   mutable position : int;
+  mutable partial_scalar : string;
+      (** The head of a multi-byte character whose tail has not arrived.
+
+          A leading byte states how many bytes follow, and a terminal that
+          sent it will send them — but not necessarily inside one
+          [Unix.read]. A character straddles the buffer boundary, or the
+          emulator re-sends a syllable mid-composition, and the wait for the
+          next byte expires with the character half read. Discarding the head
+          loses the character and leaves the tail in the stream, where each
+          continuation byte is read as its own unrecognised key: one dropped
+          Hangul syllable arrives as three.
+
+          So the head waits here instead. The next read resumes it, which is
+          the same character arriving late rather than a lost one. Empty
+          whenever no character is in flight. *)
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -137,7 +152,12 @@ type input_reader = {
 let input_buffer_bytes = 8192
 
 let create_input_reader () =
-  { bytes = Bytes.create input_buffer_bytes; filled = 0; position = 0 }
+  {
+    bytes = Bytes.create input_buffer_bytes;
+    filled = 0;
+    position = 0;
+    partial_scalar = "";
+  }
 
 let refill_input_reader reader ~timeout =
   let timeout_ns =
@@ -184,28 +204,34 @@ let take_input_byte reader ~timeout =
    least that one behind. *)
 let return_input_byte reader = reader.position <- max 0 (reader.position - 1)
 
-let is_utf8_continuation byte =
-  let code = Char.code byte in
-  code >= 0x80 && code <= 0xBF
+let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
-let read_utf8_scalar reader first expected_length =
-  let bytes = Bytes.create expected_length in
-  Bytes.set bytes 0 first;
-  let rec fill index =
-    if index >= expected_length then
-      let scalar = Bytes.to_string bytes in
-      if String.is_valid_utf_8 scalar then Some scalar else Some "invalid-utf8"
-    else
-      match take_input_byte reader ~timeout:0.05 with
-      | None -> Some "invalid-utf8"
-      | Some byte when is_utf8_continuation byte ->
-          Bytes.set bytes index byte;
-          fill (index + 1)
-      | Some _ ->
-          return_input_byte reader;
-          Some "invalid-utf8"
-  in
-  fill 1
+(* [prefix] is what has already been read of this character: one leading byte
+   on the first attempt, or the head left by an attempt that ran out of bytes.
+
+   Returning [None] means the character is still in flight, not that a key was
+   lost. The head is parked in [partial_scalar] and the next read resumes it.
+   Only a byte that cannot belong to the character — one that is not a
+   continuation — is a real decoding failure, and that byte is pushed back so
+   it can be read as whatever it actually is. *)
+let read_utf8_scalar reader ~prefix expected_length =
+  match
+    Masc_tui_utf8_input.read_scalar ~prefix ~expected_length
+      ~next_byte:(fun () -> take_input_byte reader ~timeout:0.05)
+  with
+  | Masc_tui_utf8_input.Complete scalar ->
+      reader.partial_scalar <- "";
+      Some scalar
+  | Masc_tui_utf8_input.Incomplete head ->
+      (* Not a key. The character is still arriving and the next read finishes
+         it from here. *)
+      reader.partial_scalar <- head;
+      None
+  | Masc_tui_utf8_input.Malformed { pushback } ->
+      reader.partial_scalar <- "";
+      (* The byte belongs to whatever comes next, not to this character. *)
+      if Option.is_some pushback then return_input_byte reader;
+      Some "invalid-utf8"
 
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
@@ -226,6 +252,23 @@ let paste_byte_timeout_seconds = 0.5
 let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread (fun () ->
       let key name = Some (Key name) in
+      (* A character left half-read by the previous call is finished before
+         anything else is looked at. Its remaining bytes are the next thing in
+         the stream, so reading past them would decode the tail of one
+         character as the start of another. *)
+      if String.length reader.partial_scalar > 0 then (
+        let prefix = reader.partial_scalar in
+        match Masc_tui_message_layout.utf8_scalar_byte_length prefix.[0] with
+        | Some expected_length ->
+            Option.map
+              (fun scalar -> Key scalar)
+              (read_utf8_scalar reader ~prefix expected_length)
+        | None ->
+            (* Only a leading byte is ever parked, so this is unreachable;
+               clearing it keeps an impossible state from parking forever. *)
+            reader.partial_scalar <- "";
+            key "invalid-utf8")
+      else
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
@@ -299,7 +342,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
           | Some expected_length ->
               Option.map
                 (fun scalar -> Key scalar)
-                (read_utf8_scalar reader byte expected_length)
+                (read_utf8_scalar reader
+                   ~prefix:(String.make 1 byte)
+                   expected_length)
           | None -> key "invalid-utf8"))
 
 (** Parse command line arguments *)
@@ -3989,10 +4034,13 @@ let toggle_mouse_tracking () =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
-let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
-    ~new_term =
+let enter_terminal_session ~cleanup ~terminate ~request_interrupt
+    ~request_full_repaint ~suspend ~new_term =
   at_exit cleanup;
-  Sys.set_signal Sys.sigint (Sys.Signal_handle terminate);
+  (* SIGINT is the only one of these a person sends by hand mid-sentence, so
+     it asks the loop rather than ending the process. The rest still mean the
+     session is over. *)
+  Sys.set_signal Sys.sigint (Sys.Signal_handle request_interrupt);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
   Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
   Sys.set_signal Sys.sigquit (Sys.Signal_handle terminate);
@@ -4077,6 +4125,18 @@ let main () =
 
   let request_full_repaint _ = Atomic.set resize_requested true in
   let terminate _ = exit 0 in
+  (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
+     whatever was in the composer gone. It is one key away from Ctrl-V and
+     Ctrl-X on the same hand, and the footer never listed it, so the first
+     time an operator meets this binding is the time they lose a draft.
+
+     It cannot simply become a key: turning off ISIG would take Ctrl-Z with
+     it, and suspend is wired to a handler that gives the terminal back. So
+     the signal stays a signal and the loop decides what it means — the first
+     one says what a second one will do, and any other key withdraws it. *)
+  let interrupt_requested = Atomic.make false in
+  let interrupt_armed = Atomic.make false in
+  let request_interrupt _ = Atomic.set interrupt_requested true in
   let rec suspend _ =
     restore_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
@@ -4092,7 +4152,8 @@ let main () =
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
-  enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
+  enter_terminal_session ~cleanup ~terminate ~request_interrupt
+    ~request_full_repaint ~suspend
     ~new_term;
   let render_schedule =
     Render_schedule.create ~min_interval_ns:frame_interval_ns ()
@@ -4345,6 +4406,19 @@ let main () =
       if Atomic.exchange resize_requested false then begin
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
+      (* A second Ctrl-C while the first still stands ends the session; a lone
+         one only says so. The notice is an event rather than a footer line
+         because it has to survive the frame the operator is looking at, and
+         because the answer to "why did nothing happen" belongs in the log
+         they can scroll back to. *)
+      if Atomic.exchange interrupt_requested false then
+        if Atomic.get interrupt_armed then exit 0
+        else begin
+          Atomic.set interrupt_armed true;
+          add_event state "system"
+            "Ctrl-C: press again to quit, or any other key to stay";
+          Render_schedule.request render_schedule Render_schedule.Background
+        end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           async_messages
@@ -4356,6 +4430,10 @@ let main () =
           ~maximum:maximum_input_wait_seconds
       in
       let input = read_input ~timeout:input_timeout input_reader () in
+      (* Any deliberate input withdraws a standing Ctrl-C. Without this the
+         armed state outlives the moment it was meant for, and a Ctrl-C typed
+         minutes apart from another would read as a double press. *)
+      if Option.is_some input then Atomic.set interrupt_armed false;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
          here rather than inside the surfaces is what keeps a paste from
@@ -4367,6 +4445,16 @@ let main () =
       in
       (match input with
        | Some (Pasted paste) ->
+           (* A dropped or Finder-copied file arrives shell-escaped. The
+              filesystem is the check that keeps this from touching text that
+              merely looks like a path: an existing file is what the operator
+              dropped, and anything else is left byte-for-byte as pasted. *)
+           let paste =
+             match Masc_tui_paste.unescaped_path paste.Masc_tui_paste.text with
+             | Some path when Sys.file_exists path ->
+                 { paste with Masc_tui_paste.text = path }
+             | Some _ | None -> paste
+           in
            handle_paste state ~base_path ~mailbox:async_messages ~paste
        | Some (Key _) | None -> ());
       if Option.is_some input then

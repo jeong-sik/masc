@@ -2967,6 +2967,8 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_paste.inc)
 
+(include stanzas/test_tui_utf8_input.inc)
+
 (test
  (name test_code_address)
  (modules test_code_address)

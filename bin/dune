@@ -295,6 +295,11 @@
  (modules masc_tui_paste))
 
 (library
+ (name masc_tui_utf8_input)
+ (wrapped false)
+ (modules masc_tui_utf8_input))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
@@ -427,6 +432,7 @@
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
+  masc_tui_utf8_input
   masc_tui_send_disposition
   unix
   yojson))
@@ -470,6 +476,7 @@
   masc_tui_markdown
   masc_tui_message_layout
   masc_tui_paste
+  masc_tui_utf8_input
   masc_tui_scroll
   masc_tui_send_disposition
   masc_tui_metrics_tail

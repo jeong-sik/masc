@@ -38,3 +38,20 @@ val read : next_byte:(unit -> char option) -> t
 
     [next_byte] returning [None] ends the read: the terminal went away
     mid-paste, and what arrived is returned rather than dropped. *)
+
+val unescaped_path : string -> string option
+(** The path a paste names, when the paste is one.
+
+    Dropping a file on a terminal — or copying it in Finder — pastes the path
+    with every space backslash-escaped, because that is what a shell would
+    need. The draft is not a shell, so the text that lands in it is a path
+    nobody can open.
+
+    Answers [Some] only for a single line that begins with [/] and whose
+    backslashes each escape a character a shell would have escaped. Anything
+    else is [None] and stays exactly as pasted: a code snippet containing
+    ["\\n"], a Windows path, or prose. Unescaping those would alter bytes the
+    operator meant to paste, with no way to ask for them back.
+
+    Says nothing about whether the path exists — this module cannot reach a
+    filesystem. A caller that wants that asks separately. *)

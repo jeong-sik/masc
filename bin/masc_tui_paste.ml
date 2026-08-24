@@ -76,3 +76,54 @@ let read ~next_byte =
      marker that never came. *)
   if !ended && !matched > 0 then keep (String.sub end_marker 0 !matched);
   { text = newlines_normalized (Buffer.contents text); dropped = !dropped }
+
+(* Dragging a file onto a terminal, or copying it in Finder, pastes the path
+   the way a shell would need it: every space backslash-escaped. The draft is
+   not a shell, so what lands in it is a path nobody can open —
+   [/Users/x/스크린샷\ 2026-08-25.png].
+
+   Unescaping every paste would be wrong: a pasted snippet containing "\\n" or
+   a Windows path would come out altered, and the operator would have no way
+   to paste those bytes. So this recognises one shape and refuses everything
+   else — a single line that looks like an absolute path and whose only
+   backslashes escape a character a shell would have escaped. Whether the
+   result names a file is the caller's question; this cannot reach a
+   filesystem and should not pretend to. *)
+let shell_escapable_character = function
+  | ' ' | '\t' | '\\' | '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | '&'
+  | ';' | '<' | '>' | '|' | '*' | '?' | '$' | '`' | '!' | '#' | '~' ->
+      true
+  | _ -> false
+
+let unescaped_path text =
+  let trimmed = String.trim text in
+  let length = String.length trimmed in
+  let looks_absolute = length > 1 && trimmed.[0] = '/' in
+  let single_line = not (String.contains trimmed '\n') in
+  if not (looks_absolute && single_line) then None
+  else begin
+    let output = Buffer.create length in
+    let rec walk offset =
+      if offset >= length then Some (Buffer.contents output)
+      else
+        match trimmed.[offset] with
+        | '\\' when offset + 1 < length ->
+            let escaped = trimmed.[offset + 1] in
+            if shell_escapable_character escaped then begin
+              Buffer.add_char output escaped;
+              walk (offset + 2)
+            end
+            else
+              (* A backslash before an ordinary character is not shell
+                 escaping. Whatever this text is, it is not the shape this
+                 recognises. *)
+              None
+        | '\\' -> None (* trailing backslash *)
+        | byte ->
+            Buffer.add_char output byte;
+            walk (offset + 1)
+    in
+    match walk 0 with
+    | Some path when String.length path > 1 -> Some path
+    | Some _ | None -> None
+  end

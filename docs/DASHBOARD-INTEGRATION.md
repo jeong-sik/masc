@@ -121,8 +121,8 @@ code_refs:
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
   - overview + runtime shell metadata
-- `GET /api/v1/dashboard/namespace-truth`
-  - journey / agents / shared namespace truth
+- `GET /api/v1/dashboard/project-snapshot`
+  - journey / agents / shared project snapshot
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph

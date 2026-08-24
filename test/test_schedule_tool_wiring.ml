@@ -530,6 +530,60 @@ let test_unknown_payload_is_rejected_before_persistence () =
   check (float 0.001) "unsupported metric increments" (before +. 1.0) after
 ;;
 
+(* The body used to take anything: an unknown key was persisted at creation
+   and then dropped by the consumer, which is how a live schedule ended up
+   carrying a channel_id no dispatch ever saw (#25689). *)
+let test_unknown_body_field_is_rejected_before_persistence () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-unknown-body-field"
+        ; "due_at_unix", `Float 200.0
+        ; "payload_kind", `String "masc.keeper_wake"
+        ; ( "payload_body"
+          , `Assoc
+              [ "keeper_name", `String "alpha"
+              ; "message", `String "wake up"
+              ; "channel_id", `String "C123"
+              ] )
+        ; "requested_by_id", `String "operator"
+        ; "scheduled_by_id", `String "scheduler-agent"
+        ])
+  in
+  check bool "unknown body field rejected" false (Tool_result.is_success result);
+  check bool "the error names the field" true
+    (String_util.contains_substring (Tool_result.message result) "channel_id");
+  check int "nothing persisted" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+let test_known_body_fields_still_create () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-known-body-fields"
+        ; "due_at_unix", `Float 200.0
+        ; "payload_kind", `String "masc.keeper_wake"
+        ; ( "payload_body"
+          , `Assoc
+              [ "keeper_name", `String "alpha"
+              ; "message", `String "wake up"
+              ; "title", `String "a title"
+              ; "urgency", `String "normal"
+              ] )
+        ; "requested_by_id", `String "operator"
+        ; "scheduled_by_id", `String "scheduler-agent"
+        ; "allow_unregistered_keeper", `Bool true
+        ])
+  in
+  check bool "every declared field is accepted" true
+    (Tool_result.is_success result)
+;;
+
 let test_payload_contracts_are_schema_only () =
   let contracts =
     Schedule_payload_projection.supported_contracts_to_yojson ()
@@ -847,6 +901,10 @@ let () =
             test_unregistered_wake_target_rejected
         ; test_case "unknown payload rejected before persistence" `Quick
             test_unknown_payload_is_rejected_before_persistence
+        ; test_case "unknown body field rejected before persistence" `Quick
+            test_unknown_body_field_is_rejected_before_persistence
+        ; test_case "every declared body field still creates" `Quick
+            test_known_body_fields_still_create
         ; test_case "payload contracts are schema only" `Quick
             test_payload_contracts_are_schema_only
         ; test_case "keeper wake schema validation" `Quick

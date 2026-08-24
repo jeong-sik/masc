@@ -243,6 +243,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -553,6 +554,7 @@
   test_keeper_toml
   test_runtime_missing_catalog_report
   test_runtime_toml_overrides
+  test_runtime_input_byte_ceiling
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
@@ -1292,6 +1294,8 @@
   masc_test_runtime
   masc.embedded_config
   bigstringaf
+  ; test_activity_graph checks its day file against the layout owner
+  masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader
   decompress.de
   decompress.gz)
@@ -2584,7 +2588,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries alcotest ast_grep)
+ (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
  (deps
   (source_tree ../bin)))
 

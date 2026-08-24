@@ -17,8 +17,12 @@ let parse content =
   let lines = String.split_on_char '\n' content in
   match lines with
   | first :: rest when String.equal (String.trim first) "---" ->
+    (* A block that never closes is not frontmatter. Reading it as one threw
+       the whole document away: every line became a field candidate and the
+       body came back empty, so a prompt with a typo in its closing delimiter
+       loaded as blank (#26599). Hand the content back unread instead. *)
     let rec collect acc = function
-      | [] -> { fields = List.rev acc; body = "" }
+      | [] -> empty content
       | line :: remaining when String.equal (String.trim line) "---" ->
         { fields = List.rev acc; body = String.concat "\n" remaining }
       | line :: remaining ->

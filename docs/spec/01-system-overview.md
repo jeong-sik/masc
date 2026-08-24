@@ -153,7 +153,7 @@ MASC의 현재 canonical front door는 3가지다.
 
 운영 상태를 읽고 개입 포인트를 파악하는 read-mostly 경로.
 
-- **대상**: dashboard monitoring, operator digest/action, namespace truth
+- **대상**: dashboard monitoring, operator digest/action, project snapshot
 - **핵심 코드**: `lib/dashboard/`, `lib/server/server_dashboard_http*.ml`, `dashboard/`, `lib/operator/`
 - **핵심 surface**: `/api/v1/dashboard/*`, `/api/v1/operator*`, `/api/v1/activity/*`
 - **설명**: write-heavy orchestration을 새 front door로 약속하지 않고, 운영자가 현재 runtime truth를 읽고 제한된 개입을 하는 surface다.

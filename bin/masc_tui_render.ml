@@ -2462,11 +2462,6 @@ let render_keeper_message (state : state) =
            box_line_styled buf cols ~style:Ansi.yellow
              ("  older messages could not be loaded; up retries: " ^ detail)
        | None -> ());
-    (if scroll > 0 then
-       box_line_styled buf cols ~style:Ansi.yellow
-         (Printf.sprintf
-            "  scrolled back %d row(s); down or Ctrl-E returns to the newest"
-            scroll));
     (match state.msg_loaded_error with
      | Some detail ->
          box_line_styled buf cols ~style:Ansi.yellow
@@ -2634,13 +2629,8 @@ let render_keeper_message (state : state) =
           else "Enter:disabled (Keeper unavailable)"
     in
     let scroll_hint =
-      if scroll > 0 then
-        (* At the oldest row with nothing more to fetch, say so: an operator
-           pressing up against a pane that will not move should know it is the
-           start of the conversation rather than a stuck key. *)
-        if state.msg_older_exist then "up/down:scroll  Ctrl-E:newest"
-        else "up/down:scroll  Ctrl-E:newest  (start of conversation)"
-      else "up:scroll back"
+      Message_layout.scroll_hint ~scrolled_back:scroll
+        ~older_exist:state.msg_older_exist
     in
     let escape_hint =
       match state.msg_live with

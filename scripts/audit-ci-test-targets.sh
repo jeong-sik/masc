@@ -150,19 +150,24 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   exit 2
 fi
 
-# A count below the baseline is a regression too. The gap between the two is
-# budget: a later change can add an unwired suite and still read as "OK", so a
-# gain nobody locked in becomes room for new debt. Measured on 2026-08-13: 45
-# test files added after this ratchet landed (#26959) are still unwired, and
-# #28383 is one of them -- it added test_caller_identity_credential_binding
-# with the baseline unchanged at 662 on both sides of the merge.
+# Below the baseline reports and passes. Failing here sent the PR that wires a
+# suite red for doing the thing this check asks for, and left main red until
+# someone edited the number: audit-unwired-audits.sh recorded that shape when
+# 748 went red, #27181 set 747, and 746 was red again within the hour. Three
+# siblings already made this trade -- audit-dead-surface.py,
+# audit-unwired-audits.sh, and ocaml-structure-ratchet.sh, which answers a
+# drift-down with "baseline can be lowered".
+#
+# What that gives up is real and stays given up. A gain nobody locks in becomes
+# room for new debt: measured on 2026-08-13, 45 test files added after this
+# ratchet landed (#26959) were still unwired, #28383 among them -- it added
+# test_caller_identity_credential_binding with the baseline unchanged at 662 on
+# both sides of the merge. The check above still fails when the count rises, so
+# the loss is bounded by the gap between a lowered reality and a stale number,
+# and the message below is what closes it.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
-  echo
-  echo "[ci-test-targets] FAIL - ${unwired} suites unwired, under the ${UNWIRED_BASELINE} baseline by $((UNWIRED_BASELINE - unwired))"
-  echo
-  echo "Set UNWIRED_BASELINE=${unwired} in $0. The gap is not slack to spend:"
-  echo "leaving it lets a later change add an unwired suite and still pass."
-  exit 2
+  echo "[ci-test-targets] OK - ${unwired} suites unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the $((UNWIRED_BASELINE - unwired)) you wired"
+  exit 0
 fi
 
 echo "[ci-test-targets] OK - ${unwired} suites unwired, at baseline"

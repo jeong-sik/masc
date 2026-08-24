@@ -15,8 +15,20 @@ function diag(
   return signal === undefined ? { ts, kind, message } : { ts, kind, message, signal }
 }
 
+// One round is a microtask drain followed by a macrotask turn. That pair is
+// what lets a preact render and the effect it schedules both land, and four
+// of them cover the panel's synchronous props.
+const RENDER_SETTLE_ROUNDS = 4
+
+// The ceiling on flushUntil. It is a stop, not an estimate: the loop leaves
+// the moment the condition holds, so this number only bounds how long a
+// condition that never holds takes to report -- measured at 1.3s, well inside
+// vitest's default timeout, which is what makes the failure a diff instead of
+// a timeout.
+const ASYNC_SETTLE_CEILING_ROUNDS = 40
+
 async function flush(): Promise<void> {
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < RENDER_SETTLE_ROUNDS; i += 1) {
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 0))
   }
@@ -30,7 +42,10 @@ async function flush(): Promise<void> {
 // has not been drawn yet. Pump until the caller's condition holds instead of
 // guessing a number. The assertions after this still run normally, so a real
 // failure prints a diff rather than a timeout.
-async function flushUntil(until: () => boolean, rounds = 40): Promise<void> {
+async function flushUntil(
+  until: () => boolean,
+  rounds = ASYNC_SETTLE_CEILING_ROUNDS,
+): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
     if (until()) return
     await Promise.resolve()

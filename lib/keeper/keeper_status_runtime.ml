@@ -12,14 +12,36 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
+(* Slack over the slower of the two producer cadences, for the scheduling and
+   transport delay between a heartbeat being written and being read. The .mli
+   calls it "one minute of scheduling / transport jitter"; it was spelled 60.0
+   inside the expression, where nothing said which of the two windows below it
+   belonged to. *)
+let heartbeat_transport_jitter_s = 60.0
+
+(* A turn record is emitted after a cycle completes, so its freshness window
+   carries the cycle's own execution time on top of the configured sleep. Two
+   separate numbers: how long a cycle may take, and the floor the window never
+   drops below however short the cadence is configured. *)
+let turn_cycle_execution_slack_s = 120.0
+let turn_record_freshness_floor_s = 300.0
+
+(* A keepalive loop that has only just started has not had time to write the
+   evidence the health read looks for, so it reads as recovering rather than
+   unhealthy until this window passes. Distinct from the jitter above: that one
+   widens a staleness window, this one suppresses a verdict. *)
+let keepalive_recovery_window_s = 60.0
+
 let keeper_heartbeat_stale_after_s ~keepalive_interval_s ~snapshot_interval_s =
   Float.max
     agent_staleness_threshold_s
-    (Float.max keepalive_interval_s snapshot_interval_s +. 60.0)
+    (Float.max keepalive_interval_s snapshot_interval_s +. heartbeat_transport_jitter_s)
 ;;
 
 let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
-  Float.max 300.0 (keepalive_interval_s +. 120.0)
+  Float.max
+    turn_record_freshness_floor_s
+    (keepalive_interval_s +. turn_cycle_execution_slack_s)
 ;;
 
 let keeper_turn_record_source_health
@@ -287,9 +309,7 @@ let keeper_continuity_state
   in
   let recently_started =
     match keepalive_started_at with
-    | Some started_at ->
-        let recovery_window_s = 60.0 in
-        now_ts -. started_at < recovery_window_s
+    | Some started_at -> now_ts -. started_at < keepalive_recovery_window_s
     | None -> false
   in
   if not keepalive_running then Continuity_not_running

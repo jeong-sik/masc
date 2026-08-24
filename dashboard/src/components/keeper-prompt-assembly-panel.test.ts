@@ -42,9 +42,8 @@ describe('buildKeeperPromptAssemblyReport', () => {
     ])
 
     // The shared keeper asset appears once as registry source and once as the
-    // system message. The world and recall blocks are computed at turn time.
+    // system message.
     expect(report.rows.filter(row => row.promptKey === 'keeper').length).toBe(2)
-    expect(report.rows.some(row => row.promptKey === '(computed:world_observation)')).toBe(true)
     // The one stage key is supplied and overridden.
     expect(report.stats.overrideRows).toBeGreaterThanOrEqual(1)
     expect(report.stages.map(stage => stage.title)).toEqual(
@@ -58,13 +57,11 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'agent-core-hook',
     ])
     // The world message carries no prompt asset: keeper.turn_intent was its
-    // only one and #26823 removed it. Its two rows are computed observations.
+    // only one and #26823 removed it. Its computed observation placeholders
+    // were dropped with RFC prompts-outside-ocaml §2.3 item 3.
     expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(0)
-    expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
-    expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper')?.source).toBe('override')
-    expect(report.rows.find(row => row.promptKey === '(computed:memory_os_recall)')?.source).toBe('computed')
   })
 
   it('detects stale argument shapes in effective prompt text', () => {
@@ -139,7 +136,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).toContain('fingerprint')
     expect(defaultRoute?.textContent).toContain('tok')
     expect(defaultRoute?.textContent).toMatch(/saved override/i)
-    expect(defaultRoute?.textContent).toMatch(/computed at turn time/i)
     expect(container.textContent).toContain('sent parts')
     expect(defaultRoute?.textContent).not.toContain('model-visible')
     expect(defaultRoute?.textContent).not.toMatch(/provider/i)
@@ -179,7 +175,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(rawFileList?.hasAttribute('open')).toBe(false)
     expect(rawFileList?.querySelector('summary')?.textContent).toContain('Raw prompt files')
     expect(evidence?.textContent).toContain('keeper')
-    expect(evidence?.textContent).toContain('(computed:scheduled_automation)')
     expect(evidence?.textContent).toContain('fingerprint')
 
     const intro = container.querySelector('[data-prompt-recipe-intro]')

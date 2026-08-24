@@ -83,9 +83,31 @@ type t =
       disposition matches {!Provider_attempt_effect_fenced}, only the label
       differs so a lost correction is countable apart from ordinary fenced
       provider failures. *)
+  | Accept_rejected of string
+  (** {!Keeper_internal_error.Wire_accept_rejected}. The provider answered and
+      the response was well formed; MASC's own accept contract found nothing
+      usable in it — no text, no tool call — and refused the turn. Nothing
+      failed on the provider side and nothing failed inside MASC, so this is
+      neither a provider error nor an internal one. The operator action it
+      points at is a lane's output budget, which is why it does not share a
+      label with either. *)
+  | Terminal_effect_failed of string
+  (** {!Keeper_internal_error.Wire_terminal_effect_failed}. The tool that ends
+      the turn by producing an external artifact reported failure, or returned
+      no typed receipt for what it did. Whether the artifact reached the
+      outside world is unknown, so the turn is never replayed and the
+      stimulus behind it is retired rather than requeued — an operator has to
+      decide what happened. Keeps the alert; only the label changes, from
+      "unmapped runtime state" to what actually occurred. *)
   | Internal_error of string
-  (** Exact wire ["internal_error"]. Payload is the original
-          string, carried only for [to_wire] round-trip fidelity. *)
+  (** Exact wire ["internal_error"], plus the three envelope spellings
+      {!Keeper_internal_error.Wire_internal_unhandled_exception},
+      [Wire_internal_bridge_exception] and [Wire_internal_contract_rejected].
+      All four take the same route — [Internal_opaque] /
+      [Exhausted_visible_alive] — and the receipt keeps the wire string
+      verbatim, so they stay countable apart without separate variants.
+      Payload is the original string, carried for [to_wire] round-trip
+      fidelity. *)
   | Pre_dispatch_success of string
   (** Exact wire ["pre_dispatch_success"]: a turn that
           completed without dispatching to a provider. Payload is the

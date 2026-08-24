@@ -50,6 +50,8 @@ type t =
   | Transcript_corruption of string
   | Provider_attempt_effect_fenced of string
   | Tool_correction_lost of string
+  | Accept_rejected of string
+  | Terminal_effect_failed of string
   | Internal_error of string
   | Pre_dispatch_success of string
   | Unknown of string
@@ -63,43 +65,73 @@ let is_config_or_auth_wire wire =
     || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
 ;;
 
-(* Priority-ranked partition. The bucket order replicates the [if/else]
-   order of the pre-typing [operator_disposition] string predicates, with the
-   exact canonical policy buckets for [Capacity_backpressure] and
-   [Provider_attempt_effect_fenced] inserted before the opaque internal-error
-   fall-through;
-   [of_wire] returns the FIRST matching bucket. Capacity backpressure is an
-   exact producer-owned wire kind; casing variants remain opaque rather than
-   inheriting its non-pageable policy. The original
-   [wire] is carried in payload-bearing variants so
-   [to_wire] reproduces it byte-for-byte; classification is done on a
-   canonical wire byte sequence only. Unknown or non-canonical spellings stay typed
-   [Unknown] and take the generic disposition route. *)
+(* Two stages. The keeper's own internal-error kinds are looked up in the
+   producer's enumeration first; whatever that does not claim falls to the
+   prefix tests for the agent-core and provider wire families, which are
+   priority-ranked and return the FIRST match, replicating the [if/else]
+   order of the pre-typing [operator_disposition] string predicates.
+
+   Putting the exact lookup first is not a reordering: no internal-error kind
+   equals or prefixes any config/auth or provider wire, so both stages see
+   the same inputs they saw before. Casing variants of a kind still miss the
+   lookup and stay opaque rather than inheriting its policy. The original
+   [wire] is carried in every payload-bearing variant so [to_wire] reproduces
+   it byte-for-byte; classification reads a canonical byte sequence only.
+   Spellings neither stage claims stay typed [Unknown] and take the generic
+   disposition route. *)
+(* The keeper's own internal-error family, classified from the producer's
+   typed enumeration instead of from its printed form. Previously five of
+   these thirteen were recognised by [String.equal] against four exported
+   constants and the rest fell to [Unknown], which is how a keeper's named
+   failure reached the operator as "unmapped runtime state" (#29929).
+
+   Three kinds get no policy here on purpose. [Resumable_cli_session],
+   [Receipt_persistence_failed] and [Gate_replay_repair_required] have never
+   been observed — zero rows across 189 receipt files and every August log —
+   so there is no trace to classify them from, and naming a disposition from
+   the constructor name alone would be a guess dressed as a decision. They
+   stay [Unknown], which is what they do today; the difference is that the
+   match now names them, so the next author sees the open question instead of
+   an absent arm. *)
+let of_masc_internal_kind wire = function
+  | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted wire
+  | Keeper_internal_error.Wire_capacity_backpressure -> Capacity_backpressure wire
+  | Keeper_internal_error.Wire_incomplete_tool_transcript -> Transcript_corruption wire
+  | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
+    Provider_attempt_effect_fenced wire
+  | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
+  | Keeper_internal_error.Wire_accept_rejected -> Accept_rejected wire
+  | Keeper_internal_error.Wire_terminal_effect_failed -> Terminal_effect_failed wire
+  | Keeper_internal_error.Wire_internal_unhandled_exception
+  | Keeper_internal_error.Wire_internal_bridge_exception
+  | Keeper_internal_error.Wire_internal_contract_rejected ->
+    (* One route, so one bucket. [Keeper_runtime_failure_route] answers
+       [Internal_opaque] / [Exhausted_visible_alive] for all three, the same
+       answer it gives the bare ["internal_error"] wire that an internal
+       error without an envelope produces. The wire string stays verbatim in
+       the receipt, so counting them apart never needed separate variants. *)
+    Internal_error wire
+  | Keeper_internal_error.Wire_resumable_cli_session
+  | Keeper_internal_error.Wire_receipt_persistence_failed
+  | Keeper_internal_error.Wire_gate_replay_repair_required -> Unknown wire
+;;
+
 let of_wire wire =
-  if String.equal wire "runtime_exhausted"
-  then Runtime_exhausted wire
-  else if String.equal wire Keeper_internal_error.capacity_backpressure_kind
-  then Capacity_backpressure wire
-  else if is_config_or_auth_wire wire
-  then Config_or_auth wire
-  else if
-    String.starts_with ~prefix:"api_error_" wire
-    || String.equal wire "provider_error"
-    || String.starts_with ~prefix:wire_provider_error_prefix wire
-  then Provider_runtime_failure wire
-  else if
-    String.equal wire Keeper_internal_error.incomplete_tool_transcript_kind
-  then Transcript_corruption wire
-  else if
-    String.equal wire Keeper_internal_error.provider_attempt_effect_fenced_kind
-  then Provider_attempt_effect_fenced wire
-  else if String.equal wire Keeper_internal_error.tool_correction_lost_kind
-  then Tool_correction_lost wire
-  else if String.equal wire "internal_error"
-  then Internal_error wire
-  else if String.equal wire "pre_dispatch_success"
-  then Pre_dispatch_success wire
-  else Unknown wire
+  match Keeper_internal_error.wire_kind_of_string wire with
+  | Some kind -> of_masc_internal_kind wire kind
+  | None ->
+    if is_config_or_auth_wire wire
+    then Config_or_auth wire
+    else if
+      String.starts_with ~prefix:"api_error_" wire
+      || String.equal wire "provider_error"
+      || String.starts_with ~prefix:wire_provider_error_prefix wire
+    then Provider_runtime_failure wire
+    else if String.equal wire "internal_error"
+    then Internal_error wire
+    else if String.equal wire "pre_dispatch_success"
+    then Pre_dispatch_success wire
+    else Unknown wire
 ;;
 
 (* Byte-identical inverse: every variant carries the original wire string,
@@ -114,6 +146,8 @@ let to_wire = function
   | Transcript_corruption wire -> wire
   | Provider_attempt_effect_fenced wire -> wire
   | Tool_correction_lost wire -> wire
+  | Accept_rejected wire -> wire
+  | Terminal_effect_failed wire -> wire
   | Internal_error wire -> wire
   | Pre_dispatch_success wire -> wire
   | Unknown wire -> wire
@@ -144,6 +178,8 @@ let is_transient_provider_runtime_failure = function
   | Transcript_corruption _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
+  | Accept_rejected _
+  | Terminal_effect_failed _
   | Internal_error _
   | Pre_dispatch_success _
   | Unknown _ -> false

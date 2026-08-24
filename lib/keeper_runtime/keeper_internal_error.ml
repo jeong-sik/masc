@@ -630,20 +630,84 @@ let summary_of_masc_internal_error = function
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> None
 
-let kind_of_masc_internal_error = function
-  | Runtime_exhausted _ -> "runtime_exhausted"
-  | Capacity_backpressure _ -> capacity_backpressure_kind
-  | Resumable_cli_session _ -> "resumable_cli_session"
-  | Accept_rejected _ -> "accept_rejected"
-  | Internal_unhandled_exception _ -> "internal_unhandled_exception"
-  | Internal_bridge_exception _ -> "internal_bridge_exception"
-  | Internal_contract_rejected _ -> "internal_contract_rejected"
-  | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
-  | Terminal_effect_failed _ -> "terminal_effect_failed"
-  | Provider_attempt_effect_fenced _ -> provider_attempt_effect_fenced_kind
-  | Tool_correction_lost _ -> tool_correction_lost_kind
-  | Receipt_persistence_failed _ -> "receipt_persistence_failed"
-  | Gate_replay_repair_required _ -> "gate_replay_repair_required"
+type wire_kind =
+  | Wire_runtime_exhausted
+  | Wire_capacity_backpressure
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+let wire_kind_of_masc_internal_error = function
+  | Runtime_exhausted _ -> Wire_runtime_exhausted
+  | Capacity_backpressure _ -> Wire_capacity_backpressure
+  | Resumable_cli_session _ -> Wire_resumable_cli_session
+  | Accept_rejected _ -> Wire_accept_rejected
+  | Internal_unhandled_exception _ -> Wire_internal_unhandled_exception
+  | Internal_bridge_exception _ -> Wire_internal_bridge_exception
+  | Internal_contract_rejected _ -> Wire_internal_contract_rejected
+  | Incomplete_tool_transcript _ -> Wire_incomplete_tool_transcript
+  | Terminal_effect_failed _ -> Wire_terminal_effect_failed
+  | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
+  | Tool_correction_lost _ -> Wire_tool_correction_lost
+  | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
+  | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
+
+let wire_kind_to_string = function
+  | Wire_runtime_exhausted -> "runtime_exhausted"
+  | Wire_capacity_backpressure -> capacity_backpressure_kind
+  | Wire_resumable_cli_session -> "resumable_cli_session"
+  | Wire_accept_rejected -> "accept_rejected"
+  | Wire_internal_unhandled_exception -> "internal_unhandled_exception"
+  | Wire_internal_bridge_exception -> "internal_bridge_exception"
+  | Wire_internal_contract_rejected -> "internal_contract_rejected"
+  | Wire_incomplete_tool_transcript -> incomplete_tool_transcript_kind
+  | Wire_terminal_effect_failed -> "terminal_effect_failed"
+  | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
+  | Wire_tool_correction_lost -> tool_correction_lost_kind
+  | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
+  | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
+
+(* Decoding scans this list through [wire_kind_to_string] rather than
+   repeating the strings, so encoder and decoder cannot spell a kind
+   differently. Thirteen entries; the scan cost is not worth a second table.
+
+   The one thing the compiler cannot check is whether this list is complete —
+   a fourteenth constructor breaks the two matches above but would leave a
+   silent gap here. test_keeper_internal_error_wire_kind closes that with its
+   own exhaustive match over the constructors. *)
+let all_wire_kinds =
+  [ Wire_runtime_exhausted
+  ; Wire_capacity_backpressure
+  ; Wire_resumable_cli_session
+  ; Wire_accept_rejected
+  ; Wire_internal_unhandled_exception
+  ; Wire_internal_bridge_exception
+  ; Wire_internal_contract_rejected
+  ; Wire_incomplete_tool_transcript
+  ; Wire_terminal_effect_failed
+  ; Wire_provider_attempt_effect_fenced
+  ; Wire_tool_correction_lost
+  ; Wire_receipt_persistence_failed
+  ; Wire_gate_replay_repair_required
+  ]
+
+let wire_kind_of_string wire =
+  List.find_opt
+    (fun kind -> String.equal (wire_kind_to_string kind) wire)
+    all_wire_kinds
+;;
+
+let kind_of_masc_internal_error error =
+  wire_kind_to_string (wire_kind_of_masc_internal_error error)
+;;
 
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }

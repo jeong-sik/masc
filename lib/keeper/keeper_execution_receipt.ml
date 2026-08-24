@@ -94,6 +94,8 @@ type operator_disposition_reason =
   | Reason_transcript_corruption
   | Reason_provider_attempt_effect_fenced
   | Reason_tool_correction_lost
+  | Reason_accept_rejected
+  | Reason_terminal_effect_failed
   | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
@@ -113,6 +115,10 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_attempt_effect_fenced ->
     Keeper_internal_error.provider_attempt_effect_fenced_kind
   | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
+  | Reason_accept_rejected ->
+    Keeper_internal_error.(wire_kind_to_string Wire_accept_rejected)
+  | Reason_terminal_effect_failed ->
+    Keeper_internal_error.(wire_kind_to_string Wire_terminal_effect_failed)
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
@@ -174,6 +180,15 @@ let operator_disposition (receipt : t)
        lost correction (masc#28885) is countable apart from an ordinary
        fenced provider failure. *)
     Disp_unknown, Reason_tool_correction_lost
+  | Keeper_terminal_reason.Terminal_effect_failed _ ->
+    (* Third member of the same family: the turn's closing tool may or may not
+       have put something outside the process, so the turn is never replayed
+       and the stimulus behind it is retired rather than requeued. A human
+       decides what happened, which is why this sits with its siblings above
+       the retry-label guards — a degraded retry elsewhere in the turn must
+       not relabel an alert this one earns on its own. Until now it reached
+       the operator as an unmapped state (#29929). *)
+    Disp_unknown, Reason_terminal_effect_failed
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
@@ -218,6 +233,7 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_internal_error
   | Config_or_auth _
   | Provider_runtime_failure _
+  | Accept_rejected _
   | Pre_dispatch_success _
   | Unknown _ ->
     (* Generic fall-through. [Config_or_auth] and
@@ -246,6 +262,8 @@ let operator_disposition (receipt : t)
        | Transcript_corruption _
        | Provider_attempt_effect_fenced _
        | Tool_correction_lost _
+       | Accept_rejected _
+       | Terminal_effect_failed _
        | Internal_error _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy
@@ -274,6 +292,28 @@ let operator_disposition (receipt : t)
            because the outcome is success — the runtime was simply not
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
+      | _
+        when (match terminal_reason with
+              | Keeper_terminal_reason.Accept_rejected _ -> true
+              | Runtime_exhausted _
+              | Capacity_backpressure _
+              | Config_or_auth _
+              | Provider_runtime_failure _
+              | Transcript_corruption _
+              | Provider_attempt_effect_fenced _
+              | Tool_correction_lost _
+              | Terminal_effect_failed _
+              | Internal_error _
+              | Pre_dispatch_success _
+              | Unknown _ -> false) ->
+        (* Last, not first: the degraded-retry and fallback labels above say
+           what the system DID about the rejection, which is the more useful
+           fact when one of them applies — and today they claim 41 of the 42
+           accept rejections on record. This arm names the remaining case
+           instead of calling it an unclassified state. Not pageable: the
+           provider was healthy, MASC's own accept contract refused the
+           answer, and the keeper takes its next turn. *)
+        Disp_fail_open_next_runtime, Reason_accept_rejected
       | _ ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
         Otel_metric_store.inc_counter

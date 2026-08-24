@@ -141,6 +141,34 @@ val replace_snapshot :
 (** Durably remove the current snapshot for a Keeper deleted by its Owner. *)
 val remove_snapshot : Workspace.config -> name:string -> (unit, string) result
 
+(** The one process-local record of store problems, keyed by a typed site
+    and path. [should_report] is the write side (log-gating callers), the
+    snapshot functions are the read side — the dashboard projects the same
+    rows, so a failure is recorded once and read everywhere. *)
+module Problem_report_state : sig
+  type site =
+    | Meta_read
+    | Meta_read_changed
+    | Meta_repair
+    | Keepalive_scan
+    | Persistent_scan
+
+  type entry = {
+    site : site;
+    path : string;
+    detail : string;
+    first_observed : float;
+  }
+
+  val should_report : site:site -> path:string -> detail:string -> bool
+  val note_recovered : site:site -> path:string -> bool
+  val clear : site:site -> path:string -> unit
+  val site_to_string : site -> string
+  val snapshot : unit -> entry list
+  val snapshot_to_yojson : unit -> Yojson.Safe.t
+  val reset : unit -> unit
+end
+
 module For_testing : sig
   val settle_durable_replace
     :  string

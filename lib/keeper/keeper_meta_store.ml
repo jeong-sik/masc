@@ -71,19 +71,36 @@ module Problem_report_state = struct
 
   module Table = Hashtbl.Make (Key)
 
-  let reported : string Table.t = Table.create 16
+  type entry = {
+    site : site;
+    path : string;
+    detail : string;
+    first_observed : float;
+  }
+
+  let reported : (string * float) Table.t = Table.create 16
   let mutex = Stdlib.Mutex.create ()
 
   (** [true] when (site, path, detail) is a new problem state and the caller
-      should log; [false] while the same failure keeps repeating. *)
+      should log; [false] while the same failure keeps repeating. The row
+      written here is the one and only record of the failure — the dashboard
+      reads it through [snapshot_to_yojson] below, so there is no second
+      table to keep in step. *)
   let should_report ~site ~path ~detail =
     Stdlib.Mutex.protect mutex (fun () ->
       let key = site, path in
+      (* NDT-OK: wall clock stamps first_observed for dashboard telemetry;
+         no branch reads it. *)
+      let now = Unix.gettimeofday () in
       match Table.find_opt reported key with
-      | Some previous when String.equal previous detail -> false
-      | _ ->
-        Table.replace reported key detail;
-        true)
+      | Some (previous, first_observed) when String.equal previous detail ->
+          false
+      | Some (_, first_observed) ->
+          Table.replace reported key (detail, first_observed);
+          true
+      | None ->
+          Table.replace reported key (detail, now);
+          true)
   ;;
 
   (** [true] when a previously reported problem cleared — the caller may log
@@ -105,6 +122,42 @@ module Problem_report_state = struct
       operation. *)
   let clear ~site ~path =
     Stdlib.Mutex.protect mutex (fun () -> Table.remove reported (site, path))
+  ;;
+
+  let site_to_string = function
+    | Meta_read -> "meta_read"
+    | Meta_read_changed -> "meta_read_changed"
+    | Meta_repair -> "meta_repair"
+    | Keepalive_scan -> "keepalive_scan"
+    | Persistent_scan -> "persistent_scan"
+  ;;
+
+  (** The dashboard projection reads the same rows [should_report] wrote:
+      one table, one truth, no sync step where a clear on one side could
+      leave the other side stale. *)
+  let snapshot () =
+    Stdlib.Mutex.protect mutex (fun () ->
+      Table.fold
+        (fun (site, path) (detail, first_observed) acc ->
+           { site; path; detail; first_observed } :: acc)
+        reported [])
+  ;;
+
+  let snapshot_to_yojson () =
+    `List
+      (List.map
+         (fun (e : entry) ->
+            `Assoc
+              [ ("site", `String (site_to_string e.site))
+              ; ("path", `String e.path)
+              ; ("detail", `String e.detail)
+              ; ("first_observed", `Float e.first_observed)
+              ])
+         (snapshot ()))
+  ;;
+
+  let reset () =
+    Stdlib.Mutex.protect mutex (fun () -> Table.reset reported)
   ;;
 end
 
@@ -177,6 +230,9 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
          keeper): %s"
         path
         detail;
+    (* main took the recovery decision (#29610: unreadable is absent, not fatal);
+       this branch keeps its own contribution, which is that the loss shows
+       up in the unreadable-store registry instead of only in a log line. *)
     Ok None
   in
   if not (Fs_compat.file_exists path)
@@ -192,7 +248,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
          Problem_report_state.clear ~site:Meta_repair ~path;
-         Ok (Some meta)
+              Ok (Some meta)
        | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }) ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
             reader until something external rewrote the file.  When the

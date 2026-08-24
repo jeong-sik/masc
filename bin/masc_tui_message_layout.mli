@@ -104,13 +104,19 @@ val wrap_words : max_cells:int -> string -> string list
     Words wider than the budget are split between complete UTF-8 scalars. *)
 
 val wrap_body :
-  max_cells:int -> sanitize:(string -> string) -> string -> string list
+  ?markdown:(width:int -> string -> string list) ->
+  max_cells:int ->
+  sanitize:(string -> string) ->
+  string ->
+  string list
 (** Wrap a multi-line body, applying [sanitize] to each line rather than to the
     whole text. A sanitiser that escapes control bytes escapes a newline too,
     so sanitising a document whole collapses it into one run with the escape
     printed at every break. Blank lines are kept as blank rows: a paragraph
     break is not an absence. [sanitize] is the caller's so this module keeps no
-    terminal vocabulary of its own. *)
+    terminal vocabulary of its own, and so is [markdown]: given one, it renders
+    the escaped text and owns the wrapping, because fenced code keeps breaks a
+    word wrap would ruin. *)
 
 val visible_rows :
   ?markdown:(width:int -> string -> string list) ->

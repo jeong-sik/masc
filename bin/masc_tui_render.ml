@@ -1154,8 +1154,12 @@ let render_board_read (state : state) (list_post : board_post) =
   (* Sanitised a line at a time. A newline is a control byte, so sanitising the
      body whole escaped every break and the post arrived as one unbroken run
      with "\x0A" printed through it. *)
+  (* Board posts are written in markdown -- headings, fences, rules -- and were
+     drawn as the source they were typed as. The chat pane has rendered them
+     for a while; this surface reads the same kind of document. *)
   let body_lines =
     Message_layout.wrap_body
+      ~markdown:chat_markdown
       ~max_cells:text_width
       ~sanitize:Terminal_text.single_line
       post.bp_body

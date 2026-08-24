@@ -451,6 +451,29 @@ let test_a_body_still_escapes_what_a_line_carries () =
   check (list string) "the escape on a line is still escaped"
     [ "before"; {|\x1B[31mred|}; "after" ] rows
 
+(* With a renderer the escaping still happens first, and the renderer decides
+   the rows. What must not happen is the renderer seeing a raw control byte, or
+   the escaping eating the breaks it needs to find a heading. *)
+let test_a_rendered_body_is_escaped_before_it_is_rendered () =
+  let seen = ref "" in
+  let renderer ~width text =
+    ignore width;
+    seen := text;
+    String.split_on_char '\n' text
+  in
+  let rows =
+    Layout.wrap_body
+      ~markdown:renderer
+      ~max_cells:40
+      ~sanitize:escape_control_bytes
+      "# title\n\x1b[31mred\nlast"
+  in
+  check string "the renderer is handed escaped text with its breaks intact"
+    ({|# title|} ^ "\n" ^ {|\x1B[31mred|} ^ "\nlast")
+    !seen;
+  check (list string) "and it decides the rows"
+    [ "# title"; {|\x1B[31mred|}; "last" ] rows
+
 let test_a_body_of_one_line_is_one_row () =
   check (list string) "no newline, no change"
     [ "plain" ]
@@ -744,6 +767,8 @@ let () =
             test_a_body_still_escapes_what_a_line_carries
         ; test_case "a body of one line is one row" `Quick
             test_a_body_of_one_line_is_one_row
+        ; test_case "a rendered body is escaped before it is rendered" `Quick
+            test_a_rendered_body_is_escaped_before_it_is_rendered
         ; test_case "clamping a scroll reads only as far as it must" `Quick
             test_clamping_a_scroll_reads_only_as_far_as_it_must
         ; test_case "a scrolled window matches the full walk" `Quick

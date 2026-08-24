@@ -136,16 +136,27 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            let context_metrics_unavailable =
              member_assoc "context_metrics_unavailable" keeper
            in
+           (* Parsed once into the closed surface vocabulary rather than
+              compared as text twice. keeper_status_runtime's comment on that
+              type names this ranker as one of the two sites that re-classified
+              the string; the producer builds it exhaustively, so a status this
+              parser does not know is a producer/consumer mismatch, not a rank
+              to guess at (#29350). *)
+           let surface = Keeper_status_runtime.surface_status_of_string_opt status in
            let pressure_rank =
-             if Dashboard_utils.is_keeper_offline status then 3
-             else if
-               Option.exists
-                 (fun ratio -> ratio >= lane_pressure_ctx_ratio)
-                 context_ratio
-             then
-               2
-             else if status = "idle" then 1
-             else 0
+             match surface with
+             | Some (Keeper_status_runtime.Surface_offline | Surface_inactive) -> 3
+             | Some (Surface_active | Surface_busy | Surface_listening | Surface_idle)
+             | None ->
+               if
+                 Option.exists
+                   (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                   context_ratio
+               then 2
+               else (
+                 match surface with
+                 | Some Keeper_status_runtime.Surface_idle -> 1
+                 | Some _ | None -> 0)
            in
            Some
              {

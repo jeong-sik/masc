@@ -29,6 +29,46 @@ let test_a_settled_turn_drains_the_queue () =
       n
 ;;
 
+(* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
+   the take-newest operation has to return exactly the last-pushed pair and
+   leave the drain order of everything older untouched. *)
+let test_take_newest_returns_last_and_keeps_order () =
+  check bool "empty queue has no newest" true
+    (Masc_tui_keeper_chat_queue.take_newest
+       Masc_tui_keeper_chat_queue.empty
+     = None);
+  (* [fun q -> match …] in a [|>] chain swallows the rest of the chain into
+     the match, so the stages are a plain application instead. *)
+  let push_ok queue keeper text =
+    match Masc_tui_keeper_chat_queue.push queue ~keeper_name:keeper text with
+    | Ok (next, _) -> next
+    | Error detail -> failf "push failed: %s" detail
+  in
+  let queue =
+    push_ok
+      (push_ok
+         (push_ok Masc_tui_keeper_chat_queue.empty "a" "first")
+         "b" "second")
+      "c" "third"
+  in
+  match Masc_tui_keeper_chat_queue.take_newest queue with
+  | None -> failf "take_newest returned None with three waiting"
+  | Some ((keeper, text), rest) ->
+      check string "newest pair is the last pushed" "c" keeper;
+      check string "newest text is the last pushed" "third" text;
+      check int "drain order of the rest is untouched" 2
+        (Masc_tui_keeper_chat_queue.length rest);
+      (match
+         Masc_tui_keeper_chat_queue.take_first_sendable rest
+           ~sendable:(fun _ -> true)
+       with
+       | Some (("a", "first"), remaining) ->
+           check bool "oldest still drains first" true
+             (Masc_tui_keeper_chat_queue.waiting remaining
+              = [ ("b", "second") ])
+       | _ -> failf "oldest no longer drains first after take_newest")
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -38,5 +78,8 @@ let () =
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
         ] )
+    ; ( "queue"
+      , [ test_case "take_newest returns the last and keeps order" `Quick
+            test_take_newest_returns_last_and_keeps_order ] )
     ]
 ;;

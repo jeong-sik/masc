@@ -191,6 +191,7 @@ let too_complex_reason_tag = function
   | Unsupported_construct `Function_def -> "function_def"
   | Unsupported_construct `Glob_brace -> "glob_brace"
   | Unsupported_construct `Background -> "background"
+  | Unsupported_construct `Command_separator -> "command_separator"
   | Unsupported_construct `Redirect -> "redirect"
   | Unsupported_construct (`Unknown_construct _) -> "unknown_construct"
 ;;

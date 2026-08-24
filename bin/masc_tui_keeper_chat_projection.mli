@@ -131,7 +131,9 @@ val error_certainty : ?was_unverified:bool -> error -> error_certainty
 val reader_unauthenticated : error -> bool
 
 (** The operator-facing detail for a reconciliation that failed. A refused read
-    is reported as the missing credential and its remedy; every other failure
-    keeps the server's own words. *)
-val reconciliation_failure_detail : error -> string
+    is reported as a credential problem and its remedy, and [credential_sent]
+    decides which one: without a bearer the operator has none to present, with
+    one the server rejected what it was given. Every other failure keeps the
+    server's own words. *)
+val reconciliation_failure_detail : credential_sent:bool -> error -> string
 

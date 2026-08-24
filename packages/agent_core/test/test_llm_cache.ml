@@ -49,6 +49,31 @@ let test_fingerprint_different_messages () =
   Alcotest.(check bool) "different messages = different key" true (k1 <> k2)
 ;;
 
+(* The key decides whether a stored response may answer a later request, so a
+   field that changes the request must change the key. These four are the ones
+   #27906 reproduced against; the exhaustive destructuring in [cache.ml] is
+   what keeps a fifth from being forgotten. *)
+let test_fingerprint_separates_request_shaping_fields () =
+  let msgs = [ user_msg "same" ] in
+  let key config = Cache.request_fingerprint ~config ~messages:msgs () in
+  let base = make_config () in
+  let differs label other =
+    Alcotest.(check bool) label true (key base <> key other)
+  in
+  differs
+    "max_tokens changes the key"
+    { base with PC.max_tokens = Some 4096 };
+  differs
+    "temperature changes the key"
+    { base with PC.temperature = Some 0.9 };
+  differs
+    "system_prompt changes the key"
+    { base with PC.system_prompt = Some "you are terse" };
+  differs
+    "response_format changes the key"
+    { base with PC.response_format = JsonMode }
+;;
+
 let test_fingerprint_different_models () =
   let c1 = make_config ~model_id:"model-a" () in
   let c2 = make_config ~model_id:"model-b" () in
@@ -578,6 +603,8 @@ let () =
             `Quick
             test_fingerprint_different_messages
         ; Alcotest.test_case "different models" `Quick test_fingerprint_different_models
+        ; Alcotest.test_case "request-shaping fields separate keys" `Quick
+            test_fingerprint_separates_request_shaping_fields
         ; Alcotest.test_case "with tools" `Quick test_fingerprint_with_tools
         ; Alcotest.test_case
             "empty tools vs none"

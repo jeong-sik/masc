@@ -66,6 +66,35 @@ let test_heartbeat_ping_roundtrip () =
   Alcotest.(check int64) "timestamp_ms" ping.timestamp_ms decoded.timestamp_ms;
   Alcotest.(check string) "current_task_id" ping.current_task_id decoded.current_task_id
 
+(* The proto comment for HeartbeatAck.directives is the contract a client
+   reads before sending. It listed "resume", which Keeper_directive has never
+   had, so a client that believed it got a decode failure instead (#29396 A6).
+   This pins the vocabulary to the constructors that exist, in both
+   directions, so the comment and the codec cannot drift again silently. *)
+let test_directive_wire_vocabulary_is_exactly_the_closed_type () =
+  let task_id =
+    match Keeper_id.Task_id.of_string "task-directive-vocab" with
+    | Ok id -> id
+    | Error detail -> Alcotest.failf "task id rejected: %s" detail
+  in
+  let pairs =
+    [ Keeper_directive.Pause, "pause"
+    ; Keeper_directive.Wakeup, "wakeup"
+    ; Keeper_directive.Assign_task task_id, "claim:task-directive-vocab"
+    ]
+  in
+  List.iter
+    (fun (directive, wire) ->
+       Alcotest.(check string)
+         ("to_wire " ^ wire)
+         wire
+         (T.HeartbeatAck.directive_to_wire directive))
+    pairs;
+  match T.HeartbeatAck.directive_of_wire "resume" with
+  | Ok _ -> Alcotest.fail "\"resume\" is not a directive and must not decode"
+  | Error _ -> ()
+;;
+
 let test_heartbeat_ack_roundtrip () =
   let ack = T.HeartbeatAck.{
     timestamp_ms = 1700000001000L;
@@ -270,6 +299,8 @@ let () =
     "directives", [
       Alcotest.test_case "P3 directive types roundtrip" `Quick test_heartbeat_ack_directive_types;
       Alcotest.test_case "empty directives roundtrip" `Quick test_heartbeat_ack_empty_directives;
+      Alcotest.test_case "wire vocabulary is exactly the closed type" `Quick
+        test_directive_wire_vocabulary_is_exactly_the_closed_type;
     ];
     "transport", [
       Alcotest.test_case "default is local" `Quick test_transport_from_env_default;

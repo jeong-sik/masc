@@ -99,18 +99,32 @@ let test_identity_separates_api_keys () =
        Eio.Promise.resolve resolve_release_a ())
 ;;
 
-let test_conflicting_declaration_first_wins () =
+(* Neither declaration outranks the other, so keeping the one that dispatched
+   first made the effective allowance a function of runtime order. It is a
+   configuration error, and it is raised before the permit is taken. *)
+let test_conflicting_declaration_is_rejected () =
   Eio_main.run
   @@ fun _env ->
   let base_url = "http://conflict.test:1" in
   let first = make_config ~base_url ~max_concurrent_requests:1 () in
   let second = make_config ~base_url ~max_concurrent_requests:5 () in
   Provider_admission.with_admission ~config:first (fun () -> ());
-  Provider_admission.with_admission ~config:second (fun () -> ());
+  let ran_under_conflict = ref false in
+  (match
+     Provider_admission.with_admission ~config:second (fun () ->
+       ran_under_conflict := true)
+   with
+   | () -> fail "a conflicting declaration must not be admitted"
+   | exception Invalid_argument _ -> ());
+  check bool "the body never ran" false !ran_under_conflict;
   match Provider_admission.snapshot_for ~config:second with
   | None -> fail "scheduler must exist after first admitted dispatch"
   | Some snap ->
-    check int "first declaration stays authoritative" 1 snap.Slot_scheduler.max_slots
+    check
+      int
+      "the rejected declaration did not resize the scheduler"
+      1
+      snap.Slot_scheduler.max_slots
 ;;
 
 (* agent-core boundary: the conflict warning names the endpoint, and a custom base_url can
@@ -118,33 +132,32 @@ let test_conflicting_declaration_first_wins () =
    emitted diagnostic is routed through sanitize_url_for_log so no raw secret
    reaches the Diag sink, matching the sibling log sites in complete_common and
    complete_sync. *)
-let test_conflict_warning_sanitizes_base_url () =
+let test_conflict_error_sanitizes_base_url () =
   Eio_main.run
   @@ fun _env ->
   let base_url = "http://user:secret@leak.test:1/v1?token=abc" in
   let first = make_config ~base_url ~max_concurrent_requests:1 () in
   let second = make_config ~base_url ~max_concurrent_requests:5 () in
-  let captured = Buffer.create 256 in
-  Diag.with_sink
-    (fun _level ~ctx:_ msg -> Buffer.add_string captured msg)
-    (fun () ->
-       Provider_admission.with_admission ~config:first (fun () -> ());
-       Provider_admission.with_admission ~config:second (fun () -> ()));
-  let logged = Buffer.contents captured in
+  Provider_admission.with_admission ~config:first (fun () -> ());
+  let logged =
+    match Provider_admission.with_admission ~config:second (fun () -> ()) with
+    | () -> fail "a conflicting declaration must not be admitted"
+    | exception Invalid_argument message -> message
+  in
   check
     bool
-    "the conflict warning was emitted"
+    "the conflict names the field"
     true
     (Agent_core_strings.contains_substring ~needle:"conflicting max_concurrent_requests" ~haystack:logged);
   check bool "sanitized host survives" true (Agent_core_strings.contains_substring ~needle:"leak.test:1" ~haystack:logged);
   check
     bool
-    "userinfo credential is stripped from the log"
+    "userinfo credential is stripped from the message"
     false
     (Agent_core_strings.contains_substring ~needle:"secret" ~haystack:logged);
   check
     bool
-    "query credential is stripped from the log"
+    "query credential is stripped from the message"
     false
     (Agent_core_strings.contains_substring ~needle:"token=abc" ~haystack:logged)
 ;;
@@ -245,13 +258,13 @@ let () =
         ; test_case "bounded concurrency" `Quick test_bounded_concurrency
         ; test_case "api keys admit independently" `Quick test_identity_separates_api_keys
         ; test_case
-            "conflicting declaration keeps first"
+            "conflicting declaration is rejected"
             `Quick
-            test_conflicting_declaration_first_wins
+            test_conflicting_declaration_is_rejected
         ; test_case
-            "conflict warning sanitizes base_url"
+            "conflict error sanitizes base_url"
             `Quick
-            test_conflict_warning_sanitizes_base_url
+            test_conflict_error_sanitizes_base_url
         ; test_case
             "zero declaration rejected before dispatch"
             `Quick

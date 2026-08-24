@@ -36,6 +36,20 @@ let with_ws_same_origin_ready f =
   TM.set_ws_same_origin_runtime_ready true;
   Fun.protect ~finally:(fun () -> TM.set_ws_same_origin_runtime_ready false) f
 
+(* [Uri.host] reads the leading dotted quad of "127.0.0.1.example.com" as an
+   IPv4 literal and pushes the rest into the path, so the host field derived
+   from it can name a different machine than the base_url the same context
+   publishes. Every URL this module emits is built by appending to base_url,
+   so a client reaches whatever base_url says (#29806). *)
+let test_context_from_env_host_matches_the_published_base_url () =
+  with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1.example.com/root") (fun () ->
+      let ctx = TRM.context_from_env () in
+      check string "host is what the URL check ran on" "127.0.0.1" ctx.host;
+      check string
+        "base_url names that same host; the rest folds into the path"
+        "http://127.0.0.1/.example.com/root"
+        ctx.base_url)
+
 let test_websocket_discovery_http_shape_extends_tool_shape () =
   let tool_json = TRM.websocket_discovery_json (make_context ()) in
   let http_json =
@@ -322,5 +336,7 @@ let () =
             test_normalize_advertised_host_canonicalizes_ipv6_loopback;
           test_case "preserve noncanonical 127 alias" `Quick
             test_normalize_advertised_host_preserves_noncanonical_127_alias;
+          test_case "env host matches the published base url" `Quick
+            test_context_from_env_host_matches_the_published_base_url;
         ] );
     ]

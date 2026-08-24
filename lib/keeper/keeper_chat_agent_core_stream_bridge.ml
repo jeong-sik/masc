@@ -29,6 +29,11 @@ type state =
   ; text_dedup_logged : bool
         (* One warn log per stream is enough; every occurrence still bumps the
            [masc_keeper_stream_text_delta_dedup_total] counter. *)
+  ; max_wire_bytes : int
+        (* Read once per stream. [Keeper_chat_media_store.max_wire_bytes]
+           resolves an env var on every call, so reading it again at finalize
+           could reject a payload the chunk path had already accepted, from an
+           operator edit landing mid-stream (#24018). *)
   }
 
 type translated_event = {
@@ -36,13 +41,14 @@ type translated_event = {
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
 
-let empty_state =
+let empty_state () =
   { blocks_by_index = []
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
   ; message_open = false
   ; text_by_index = []
   ; text_dedup_logged = false
+  ; max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
   }
 
 let terminal_message_had_text state =
@@ -107,9 +113,8 @@ let media_persist_protocol_reason = function
   | Keeper_chat_media_store.Write_failed _ -> "failed to persist generated media"
   | err -> Keeper_chat_media_store.persist_error_to_string err
 
-let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
+let add_media_chunk ~max_bytes ~media_type ~source_type ~chunks ~encoded_bytes data =
   let encoded_bytes = encoded_bytes + String.length data in
-  let max_bytes = Keeper_chat_media_store.max_wire_bytes () in
   if encoded_bytes > max_bytes
   then Error (encoded_bytes, max_bytes)
   else Ok (Active_media { media_type; source_type; chunks = data :: chunks; encoded_bytes })
@@ -119,9 +124,8 @@ let media_payload_too_large_event ~index ~size_bytes ~max_bytes =
     ~reason:(media_payload_too_large_reason ~size_bytes ~max_bytes)
     Keeper_chat_events.Media_payload_too_large
 
-let finalize_media_block ~redact_text ~base_dir ~index ~media_type ~source_type
-    ~chunks ~encoded_bytes =
-  let max_wire_bytes = Keeper_chat_media_store.max_wire_bytes () in
+let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_type
+    ~source_type ~chunks ~encoded_bytes =
   if encoded_bytes > max_wire_bytes
   then
     [ media_payload_too_large_event ~index ~size_bytes:encoded_bytes
@@ -279,7 +283,8 @@ let translate ~redact_text ~base_dir bridge_state
                 (* RFC-0301: media block still open at message end (no balanced
                    ContentBlockStop) — persist and surface it rather than drop it
                    silently on the block-table clear below. *)
-                finalize_media_block ~redact_text ~base_dir ~index ~media_type
+                finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes
+                  ~redact_text ~base_dir ~index ~media_type
                   ~source_type ~chunks ~encoded_bytes)
           bridge_state.blocks_by_index
       in
@@ -291,6 +296,7 @@ let translate ~redact_text ~base_dir bridge_state
           ; message_open = false
           ; text_by_index = []
           ; text_dedup_logged = bridge_state.text_dedup_logged
+          ; max_wire_bytes = bridge_state.max_wire_bytes
           }
       ;
         chat_events = block_ends @ [ Agent_core_stream_message_stop ]
@@ -377,7 +383,8 @@ let translate ~redact_text ~base_dir bridge_state
          when String.equal m.media_type media_type && m.source_type = source_type
          ->
            (match
-              add_media_chunk ~media_type ~source_type ~chunks:m.chunks
+              add_media_chunk ~max_bytes:bridge_state.max_wire_bytes
+                ~media_type ~source_type ~chunks:m.chunks
                 ~encoded_bytes:m.encoded_bytes data
             with
             | Ok block ->
@@ -411,7 +418,8 @@ let translate ~redact_text ~base_dir bridge_state
       | Some Invalid_media_block -> { bridge_state; chat_events = [] }
       | None ->
           (match
-             add_media_chunk ~media_type ~source_type ~chunks:[]
+             add_media_chunk ~max_bytes:bridge_state.max_wire_bytes
+                ~media_type ~source_type ~chunks:[]
                 ~encoded_bytes:0 data
             with
             | Ok block ->
@@ -539,7 +547,8 @@ let translate ~redact_text ~base_dir bridge_state
           { bridge_state = remove_block bridge_state index;
             chat_events =
               block_stop
-              :: finalize_media_block ~redact_text ~base_dir ~index ~media_type
+              :: finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes
+                   ~redact_text ~base_dir ~index ~media_type
                    ~source_type ~chunks ~encoded_bytes
           }
       | None ->

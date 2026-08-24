@@ -85,6 +85,11 @@ val keeper_board_own_recent_max : unit -> int
     the world observation carries per turn. Cursor-independent — no watermark. *)
 val keeper_fleet_messages_max : unit -> int
 
+val keeper_context_briefing_share_percent : unit -> int
+(** Share (percent) of the runtime's declared request-body cap that the
+    world-state briefing may occupy. The briefing is pinned, so this is what
+    stops it from crowding out the turn it briefs. *)
+
 val keeper_own_recent_turns_max : unit -> int
 (** Past turns of this keeper's own tool calls replayed into the world
     observation. Autonomous turns carried no record of what the keeper had

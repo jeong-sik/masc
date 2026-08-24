@@ -215,18 +215,27 @@ let reader_unauthenticated = function
   | Http_error { status = 401 | 403; _ } -> true
   | Http_error _ | Transport_error _ | Protocol_error _ -> false
 
-(* The bearer lives in the environment of the process, so a masc-tui started
-   before MASC_TOKEN was exported carries none and every write route refuses it.
-   Naming the remedy keeps the operator from reading a raw server error body and
-   guessing which side is broken. *)
-let unauthenticated_reader_remedy =
-  "This masc-tui holds no operator token, so it cannot read the operation \
-   back; the operation itself is untouched on the server. Run \
-   'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
-   then press Ctrl-R to settle this request."
+(* A refusal names two different situations and only one of them is fixed by
+   providing a token. Since #29793 this client finds the bearer masc login left
+   in the workspace, so it usually does present one -- and then a refusal means
+   the stored credential was rejected, where "you have no token" is both false
+   and useless advice. The distinction is #29790's. *)
+let refused_reader_remedy ~credential_sent =
+  let cause =
+    if credential_sent then
+      "The operator token this masc-tui presented was refused, so it cannot \
+       read the operation back"
+    else
+      "This masc-tui holds no operator token, so it cannot read the operation \
+       back"
+  in
+  cause
+  ^ "; the operation itself is untouched on the server. Run \
+     'masc login --agent masc-tui --client-env MASC_TOKEN', restart masc-tui, \
+     then press Ctrl-R to settle this request."
 
-let reconciliation_failure_detail error =
-  if reader_unauthenticated error then unauthenticated_reader_remedy
+let reconciliation_failure_detail ~credential_sent error =
+  if reader_unauthenticated error then refused_reader_remedy ~credential_sent
   else error_to_string error |> terminal_safe_text
 
 let stream_error_acceptance_observed = function

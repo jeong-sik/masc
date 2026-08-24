@@ -32,17 +32,25 @@ let resolve_existing ~key ~max =
       Some resolution)
 ;;
 
-let warn_conflict = function
+(* Two configs naming the same endpoint identity with different allowances
+   have no precedence between them: whichever dispatched first won, so the
+   effective limit was a function of runtime order. Warning about it left
+   both callers believing their own number. This is a configuration error and
+   it is raised here, which is before the permit is taken and therefore
+   before any provider I/O. *)
+let reject_conflict = function
   | None -> ()
   | Some (conflict : State.conflict) ->
-    Diag.warn
-      "provider_admission"
-      "conflicting max_concurrent_requests for %s %s: scheduler holds %d, a config \
-       declares %d; the first declaration stays authoritative"
-      conflict.kind
-      (Complete_common.sanitize_url_for_log conflict.base_url)
-      conflict.authoritative_max
-      conflict.declared_max
+    invalid_arg
+      (Printf.sprintf
+         "Provider_admission: conflicting max_concurrent_requests for %s %s: one \
+          config declares %d, another declares %d. The endpoint identity (kind, \
+          base_url, api-key identity) admits one allowance; make the declarations \
+          agree or give them different identities."
+         conflict.kind
+         (Complete_common.sanitize_url_for_log conflict.base_url)
+         conflict.authoritative_max
+         conflict.declared_max)
 ;;
 
 let entry_for ~key ~max =
@@ -53,7 +61,7 @@ let entry_for ~key ~max =
       let candidate = Slot_scheduler.create ~max_slots:max in
       apply_transition (State.install key ~declared_max:max ~candidate)
   in
-  warn_conflict resolution.conflict;
+  reject_conflict resolution.conflict;
   resolution.scheduler
 ;;
 

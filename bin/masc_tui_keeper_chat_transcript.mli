@@ -98,6 +98,28 @@ val completed_tool_rows : (string * string) list -> string list
     always carry the finished marker: a persisted call is one that returned. *)
 
 val tool_rows : t -> string list
+
+(** How a tool step recorded in an autonomous turn's trace ended. The server
+    writes one of [ok], [err], [pending]; a step with no status at all is the
+    fourth case, kept apart from [pending] because "the trace closed with the
+    call open" and "the trace did not say" are different facts. *)
+type persisted_tool_outcome =
+  | Returned  (** [status: "ok"] *)
+  | Failed  (** [status: "err"] *)
+  | Never_returned  (** [status: "pending"] *)
+  | Outcome_unrecorded  (** no [status] field *)
+
+val persisted_tool_rows :
+  (persisted_tool_outcome * string * string * string option) list -> string list
+(** Rows for the tool steps of one autonomous turn read back from the
+    transcript's trace block, given as (outcome, tool name, argument text,
+    duration label) in the order the turn made them.
+
+    Formatted by the same function {!tool_rows} uses, so a turn the keeper
+    ran on its own reads like one watched live: the finished glyph for a call
+    that returned, a distinct one for a call that returned an error, and the
+    open glyph for a call the trace never saw finish. The duration, when the
+    server recorded one, follows the subject. *)
 (** One line per tool call, in stream order, the way the pane draws them: a
     marker for how far the call got, the tool's name, and the argument it is
     known by.

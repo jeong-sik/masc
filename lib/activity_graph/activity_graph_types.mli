@@ -54,7 +54,6 @@ type event = {
   seq : int;
   ts_ms : int;
   ts_iso : string;
-  workspace_id : string;
   kind : string;
   actor : entity_ref option;
   subject : entity_ref option;

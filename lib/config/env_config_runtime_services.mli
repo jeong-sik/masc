@@ -32,17 +32,6 @@ module RateLimit : sig
   (** [MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC] (default [3600.0]). *)
 end
 
-(** {1 Agent autonomy quiet hours} *)
-
-module Autonomy : sig
-  val quiet_start : int
-  (** [MASC_AUTONOMY_QUIET_START] (default [3]).  Hour of day
-      ([0..23]) when keeper suppresses actions. *)
-
-  val quiet_end : int
-  (** [MASC_AUTONOMY_QUIET_END] (default [7]). *)
-end
-
 (** {1 Timeouts} *)
 
 module Timeouts : sig

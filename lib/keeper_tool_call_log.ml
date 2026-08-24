@@ -243,12 +243,9 @@ let current_log_path () =
   match store_dir () with
   | None -> None
   | Some dir ->
-    let tm = Unix.gmtime (Unix.gettimeofday ()) in
-    let month =
-      Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
-    in
-    let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
-    Some (Filename.concat (Filename.concat dir month) day)
+    (* Same layout this file already reads through Jsonl_writer.day_key below;
+       it was spelled out again here (#27143). *)
+    Some (Jsonl_writer.dated_path_now ~base_dir:dir).Jsonl_writer.path
 ;;
 
 let configured_masc_root () =

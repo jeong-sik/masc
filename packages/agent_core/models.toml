@@ -1667,6 +1667,14 @@ supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
 reasoning_streaming_format = "delta:reasoning_content"
+# GLM thinking with tool calls keeps the intermediate reasoning inside the
+# current user turn's tool-call rounds and drops it when a new user turn
+# starts (bigmodel.cn official request-flow diagram, checked 2026-08-24).
+# Undeclared, the row fell back to No_replay and the model re-derived its
+# plan on every tool round. #30015 keeps the synthetic extra-context
+# carrier out of the latest-user boundary, so this policy is effective on
+# keeper turns.
+reasoning_replay = "latest_user_turn_tool_calls"
 input_per_million = 1.2
 output_per_million = 4.0
 cache_write_multiplier = 1.0

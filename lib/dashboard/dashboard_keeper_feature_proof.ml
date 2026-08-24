@@ -229,28 +229,44 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
     | Some stat -> stat
     | None -> Decision.turn_span_stats ~config ~now keeper_name
   in
-  let observed =
-    snapshots
-    |> List.filter_map (fun snapshot ->
-      if Decision.has_persistent_turn_span ~now (stat_for snapshot.keeper_name) then
-        Some snapshot.keeper_name
-      else None)
-    |> uniq_sorted
-  in
-  let missing =
-    snapshots
-    |> List.filter_map (fun snapshot ->
-      if Decision.has_persistent_turn_span ~now (stat_for snapshot.keeper_name) then
-        None
-      else Some snapshot.keeper_name)
-    |> uniq_sorted
+  (* Three disjoint sets, not two. A keeper whose earliest turn row the head
+     scan never reached has not failed to persist turns - the reader ran out
+     of budget - and filing it under [missing] publishes a reader limit as
+     keeper behaviour. It stays inside [total], so an unread history can
+     never lift the feature to Pass either. *)
+  let keepers_by_reading ~required_span_hours =
+    let met, not_met, undetermined =
+      List.fold_left
+        (fun (met, not_met, undetermined) snapshot ->
+          match
+            Decision.persistent_turn_span_reading ~required_span_hours ~now
+              (stat_for snapshot.keeper_name)
+          with
+          | Decision.Span_met ->
+            snapshot.keeper_name :: met, not_met, undetermined
+          | Decision.Span_not_met ->
+            met, snapshot.keeper_name :: not_met, undetermined
+          | Decision.Span_undetermined ->
+            met, not_met, snapshot.keeper_name :: undetermined)
+        ([], [], [])
+        snapshots
+    in
+    uniq_sorted met, uniq_sorted not_met, uniq_sorted undetermined
   in
   let total = keeper_count snapshots in
-  let status =
-    if total = 0 || observed = [] then Fail
-    else if List.length observed = total then Pass
+  (* Fail states that nobody met the span. That is only sayable when every
+     keeper produced an answer; with an unread history in the mix the report
+     does not know, and Warn is the honest ceiling. *)
+  let span_status ~met ~undetermined =
+    if total = 0 then Fail
+    else if List.length met = total then Pass
+    else if met = [] && undetermined = [] then Fail
     else Warn
   in
+  let observed, missing, undetermined =
+    keepers_by_reading ~required_span_hours:Decision.persistent_turn_window_hours
+  in
+  let status = span_status ~met:observed ~undetermined in
   let per_keeper =
     snapshots
     |> List.map (fun snapshot ->
@@ -260,30 +276,11 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
   let duration_tiers =
     Decision.persistence_tiers
     |> List.map (fun (tier : Decision.persistence_tier) ->
-      let observed_keepers, missing_keepers =
-        snapshots
-        |> List.partition (fun snapshot ->
-          Decision.has_persistent_turn_span_for
-            ~required_span_hours:tier.required_span_hours
-            ~now
-            (stat_for snapshot.keeper_name))
-      in
-      let observed_keepers =
-        observed_keepers
-        |> List.map (fun snapshot -> snapshot.keeper_name)
-        |> uniq_sorted
-      in
-      let missing_keepers =
-        missing_keepers
-        |> List.map (fun snapshot -> snapshot.keeper_name)
-        |> uniq_sorted
+      let observed_keepers, missing_keepers, undetermined_keepers =
+        keepers_by_reading ~required_span_hours:tier.required_span_hours
       in
       let tier_status =
-        if total = 0 || observed_keepers = []
-        then Fail
-        else if List.length observed_keepers = total
-        then Pass
-        else Warn
+        span_status ~met:observed_keepers ~undetermined:undetermined_keepers
       in
       `Assoc
         [ "id", `String tier.id
@@ -293,8 +290,10 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
         ; "keeper_count", `Int total
         ; "observed_count", `Int (List.length observed_keepers)
         ; "missing_count", `Int (List.length missing_keepers)
+        ; "undetermined_count", `Int (List.length undetermined_keepers)
         ; "observed_keepers", Json_util.json_string_list observed_keepers
         ; "missing_keepers", Json_util.json_string_list missing_keepers
+        ; "undetermined_keepers", Json_util.json_string_list undetermined_keepers
         ])
   in
   `Assoc [
@@ -303,11 +302,20 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
     ("status", `String (status_to_string status));
     ("summary",
      `String
-       (Printf.sprintf
-          "%d/%d keepers have decision-log turn spans >= %.1fh and latest turn <= %.1fh old"
-          (List.length observed) total
-          Decision.persistent_turn_window_hours
-          Decision.recent_turn_max_age_hours));
+       (let counted =
+          Printf.sprintf
+            "%d/%d keepers have decision-log turn spans >= %.1fh and latest turn <= %.1fh old"
+            (List.length observed) total
+            Decision.persistent_turn_window_hours
+            Decision.recent_turn_max_age_hours
+        in
+        match undetermined with
+        | [] -> counted
+        | unread ->
+          Printf.sprintf
+            "%s; %d more read past the segment head budget, span unknown"
+            counted
+            (List.length unread)));
     ("keeper_evidence",
      `Assoc [
        ("keeper_count", `Int total);
@@ -318,6 +326,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
          `Float Decision.recent_turn_max_age_hours );
        ("observed_keepers", Json_util.json_string_list observed);
        ("missing_keepers", Json_util.json_string_list missing);
+       ("undetermined_keepers", Json_util.json_string_list undetermined);
        ("read_errors", `List (keeper_read_errors snapshots));
        ("per_keeper", `List per_keeper);
      ]);

@@ -200,11 +200,6 @@ val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
 
-(** Strict inverse of {!keeper_tool_group_to_string}. Unknown strings are
-    [None] — a typo in [keeper.tools] must fail the TOML load, never silently
-    keep the full surface (RFC-0389). *)
-val keeper_tool_group_of_string : string -> keeper_tool_group option
-
 (** Convert raw TOML group names to a [tool_surface].
     [None] or empty list → [All] (inherit, no narrowing).
     Unknown names are logged and silently excluded (fail-open). *)

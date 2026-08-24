@@ -1,6 +1,6 @@
 (* The repeated-call yield compares these fingerprints, so what they hash is
    behavior: a measurement field in the output must not break identity, and a
-   changed answer must. The live shape this pins: sangsu ran [gh auth status]
+   changed answer must. The live shape this pins: a keeper ran [gh auth status]
    four times in one run and the four results differed only at
    execution_time_ms, so the yield never saw the loop (2026-08-24). *)
 

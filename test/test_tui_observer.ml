@@ -16,12 +16,12 @@ let tool_called_frame =
    \"tool_name\":\"read_file\",\"tool_use_id\":\"tu-1\",\"turn\":2086}}\n\n"
 
 let heartbeat_frame =
-  "data: {\"type\":\"keeper_heartbeat\",\"name\":\"taskmaster\",\
+  "data: {\"type\":\"keeper_heartbeat\",\"name\":\"bandleader\",\
    \"ts_unix\":1787505649.446111,\"phase\":\"turn_running\",\"in_turn\":true,\
    \"in_flight_elapsed_ms\":2189925.43,\"since_last_progress_ms\":13093.6}\n\n"
 
 let turn_complete_frame =
-  "data: {\"type\":\"keeper_turn_complete\",\"name\":\"rondo\",\"turn\":2086,\
+  "data: {\"type\":\"keeper_turn_complete\",\"name\":\"largo\",\"turn\":2086,\
    \"model_used\":null,\"input_tokens\":73877,\"output_tokens\":358,\
    \"cost_usd\":0.02581816,\"tool_calls_made\":0,\"total_turns\":547,\
    \"ts_unix\":1787505649.491379}\n\n"
@@ -120,16 +120,16 @@ let bare_heartbeat_frame =
   "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1787505653.07}\n\n"
 
 let keeper_tool_call_frame =
-  "data: {\"type\":\"keeper_tool_call\",\"name\":\"rondo\",\"tool_name\":\"tool_execute\",\
+  "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"tool_execute\",\
    \"duration_ms\":14534,\"disposition\":\"completed\",\"ts_unix\":1787507566.14,\
    \"tool_args\":{\"argv\":[\"dune\",\"build\"]},\"tool_result\":{\"ok\":true}}\n\n"
 
 let test_keeper_events_decode_by_name () =
   check (list string) "heartbeat, bare heartbeat, settlement, keeper tool call"
-    [ "heartbeat(taskmaster,turn_running,in_turn=true)"
+    [ "heartbeat(bandleader,turn_running,in_turn=true)"
     ; "heartbeat(lane-smith,-,in_turn=-)"
-    ; "turn_complete(rondo,turn=2086,cost=0.0258)"
-    ; "keeper_tool_call(rondo,tool_execute,14534ms,completed)"
+    ; "turn_complete(largo,turn=2086,cost=0.0258)"
+    ; "keeper_tool_call(largo,tool_execute,14534ms,completed)"
     ]
     (List.map summary
        (decode_all

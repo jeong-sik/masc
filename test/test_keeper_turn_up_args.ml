@@ -197,7 +197,13 @@ let test_persist_round_trips_wake_prompt () =
   let name = "wake-persist-fixture" in
   let meta =
     match
-      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ])
+      Masc_test_deps.meta_of_json_fixture
+        (* persist reads instructions off the meta, not off the parsed args,
+           and refuses a keeper that has none. *)
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
     with
     | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error

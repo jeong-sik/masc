@@ -655,9 +655,9 @@ def run_ratchet(count: int) -> int:
     """Compare the dead-export count against the frozen baseline.
 
     Below the baseline passes and says by how much, rather than failing until
-    someone edits the number. audit-ci-test-targets.sh carries the note about
-    why the other direction is wrong: failing on your own improvement turned
-    main red three times in an hour while people wired suites.
+    someone edits the number. The other direction is wrong for a measured
+    reason: failing on your own improvement turned main red three times in an
+    hour while people were wiring suites.
     """
     if count > DEAD_EXPORT_BASELINE:
         print(

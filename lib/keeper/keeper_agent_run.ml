@@ -838,7 +838,7 @@ let run_turn
                      (* Tool axis first: its input+output fingerprints are the
                         stronger no-progress proof and carry the tool name.
                         The text axis runs only when tool fingerprints still
-                        move — the sangsu loop shape, where every turn's tool
+                        move — the observed loop shape, where every turn's tool
                         batch differed but the plan sentence never did. *)
                      let repeated_loop_decision () =
                            (match

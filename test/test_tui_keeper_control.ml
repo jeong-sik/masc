@@ -156,11 +156,11 @@ let test_arming_does_not_carry_to_another_keeper () =
   in
   match
     Control.gate_transition ~inflight:false ~pending:(Some armed)
-      ~keeper:"taskmaster" Control.Shutdown
+      ~keeper:"bandleader" Control.Shutdown
   with
   | Control.Gate_arm rearmed ->
       Alcotest.(check string)
-        "re-armed on the keeper under the cursor" "taskmaster"
+        "re-armed on the keeper under the cursor" "bandleader"
         rearmed.pending_keeper
   | Control.Gate_submit ->
       Alcotest.fail "another keeper's arming must not submit this one"
@@ -289,7 +289,7 @@ let test_operation_id_is_per_attempt () =
     "distinct across keepers" false
     (String.equal
        (Control.mint_operation_id ~keeper:"analyst" ~serial:7)
-       (Control.mint_operation_id ~keeper:"taskmaster" ~serial:7))
+       (Control.mint_operation_id ~keeper:"bandleader" ~serial:7))
 
 (* {1 Roster completeness} *)
 
@@ -395,8 +395,8 @@ let test_full_roster_is_complete () =
   | Control.Roster_complete rows ->
       Alcotest.(check int) "one row" 1 (List.length rows);
       let absent =
-        { Control.name = "taskmaster"; paused = false
-        ; liveness = Control.liveness_of_roster (complete rows) "taskmaster" }
+        { Control.name = "bandleader"; paused = false
+        ; liveness = Control.liveness_of_roster (complete rows) "bandleader" }
       in
       Alcotest.(check string) "a name a complete roster omits is offline"
         "offline" (Control.status_label absent)
@@ -489,7 +489,7 @@ let test_roster_decode_reads_rows () =
     Yojson.Safe.from_string
       (Printf.sprintf {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
          (gate_row "analyst")
-         (gate_row ~status:"idle" "taskmaster"))
+         (gate_row ~status:"idle" "bandleader"))
   in
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
@@ -498,7 +498,7 @@ let test_roster_decode_reads_rows () =
       Alcotest.(check bool) "not truncated" false truncated;
       Alcotest.(check int) "total" 2 total;
       Alcotest.(check (list string))
-        "names in order" [ "analyst"; "taskmaster" ]
+        "names in order" [ "analyst"; "bandleader" ]
         (List.map (fun (row : Decode.keeper_runtime) -> row.kr_name) rows);
       Alcotest.(check bool)
         "idle parsed" true

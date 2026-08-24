@@ -215,23 +215,23 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn () =
 let test_keeper_calls_reject_rows_naming_another_keeper () =
   let payload =
     `Assoc
-      [ "keeper", `String "rondo"
+      [ "keeper", `String "largo"
       ; "count", `Int 3
       ; "health", `String "ok"
       ; "latest_age_s", `Float 8.2
       ; "stale_reason", `String "fresh"
       ; ( "entries"
         , `List
-            [ keeper_call_row ~keeper:"rondo" ~tool:"Read" ~duration_ms:28.4
+            [ keeper_call_row ~keeper:"largo" ~tool:"Read" ~duration_ms:28.4
                 ~turn:2143 ()
             ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
-            ; keeper_call_row ~keeper:"rondo" ~tool:"tool_execute"
+            ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
                 ~success:false ()
             ] )
       ]
   in
   match
-    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo" payload
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo" payload
   with
   | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
   | Ok snapshot ->
@@ -261,7 +261,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
       [ "ts", `Float 1787534998.4
-      ; "keeper", `String "rondo"
+      ; "keeper", `String "largo"
       ; "tool", `String "Execute"
       ; "input", `String {|{"argv": ["ls"]}|}
       ; "success", `Bool true
@@ -270,7 +270,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   in
   let payload entries =
     `Assoc
-      [ "keeper", `String "rondo"
+      [ "keeper", `String "largo"
       ; "count", `Int (List.length entries)
       ; "health", `String "ok"
       ; "entries", `List entries
@@ -278,7 +278,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
   in
   let outputs entries =
     match
-      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
         (payload entries)
     with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
@@ -300,24 +300,24 @@ let test_keeper_calls_carry_what_the_call_answered () =
 let test_keeper_calls_require_the_envelope () =
   Alcotest.(check bool) "no entries list is an error" true
     (Result.is_error
-       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
-             [ "keeper", `String "rondo"
+             [ "keeper", `String "largo"
              ; "count", `Int 0
              ; "health", `String "ok"
              ])));
   Alcotest.(check bool) "a row without success is an error" true
     (Result.is_error
-       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"rondo"
+       (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
-             [ "keeper", `String "rondo"
+             [ "keeper", `String "largo"
              ; "count", `Int 1
              ; "health", `String "ok"
              ; ( "entries"
                , `List
                    [ `Assoc
                        [ "ts", `Float 1.0
-                       ; "keeper", `String "rondo"
+                       ; "keeper", `String "largo"
                        ; "tool", `String "Read"
                        ]
                    ] )
@@ -647,10 +647,10 @@ let fleet_safety_json ?(missing = true) () =
                    (List.map
                       (fun n -> `String n)
                       (if missing
-                       then [ "analyst"; "kidsnote"; "sangsu" ]
-                       else [ "analyst"; "kidsnote" ])) )
+                       then [ "analyst"; "bluebird"; "haneul" ]
+                       else [ "analyst"; "bluebird" ])) )
              ; ( "executable_keeper_names"
-               , `List [ `String "analyst"; `String "kidsnote" ] )
+               , `List [ `String "analyst"; `String "bluebird" ] )
              ]) )
     ]
 
@@ -670,11 +670,11 @@ let test_decode_fleet_safety_carries_both_name_lists () =
         fleet.fs_active_task_owner_without_fiber_count;
       (* The reader takes the difference; the server does not precompute it. *)
       Alcotest.(check (list string)) "keepers that should run"
-        [ "analyst"; "kidsnote"; "sangsu" ] fleet.fs_bootable_names;
+        [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
       Alcotest.(check (list string)) "keepers that do run"
-        [ "analyst"; "kidsnote" ] fleet.fs_executable_names;
+        [ "analyst"; "bluebird" ] fleet.fs_executable_names;
       Alcotest.(check (list string)) "the difference names the missing keeper"
-        [ "sangsu" ]
+        [ "haneul" ]
         (List.filter
            (fun n -> not (List.mem n fleet.fs_executable_names))
            fleet.fs_bootable_names)

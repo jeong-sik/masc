@@ -184,6 +184,12 @@ let load_from_masc_dir (state : state) (base_path : string) =
              Keeper_selection.Logs_keeper
                { keeper_name; cursor = state.keeper_cursor }
          | None -> Keeper_selection.List_cursor state.keeper_cursor)
+    | Some Keeper_calls ->
+        (match selected_keeper_name with
+         | Some keeper_name ->
+             Keeper_selection.Calls_keeper
+               { keeper_name; cursor = state.keeper_cursor }
+         | None -> Keeper_selection.List_cursor state.keeper_cursor)
     | Some Keeper_message ->
         (match state.msg_target_keeper_name with
          | Some keeper_name ->
@@ -198,7 +204,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
   let loaded_keepers, keepers_error = load_keepers base_path in
   let keepers =
     match keepers_error, current_keeper_mode with
-    | Some _, Some (Keeper_detail | Keeper_logs) ->
+    | Some _, Some (Keeper_detail | Keeper_logs | Keeper_calls) ->
         (* A partial or failed read cannot prove that the focused Keeper was
            deleted. Keep the last complete roster until a reliable refresh can
            reconcile that identity. Message mode instead uses its explicit
@@ -220,10 +226,11 @@ let load_from_masc_dir (state : state) (base_path : string) =
    | Keeper_selection.List_cursor cursor ->
        state.keeper_cursor <- cursor;
        (match current_keeper_mode with
-        | Some (Keeper_detail | Keeper_logs | Keeper_message) ->
+        | Some (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message) ->
             state.view <- Keepers Keeper_list;
             state.detail_scroll <- 0;
-            state.log_scroll <- 0
+            state.log_scroll <- 0;
+            state.keeper_calls_scroll <- 0
         | Some Keeper_list | None -> ())
    | Keeper_selection.Detail_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
@@ -231,6 +238,9 @@ let load_from_masc_dir (state : state) (base_path : string) =
    | Keeper_selection.Logs_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_logs
+   | Keeper_selection.Calls_keeper { cursor; _ } ->
+       state.keeper_cursor <- cursor;
+       state.view <- Keepers Keeper_calls
    | Keeper_selection.Message_keeper { cursor; _ } ->
        state.keeper_cursor <- cursor;
        state.view <- Keepers Keeper_message);

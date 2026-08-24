@@ -91,6 +91,18 @@ let roundtrip_corpus =
   ; Keeper_internal_error.incomplete_tool_transcript_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
   ; Keeper_internal_error.tool_correction_lost_kind
+    (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
+       to hold five of its thirteen kinds, so the eight missing ones were
+       neither recognised nor deliberately left [Unknown] — they were simply
+       never considered, and four of them reached operators as "unmapped
+       runtime state" in production (#29929). Spelled out here rather than
+       taken from [wire_kind_to_string]: this list is the oracle's, and
+       reading it from the producer would remove the check. *)
+  ; "accept_rejected"
+  ; "terminal_effect_failed"
+  ; "internal_unhandled_exception"
+  ; "internal_bridge_exception"
+  ; "internal_contract_rejected"
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -111,6 +123,15 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
+    (* Producer kinds with no policy yet, which is not the same as the
+       deliberate Unknowns below. None has ever been observed — zero rows
+       across 189 receipt files and every August log — so there is no trace
+       to classify them from. [of_wire] names them explicitly and answers
+       [Unknown], so the open question is visible in the match instead of
+       being an absent arm. *)
+  ; "resumable_cli_session"
+  ; "receipt_persistence_failed"
+  ; "gate_replay_repair_required"
     (* genuine Unknown (preserve-don't-fix) *)
   ; "no_capable_provider"
   ; "mcp_error"
@@ -188,6 +209,8 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
   then R.Disp_unknown, R.Reason_tool_correction_lost
+  else if String.equal terminal_reason "terminal_effect_failed"
+  then R.Disp_unknown, R.Reason_terminal_effect_failed
   else if preflight_config_failure
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
@@ -205,7 +228,11 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
   then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
-  else if String.equal terminal_reason "internal_error"
+  else if
+    String.equal terminal_reason "internal_error"
+    || String.equal terminal_reason "internal_unhandled_exception"
+    || String.equal terminal_reason "internal_bridge_exception"
+    || String.equal terminal_reason "internal_contract_rejected"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
@@ -226,6 +253,8 @@ let frozen_operator_disposition (receipt : R.t)
       R.Disp_pass, R.Reason_healthy
     | `Ok when receipt.runtime_outcome = R.Runtime_not_dispatched ->
       R.Disp_pass, R.Reason_healthy
+    | _ when String.equal terminal_reason "accept_rejected" ->
+      R.Disp_fail_open_next_runtime, R.Reason_accept_rejected
     | _ -> R.Disp_unknown, R.Reason_unmapped_runtime_state)
 ;;
 

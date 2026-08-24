@@ -1902,6 +1902,7 @@
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_tool_plan_executor.inc)
+(include stanzas/test_keeper_tool_progress_identity.inc)
 
 (include stanzas/test_keeper_fs.inc)
 

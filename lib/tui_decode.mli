@@ -44,10 +44,14 @@ val short_timestamp_for_terminal : string -> string
     before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
     raw C1 byte. Empty timestamps render as [(never)]. *)
 
-val clock_timestamp_for_terminal : string -> string
-(** Select the conventional eight-byte clock portion of a timestamp when it is
-    present, then sanitize the result. The final sanitizer makes arbitrary
-    external timestamp bytes safe even when the byte slice splits UTF-8. *)
+val clock_timestamp_for_terminal :
+  localtime:(float -> Unix.tm) -> string -> string
+(** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
+    converts to - [Unix.localtime] on a screen, [Unix.gmtime] or a fixed
+    offset in a test - then sanitized. A timestamp the codec cannot read
+    keeps the conventional eight-byte slice, so the result is still one
+    clock-shaped row fragment; the final sanitizer makes arbitrary external
+    bytes safe even when the slice splits UTF-8. *)
 
 
 (** Where a goal stands with the completion judge.
@@ -128,6 +132,38 @@ type system_log_entry = {
   sl_keeper : string option;
   sl_message : string;
 }
+
+(** One tool call from a keeper's durable call log
+    ([GET /api/v1/keepers/:name/tool-calls]). The row's own [keeper] is
+    checked against the keeper that was asked for; a row naming another is
+    rejected rather than attributed by envelope position. *)
+type keeper_call = {
+  kc_at : float;  (** [ts], unix seconds *)
+  kc_tool : string;
+  kc_input : string;  (** the call's argument text as served, may be truncated *)
+  kc_output : string option;
+      (** what the call answered, as served and already bounded by the server.
+          [None] means the row carried no result, which is not the same as a
+          call that returned an empty one. *)
+  kc_success : bool;
+  kc_duration_ms : float option;
+  kc_turn : int option;
+  kc_task_id : string option;
+  kc_model : string option;
+}
+
+type keeper_calls_snapshot = {
+  kcs_keeper : string;
+  kcs_entries : keeper_call list;  (** in the server's order, newest last *)
+  kcs_count : int;
+  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_latest_age_s : float option;
+  kcs_stale_reason : string option;
+  kcs_mismatched : int;  (** rows naming another keeper, rejected *)
+}
+
+val decode_keeper_calls_snapshot :
+  requested_keeper:string -> Yojson.Safe.t -> (keeper_calls_snapshot, string) result
 
 type system_log_snapshot = {
   sys_entries : system_log_entry list;  (** newest last, as the server returns *)
@@ -439,11 +475,16 @@ val decode_json_response_body :
     outcome; a shape the endpoints never send is an error, not a guessed
     success. *)
 val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
+
+(** Decode one SGR mouse report into the [up]/[down] key a wheel turns
+    into, or [None] for reports nothing consumes (clicks, releases,
+    horizontal wheel). [parameters] is the raw CSI parameter span
+    (["<64;10;5"]), [final] the CSI final byte. *)
+val sgr_wheel_key : string -> char -> string option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
-val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result

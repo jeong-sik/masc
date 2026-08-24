@@ -148,6 +148,19 @@ let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
 
+(** [is_unspecified_host host] returns [true] for the wildcard bind addresses
+    0.0.0.0 and ::, which mean "every interface" rather than a reachable peer.
+    Callers ask this to tell an advertised address apart from a bind address.
+
+    Three modules carried a byte-identical copy of this before (#27219);
+    unspecified and loopback are decided in the same place because the callers
+    that ask one almost always ask the other. *)
+let is_unspecified_host host =
+  match Ipaddr.of_string (String.trim host) with
+  | Ok (Ipaddr.V4 addr) -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
+  | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+  | Error _ -> false
+
 (* Sole owner of URL-shaped trailing-slash trimming. This is the lowest
    layer that needs it ([Env_config_core] depends on this module, not the
    other way round), so callers above reach it here instead of keeping a

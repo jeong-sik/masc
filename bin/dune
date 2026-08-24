@@ -230,6 +230,7 @@
  (modules masc_tui_keeper_chat_projection)
  (libraries
   masc
+  masc_tui_credential
   masc.keeper_chat_operations
   masc.masc_random_id
   masc.masc_core
@@ -241,6 +242,18 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
  (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_observer)
+ (wrapped false)
+ (modules masc_tui_observer)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_acting)
+ (wrapped false)
+ (modules masc_tui_acting)
+ (libraries masc_tui_observer))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -261,7 +274,8 @@
  (libraries
   masc
   masc_tui_keeper_chat_live
-  masc_tui_keeper_chat_projection))
+  masc_tui_keeper_chat_projection
+  masc_tui_message_layout))
 
 (library
  (name masc_tui_message_layout)
@@ -270,19 +284,9 @@
  (libraries uucp uuseg))
 
 (library
- (name masc_tui_keeper_chat_recovery)
+ (name masc_tui_send_disposition)
  (wrapped false)
- (modules masc_tui_keeper_chat_recovery)
- (libraries
-  masc.masc_core
-  masc.masc_process
-  masc.masc_random_id
-  masc
-  masc_tui_keeper_chat_projection
-  eio
-  fs_compat
-  yojson
-  unix))
+ (modules masc_tui_send_disposition))
 
 (library
  (name masc_tui_frame_presenter)
@@ -344,7 +348,7 @@
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
- (libraries masc yojson))
+ (libraries masc masc_tui_credential yojson))
 
 (library
  (name masc_tui_keeper_selection)
@@ -362,6 +366,10 @@
  (modules masc_tui_terminal_write_repair)
  (libraries masc_tui_render_schedule unix))
 
+(library
+ (name masc_tui_credential)
+ (modules masc_tui_credential))
+
 (executable
  (name masc_tui)
  (modules
@@ -376,6 +384,8 @@
  (libraries
   masc
   masc.auth
+  masc_tui_credential
+  masc.runtime
   masc_tui_context_state
   masc_tui_frame_presenter
   masc_tui_keeper_activity
@@ -383,12 +393,14 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
-  masc_tui_keeper_chat_recovery
+  masc_tui_observer
+  masc_tui_acting
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_message_layout
+  masc_tui_send_disposition
   masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection

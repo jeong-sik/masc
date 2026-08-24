@@ -137,6 +137,45 @@ let test_capability_is_still_accepted_on_the_wire () =
       "an existing sender's capability must still parse, got %s"
       (C.request_error_to_string err)
 
+(* The schema layer and the payload layer answer the same model in the same
+   turn. [Agent_core.Tool_input_validation] writes an absent field as
+   MISSING (required: <type>) and a mistyped one as "wrong type - expected: X,
+   got: Y"; a payload that clears the schema and fails here used to answer in a
+   second vocabulary ("target.kind must be required field"), which names the
+   rule the field broke instead of the correction. These pin the two layers to
+   one wording. *)
+let test_absent_field_reads_as_missing () =
+  match message_of_target_json (`Assoc [ "name", `String "delta" ]) with
+  | None -> Alcotest.fail "a target without kind must be rejected"
+  | Some msg ->
+    Alcotest.(check bool) "names the field" true (contains ~needle:"target.kind" msg);
+    Alcotest.(check bool) "says it is missing" true (contains ~needle:"MISSING" msg);
+    Alcotest.(check bool)
+      "names the type to send"
+      true
+      (contains ~needle:"required: string" msg)
+;;
+
+let test_mistyped_field_names_what_arrived () =
+  match message_of_target_json (`Assoc [ "kind", `Int 1; "name", `String "delta" ]) with
+  | None -> Alcotest.fail "a non-string kind must be rejected"
+  | Some msg ->
+    Alcotest.(check bool) "says the type is wrong" true (contains ~needle:"wrong type" msg);
+    Alcotest.(check bool) "names the expected type" true (contains ~needle:"string" msg);
+    Alcotest.(check bool) "names what arrived" true (contains ~needle:"integer" msg)
+;;
+
+let test_non_object_target_names_what_arrived () =
+  match message_of_target_json (`String "delta") with
+  | None -> Alcotest.fail "a string target must be rejected"
+  | Some msg ->
+    Alcotest.(check bool) "expects an object" true (contains ~needle:"object" msg);
+    Alcotest.(check bool)
+      "quotes the string it received"
+      true
+      (contains ~needle:"string(\"delta\")" msg)
+;;
+
 let () =
   Alcotest.run "keeper_invocation_contract_hints"
     [ ( "undeclared_field_hint"
@@ -146,6 +185,14 @@ let () =
             test_other_guessed_names_get_the_same_hint
         ; Alcotest.test_case "a valid target still parses" `Quick
             test_valid_target_still_parses
+        ] )
+    ; ( "one_vocabulary_with_the_schema_layer"
+      , [ Alcotest.test_case "an absent field reads as MISSING" `Quick
+            test_absent_field_reads_as_missing
+        ; Alcotest.test_case "a mistyped field names what arrived" `Quick
+            test_mistyped_field_names_what_arrived
+        ; Alcotest.test_case "a non-object target names what arrived" `Quick
+            test_non_object_target_names_what_arrived
         ] )
     ; ( "single_value_capability"
       , [ Alcotest.test_case "omitted capability is accepted" `Quick

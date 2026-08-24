@@ -70,17 +70,6 @@ export {
   parseGoalVerificationRunsResponse,
   fetchGoalVerificationRuns,
 } from './dashboard-goal-verification-runs'
-export type {
-  KeeperFeatureProofStatus,
-  KeeperPersistenceTierId,
-  KeeperPersistenceEvidenceKind,
-  KeeperPersistenceTierProof,
-  DashboardKeeperPersistenceProofResponse,
-} from './dashboard-keeper-feature-proof'
-export {
-  parseKeeperPersistenceProofResponse,
-  fetchKeeperPersistenceProof,
-} from './dashboard-keeper-feature-proof'
 export {
   fetchExactLaneRun,
   fetchExactLaneRuns,

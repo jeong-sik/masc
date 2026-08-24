@@ -219,6 +219,73 @@ let test_append_to_leaves_an_empty_reply_empty () =
   Alcotest.(check string) "unchanged" "" (Trail.append_to t ~text:"")
 ;;
 
+(* --- result digest ------------------------------------------------------- *)
+
+let check_digest description ~result expected =
+  Alcotest.(check (option string))
+    description
+    expected
+    (Trail.tool_result_digest ~result)
+;;
+
+(* The envelopes measured on one keeper's newest hundred calls. Written out
+   rather than reduced to one case: the point is that a row says something
+   useful for each shape this workspace actually writes. *)
+let test_digest_reads_the_live_envelopes () =
+  check_digest
+    "a command answers with its output, not its envelope"
+    ~result:{|{"ok":true,"cwd":".","execution_time_ms":529,"output":"65de95f856 chore(glm)"}|}
+    (Some "65de95f856 chore(glm)");
+  check_digest
+    "a failure says why before anything else"
+    ~result:{|{"ok":false,"cwd":".","error":"exit 128: not a git repository","output":"
+
+"}|}
+    (Some "exit 128: not a git repository");
+  check_digest
+    "a read answers with what it read"
+    ~result:{|{"ok":true,"path":"lib/a.ml","bytes":12,"content":"let x = 1"}|}
+    (Some "let x = 1");
+  check_digest
+    "a write with no text payload names the file it wrote"
+    ~result:{|{"ok":true,"mode":"create","bytes_written":40,"path":"repos/masc/a.ml"}|}
+    (Some "repos/masc/a.ml")
+;;
+
+(* Seventeen of that hundred were not JSON at all. The text is the result. *)
+let test_digest_takes_plain_text_as_it_is () =
+  check_digest "plain text needs shortening, not parsing"
+    ~result:"  backlog is empty  " (Some "backlog is empty")
+;;
+
+(* A shape with none of the known keys is still better named by its own text
+   than by nothing -- the same fallback the subject takes. *)
+let test_digest_falls_back_to_the_whole_shape () =
+  check_digest "an unknown shape names itself"
+    ~result:{|{"ok":true,"occurrences":3}|}
+    (Some {|{"ok":true,"occurrences":3}|})
+;;
+
+(* An empty result is a call that answered nothing. A row can leave that
+   blank; padding it with "" would say the call answered an empty string. *)
+let test_digest_of_an_empty_result_is_absent () =
+  check_digest "empty" ~result:"" None;
+  check_digest "whitespace only" ~result:"   \n  " None
+;;
+
+(* Long results are cut to the same width a subject is, so one row cannot
+   push the ones under it off the screen. *)
+let test_digest_is_bounded () =
+  match Trail.tool_result_digest ~result:(String.make 4000 'x') with
+  | None -> Alcotest.fail "a long result should still name itself"
+  | Some digest ->
+      Alcotest.(check bool)
+        (Printf.sprintf "a 4000-byte result is cut (got %d bytes)"
+           (String.length digest))
+        true
+        (String.length digest < 200)
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_tool_trail"
@@ -234,6 +301,17 @@ let () =
         ; Alcotest.test_case "empty value" `Quick test_subject_empty_value
         ; Alcotest.test_case "partial json" `Quick test_subject_partial_json
         ; Alcotest.test_case "long path keeps its tail" `Quick test_subject_keeps_path_tail
+        ] )
+    ; ( "result digest"
+      , [ Alcotest.test_case "live envelopes" `Quick
+            test_digest_reads_the_live_envelopes
+        ; Alcotest.test_case "plain text" `Quick
+            test_digest_takes_plain_text_as_it_is
+        ; Alcotest.test_case "unknown shape" `Quick
+            test_digest_falls_back_to_the_whole_shape
+        ; Alcotest.test_case "empty result" `Quick
+            test_digest_of_an_empty_result_is_absent
+        ; Alcotest.test_case "bounded" `Quick test_digest_is_bounded
         ] )
     ; ( "trail"
       , [ Alcotest.test_case "no tools" `Quick test_no_tools_renders_nothing

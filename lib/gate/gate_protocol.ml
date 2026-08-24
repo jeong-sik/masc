@@ -108,7 +108,12 @@ let validation_error_to_string = function
   | Empty_content -> "content is required"
   | Content_too_long len ->
       Printf.sprintf "content too long: %d chars" len
-  | Empty_keeper_name -> "keeper_name is required"
+  (* Every other message in this list names the request field the caller has
+     to fix. The inbound decoder reads [destination_id] -- [keeper_name] is the
+     non-canonical spelling it ignores when both are present -- so naming
+     [keeper_name] here pointed a caller at a field the decoder does not read
+     (#24887). *)
+  | Empty_keeper_name -> "destination_id is required"
   | Empty_channel_user_id -> "channel_user_id is required"
   | Empty_idempotency_key -> "idempotency_key is required"
 

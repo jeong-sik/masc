@@ -244,7 +244,7 @@ let test_error_json () =
 let test_validation_error_strings () =
   check string "empty content" "content is required"
     (Gate_protocol.validation_error_to_string Gate_protocol.Empty_content);
-  check string "empty keeper" "keeper_name is required"
+  check string "empty keeper" "destination_id is required"
     (Gate_protocol.validation_error_to_string Gate_protocol.Empty_keeper_name)
 
 let test_gate_error_strings () =
@@ -274,6 +274,31 @@ let test_message_request_status_of_string () =
   check_status_parse "lost" "lost" (Some Gate_protocol.Lost);
   check_status_parse "cancelled" "cancelled" (Some Gate_protocol.Cancelled);
   check_status_parse "unknown fails closed" "finished" None
+
+(* The inbound decoder reads [destination_id]; [keeper_name] is the
+   non-canonical spelling it ignores when both are present, which the two cases
+   above this pin. What did not follow was the route documentation and the
+   validation message, which both named [keeper_name] -- so a caller writing a
+   request from the docs sent a field the decoder does not read, and the error
+   told them to fix a field that was already there (#24887). These pin the
+   message against the field the decoder actually reads. *)
+let test_empty_keeper_error_names_the_decoded_field () =
+  check
+    string
+    "the message names destination_id"
+    "destination_id is required"
+    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_keeper_name)
+;;
+
+let test_other_validation_messages_name_their_own_field () =
+  (* The claim is consistency, so it has to hold for the siblings too. *)
+  check string "content" "content is required"
+    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_content);
+  check string "channel_user_id" "channel_user_id is required"
+    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_channel_user_id);
+  check string "idempotency_key" "idempotency_key is required"
+    (Gate_protocol.validation_error_to_string Gate_protocol.Empty_idempotency_key)
+;;
 
 let () =
   Alcotest.run "Gate_protocol"
@@ -311,5 +336,12 @@ let () =
           test_case "gate error strings" `Quick test_gate_error_strings;
           test_case "message request status parse" `Quick
             test_message_request_status_of_string;
+        ] );
+      ( "validation_message_fields",
+        [
+          test_case "empty keeper error names the decoded field" `Quick
+            test_empty_keeper_error_names_the_decoded_field;
+          test_case "siblings name their own field" `Quick
+            test_other_validation_messages_name_their_own_field;
         ] );
     ]

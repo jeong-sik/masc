@@ -29,6 +29,24 @@ let test_block_id_unknown_rejected () =
     check bool "unknown block id is explicit" true
       (Astring.String.is_infix ~affix:"unknown prompt block id" message)
 
+(* Recurring world-state blocks stay on the first provider round of a turn;
+   only a genuine mid-turn message (the operator note) rides a post-tool
+   round. Pinned per constructor so a new block declares its class rather
+   than inheriting one (task-514). *)
+let test_block_id_post_tool_round_classes () =
+  List.iter
+    (fun (block, expected) ->
+      check bool
+        (Printf.sprintf "post-tool class of %s" (Prompt_block_id.to_string block))
+        expected
+        (Prompt_block_id.injected_on_post_tool_round block))
+    [ (Prompt_block_id.Keeper_instructions, true)
+    ; (Prompt_block_id.Dynamic_context, false)
+    ; (Prompt_block_id.Temporal_summary, false)
+    ; (Prompt_block_id.Memory_os_recall, false)
+    ; (Prompt_block_id.Operator_note, true)
+    ]
+
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
 let digest_of_label label =
@@ -776,6 +794,8 @@ let () =
     [ ( "prompt_block_id"
       , [ test_case "all known constructors roundtrip" `Quick test_block_id_roundtrip
         ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
+        ; test_case "post-tool round classes" `Quick
+            test_block_id_post_tool_round_classes
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip

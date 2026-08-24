@@ -173,12 +173,30 @@ let validate_supported_reasoning ~reasoning_block_supported ~message_index conte
     Error (Unsupported_reasoning_block { message_index; block_index; block_kind })
 ;;
 
+(* The extra-system-context carrier rides the User role for wire
+   compatibility, but it is runtime-assembled context, not a person speaking:
+   [Types.Extra_system_context_provenance] exists so consumers attribute the
+   carrier by typed identity. Counting it as a user turn made
+   [Tool_call_assistant_messages_latest_user_turn] drop every assistant
+   reasoning block whenever a request carried the trailing per-turn context —
+   a keeper tool loop injects one on every provider round, so replay was
+   permanently empty on those lanes. Any classification of the carrier key
+   marks the message as a carrier, mirroring
+   [Runtime_model_input_tail_window]. *)
+let is_extra_system_context_carrier (message : Types.message) =
+  match Types.Extra_system_context_provenance.classify message.metadata with
+  | Types.Extra_system_context_provenance.Absent -> false
+  | Types.Extra_system_context_provenance.Present
+  | Types.Extra_system_context_provenance.Invalid
+  | Types.Extra_system_context_provenance.Duplicate -> true
+;;
+
 let find_latest_user_message_index classified_messages =
   List.fold_left
     (fun latest (message_index, (message : Types.message), _) ->
        match message.role with
-       | User -> Some message_index
-       | System | Assistant | Tool -> latest)
+       | User when not (is_extra_system_context_carrier message) -> Some message_index
+       | User | System | Assistant | Tool -> latest)
     None
     classified_messages
 ;;

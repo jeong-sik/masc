@@ -1,0 +1,20 @@
+name = "masc_keeper_list"
+description = """
+List known keepers from persisted keeper metadata. The response carries \
+total (keepers known before limit), limit (the value applied) and truncated, \
+so a short answer is distinguishable from a complete one."""
+additional_properties = false
+
+[[params]]
+name = "limit"
+type = "integer"
+description = """
+Max keepers to return (default: 50). Names are sorted and cut from the end, \
+so a low limit hides whatever sorts last; check truncated in the response."""
+
+[[params]]
+name = "detailed"
+type = "boolean"
+description = """
+Return keeper summaries (model/context/handoff/compaction) instead of names \
+only."""

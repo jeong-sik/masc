@@ -4838,6 +4838,48 @@ let help_lines () =
             entries
        @ [ "" ])
 
+(* The [:] palette: a typed filter over every jump the strip and roster
+   offer. The list is the same [palette_matches] the Enter key resolves, so
+   what is highlighted is what will run. *)
+let render_palette (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 2048 in
+  let matches = Masc_tui_types.palette_matches state in
+  let total = List.length matches in
+  let cursor = max 0 (min state.palette_cursor (total - 1)) in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s:%s %s%s" Ansi.bold Ansi.reset
+       (Terminal_text.single_line state.palette_query)
+       (Ansi.cyan ^ "\xe2\x96\x8c" ^ Ansi.reset));
+  box_divider buf cols;
+  let content_height = max 1 (rows - 5) in
+  let first =
+    if cursor < content_height then 0
+    else cursor - content_height + 1
+  in
+  matches
+  |> List.filteri (fun i _ -> i >= first && i < first + content_height)
+  |> List.iteri (fun visible_index (label, _) ->
+       let selected = first + visible_index = cursor in
+       let line =
+         if selected then
+           Ansi.bold ^ Ansi.cyan ^ "\xe2\x96\xb8 " ^ label ^ Ansi.reset
+         else "  " ^ label
+       in
+       box_line buf cols line);
+  if total = 0 then
+    box_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf
+       "%s  %d/%d  Enter:jump  Esc:close  | Port: %d%s\n"
+       Ansi.dim
+       (if total = 0 then 0 else cursor + 1)
+       total state.port Ansi.reset);
+  finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
+
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -4906,5 +4948,6 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
+  else if state.palette_open then render_palette state
   else if state.help_open then render_help state
   else render_surface state

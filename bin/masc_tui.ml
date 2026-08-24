@@ -3711,6 +3711,7 @@ let main () =
       let composer_claimed =
         (not compact_viewport)
         && (not state.help_open)
+        && (not state.palette_open)
         && state.view <> Keepers Keeper_message
         &&
         match key with
@@ -3731,6 +3732,47 @@ let main () =
                 state.help_scroll <- 0
             | "j" | "down" -> state.help_scroll <- state.help_scroll + 1
             | "k" | "up" -> state.help_scroll <- max 0 (state.help_scroll - 1)
+            | _ -> ())
+       (* The palette is the same kind of modal, but typed: printable keys
+          build the query, arrows move the cursor, Enter runs the highlighted
+          jump through the exact goto/chat paths the bound keys use. *)
+       | Some k when state.palette_open ->
+           let close () =
+             state.palette_open <- false;
+             state.palette_query <- "";
+             state.palette_cursor <- 0
+           in
+           (match k with
+            | "esc" -> close ()
+            | "\r" ->
+                let matches = Masc_tui_types.palette_matches state in
+                let chosen =
+                  List.nth_opt matches
+                    (max 0 (min state.palette_cursor (List.length matches - 1)))
+                in
+                close ();
+                (match chosen with
+                 | Some (_, Masc_tui_types.Palette_goto destination) ->
+                     goto_surface state ~mailbox:async_messages destination
+                 | Some (_, Masc_tui_types.Palette_chat keeper_name) ->
+                     open_message_for_keeper
+                       ~return_to:Keeper_chat_return_list state keeper_name;
+                     launch_keeper_history_load state
+                       ~mailbox:async_messages ~keeper_name;
+                     state.view <- Keepers Keeper_message
+                 | None -> ())
+            | "down" -> state.palette_cursor <- state.palette_cursor + 1
+            | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
+            | "\127" | "\b" ->
+                state.palette_query <-
+                  Masc_tui_message_layout.drop_last_utf8_scalar
+                    state.palette_query;
+                state.palette_cursor <- 0
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                state.palette_query <- state.palette_query ^ s;
+                state.palette_cursor <- 0
             | _ -> ())
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
@@ -3786,6 +3828,10 @@ let main () =
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
+       | Some ":" ->
+           state.palette_open <- true;
+           state.palette_query <- "";
+           state.palette_cursor <- 0
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->

@@ -122,6 +122,30 @@ let with_fixture ?auth_json ?before_initialize_response steps f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
+(* Two kinds of deadline live in this suite and they want opposite things.
+
+   A deadline a test asserts *fires* wants to be short: the fixture pauses
+   past it on purpose and the timeout is the result. 0.05 s is right there.
+
+   A deadline a test needs to *not* fire has to cover starting the fixture as
+   well as the pause it is compared against. Spawning the shell alone measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, so 0.05 s
+   expired before the script reached its first [read] and the case failed
+   about half the time -- which is not what any of these are asserting.
+
+   Growing the pauses alongside was tried and made it worse: the suite got
+   slower, which lengthened the very spawn tail being worked around, and the
+   failure moved to whichever neighbour happened to be unlucky. So the pauses
+   stay as they are and only the windows that must survive a process start
+   carry this name.
+
+   The default stays 2 s. Raising it was tried and inverted the suite: the
+   default also feeds the cases that assert a deadline *does* fire, and a
+   5 s default swallowed the 0.2 s pause those wait through, so
+   [test_no_deadline_keeps_initialize_bounded] failed 12 times out of 12. The
+   two kinds cannot share one number. *)
+let window_outlasting_process_start_s = 5.0
+
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
     ?on_turn_started_delay_s ?on_stream_event path =
@@ -205,7 +229,7 @@ let test_progress_resets_stream_idle_timeout () =
   with_fixture
     [ Emit assistant; Pause 0.4; Emit assistant; Pause 0.4; Emit result ]
     (fun path ->
-       match run_fixture ~timeout_s:0.75 path with
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
        | Ok turn ->
          check string "progressing turn completes" "MASC_CLAUDE_OK" turn.text
        | Error error -> fail (Runtime_claude_code.error_to_string error))
@@ -243,7 +267,7 @@ let test_no_deadline_starts_after_user_message () =
     (fun path ->
        match
          run_fixture
-           ~admission_timeout_s:0.05
+           ~admission_timeout_s:window_outlasting_process_start_s
            ~no_turn_deadline:true
            path
        with

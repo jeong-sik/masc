@@ -78,7 +78,7 @@ let is_config_or_auth_wire wire =
    the constructor name alone would be a guess dressed as a decision. They
    stay [Unknown], which is what they do today; the difference is that the
    match now names them, so the next author sees the open question instead of
-   an absent arm. #29945 tracks tracing them. *)
+   an absent arm. *)
 let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted wire
   | Keeper_internal_error.Wire_capacity_backpressure -> Capacity_backpressure wire

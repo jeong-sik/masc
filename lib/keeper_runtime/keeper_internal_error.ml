@@ -679,12 +679,7 @@ let wire_kind_to_string = function
 
 (* Decoding scans this list through [wire_kind_to_string] rather than
    repeating the strings, so encoder and decoder cannot spell a kind
-   differently. Thirteen entries; the scan cost is not worth a second table.
-
-   The one thing the compiler cannot check is whether this list is complete —
-   a fourteenth constructor breaks the two matches above but would leave a
-   silent gap here. test_keeper_internal_error_wire_kind closes that with its
-   own exhaustive match over the constructors. *)
+   differently. *)
 let all_wire_kinds =
   [ Wire_runtime_exhausted
   ; Wire_capacity_backpressure

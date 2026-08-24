@@ -43,7 +43,8 @@ implementation_prs: []
 python3 - <<'PY'
 import glob, json, collections, os
 c = collections.Counter()
-for kd in glob.glob(os.path.expanduser("~/me/.masc/keepers/*/raw-traces")):
+base = os.environ["MASC_BASE_PATH"]
+for kd in glob.glob(base + "/.masc/keepers/*/raw-traces"):
     for f in sorted(glob.glob(kd + "/*.jsonl"))[-25:]:
         for line in open(f, "rb").read().decode("utf-8", "replace").splitlines():
             try: o = json.loads(line)
@@ -70,7 +71,7 @@ git 403 · gh 170 · ls 62 · sleep 34 · dune 28 · grep 27 · opam 26 · bash 
 
 ### 1.2 keeper 는 이미 브라우저를 몰았다
 
-`~/me/.masc/playground/kidsnote/capture_lanes_v2.py` (113줄, 2026-08-24 20:05:38).
+`<base-path>/.masc/playground/kidsnote/capture_lanes_v2.py` (113줄, 2026-08-24 20:05:38).
 vite dev server 를 띄우고 시스템 Chrome 을 playwright 로 몰아 대시보드 Tools 탭을
 캡처한다. 산출물 `task-481-lanes-v2-capture.png` (174 KB, 1440x1200, 20:07:15).
 
@@ -81,7 +82,7 @@ vite dev server 를 띄우고 시스템 Chrome 을 playwright 로 몰아 대시�
 ### 1.3 도구 표면
 
 ```bash
-rg -o "tools=\d+ tool_surface_bytes=\d+" ~/me/.masc/logs/*.log | tail -1
+rg -o "tools=\d+ tool_surface_bytes=\d+" "$MASC_BASE_PATH"/.masc/logs/*.log | tail -1
 # tools=96 tool_surface_bytes=62685
 ```
 
@@ -114,7 +115,7 @@ Slack 은 MCP 가 아닌데 커넥터로 붙어 있다. **MCP 냐 아니냐가 �
 - 입력 `artifact` 는 vision store handle. vision store 는 대화로 들어온 이미지를
   담는다(`Keeper_vision_ingest.evict_blocks ~mode:Eager` / `evict_message
   ~mode:Store_only`). **keeper 가 만든 파일을 넣는 경로는 없다.**
-- blob store 는 살아 있다: `~/me/.masc/tool_blobs/` 256 샤드 1.0 GB,
+- blob store 는 살아 있다: `<base-path>/.masc/tool_blobs/` 256 샤드 1.0 GB,
   trace 에 `masc:blob` 272회 · `keeper_artifact_read` 1274회. 다만 `Execute` 의
   stdout 만 들어간다.
 

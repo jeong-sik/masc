@@ -577,6 +577,12 @@ def stable_termios(attributes: list[Any]) -> list[Any]:
     return stable
 
 
+# How far down the keeper list a scan may walk. The fixture roster is small;
+# the bound exists so a keeper that never reports itself selected fails here
+# instead of looping.
+KEEPER_ROW_SCAN_BOUND = 24
+
+
 def keeper_row_selected(name: bytes) -> bytes:
     """Bytes that appear only while ``name`` is the selected keeper row.
 
@@ -1502,6 +1508,34 @@ def wheel_scrolls_and_clicks_do_not(
     os.write(master_fd, b"q")
 
 
+def select_keeper_row(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    name: bytes,
+) -> None:
+    """Move the keeper-list cursor onto ``name``, wherever the row sits.
+
+    The roster comes from the fixture plus whatever the live read added, so a
+    scenario that presses Enter on the list's first row is asserting an order
+    nothing promises. Walking down until the row reports itself selected makes
+    the scenario say which keeper it means.
+    """
+    needle = keeper_row_selected(name)
+    if find_needle(output, needle, 0) >= 0:
+        return
+    for _ in range(KEEPER_ROW_SCAN_BOUND):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\x1b[B")
+        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+        if find_needle(output, needle, start) >= 0:
+            return
+    raise AssertionError(
+        f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
+    )
+
+
 def keeper_detail_overscroll_interaction(
     fixtures: HttpFixtures,
     refresh_gate: GatedHttpResponse,
@@ -1528,6 +1562,11 @@ def keeper_detail_overscroll_interaction(
                 timeout=3.0,
             )
             send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            # Confirm which row Enter will open rather than assuming the list
+            # opens on its first entry. The roster order is a property of the
+            # fixture and of whatever the live read returned, so pressing
+            # Enter blind waits for a detail header that may never come.
+            select_keeper_row(process, master_fd, output, b"alpha")
             send_and_wait(
                 process,
                 master_fd,

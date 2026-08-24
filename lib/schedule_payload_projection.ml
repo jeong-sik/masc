@@ -214,8 +214,35 @@ let set_keeper_wake_result_delivery ~payload ~channel =
   | _ -> Error "payload must be a JSON object"
 ;;
 
+(* Every field this contract reads. The body used to accept anything: an
+   unknown key was persisted at creation and then dropped by the consumer,
+   which is how a live schedule ended up carrying a channel_id that no
+   dispatch ever saw (#25689). [result_delivery] already closed its own
+   fields; this closes the body around it. *)
+let keeper_wake_body_fields =
+  [ "keeper_name"; "message"; "title"; "urgency"; "result_delivery" ]
+
+let unknown_keeper_wake_body_fields body =
+  List.filter
+    (fun (name, _) ->
+      not (List.exists (String.equal name) keeper_wake_body_fields))
+    body
+  |> List.map fst
+  |> List.sort_uniq String.compare
+
 let validate_keeper_wake_body body =
   let ( let* ) = Result.bind in
+  let* () =
+    match unknown_keeper_wake_body_fields body with
+    | [] -> Ok ()
+    | unknown ->
+      Error
+        (Printf.sprintf
+           "%s payload body has unknown field(s): %s (known: %s)"
+           keeper_wake_kind
+           (String.concat ", " unknown)
+           (String.concat ", " keeper_wake_body_fields))
+  in
   let* _ = result_delivery_of_body body in
   match assoc_string "keeper_name" body, assoc_string "message" body with
   | None, _ -> Error (keeper_wake_kind ^ " payload requires non-empty body.keeper_name")

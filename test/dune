@@ -2870,6 +2870,7 @@
 (include stanzas/test_keeper_memory_journal_projection.inc)
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
+(include stanzas/test_tui_send_disposition.inc)
 
 (test
  (name test_code_address)

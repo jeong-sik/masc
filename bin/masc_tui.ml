@@ -950,31 +950,24 @@ let queue_keeper_message state ~keeper_name text =
 ;;
 
 let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
-  match state.msg_prepared with
-  | Some request ->
+  (* The order lives in [send_disposition] so the footer reads the same state
+     the same way; see its note. *)
+  match send_disposition state with
+  | Refused_prepared request ->
       add_event state "error"
         (Printf.sprintf
            "Keeper request %s is prepared for its first serialized dispatch; use Ctrl-R to retry its recovery fence"
            request.request_id)
-  | None ->
-  match state.msg_cleanup_pending with
-  | Some request ->
+  | Refused_cleanup request ->
       add_event state "error"
         (Printf.sprintf
            "Keeper request %s is settled but its durable cleanup is incomplete; use Ctrl-R to finish cleanup"
            request.request_id)
-  | None ->
-  match state.msg_recovery_error with
-  | Some (Recovery_blocked detail) ->
+  | Refused_recovery_blocked detail ->
       add_event state "error"
         ("Cannot send while Keeper chat recovery is blocked; use Ctrl-R to reload the durable state: "
        ^ detail)
-  | None ->
-  match state.msg_inflight with
-  | Some request -> (
-      (* A turn is running. Hold the line rather than refusing it: the operator
-         pressed Enter meaning "send this next", and the turn settling is what
-         "next" is. *)
+  | Queues_behind request -> (
       match
         match keeper_name with
         | Some _ -> keeper_name
@@ -992,14 +985,12 @@ let rec start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                    (Keeper_chat.terminal_safe_text target)
                    request.request_id
                    waiting)))
-  | None -> (
-      match state.msg_unverified with
-      | Some request ->
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
-               request.request_id)
-      | None ->
+  | Refused_unverified request ->
+      add_event state "error"
+        (Printf.sprintf
+           "Keeper request %s has an unverified outcome; use Ctrl-R to reconnect with the same request ID"
+           request.request_id)
+  | Sends -> (
       match
         (match keeper_name with Some _ -> keeper_name | None -> state.msg_target_keeper_name)
       with

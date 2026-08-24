@@ -574,6 +574,20 @@ type state = {
   refresh_interval: float;
 }
 
+(* One reading of the state for both the send path and the footer; the order
+   and the reasoning live in [Masc_tui_send_disposition]. *)
+type send_disposition =
+  Masc_tui_keeper_chat_projection.request Masc_tui_send_disposition.t
+
+let send_disposition state : send_disposition =
+  Masc_tui_send_disposition.of_state ~prepared:state.msg_prepared
+    ~cleanup_pending:state.msg_cleanup_pending
+    ~recovery_blocked:
+      (match state.msg_recovery_error with
+       | Some (Recovery_blocked detail) -> Some detail
+       | None -> None)
+    ~inflight:state.msg_inflight ~unverified:state.msg_unverified
+
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
 let keeper_reading (state : state) (keeper : keeper) :

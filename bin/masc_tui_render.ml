@@ -2604,39 +2604,34 @@ let render_keeper_message (state : state) =
 
     (* Footer *)
     let enter_hint =
-      match state.msg_inflight, state.msg_inflight_kind, state.msg_unverified with
-      | Some _, Some Dispatch_claim, _ ->
-          "waiting for serialized dispatch  Enter:blocked"
-      | Some _, Some Operation_get, _ ->
-          "reconciling exact operation  Enter:blocked"
-      | Some _, Some Cleanup_delete, _ ->
-          "finishing durable cleanup  Enter:blocked"
-      | Some _, Some Chat_post, Some _ ->
-          "replaying exact request  Enter:blocked"
-      (* A turn is running and nothing durable is blocking: Enter holds the
-         line for the next one. Saying "wait" was the honest hint while the
-         send was refused; now the honest hint is what the key does. *)
-      | Some _, (Some Chat_post | None), _ | None, Some _, _ ->
-          (match Masc_tui_keeper_chat_queue.length state.msg_queued with
-           | 0 -> "Enter:queue for next turn"
-           | waiting ->
-             Printf.sprintf
-               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
-               waiting)
-      | None, None, _ ->
-      match state.msg_cleanup_pending, state.msg_prepared, state.msg_recovery_error
-      with
-      | Some _, _, _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
-      | None, Some _, _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
-      | None, None, Some (Recovery_blocked _) ->
+      (* What the key does is read once, by [send_disposition]; the in-flight
+         kind only names what is happening while it does it. Answering both
+         here from a subset of the state is what let the footer say
+         [Enter:blocked] on a screen that also showed "queued 1". *)
+      let queue_hint () =
+        match Masc_tui_keeper_chat_queue.length state.msg_queued with
+        | 0 -> "Enter:queue for next turn"
+        | waiting ->
+            Printf.sprintf
+              "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+              waiting
+      in
+      (* What the in-flight work is stays out of the footer: the box above it
+         already names it ("polling the exact operation", "durable cleanup is
+         in progress"), and repeating it here pushed the footer past a narrow
+         terminal. *)
+      match send_disposition state with
+      | Queues_behind _ -> queue_hint ()
+      | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
+      | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"
+      | Refused_recovery_blocked _ ->
           "Ctrl-R:reload exact recovery  Enter:blocked"
-      | None, None, None ->
-          (match state.msg_unverified, target_registered with
-           | Some _, _ -> "Ctrl-R:resume exact request  Enter:blocked"
-           | None, false when Option.is_some state.keepers_error ->
-               "Enter:disabled (roster unavailable)"
-           | None, false -> "Enter:disabled (Keeper unavailable)"
-           | None, true -> "Enter:send")
+      | Refused_unverified _ -> "Ctrl-R:resume exact request  Enter:blocked"
+      | Sends ->
+          if target_registered then "Enter:send"
+          else if Option.is_some state.keepers_error then
+            "Enter:disabled (roster unavailable)"
+          else "Enter:disabled (Keeper unavailable)"
     in
     let scroll_hint =
       if scroll > 0 then

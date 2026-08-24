@@ -316,6 +316,30 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
       Error (Printf.sprintf "observer stream refused with %d: %s" status body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
+(** One MCP [tools/call] under an existing session.
+
+    The task tools ([masc_add_task], [masc_transition]) have no REST route;
+    this is how the dashboard calls them and now how the TUI does. The
+    session is the one the observer feed opened, or one the caller opened
+    for this call; the server keeps sessions across requests. *)
+let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
+    ~(request_id : string) ~(tool : string)
+    ~(arguments : (string * Yojson.Safe.t) list) :
+    (Masc_tui_mcp.outcome, string) result =
+  let headers =
+    json_headers
+      (("Accept", "application/json, text/event-stream")
+      :: ("Mcp-Session-Id", sanitize_header_value session_id)
+      :: auth_headers ())
+  in
+  let body = Masc_tui_mcp.request_body ~request_id ~tool ~arguments in
+  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "tools/call returned %d: %s" status body)
+  | Ok (_, body) -> Masc_tui_mcp.outcome_of_body ~request_id body
+
 (** Fetch a keeper's durable chat transcript.
 
     The pane's scrollback used to be session-local while the server kept the

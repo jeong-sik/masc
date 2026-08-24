@@ -61,6 +61,21 @@ CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 BOARD_CELL_BODY = ("한" * 20) + " " + ("한" * 20)
 
 
+class SequencedHttpResponse:
+    """One response per call, in order; the last repeats. The MCP endpoint
+    answers initialize and tools/call on the same path, so a scenario that
+    does both needs the fixture to change under it."""
+
+    def __init__(self, responses: list) -> None:
+        self.responses = list(responses)
+        self.served = 0
+
+    def __call__(self):
+        index = min(self.served, len(self.responses) - 1)
+        self.served += 1
+        return self.responses[index]
+
+
 class GatedHttpResponse:
     def __init__(self, response: HttpResponse) -> None:
         self.response = response
@@ -3178,6 +3193,86 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+TASK_TOOL_ANSWER = RawHttpResponse(
+    200,
+    (
+        b'event: message\n'
+        b'data: {"jsonrpc":"2.0","result":{"content":[{"type":"text",'
+        b'"text":"{\\"ok\\":true,\\"task_id\\":\\"task-9\\"}"}],"isError":false}}\n\n'
+    ),
+    content_type="text/event-stream",
+)
+
+
+def task_dispatch_http_fixtures() -> HttpFixtures:
+    fixtures = observer_http_fixtures()
+    fixtures["/mcp"] = SequencedHttpResponse(
+        [
+            RawHttpResponse(
+                200,
+                json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),
+                content_type="application/json",
+                headers=(("Mcp-Session-Id", "mcp_fixture_session"),),
+            ),
+            TASK_TOOL_ANSWER,
+        ]
+    )
+    fixtures["/api/v1/keepers/chat/stream"] = (
+        503,
+        {"error": "stop after the dispatch request capture"},
+    )
+    return fixtures
+
+
+def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
+    """/task in the composer creates the task over MCP and hands the keeper
+    the operator's words with the task id in front."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+        )
+        send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+        send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
+        os.write(master_fd, b"\r")
+        chat_body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        tool_calls = [
+            json.loads(body) for path, body in requests if path == "/mcp"
+        ]
+        add_task = [
+            p for p in tool_calls
+            if p.get("method") == "tools/call"
+            and p.get("params", {}).get("name") == "masc_add_task"
+        ]
+        if len(add_task) != 1:
+            raise AssertionError(f"expected one masc_add_task call: {tool_calls!r}")
+        arguments = add_task[0]["params"]["arguments"]
+        if arguments.get("title") != "Lanes surface" or "description" in arguments:
+            raise AssertionError(f"unexpected add_task arguments: {arguments!r}")
+        message = json.loads(chat_body).get("message")
+        if message != "[task-9] Lanes surface":
+            raise AssertionError(f"keeper message did not carry the task id: {message!r}")
+        # The dispatch lands the operator in the keeper's chat, where the
+        # send (and its 503 from the fixture) is on screen; the POST bodies
+        # above are the proof of what went out.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     """Ctrl-J opens a line; Return sends.
 
@@ -3288,6 +3383,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=observer_feed_interaction(observer_requests),
         http_fixtures=observer_http_fixtures(),
         http_requests=observer_requests,
+    )
+    dispatch_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Composer task dispatch",
+        interact=task_dispatch_interaction(dispatch_requests),
+        http_fixtures=task_dispatch_http_fixtures(),
+        http_requests=dispatch_requests,
     )
     composer_requests: HttpRequests = []
     run_terminal_scenario(

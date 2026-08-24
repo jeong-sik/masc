@@ -556,7 +556,20 @@ let load_overview ~(host : string) ~(port : int) :
           ov_keepers;
           ov_mcp_agents;
           ov_incident_count;
-          ov_attention_items = incidents @ attention_queue @ attention_items;
+          (* The briefing projects one fact onto two lists: an incident is
+             also queued for operator attention, as the same JSON row. On the
+             live runtime all three incidents came back on both lists and the
+             panel drew each twice. One fact, one row: a later item
+             structurally equal to an earlier one is the same projection
+             again, not a second fact. Items that differ in any field keep
+             both rows. *)
+          ov_attention_items =
+            (incidents @ attention_queue @ attention_items
+            |> List.fold_left
+                 (fun kept item ->
+                   if List.mem item kept then kept else item :: kept)
+                 []
+            |> List.rev);
           ov_top_attention = top_attention;
           ov_generated_at;
         }

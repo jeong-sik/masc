@@ -1991,6 +1991,17 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approvals_list state request reqd) request reqd)
 
+  (* The per-keeper approval stance the gate consults per call. Reading the
+     overrides is a public-read projection like the listing above; setting
+     one decides what a running turn may do next, so it carries the same
+     authority as answering a held call. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_get state request reqd) request reqd)
+  |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_set state request reqd) request reqd)
+
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with

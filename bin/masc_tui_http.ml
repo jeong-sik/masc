@@ -559,6 +559,24 @@ let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
 
+(** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
+let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode"
+
+(** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
+let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+  in
+  match
+    post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body
+  with
+  | Error detail -> Error detail
+  | Ok _ -> Ok ()
+
 (** POST /api/v1/operator/confirm to approve/deny a pending confirmation. *)
 let operator_confirm_body ~(token : string)
     ~(decision : Masc_tui_operator_projection.approval_decision) =

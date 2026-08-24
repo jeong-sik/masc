@@ -1706,6 +1706,20 @@ let decode_keeper_tool_approval json =
     ; kta_timeout_sec
     }
 
+(* GET /api/v1/keepers/tool-approval-mode: the keepers moved off the default
+   stance. Decoded to (keeper, mode) pairs; the caller decides what a mode
+   means — this module carries the wire vocabulary only. *)
+let decode_tool_approval_mode_overrides json =
+  let* items = required_list_field json "overrides" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* keeper = required_string_field item "keeper" in
+        let* mode = required_string_field item "mode" in
+        loop ((keeper, mode) :: acc) rest
+  in
+  loop [] items
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function

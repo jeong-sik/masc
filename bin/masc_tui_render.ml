@@ -1757,7 +1757,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
-    ~status ~keeper ~runtime =
+    ~yolo ~status ~keeper ~runtime =
   let status_color, glyph = keeper_status_glyph status in
   (* Same gutter marker the Approvals, Board and Planning lists draw. A
      selection cursor that changes shape when the operator switches surface
@@ -1781,7 +1781,13 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
-    ; (if selected then Ansi.bold ^ name ^ Ansi.reset else name)
+    ; (let dressed =
+         (* A keeper whose gate runs every call unasked wears its name in
+            red: the stance has no column of its own, and the name is what
+            the eye finds first. *)
+         if yolo then Ansi.red ^ name ^ Ansi.reset else name
+       in
+       if selected then Ansi.bold ^ dressed ^ Ansi.reset else dressed)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
         keeper.k_total_turns Ansi.reset
@@ -1844,6 +1850,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
+          ; Ansi.red ^ "g" ^ Ansi.reset ^ " yolo"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
@@ -2044,6 +2051,7 @@ let render_keeper_list (state : state) =
           box_line buf cols
             (keeper_row_content ~columns
                ~selected:(position = state.keeper_cursor)
+               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
                ~status:(Keeper_control.display_status reading) ~keeper ~runtime)
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;

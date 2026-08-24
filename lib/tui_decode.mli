@@ -375,6 +375,11 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+val decode_tool_approval_mode_overrides :
+  Yojson.Safe.t -> ((string * string) list, string) result
+(** Decode [GET /api/v1/keepers/tool-approval-mode]'s
+    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+
 val decode_keeper_tool_approvals :
   Yojson.Safe.t -> (keeper_tool_approval list, string) result
 (** Decode the [{pending: [...]}] listing, oldest first, rejecting rows with

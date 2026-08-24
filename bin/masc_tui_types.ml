@@ -521,6 +521,10 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* Keepers whose approval gate runs every call unasked. Names only: the
+     wire carries (keeper, mode) pairs and [auto] is the absent default, so
+     what the pane needs is exactly the yolo set. *)
+  mutable keeper_yolo_names: string list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
@@ -782,6 +786,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   approvals_error = None;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_cursor = 0;
   pending_approval_action = None;

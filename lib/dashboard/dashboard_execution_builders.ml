@@ -243,26 +243,32 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
      the surface subset. A paused keeper is neither offline nor running: it is
      not failing, and it is also not going to make progress, so it carries its
      own liveness rather than borrowing either verdict. *)
-  let liveness =
-    match Keeper_status_runtime.control_plane_status_of_string_opt status with
-    | Some
-        (Keeper_status_runtime.Cp_surface
-           ( Keeper_status_runtime.Surface_offline
-           | Keeper_status_runtime.Surface_inactive )) ->
-      Cl_offline
-    | Some
-        (Keeper_status_runtime.Cp_surface
-           ( Keeper_status_runtime.Surface_active
-           | Keeper_status_runtime.Surface_busy
-           | Keeper_status_runtime.Surface_listening
-           | Keeper_status_runtime.Surface_idle )) ->
-      Cl_live
-    | Some Keeper_status_runtime.Cp_paused -> Cl_paused
+  (* Two readings, read separately. [paused] is a person's decision and health
+     is an observation; the status string this used to parse folded the two
+     into one word, and folded stale, degraded and zombie together on the way.
+
+     Health is parsed whether or not the keeper is paused, so a health this
+     build cannot read is rejected either way. Validating it only on the
+     unpaused path would grant producer drift a free pass on every paused
+     keeper - the permissive fallback moved one field over. *)
+  let health =
+    let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
+    match Keeper_status_runtime.keeper_health_of_string_opt raw with
+    | Some value -> value
     | None ->
       invalid_arg
-        (Printf.sprintf
-           "dashboard continuity: unknown current keeper status %S"
-           status)
+        (Printf.sprintf "dashboard continuity: unknown keeper health %S" raw)
+  in
+  let liveness =
+    if Option.value ~default:false (Json_util.assoc_bool_opt "paused" keeper)
+    then Cl_paused
+    else
+      match health with
+      | Keeper_types.KH_offline | KH_zombie -> Cl_offline
+      (* Stale is a keeper whose heartbeat is late, not one that stopped: its
+         fiber is alive and it may still be taking turns. Reading it as offline
+         sent an operator to boot a keeper that was already up. *)
+      | KH_healthy | KH_idle | KH_stale | KH_degraded -> Cl_live
   in
   let continuity_offline =
     match liveness with

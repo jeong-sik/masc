@@ -778,7 +778,7 @@ let patched_keeper_status row ~event ~keepalive_running =
     match Keeper_status_runtime.control_plane_status_of_string_opt status with
     | Some
         (Cp_surface
-           ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
+           ((Surface_active | Surface_idle) as s)) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
     | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
     | Some Cp_paused ->

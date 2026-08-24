@@ -653,6 +653,11 @@ type state = {
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
+  (* How far back the arrows have walked through what this pane sent, and the
+     draft they set aside to do it. [None] means the composer holds the
+     operator's own text, so pressing down has nothing to give back. *)
+  mutable msg_recall_at: int option;
+  mutable msg_recall_draft: string;
   (* The turn currently streaming, if any. Drawn below the history and
      discarded when the turn settles; its tool rows are committed to the
      history first. Never authoritative -- the recorded reply comes from the
@@ -902,6 +907,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_history = [];
+  msg_recall_at = None;
+  msg_recall_draft = "";
   msg_live = None;
   msg_loaded = [];
   msg_loaded_keeper = None;

@@ -607,7 +607,7 @@ describe('filterKeeperSnapshots', () => {
   const alpha = snapshot({ name: 'gen12-alpha' })
   const beta = snapshot({
     name: 'gen14-beta',
-    phase: 'Overflowed',
+    phase: 'Draining',
     runtime: { state: 'trying' },
   })
   const gamma = snapshot({
@@ -630,7 +630,7 @@ describe('filterKeeperSnapshots', () => {
   })
 
   it('matches phase (KSM) axis value', () => {
-    const out = filterKeeperSnapshots(rows, 'overflowed')
+    const out = filterKeeperSnapshots(rows, 'draining')
     expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
   })
 

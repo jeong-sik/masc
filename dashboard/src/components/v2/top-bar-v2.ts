@@ -1,7 +1,7 @@
 // MASC v2 — top bar (ported from prototype shell.jsx TopBar + AttentionIndicator).
 // Emits the prototype `.v2-top` DOM (crumb · live statchip · attention ·
 // schedule · Copilot). Wired to live signals: running count + attention
-// aggregate (Gate approvals, needs-attention keepers, crashed/overflowed,
+// aggregate (Gate approvals, needs-attention keepers, crashed,
 // stale connectors). The Copilot button reuses the existing dock controller.
 
 import { html } from 'htm/preact'
@@ -34,7 +34,7 @@ import {
   subscribeDashboardFullHealthRefresh,
 } from '../dashboard-full-health-state'
 
-const FAILURE_PHASES = new Set(['Overflowed', 'Crashed'])
+const FAILURE_PHASES = new Set(['Crashed'])
 
 type TopBarKeeperCount =
   | { kind: 'executable'; count: number }

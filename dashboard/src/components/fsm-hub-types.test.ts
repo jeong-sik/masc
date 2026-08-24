@@ -70,7 +70,7 @@ describe('extractLaneValue', () => {
 
   it('handles all valid phase values', () => {
     const phases: KeeperCompositeSnapshot['phase'][] = [
-      'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable',
+      'Running', 'Failing', 'Compacting', 'HandingOff', 'Draining', 'Stable',
     ]
     for (const phase of phases) {
       expect(extractLaneValue(snapshot({ phase }), 'phase')).toBe(phase)

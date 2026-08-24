@@ -51,7 +51,6 @@ describe('ide persistence helpers', () => {
   it('maps keeper phases to persistence states', () => {
     expect(persistenceStateFromKeeperPhase('Running')).toBe('saved')
     expect(persistenceStateFromKeeperPhase('Compacting')).toBe('syncing')
-    expect(persistenceStateFromKeeperPhase('Overflowed')).toBe('conflict')
     expect(persistenceStateFromKeeperPhase('Offline')).toBe('offline')
     expect(persistenceStateFromKeeperPhase('Running', true)).toBe('offline')
   })

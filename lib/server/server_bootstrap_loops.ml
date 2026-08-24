@@ -41,7 +41,6 @@ let keeper_agent_status_of_phase = function
   | Keeper_state_machine.Running -> Masc_domain.Active
   | Keeper_state_machine.Paused -> Masc_domain.Listening
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
   | Keeper_state_machine.Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining

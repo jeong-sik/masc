@@ -174,18 +174,6 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('Compaction')
   })
 
-  it('reports warn for Overflowed phase', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        phase: 'overflowed',
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('warn')
-    expect(insight.headline).toContain('overflowed')
-  })
-
   it('reports warn for HandingOff phase', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
@@ -217,7 +205,7 @@ describe('deriveOperationalInsight', () => {
   it('reports raw collapsed_from source in detail, evidence, and nextStep', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'overflowed',
+        phase: 'draining',
         collapsed_from: 'paused',
       }),
       noObservations,

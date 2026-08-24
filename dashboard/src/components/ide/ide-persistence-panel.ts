@@ -65,7 +65,6 @@ export function persistenceStateFromKeeperPhase(
   if (hasFetchError) return 'offline'
   switch (normalizePhase(phase)) {
     case 'failing':
-    case 'overflowed':
     case 'crashed':
       return 'conflict'
     case 'compacting':

@@ -500,7 +500,7 @@ function RuntimeSection({
 
 function compactRequiresForce(keeper: Keeper): boolean {
   const phase = phaseTokenFromKeeper(keeper)
-  if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
+  if (phase === 'paused' || phase === 'compacting') return false
   if (phase === 'running' || phase === 'failing') return true
   const status = keeper.status.toLowerCase()
   return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'

@@ -849,7 +849,7 @@ describe('KeeperWorkspaceRail', () => {
     // Use lifecycle_phase (the canonical wire field per Keeper type —
     // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
     // routes through `lifecycle_phase`, not the deprecated `phase` alias).
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -897,7 +897,7 @@ describe('KeeperWorkspaceRail', () => {
       '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
     )
     shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     // The compaction toast names the keeper; a later refresh toast does not, so
@@ -918,7 +918,7 @@ describe('KeeperWorkspaceRail', () => {
   it('reports completion only when the tool returns measured before/after tokens', async () => {
     vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
     shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() =>

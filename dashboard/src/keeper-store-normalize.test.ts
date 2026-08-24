@@ -6,7 +6,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('offline')).toBe('Offline')
     expect(toKeeperPhase('running')).toBe('Running')
     expect(toKeeperPhase('failing')).toBe('Failing')
-    expect(toKeeperPhase('overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('compacting')).toBe('Compacting')
     expect(toKeeperPhase('handing_off')).toBe('HandingOff')
     expect(toKeeperPhase('draining')).toBe('Draining')
@@ -19,7 +18,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
   it('accepts PascalCase input for forward compatibility', () => {
     expect(toKeeperPhase('Offline')).toBe('Offline')
     expect(toKeeperPhase('Running')).toBe('Running')
-    expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
   })
 
@@ -68,13 +66,6 @@ describe('normalizeKeepers phase field', () => {
       { name: 'handoff-test', status: 'active', phase: 'handing_off' },
     ])
     expect(keeper?.phase).toBe('HandingOff')
-  })
-
-  it('normalizes overflowed to Overflowed', () => {
-    const [keeper] = normalizeKeepers([
-      { name: 'overflow-test', status: 'active', phase: 'overflowed' },
-    ])
-    expect(keeper?.phase).toBe('Overflowed')
   })
 
   it('returns null for unknown phase', () => {

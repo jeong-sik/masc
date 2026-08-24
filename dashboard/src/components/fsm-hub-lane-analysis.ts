@@ -21,7 +21,6 @@ export function isObservedStall(
     // is lowercase + snake_case. Prior PascalCase compares never matched —
     // KSM stalled detection silently disabled for every non-terminal phase.
     if (value === 'failing') return observedForSec >= 90
-    if (value === 'overflowed') return observedForSec >= 60
     if (value === 'compacting') return observedForSec >= 90
     if (value === 'handing_off' || value === 'draining') return observedForSec >= 60
     return false
@@ -65,7 +64,6 @@ function laneMeaning(
             : { tone: 'ok', meaning: 'keeper 는 살아있고 현재 진행 중인 turn 은 없음' }
         case 'failing':
           return { tone: 'error', meaning: 'parent lifecycle degraded — healthy turn 재개 전 해소 필요' }
-        case 'overflowed':
           return { tone: 'warn', meaning: 'context overflow latched — healthy turn 재개 전 해소 필요' }
         case 'compacting':
           return { tone: 'warn', meaning: 'post-turn compaction 이 lifecycle 점유 중' }

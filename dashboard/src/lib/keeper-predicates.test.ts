@@ -98,7 +98,7 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   })
   it.each<[Keeper['phase']]>([
     ['Running'], ['Paused'], ['Offline'], ['Stopped'], ['Restarting'],
-    ['Failing'], ['Overflowed'], ['Compacting'], ['HandingOff'], ['Draining'],
+    ['Failing'], ['Compacting'], ['HandingOff'], ['Draining'],
   ])('phase=%s ⇒ NOT crashed (terminal-failure-only subset)', (phase) => {
     expect(isKeeperCrashed(k({ phase }))).toBe(false)
   })
@@ -171,7 +171,7 @@ describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
     expect(isKeeperRunningExcludingRestarting(k({ status }))).toBe(true)
   })
   it.each([
-    ['Running'], ['Failing'], ['Overflowed'], ['Compacting'], ['HandingOff'], ['Draining'],
+    ['Running'], ['Failing'], ['Compacting'], ['HandingOff'], ['Draining'],
   ])('phase=%s ⇒ running', (phase) => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(true)
   })

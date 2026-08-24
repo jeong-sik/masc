@@ -404,7 +404,7 @@ let test_reconcile_predicate_stopped_resolved () =
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)
@@ -425,7 +425,7 @@ let test_reconcile_predicate_stopped_unresolved () =
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
        | KSM.Running | KSM.Paused | KSM.Crashed -> true
-       | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
+       | KSM.Failing | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
        | KSM.Stopped -> not (R.lane_has_exited e)

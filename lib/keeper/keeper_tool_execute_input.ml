@@ -41,12 +41,16 @@ let typed_stage_command_text argv =
 ;;
 
 let typed_input_command_text
-      ({ program = { head; tail }; _ } : Keeper_tool_execute_typed_input.execute_input)
+      ({ source; _ } : Keeper_tool_execute_typed_input.execute_input)
   =
-  head :: tail
-  |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
-    typed_stage_command_text stage.argv)
-  |> String.concat " | "
+  match source with
+  (* The script is already the command line this wants to render. *)
+  | Keeper_tool_execute_typed_input.Script script -> script
+  | Keeper_tool_execute_typed_input.Staged { program = { head; tail }; _ } ->
+    head :: tail
+    |> List.map (fun (stage : Keeper_tool_execute_typed_input.exec_stage) ->
+      typed_stage_command_text stage.argv)
+    |> String.concat " | "
 ;;
 
 let typed_input_has_env

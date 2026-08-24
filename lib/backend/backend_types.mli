@@ -39,6 +39,10 @@ val pubsub_max_messages : int
 (** Generate a node identifier of the form
     ["<hostname>-<pid>-<rand4hex>"], suitable for
     single-instance disambiguation in logs. *)
+val node_id_suffix_bytes : int
+(** Entropy bytes in the suffix of {!generate_node_id}. Exposed so a test
+    states the width against this value instead of copying the number. *)
+
 val generate_node_id : unit -> string
 
 (** Default config rooted at [".masc"], cluster ["default"], and

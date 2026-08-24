@@ -763,7 +763,7 @@ let plan_claim ~expected ~client_kind ~runtime_id =
        rejection is not auto-superseded on the same runtime. The provider
        already proved it will not admit this bootstrap episode, so a fresh
        claim would re-send the identical over-capacity request every cycle
-       (observed live: sangsu/rondo replaying ~1.27M-token requests per
+       (observed live: two keepers replaying ~1.27M-token requests per
        heartbeat on 2026-08-23). A different client_kind/runtime_id still
        starts fresh above — that branch is operator-driven, not a heartbeat
        replay. Re-entry needs [resolve_recovery] (restart_fresh after the

@@ -11,7 +11,6 @@ module Ansi = struct
   let bold = "\027[1m"
   let dim = "\027[2m"
 
-  let _black = "\027[30m"
   let red = "\027[31m"
   let green = "\027[32m"
   let yellow = "\027[33m"
@@ -19,11 +18,14 @@ module Ansi = struct
   let magenta = "\027[35m"
   let cyan = "\027[36m"
   let white = "\027[37m"
-  let gray = "\027[90m"
 
-  let _bg_black = "\027[40m"
-  let _bg_blue = "\027[44m"
-  let bg_white = "\027[47m"
+  (* SGR 39 restores the terminal's own text colour. [white] is a colour like
+     any other -- on a light background it is the background -- so a fallback
+     that means "nothing special about this value" has to say default, not
+     white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
+     an emphasised run without flattening it. *)
+  let default_fg = "\027[39m"
+  let gray = "\027[90m"
 
   (* Cursor movement *)
   let move_to row col = Printf.sprintf "\027[%d;%dH" row col
@@ -38,12 +40,20 @@ module Ansi = struct
   let box_tr = "\xe2\x94\x90" (* top-right corner *)
   let box_bl = "\xe2\x94\x94" (* bottom-left corner *)
   let box_br = "\xe2\x94\x98" (* bottom-right corner *)
-  let _box_t = "\xe2\x94\xac"  (* top tee *)
-  let _box_b = "\xe2\x94\xb4"  (* bottom tee *)
   let box_l = "\xe2\x94\x9c"  (* left tee *)
   let box_r = "\xe2\x94\xa4"  (* right tee *)
-  let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
+
+(** A screen title.
+
+    Emphasis belongs to the words that name the screen, not to the whole header
+    line. Headers interpolate coloured badges, and the reset that closes a badge
+    also closes any style wrapped around the line, so styling the line bolded a
+    different amount of text on every screen -- as far as its first badge, which
+    sits in a different place each time. Eight screens wrapped the line and eight
+    drew it plain, and the four styles that came out of that were not a
+    decision. *)
+let screen_title text = Ansi.bold ^ text ^ Ansi.reset
 
 (** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
     an idle TUI does not spawn [tput] twice per frame. *)
@@ -95,21 +105,6 @@ module Terminal_text = struct
   let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
 end
 
-let is_keeper name =
-  String.length name >= 7 && String.sub name 0 7 = "keeper-"
-
-(** Agent icon — deterministic by name hash, vendor-agnostic *)
-let agent_icon name =
-  let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
-  if is_keeper name then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
-  else icons.(Hashtbl.hash name mod Array.length icons)
-
-(** Agent color — deterministic by name hash, vendor-agnostic *)
-let agent_color name =
-  let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
-  if is_keeper name then Ansi.white
-  else colors.(Hashtbl.hash name mod Array.length colors)
-
 (** Status color *)
 let status_color status =
   match status with
@@ -117,7 +112,7 @@ let status_color status =
   | "idle" | "online" -> Ansi.green
   | "offline" -> Ansi.gray
   | "error" -> Ansi.red
-  | _ -> Ansi.white
+  | _ -> Ansi.default_fg
 
 (** Task status icon *)
 let task_status_icon status =
@@ -135,15 +130,6 @@ let priority_indicator p =
   else if p <= 2 then Ansi.red ^ "!!" ^ Ansi.reset
   else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
   else ""
-
-(** Soul profile color *)
-let soul_color profile =
-  match profile with
-  | "relationship" -> Ansi.magenta
-  | "delivery" -> Ansi.green
-  | "balanced" -> Ansi.cyan
-  | "creative" -> Ansi.yellow
-  | _ -> Ansi.white
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =
@@ -163,16 +149,6 @@ let ctx_bar ratio width =
     (String.make filled '#')
     (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
-
-(** Format channel name with color *)
-let channel_color ch =
-  match ch with
-  | "heartbeat" -> Ansi.dim ^ "hb" ^ Ansi.reset
-  | "turn" -> Ansi.cyan ^ "turn" ^ Ansi.reset
-  | "compaction" -> Ansi.yellow ^ "comp" ^ Ansi.reset
-  | "handoff" -> Ansi.magenta ^ "hand" ^ Ansi.reset
-  | "initiative" -> Ansi.blue ^ "init" ^ Ansi.reset
-  | s -> s
 
 (** Shared helper: draw box top border *)
 let box_top buf cols =

@@ -772,6 +772,130 @@ newly_wired_targets=(
   @test/runtest-test_safe_ops
 )
 
+newly_wired_followup_targets=(
+  @test/runtest-test_sandbox_inspect_trim_10488
+  @test/runtest-test_schedule_domain
+  @test/runtest-test_schedule_service
+  @test/runtest-test_server_activity_http
+  @test/runtest-test_server_auth_warn_log_bound
+  @test/runtest-test_server_base_path_diagnostics
+  @test/runtest-test_server_dashboard_http_keeper_api_trace
+  @test/runtest-test_server_dashboard_http_keeper_memory_health
+  @test/runtest-test_server_dashboard_http_schedule_actions
+  @test/runtest-test_server_discord_trigger_policy
+  @test/runtest-test_server_hibernation
+  @test/runtest-test_server_ide_http
+  @test/runtest-test_server_ide_lsp_proxy
+  @test/runtest-test_server_request_authority
+  @test/runtest-test_server_runtime_bootstrap
+  @test/runtest-test_server_slack_gateway_attention
+  @test/runtest-test_server_slack_trigger_policy
+  @test/runtest-test_server_startup_takeover
+  @test/runtest-test_server_state_product
+  @test/runtest-test_server_timing
+  @test/runtest-test_server_utils_bounded_cache
+  @test/runtest-test_session
+  @test/runtest-test_session_coverage
+  @test/runtest-test_session_lifecycle_event
+  @test/runtest-test_set_util
+  @test/runtest-test_shutdown_benign_termination
+  @test/runtest-test_shutdown_flag
+  @test/runtest-test_slack_gateway_state
+  @test/runtest-test_slack_rest_client
+  @test/runtest-test_sse
+  @test/runtest-test_sse_external_sub
+  @test/runtest-test_sse_pumps
+  @test/runtest-test_sse_qw
+  @test/runtest-test_sse_registration_auth
+  @test/runtest-test_start_masc_mcp_script
+  @test/runtest-test_start_masc_script
+  @test/runtest-test_stop_reason_label
+  @test/runtest-test_streamable_http_upgrade
+  @test/runtest-test_string_util
+  @test/runtest-test_subscriptions
+  @test/runtest-test_surface_ref
+  @test/runtest-test_system_error_class
+  @test/runtest-test_system_log_atomicity
+  @test/runtest-test_tag_dispatch_typed
+  @test/runtest-test_task_status_label_10421
+  @test/runtest-test_task_transition_broadcast
+  @test/runtest-test_telemetry_eio_coverage
+  @test/runtest-test_telemetry_error_occurred_wire_10358
+  @test/runtest-test_telemetry_observe
+  @test/runtest-test_telemetry_unified
+  @test/runtest-test_telemetry_unified_source
+  @test/runtest-test_tempo_coverage
+  @test/runtest-test_thinking_control_format_unknown_error
+  @test/runtest-test_time_codec
+  @test/runtest-test_timeout_origin
+  @test/runtest-test_tool_agent_coverage
+  @test/runtest-test_tool_agent_timeline_build
+  @test/runtest-test_tool_agent_timeline_name_match
+  @test/runtest-test_tool_args_envelope
+  @test/runtest-test_tool_assignment_telemetry
+  @test/runtest-test_tool_bridge_externalize
+  @test/runtest-test_tool_call_replay_harness
+  @test/runtest-test_tool_capability_typed
+  @test/runtest-test_tool_control_coverage
+  @test/runtest-test_tool_descriptors_gen
+  @test/runtest-test_tool_dispatch
+  @test/runtest-test_tool_dispatch_emit
+  @test/runtest-test_tool_diversity
+  @test/runtest-test_tool_error
+  @test/runtest-test_tool_help_metadata_rfc_0195
+  @test/runtest-test_tool_help_registry_shard_coverage_10101
+  @test/runtest-test_tool_hooks
+  @test/runtest-test_tool_library_coverage
+  @test/runtest-test_tool_local_runtime_probe
+  @test/runtest-test_tool_metrics
+  @test/runtest-test_tool_metrics_persist
+  @test/runtest-test_tool_output_washing_e2e
+  @test/runtest-test_tool_plan_coverage
+  @test/runtest-test_tool_quality_classify
+  @test/runtest-test_tool_registry
+  @test/runtest-test_tool_resolution_runtime_projection
+  @test/runtest-test_tool_result
+  @test/runtest-test_tool_task_args
+  @test/runtest-test_tool_token
+  @test/runtest-test_tool_unified
+  @test/runtest-test_trajectory
+  @test/runtest-test_trajectory_atomicity
+  @test/runtest-test_transport_bridge_seal
+  @test/runtest-test_transport_coverage
+  @test/runtest-test_transport_read_model
+  @test/runtest-test_turn_id_propagation
+  @test/runtest-test_turn_record
+  @test/runtest-test_types_coverage
+  @test/runtest-test_types_utils_coverage
+  @test/runtest-test_validation
+  @test/runtest-test_validation_coverage
+  @test/runtest-test_verify_handoff_tool
+  @test/runtest-test_voice_bridge_error
+  @test/runtest-test_voice_config
+  @test/runtest-test_web_dashboard_coverage
+  @test/runtest-test_with_cleanups_on_release
+  @test/runtest-test_with_process_coverage
+  @test/runtest-test_work_as_heartbeat
+  @test/runtest-test_workspace_base_path_cache
+  @test/runtest-test_workspace_bind_fail_closed
+  @test/runtest-test_workspace_bootstrap
+  @test/runtest-test_workspace_coverage
+  @test/runtest-test_workspace_file_confidentiality
+  @test/runtest-test_workspace_goal_index
+  @test/runtest-test_workspace_handoff_boundary
+  @test/runtest-test_workspace_messages_raw
+  @test/runtest-test_workspace_routes_keeper
+  @test/runtest-test_workspace_state_recovery
+  @test/runtest-test_workspace_task_delete
+  @test/runtest-test_workspace_task_lifecycle
+  @test/runtest-test_workspace_task_verification_phase_e
+  @test/runtest-test_workspace_telemetry_drop_non_eio
+  @test/runtest-test_workspace_tree_exclusions
+  @test/runtest-test_workspace_utils_coverage
+  @test/runtest-test_worktree_detection
+  @test/runtest-test_yojson_type_error_board
+)
+
 sse_targets=(
   @test/runtest-test_tui_board_detail
   @test/runtest-test_tui_board_selection
@@ -828,6 +952,7 @@ run_group normal 1200 "${normal_targets[@]}" || overall_status=1
 # 350 suites ran in 103s on the first CI pass (08:49:02 to 08:50:45, run
 # 32628548472); 300s is that measurement with headroom, not a guess.
 run_group newly-wired 300 "${newly_wired_targets[@]}" || overall_status=1
+run_group newly-wired-followup 300 "${newly_wired_followup_targets[@]}" || overall_status=1
 
 # Own group, not part of [normal_targets]: the matrix's tools/call sweep is an
 # Alcotest `Slow case, so it must run without ALCOTEST_QUICK_TESTS, and it

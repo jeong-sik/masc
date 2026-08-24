@@ -214,7 +214,7 @@ let provider_timeout_suffix = function
 let provider_error_terminal_reason_code = function
   | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
   | Llm_provider.Error.InvalidConfig { field; _ } ->
-    Printf.sprintf "provider_error_invalid_config:%s" field
+    Keeper_terminal_reason.wire_provider_error_invalid_config_prefix ^ field
   | Llm_provider.Error.ParseError _ -> "provider_error_parse"
   | Llm_provider.Error.ProviderWireError { format; kind; _ } ->
     Printf.sprintf
@@ -234,9 +234,9 @@ let provider_error_terminal_reason_code = function
     Printf.sprintf
       "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
-  | Llm_provider.Error.AuthError _ -> "provider_error_auth"
+  | Llm_provider.Error.AuthError _ -> Keeper_terminal_reason.wire_provider_error_auth
   | Llm_provider.Error.AuthorizationError _ ->
-    "provider_error_authorization"
+    Keeper_terminal_reason.wire_provider_error_authorization
   | Llm_provider.Error.ServerError { code; _ } ->
     Printf.sprintf "provider_error_server:%d" code
   | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->
@@ -245,7 +245,8 @@ let provider_error_terminal_reason_code = function
       (network_error_kind_to_wire kind)
       (provider_timeout_suffix timeout_phase)
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
-    "provider_error_timeout" ^ provider_timeout_suffix timeout_phase
+    Keeper_terminal_reason.wire_provider_error_timeout
+    ^ provider_timeout_suffix timeout_phase
   | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
   | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
   | Llm_provider.Error.ProviderTerminal { reason; _ } ->

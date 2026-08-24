@@ -214,10 +214,16 @@ let parse_provider_csv raw =
   |> Json_util.dedupe_keep_order
   |> List.filter_map provider_of_string
 
-let env_present name =
-  match Env_config_core.raw_value_opt name |> Option.map String.trim with
-  | Some value when not (String.equal value "") -> true
-  | _ -> false
+(* One source for both questions a provider asks about its credential: is it
+   there, and what is it. The presence check already read
+   [Env_config_core.raw_value_opt], which falls back to the boot-time config
+   overrides, while the fetchers read [Sys.getenv_opt], which does not. A key
+   declared in runtime.toml therefore made the provider selectable and then
+   unusable — the call found nothing (#21972 P2-3). *)
+let env_value name =
+  Env_config_core.raw_value_opt name |> Fun.flip Option.bind String_util.trim_nonempty
+
+let env_present name = Option.is_some (env_value name)
 
 let provider_has_credentials = function
   | Searxng -> env_present "MASC_SEARXNG_URL"
@@ -428,7 +434,7 @@ let fetch_searxng ~timeout_sec ~query =
       | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
 let fetch_brave ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
+  match env_value "BRAVE_SEARCH_API_KEY" with
   | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
   | Some api_key ->
       let search_url =
@@ -459,7 +465,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_tavily ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "TAVILY_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
+  match env_value "TAVILY_API_KEY" with
   | None -> Error (Config "missing TAVILY_API_KEY")
   | Some api_key ->
       let search_url = "https://api.tavily.com/search" in
@@ -496,7 +502,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_exa ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "EXA_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
+  match env_value "EXA_API_KEY" with
   | None -> Error (Config "missing EXA_API_KEY")
   | Some api_key ->
       let search_url = "https://api.exa.ai/search" in
@@ -534,9 +540,9 @@ let fetch_exa ~timeout_sec ~query ~limit =
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   let api_key =
-    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
+    match env_value "BING_SEARCH_API_KEY" with
     | Some key -> Some key
-    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
+    | None -> env_value "AZURE_BING_SEARCH_API_KEY"
   in
   match api_key with
   | None -> Error (Config "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY")
@@ -579,8 +585,7 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
    stays Ok so the chain records it as "no results". *)
 let fetch_brave_llm_context ~timeout_sec ~query ~limit =
   match
-    Sys.getenv_opt "BRAVE_SEARCH_API_KEY"
-    |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
+    env_value "BRAVE_SEARCH_API_KEY"
   with
   | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
   | Some api_key ->
@@ -617,8 +622,7 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
    answers {results: [{title, url, content}]}. *)
 let fetch_ollama ~timeout_sec ~query ~limit =
   match
-    Sys.getenv_opt "OLLAMA_API_KEY"
-    |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
+    env_value "OLLAMA_API_KEY"
   with
   | None -> Error (Config "missing OLLAMA_API_KEY")
   | Some api_key ->

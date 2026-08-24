@@ -29,9 +29,7 @@ let sanitize_header_value value =
     | c -> c)
   |> String.trim
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let trim_nonempty = String_util.trim_nonempty
 
 let auth_headers () =
   let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in

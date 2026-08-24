@@ -228,8 +228,10 @@ let test_extra_mentions_merge () =
 
 let test_pre_p4_row_reads_empty () =
   with_base "lane-mentions-prep4" (fun base ->
-      (* A pre-P4 row: no [mentions] field even though the content has
-         an @-token.  Reads as [], not an error. *)
+      (* A row with no [mentions] field even though the content has an
+         @-token.  Reads as [], not an error.  The row still carries an
+         [id]: the reader has required one since #26311, so a row without
+         it is dropped before the mentions decoder ever sees it. *)
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let dir =
@@ -240,7 +242,7 @@ let test_pre_p4_row_reads_empty () =
       let path = Filename.concat dir "alice.jsonl" in
       let oc = open_out_gen [ Open_append ] 0o644 path in
       output_string oc
-        "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
+        "{\"id\":\"msg-lane-mentions-no-field\",\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
       close_out oc;
       match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ _seed; legacy ] ->

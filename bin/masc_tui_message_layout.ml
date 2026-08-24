@@ -253,9 +253,19 @@ let chat_input_prompt_prefix = "  > "
 
 let chat_input_prompt_cells = display_width chat_input_prompt_prefix
 
+(* The pane draws its rows inside the box, which spends its border and the
+   space after it before any content starts. *)
+let chat_input_box_cells = 2
+
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
-  min last_column (chat_input_prompt_cells + display_width input)
+  (* Three things sit left of the caret: the box, the prompt, and what was
+     typed -- and the caret goes one cell past the last of them. Deriving this
+     from the prompt alone put it on the prompt's own ">" instead of after the
+     text, because the constant it replaced was all three added up rather than
+     the prompt's width. *)
+  min last_column
+    (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
 
 (* Metadata rows read down the pane as a column: [timestamp] speaker request.
    Speakers vary in width, so every role label is padded to one fixed column

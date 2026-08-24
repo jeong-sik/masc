@@ -198,7 +198,6 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
            Keeper_registry.Packed Turn_finalizing
        | Keeper_state_machine.Running
        | Keeper_state_machine.Failing
-       | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
@@ -252,7 +251,6 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
          })
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
   | Keeper_state_machine.Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining

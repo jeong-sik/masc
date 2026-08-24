@@ -266,8 +266,6 @@ function keeperLifecycleStatus(
       return 'running'
     case 'Failing':
       return 'failing'
-    case 'Overflowed':
-      return 'overflowed'
     case 'Compacting':
       return 'compacting'
     case 'HandingOff':

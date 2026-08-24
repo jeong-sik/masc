@@ -3,9 +3,6 @@
     This module defines the keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
 
-    Phase count history:
-      - 11 phases at RFC-0002 Phase 1 introduction (#5229, 2026-04-05)
-      - +1 → 12 when [Overflowed] was added (MASC-1, 2026-04)
     Single Source of Truth (SSOT) is the [type phase] declaration below;
     spec doc counts are
     cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
@@ -21,17 +18,13 @@
 (** {1 Phase (11-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
-    Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
+    Buffer states ([Failing], [Compacting], [HandingOff],
     [Draining], [Restarting]) are observable intermediaries between
     stable states. *)
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
-  | Overflowed    (** Retired (#26546): no condition derives this phase since
-                      the automatic overflow-compaction trigger was removed.
-                      The variant survives so historical durable lifecycle
-                      records ("overflowed") still decode. *)
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
@@ -231,10 +224,9 @@ val transition_error_to_string : transition_error -> string
     7.  Paused (operator_paused)
     8.  HandingOff (handoff_active)
     9.  Compacting (compaction_active)
-    10. (retired #26546 — Overflowed is no longer derived)
-    11. Failing (latest health failure or structural failure observation)
-    12. Running (fiber_alive)
-    13. Offline (default fallback for inconsistent zero-state)
+    10. Failing (latest health failure or structural failure observation)
+    11. Running (fiber_alive)
+    12. Offline (default fallback for inconsistent zero-state)
 
     The order above is the ground truth enforced by
     [keeper_state_machine.ml] and TLC. *)

@@ -19,8 +19,8 @@ describe('isObservedStall', () => {
     expect(isObservedStall('phase', 'failing', 89)).toBe(false)
   })
 
-  it('detects overflowed stall at 60s', () => {
-    expect(isObservedStall('phase', 'overflowed', 60)).toBe(true)
+  it('detects draining stall at 60s', () => {
+    expect(isObservedStall('phase', 'draining', 60)).toBe(true)
   })
 
   it('detects compacting stall at 90s', () => {

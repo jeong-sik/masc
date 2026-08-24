@@ -419,7 +419,7 @@ interface DeriveInputsLite {
 
 describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
   it.each<KeeperPhase>([
-    'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+    'Offline', 'Running', 'Failing', 'Compacting',
     'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
     'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
@@ -450,7 +450,7 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
   it.each<KeeperPhase>([
-    'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
+    'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })

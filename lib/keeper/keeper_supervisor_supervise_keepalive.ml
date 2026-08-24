@@ -331,7 +331,6 @@ let supervise_keepalive
             ~rollback:Keeper_keepalive_launch_transaction.Retain_registered
         | Keeper_state_machine.Running
         | Keeper_state_machine.Failing
-        | Keeper_state_machine.Overflowed
         | Keeper_state_machine.Compacting
         | Keeper_state_machine.HandingOff
         | Keeper_state_machine.Draining

@@ -452,7 +452,6 @@ type keeper_lane_phase =
   | Lane_phase_offline
   | Lane_phase_running
   | Lane_phase_failing
-  | Lane_phase_overflowed
   | Lane_phase_compacting
   | Lane_phase_handing_off
   | Lane_phase_draining

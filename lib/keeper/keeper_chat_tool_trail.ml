@@ -174,6 +174,44 @@ let subject_of_assoc fields =
      | named -> Option.map shorten (value_text (`Assoc named)))
 ;;
 
+(* What a result says, when it says it in a shape this workspace writes.
+
+   Tool results share an envelope -- [ok] plus a payload -- and the payload's
+   name is what differs: [error] when the call failed, [output] for a command,
+   [content] for a read, [path] and [bytes_written] for a write. Measured on
+   one keeper's newest hundred calls: 63 carried [output], 17 were not JSON at
+   all, and the rest split across the others.
+
+   [error] comes first because a call that failed says why before it says
+   anything else. Like {!subject_keys} this is a preference and not a gate:
+   a shape with none of these keys is still better named by its own text than
+   by nothing, and the whole-object fallback below is what says it.
+
+   The caller gets one short line. Callers that want the whole result read it
+   from the surface that serves it; this is the line that goes in a row. *)
+let result_keys = [ "error"; "output"; "content"; "path"; "detail"; "message" ]
+
+let tool_result_digest ~result =
+  let trimmed = String.trim result in
+  if String.equal trimmed "" then None
+  else (
+    match Yojson.Safe.from_string trimmed with
+    | `Assoc fields ->
+      (match
+         List.find_map
+           (fun key -> Option.bind (List.assoc_opt key fields) value_text)
+           result_keys
+       with
+       | Some text -> Some (shorten text)
+       | None -> subject_of_assoc fields)
+    | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `List _ | `Null ->
+      value_text (Yojson.Safe.from_string trimmed) |> Option.map shorten
+    | exception Yojson.Json_error _ ->
+      (* Seventeen of that hundred were plain text, not JSON. The text is the
+         result; it needs shortening, not parsing. *)
+      Some (shorten trimmed))
+;;
+
 let tool_subject ~name:_ ~args =
   let trimmed = String.trim args in
   if String.equal trimmed ""

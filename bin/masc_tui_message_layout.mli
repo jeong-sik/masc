@@ -51,6 +51,16 @@ val input_viewport : max_cells:int -> string -> string
 (** Keep the complete input when it fits. Overflow uses a leading [~] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
+val scroll_hint : scrolled_back:int -> older_exist:bool -> string
+(** The footer's scrolling hint: which keys move the pane, how far back it
+    sits, and whether anything older is left to fetch.
+
+    The count used to be a row of its own above the composer. That row was
+    drawn from the clamped position and counted from the unclamped one, so the
+    pane came out a row short whenever they disagreed -- an [up] press on a
+    conversation that already fits does it. The count says the same thing here
+    without a row whose presence the pane's own height depends on. *)
+
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
     immediately before the right border. Measured from the prefix the pane
@@ -147,6 +157,16 @@ val composer_lines : max_rows:int -> string -> string list
     before the width is applied, and a count that moved with the width would
     disagree with the drawing. A line wider than the pane is fitted by
     {!input_viewport}, the way the single-line composer already was. *)
+
+val last_page_start : height:int -> int list -> int
+(** The smallest index from which items costing the given rows each still fit
+    in [height] when drawn from there to the end.
+
+    A scroll bound for a list whose items are not one row apiece. Bounding
+    such a list by [count - height] leaves its tail unreachable: when every
+    item costs two rows, half of them sit past the end of that bound. An item
+    taller than the whole height is still reachable -- it is drawn as far as
+    the height allows rather than skipped. *)
 
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as [12s] or [3m07s].

@@ -53,7 +53,7 @@ let test_every_comment_in_a_thread_names_its_id () =
   let out =
     rendered
       [ comment ~id:root_id ~author:"analyst" ~content:"root" ~parent_id:None
-      ; comment ~id:reply_id ~author:"rondo" ~content:"reply" ~parent_id:(Some root_id)
+      ; comment ~id:reply_id ~author:"largo" ~content:"reply" ~parent_id:(Some root_id)
       ]
   in
   Alcotest.(check bool) "the root id is readable" true (contains ~needle:root_id out);

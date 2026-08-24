@@ -14,9 +14,9 @@ let push_exn queue ~keeper_name text =
 ;;
 
 let test_lines_wait_in_the_order_they_were_written () =
-  let q, first = push_exn Queue.empty ~keeper_name:"kidsnote" "one" in
-  let q, second = push_exn q ~keeper_name:"kidsnote" "two" in
-  let q, third = push_exn q ~keeper_name:"kidsnote" "three" in
+  let q, first = push_exn Queue.empty ~keeper_name:"bluebird" "one" in
+  let q, second = push_exn q ~keeper_name:"bluebird" "two" in
+  let q, third = push_exn q ~keeper_name:"bluebird" "three" in
   check (list int) "each push says how many are waiting" [ 1; 2; 3 ]
     [ first; second; third ];
   check (list string) "and they wait in submission order"
@@ -27,18 +27,18 @@ let test_lines_wait_in_the_order_they_were_written () =
 (* The operator can switch keepers while a turn runs. A queued line must reach
    the keeper it was written to, not whoever is selected when it finally goes. *)
 let test_a_line_keeps_the_keeper_it_was_written_to () =
-  let q, _ = push_exn Queue.empty ~keeper_name:"kidsnote" "for kidsnote" in
-  let q, _ = push_exn q ~keeper_name:"taskmaster" "for taskmaster" in
+  let q, _ = push_exn Queue.empty ~keeper_name:"bluebird" "for bluebird" in
+  let q, _ = push_exn q ~keeper_name:"bandleader" "for bandleader" in
   match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a waiting line"
   | Some ((keeper_name, text), rest) ->
-      check string "the oldest goes first" "for kidsnote" text;
-      check string "to its own keeper" "kidsnote" keeper_name;
+      check string "the oldest goes first" "for bluebird" text;
+      check string "to its own keeper" "bluebird" keeper_name;
       (match Queue.take_first_sendable rest ~sendable:(fun _ -> true) with
        | None -> fail "expected the second line to still be waiting"
        | Some ((keeper_name, text), rest) ->
-           check string "and the next keeps its own" "taskmaster" keeper_name;
-           check string "with its own text" "for taskmaster" text;
+           check string "and the next keeps its own" "bandleader" keeper_name;
+           check string "with its own text" "for bandleader" text;
            check bool "nothing left after both" true (Queue.is_empty rest))
 ;;
 

@@ -389,7 +389,7 @@ let test_repeated_exact_tool_call_boundary () =
        ; tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
        ]);
-  (* The shape the old counter missed. sangsu ran the same git status 48 times
+  (* The shape the old counter missed. A keeper ran the same git status 48 times
      in one dispatch, always with another call in between, so a counter that
      stopped at the first different call never left 1 and the dispatch ran 279
      calls over 31 minutes with no answer. The list is newest-first. *)

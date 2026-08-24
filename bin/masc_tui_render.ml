@@ -4288,7 +4288,7 @@ let render_runtime_pick (state : state) =
     with
     | Some a ->
         Printf.sprintf "%s (%s)"
-          (Terminal_text.single_line_or ~default:"-" a.ra_runtime_id)
+          (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
           (Terminal_text.single_line a.ra_source)
     | None -> "-"
   in

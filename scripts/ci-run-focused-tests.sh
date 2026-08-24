@@ -237,6 +237,8 @@ normal_targets=(
   @test/runtest-test_keeper_tool_execute_typed_input
   @test/runtest-test_tool_schema_agent_core_boundary
   @test/runtest-test_tool_call_quality_benchmark
+  @test/runtest-test_filesystem_tool_toml_parity
+  @test/runtest-test_task_tool_toml_parity
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
   @test/runtest-test_mcp_server_eio
@@ -402,6 +404,7 @@ agent_core_targets=(
 
 operator_targets=(
   @test/runtest-test_tui_operator_projection
+  @test/runtest-test_tui_tool_tree
   @test/runtest-test_operator_control_snapshot_state
   @test/runtest-test_operator_control_snapshot
   @test/runtest-test_operator_control_snapshot_cache

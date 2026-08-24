@@ -82,6 +82,57 @@ let test_user_tool_case_variant_does_not_dispatch_neighbor () =
     (tool_description (Agent_tools.find_in_index index "FetchA"))
 ;;
 
+(* GLM-family providers fuse a per-call sequence number onto the tool name
+   (live shape 2026-08-24, keeper/polisher turns 3042-3044). The suffix
+   recovery accepts one registered stem plus a [0-9._] tail and nothing
+   else; the boundary cases below pin each refusal. *)
+let test_strip_suffix_resolves_glm_call_number_shape () =
+  let available = [ "Execute"; "Grep"; "Read" ] in
+  check
+    (option string)
+    "dot-separated call number resolves to the registered stem"
+    (Some "Execute")
+    (Agent_tools.strip_registered_suffix ~available "Execute1139645993.1");
+  check
+    (option string)
+    "underscore timestamp resolves to the registered stem"
+    (Some "keeper_broadcast")
+    (Agent_tools.strip_registered_suffix
+       ~available:[ "keeper_broadcast" ]
+       "keeper_broadcast_1770374959066")
+;;
+
+let test_strip_suffix_refuses_non_numeric_tails () =
+  let available = [ "Execute"; "Grep"; "Read" ] in
+  check
+    (option string)
+    "alphabetic tail stays None"
+    None
+    (Agent_tools.strip_registered_suffix ~available "Execute_foo");
+  check
+    (option string)
+    "unknown stem stays None"
+    None
+    (Agent_tools.strip_registered_suffix ~available "Nope12345.1");
+  check
+    (option string)
+    "exact registered name is not the strip's job"
+    None
+    (Agent_tools.strip_registered_suffix ~available "Execute")
+;;
+
+let test_strip_suffix_refuses_ambiguous_prefix () =
+  (* "alpha_17" extends alpha by "_17" and alpha_1 by "7": two live matches,
+     so recovery must refuse rather than pick. *)
+  check
+    (option string)
+    "two matching stems stay None"
+    None
+    (Agent_tools.strip_registered_suffix
+       ~available:[ "alpha"; "alpha_1" ]
+       "alpha_17")
+;;
+
 let () =
   run
     "Agent_tools_index"
@@ -106,6 +157,20 @@ let () =
             "user tool case variant does not dispatch lowercase neighbor"
             `Quick
             test_user_tool_case_variant_does_not_dispatch_neighbor
+        ] )
+    ; ( "suffix recovery"
+      , [ test_case
+            "glm call-number shape resolves to the registered stem"
+            `Quick
+            test_strip_suffix_resolves_glm_call_number_shape
+        ; test_case
+            "non-numeric tails and unknown stems stay None"
+            `Quick
+            test_strip_suffix_refuses_non_numeric_tails
+        ; test_case
+            "ambiguous prefix stays None"
+            `Quick
+            test_strip_suffix_refuses_ambiguous_prefix
         ] )
     ]
 ;;

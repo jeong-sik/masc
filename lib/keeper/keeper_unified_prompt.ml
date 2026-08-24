@@ -226,11 +226,25 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
   (match task.Masc_domain.skills with
    | [] -> ()
    | skills ->
-       Buffer.add_string buf
-         (Printf.sprintf
-            "- Skills named by this task: %s. Each one is at \
-             .masc/skills/<name>/SKILL.md — read it before you use it.\n"
-            (String.concat ", " skills)));
+     let names = String.concat ", " skills in
+     (* The sentence lives with the other prompt text under [config/prompts];
+        this module keeps the names. The fallback carries no wording because
+        losing the sentence is survivable and losing the names is not — the
+        same split [observation_prose] makes below. *)
+     Buffer.add_string
+       buf
+       (match
+          Prompt_registry.render_prompt_template
+            Prompt_names.keeper_task_skills
+            [ "skills", names ]
+        with
+        | Ok text -> String.trim text ^ "\n"
+        | Error detail ->
+          Log.Misc.error
+            "keeper task skills prompt did not render, falling back to the \
+             names alone: %s"
+            detail;
+          Printf.sprintf "- %s\n" names));
   Buffer.add_string buf
     "\n";
   Buffer.contents buf

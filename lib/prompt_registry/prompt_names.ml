@@ -29,6 +29,7 @@ let keeper_observation_recovered_current_task =
   "keeper.observation.recovered_current_task"
 ;;
 
+let keeper_task_skills = "keeper.task.skills"
 let keeper_observation_current_task_absent = "keeper.observation.current_task_absent"
 
 let keeper_observation_current_task_absent_in_recovery =

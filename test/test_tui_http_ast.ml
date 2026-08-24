@@ -892,13 +892,29 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~arguments:
          [ "cleanup", "cleanup"
          ; "terminate", "terminate"
+           (* SIGINT stopped meaning "the session is over". It is the only one
+              of these a person sends by hand mid-sentence, so it asks the loop
+              to interrupt the turn instead, and the handler that does it is
+              handed in here with the rest. The guard lists every argument by
+              name, so a new one has to be named or the whole call stops
+              matching -- which is what it is for: this is the boundary where
+              a signal becomes a decision, and an argument that arrived
+              unlisted would be a decision nobody pinned. *)
          ; "request_interrupt", "request_interrupt"
          ; "request_full_repaint", "request_full_repaint"
          ; "suspend", "suspend"
          ; "new_term", "new_term"
          ]);
-  check int "SIGINT asks the loop rather than ending the process" 1
+  (* SIGINT no longer ends the session. It is the one signal a person sends by
+     hand mid-sentence, so it asks the loop to interrupt the turn and the
+     surface stays up; the two below still mean the session is over. Pinned as
+     the handler it now has rather than dropped, because "Ctrl-C does not kill
+     this" is the property, and an unpinned SIGINT could quietly go back to
+     terminating. *)
+  check int "SIGINT interrupts the turn rather than the session" 1
     (signal_handler "Sys.sigint" "request_interrupt");
+  check int "SIGINT does not terminate" 0
+    (signal_handler "Sys.sigint" "terminate");
   check int "SIGTERM terminates through cleanup" 1
     (signal_handler "Sys.sigterm" "terminate");
   check int "SIGHUP terminates through cleanup" 1

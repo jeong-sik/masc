@@ -50,6 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?(skill_catalog = Keeper_skill_catalog.empty)
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -367,6 +368,8 @@ let make_tool_bundle_for_descriptors
   let composition_tools =
     Keeper_tool_composition_surface.make_tools
         ?catalog:composition_catalog
+        ~skill_composition_entries:
+          (Keeper_skill_catalog.composition_entries skill_catalog)
         ~config
         ~meta
         ~publication_recovery
@@ -413,6 +416,7 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?skill_catalog
       ?turn_ctx_cell
       ()
   =
@@ -426,6 +430,7 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?composition_catalog
+    ?skill_catalog
     ?turn_ctx_cell
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
@@ -439,6 +444,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?composition_catalog
+      ?skill_catalog
       ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
@@ -450,6 +456,7 @@ let make_tools
      ~ctx_snapshot
      ?clock
      ?composition_catalog
+     ?skill_catalog
      ?turn_ctx_cell
      ())
     .tools

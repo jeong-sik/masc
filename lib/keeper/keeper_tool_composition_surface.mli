@@ -22,6 +22,11 @@ val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 val make_tools
   :  ?catalog:Keeper_tool_composition_catalog.t
+  -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
+       (** Composition entries declared by skills
+           ({!Keeper_skill_catalog.composition_entries}). Same validated type
+           as catalog entries; materialized by the same closure. The caller
+           that loaded both catalogs refuses cross-source name collisions. *)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

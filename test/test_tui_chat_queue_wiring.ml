@@ -58,7 +58,10 @@ let test_take_newest_returns_last_and_keeps_order () =
       check string "newest text is the last pushed" "third" text;
       check int "drain order of the rest is untouched" 2
         (Masc_tui_keeper_chat_queue.length rest);
-      (match Masc_tui_keeper_chat_queue.pop rest with
+      (match
+         Masc_tui_keeper_chat_queue.take_first_sendable rest
+           ~sendable:(fun _ -> true)
+       with
        | Some (("a", "first"), remaining) ->
            check bool "oldest still drains first" true
              (Masc_tui_keeper_chat_queue.waiting remaining

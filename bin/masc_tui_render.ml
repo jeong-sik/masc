@@ -2395,73 +2395,28 @@ let render_keeper_message (state : state) =
     box_divider buf cols;
 
     (* Input line *)
-    (match state.msg_inflight, state.msg_inflight_kind with
-     | Some request, Some Dispatch_claim ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (waiting for serialized dispatch %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Operation_get ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (reconciling exact operation %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Cleanup_delete ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (finishing durable cleanup %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post
-       when Option.exists
-              (Keeper_chat.same_request_identity request)
-              state.msg_unverified ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (replaying exact request %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post
-       when String.equal request.keeper_name keeper_name ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (sending %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (sending to %s: %s)"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, None ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf "  (processing %s…)"
-              (Keeper_chat.compact_request_id request.request_id))
-     | None, Some _ | None, None -> ());
-    (* What is waiting, in the order it will go. Shown in full rather than as a
-       count: an operator who typed three lines during a turn needs to see
-       which three, and a queue that only says "3 waiting" is the same silence
-       that made a refused send look like a sent one. *)
-    (match Masc_tui_keeper_chat_queue.waiting state.msg_queued with
-     | [] -> ()
-     | queued ->
-         List.iteri
-           (fun index (queued_keeper, text) ->
-             let body =
-               match String.index_opt text '\n' with
-               | None -> text
-               | Some cut -> String.sub text 0 cut ^ " …"
-             in
-             let addressed =
-               if String.equal queued_keeper keeper_name
-               then ""
-               else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
-             in
+    (* This keeper's own turn first, then any other keeper's — talking here
+       does not stop those, so the pane says they are going. *)
+    (match
+       List.partition
+         (fun (request : Keeper_chat.request) ->
+           String.equal request.keeper_name keeper_name)
+         state.msg_inflight
+     with
+     | mine, others ->
+         List.iter
+           (fun (request : Keeper_chat.request) ->
+             box_line_styled buf cols ~style:Ansi.yellow
+               (Printf.sprintf "  (sending %s…)"
+                  (Keeper_chat.compact_request_id request.request_id)))
+           mine;
+         List.iter
+           (fun (request : Keeper_chat.request) ->
              box_line_styled buf cols ~style:Ansi.dim
-               (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
-                  (Keeper_chat.terminal_safe_text body)))
-           queued);
-    (if state.msg_older_loading then
-       box_line_styled buf cols ~style:Ansi.dim
-         "  loading older messages…"
-     else
-       match state.msg_older_error with
-       | Some detail ->
-           box_line_styled buf cols ~style:Ansi.yellow
-             ("  older messages could not be loaded; up retries: " ^ detail)
-       | None -> ());
+               (Printf.sprintf "  (also sending to %s: %s)"
+                  (Keeper_chat.terminal_safe_text request.keeper_name)
+                  (Keeper_chat.compact_request_id request.request_id)))
+           others);
     (if scroll > 0 then
        box_line_styled buf cols ~style:Ansi.yellow
          (Printf.sprintf
@@ -2490,70 +2445,6 @@ let render_keeper_message (state : state) =
              box_line_styled buf cols ~style ("  " ^ text))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | None -> ());
-    (match state.msg_prepared with
-     | Some request when state.msg_inflight = None ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf
-              "  prepared fence: %s %s; Ctrl-R retries the first serialized dispatch"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some _ | None -> ());
-    (match state.msg_unverified, state.msg_inflight_kind with
-     | Some request, Some Dispatch_claim ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  prior outcome unverified: %s %s; waiting for the serialized phase recheck"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Chat_post ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  prior outcome unverified: %s %s; replaying the same request ID"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Operation_get ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  outcome unverified: %s %s; polling the exact operation"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, Some Cleanup_delete ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  request settled: %s %s; durable cleanup is in progress"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | Some request, None ->
-         box_line_styled buf cols ~style:Ansi.red
-           (Printf.sprintf
-              "  outcome unverified: %s %s; Ctrl-R resumes the exact request"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | None, Some _ | None, None -> ());
-    (match state.msg_cleanup_pending with
-     | Some request ->
-         box_line_styled buf cols ~style:Ansi.yellow
-           (Printf.sprintf
-              "  request settled: %s %s; Ctrl-R finishes durable cleanup"
-              (Keeper_chat.terminal_safe_text request.keeper_name)
-              (Keeper_chat.compact_request_id request.request_id))
-     | None -> ());
-    (match
-       state.msg_prepared, state.msg_cleanup_pending, state.msg_recovery_error
-     with
-     | Some _, _, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  prepared recovery blocked; no new request may start: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | None, Some _, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  cleanup retry failed; no POST or GET will be issued: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | None, None, Some (Recovery_blocked detail) ->
-         box_line_styled buf cols ~style:Ansi.red
-           ("  recovery needs retry; Ctrl-R reloads durable recovery state: "
-          ^ Keeper_chat.terminal_safe_text detail)
-     | Some _, _, None | None, Some _, None | None, None, None -> ());
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with
@@ -2616,11 +2507,10 @@ let render_keeper_message (state : state) =
               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
               waiting
       in
-      (* What the in-flight work is stays out of the footer: the box above it
-         already names it ("polling the exact operation", "durable cleanup is
-         in progress"), and repeating it here pushed the footer past a narrow
-         terminal. *)
-      match send_disposition state with
+      (* The fence refusals cannot occur any more — the states they ranked are
+         gone — but the vocabulary still carries them, so they stay matched
+         rather than swept into a catch-all. *)
+      match send_disposition state ~keeper_name with
       | Queues_behind _ -> queue_hint ()
       | Refused_cleanup _ -> "Ctrl-R:finish durable cleanup  Enter:blocked"
       | Refused_prepared _ -> "Ctrl-R:retry prepared fence  Enter:blocked"

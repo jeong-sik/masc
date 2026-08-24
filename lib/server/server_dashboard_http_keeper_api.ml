@@ -750,15 +750,30 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name keeper_suffix_file_changes in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      (* A name that cannot belong to a keeper is refused rather than looked
+         up. The window filters rows by an equal string, so a typo would
+         otherwise come back as an empty answer -- indistinguishable from a
+         real keeper that changed nothing. *)
+      respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
     else
-      let window_hours =
+      (* A window that cannot be read is refused, not replaced by the default.
+         Answering [?window_hours=abc] over the last day would report a period
+         the caller did not ask for, under a field saying it did. Too wide a
+         window is different: it is clamped, and the response states the
+         window it actually covered. *)
+      match
         match Server_utils.query_param req "window_hours" with
-        | None -> file_changes_default_window_hours
+        | None -> Ok file_changes_default_window_hours
         | Some raw -> (
             match float_of_string_opt (String.trim raw) with
-            | Some hours when hours > 0.0 -> Float.min hours file_changes_max_window_hours
-            | Some _ | None -> file_changes_default_window_hours)
-      in
+            | Some hours when hours > 0.0 ->
+                Ok (Float.min hours file_changes_max_window_hours)
+            | Some _ | None ->
+                Error (Printf.sprintf "window_hours must be a positive number: %s" raw))
+      with
+      | Error detail -> respond_error reqd detail
+      | Ok window_hours ->
       let rows = Keeper_tool_call_log.read_window ~keeper_name:name ~window_hours () in
       let tally = Keeper_tool_call_file_change.classify_all rows in
       let json =

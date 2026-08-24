@@ -7,7 +7,6 @@ code_refs:
   - bin/masc_tui_loader.ml
   - bin/masc_tui_http.ml
   - bin/masc_tui_types.ml
-  - bin/masc_tui_keeper_chat_recovery.ml
 ---
 
 # MASC TUI Guide
@@ -265,39 +264,6 @@ reliably, a stale entry may still name the target, so membership alone does not
 authorize an external effect - the surface renders
 `Keeper roster is unavailable` and the footer reads
 `Enter:disabled (roster unavailable)`.
-
-#### Dispatch fence
-
-Before any POST the TUI writes a `prepared` recovery fence and requires the new
-directory chain, the file, and the parent directory entry to be durably synced.
-`prepared` means no process has durably claimed a POST. The sender then acquires
-the cross-process dispatch lock, rechecks the exact identity, and advances the
-fence to `dispatching` before crossing the network boundary. Only that lock
-holder may POST, and it holds the lock until the main TUI has applied the result
-and acknowledged its recovery mutation.
-
-`dispatching` never authorizes a later POST. After a crash, cancellation, or
-failed result-phase write, recovery only reads the exact operation. Only an
-outcome-unverified result durably advanced to `replayable` may be claimed for
-another exact-ID POST, and that replay claim first returns the fence to
-fail-closed `dispatching`. A stale retry never recreates a missing `prepared`
-fence: it goes through the serialized claim and stops if the fence was already
-removed.
-
-Once the stream proves server acceptance the fence becomes `accepted`. If
-delivery then becomes uncertain, new sends are blocked and `Ctrl-R` polls the
-exact durable operation until it settles - it does not mint a fresh ID or issue
-another chat POST. A definitive pre-acceptance rejection advances the fence to
-`rejected`, which is cleanup-only. Only the current pre-handler statuses `400`,
-`401`, `403`, and `404` qualify as definitive; timeouts, conflicts, rate limits,
-`5xx`, and unknown statuses stay outcome-unverified because an intermediary may
-have forwarded the POST before returning them.
-
-If a fail-closed `dispatching` fence repeatedly returns operation `404`, the TUI
-stays blocked on purpose: it cannot prove whether the POST crossed the boundary,
-and it offers no force-replay or force-clear shortcut. Verify the exact
-operation and the runtime logs before an operator removes that fence. Clearing
-it without that proof can permit overlapping work.
 
 ### Approvals
 

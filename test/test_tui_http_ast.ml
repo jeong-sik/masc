@@ -412,10 +412,17 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"board_detail_request_still_current" ~callees:[]
        ~fields:[ "view" ]);
+  (* [board_read_pane], not [render_board_read]: #30255 split the surface the
+     way #30146 split keeper detail, so the frame picks the layout and the
+     pane draws the content. Everything these guards watch -- the detail
+     selection, the shared row allocation, the single scroll projection, the
+     sanitised post fields -- went with the content. Nothing is left in the
+     frame, so pointing them at the old name read one move as six
+     regressions. *)
   check int "Board renderer selects detail by post identity" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_board_read"
+       ~binding_name:"board_read_pane"
        ~callee:"Board_detail.view_for");
   check bool "metadata refresh reconciles the selected log identity" true
     (Ast_grep.count_calls_in_value_binding
@@ -724,19 +731,19 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_board_read"
+       ~binding_name:"board_read_pane"
        ~callee:"Render_schedule.allocate_board_read");
   check int "board body and comments share the allocation" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_board_read" ~callees:[]
+       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "body_rows"; "comment_rows" ]);
   check int "board read projects one scroll across body and comments" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_board_read"
+       ~binding_name:"board_read_pane"
        ~callee:"Render_schedule.project_board_read_scroll");
   check int "board renderer consumes normalized body and comment offsets" 3
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_board_read" ~callees:[]
+       ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
   check int "resize invalidation and Force request share one boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -756,9 +763,23 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:main_path ~binding_name:"invalidate_frame_for_resize"
        ~callee:"Render_schedule.request" ~position:1
        ~constructor:"Render_schedule.Force");
-  check int "main uses the coupled resize boundary" 1
+  (* The contract is that this boundary is the only door, not that main walks
+     through it once. #30255 gave the loop a second reason to distrust the
+     presenter's cached screen -- an image overlay covered the frame and was
+     dismissed -- and a count read that as a regression. What must stay true
+     is that main never reaches past the boundary: the three assertions above
+     pin what happens inside it, and this one pins that nothing else does it.
+
+     [Frame_presenter.invalidate] appears once in the whole file, inside the
+     boundary, so a caller that invalidated on its own would raise this to 2
+     and fail here. *)
+  check bool "main reaches the presenter only through the resize boundary" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"invalidate_frame_for_resize");
+       ~binding_name:"main" ~callee:"invalidate_frame_for_resize"
+     >= 1);
+  check int "nothing invalidates the presenter outside that boundary" 1
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Frame_presenter.invalidate");
   let terminal_repair_path = "bin/masc_tui_terminal_write_repair.ml" in
   check int "console repair boundary delegates to the repair state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
@@ -1143,7 +1164,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   check_fields ~non_rendering_calls:[ "Board_detail.view_for" ]
-    "render_board_read"
+    "board_read_pane"
     [ "bp_id"
     ; "bp_author"
     ; "bp_title"

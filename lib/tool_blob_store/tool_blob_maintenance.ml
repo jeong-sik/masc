@@ -152,7 +152,28 @@ let add_references ~path ~line references text =
            })
 ;;
 
-let rec references_in_json ~path ~line references = function
+type reference_scan_context =
+  | Durable_value
+  | Route_evidence
+  | Route_evidence_composable_output
+
+let child_reference_scan_context context key =
+  match context, key with
+  | Durable_value, "route_evidence" -> Route_evidence
+  | Route_evidence, "composable_output" -> Route_evidence_composable_output
+  | ( Durable_value
+    | Route_evidence
+    | Route_evidence_composable_output ),
+    _ ->
+    Durable_value
+;;
+
+let rec references_in_json
+          ?(context = Durable_value)
+          ~path
+          ~line
+          references
+  = function
   | `String text -> add_references ~path ~line references text
   | (`Assoc fields as json) ->
     (match Tool_output.normalized_artifact_ref_of_json json with
@@ -164,9 +185,20 @@ let rec references_in_json ~path ~line references = function
             { path; line; detail })
      | Tool_output.Not_normalized_artifact_ref ->
        List.fold_left
-         (fun result (_, value) ->
-            Result.bind result (fun current ->
-              references_in_json ~path ~line current value))
+         (fun result (key, value) ->
+            match context, key with
+            | Route_evidence_composable_output, "schema" -> result
+            | ( Durable_value
+              | Route_evidence
+              | Route_evidence_composable_output ),
+              _ ->
+              Result.bind result (fun current ->
+                references_in_json
+                  ~context:(child_reference_scan_context context key)
+                  ~path
+                  ~line
+                  current
+                  value))
          (Ok references)
          fields)
   | `List values ->

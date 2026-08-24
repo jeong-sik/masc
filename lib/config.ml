@@ -15,9 +15,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
 
 let front_door_tool_schemas : Masc_domain.tool_schema list = raw_all_tool_schemas
 
-(** Validate tool schemas at module initialization time.
-    Logs warnings for: duplicate names, empty names/descriptions,
-    input_schema.type not "object". Does not block startup. *)
+(* Contract lives in config.mli. *)
 let validate_schemas (schemas : Masc_domain.tool_schema list) =
   let errors, _ =
     List.fold_left

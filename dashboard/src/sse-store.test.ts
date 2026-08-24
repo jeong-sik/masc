@@ -882,6 +882,46 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 
+  it('refetches the fusion board-sink track when a post is created', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'fusion', params: {}, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-1',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    // The event carries a preview and no meta, so the detail browser cannot be
+    // built from it — the surface has to refetch (#21822).
+    expect(refreshFusion).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the fusion track alone when the operator is elsewhere', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-2',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusion).not.toHaveBeenCalled()
+  })
+
   it('keeps optimistic post_created hydration inside the active hearth filter', async () => {
     const { sseStore } = await loadSseStore()
     const refreshHearths = vi.fn()

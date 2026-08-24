@@ -102,6 +102,9 @@ let block_reason_of_exec_too_complex
       | `Function_def
       | `Glob_brace
       | `Background
+      (* A separated list, not a redirect: it used to land in the arm above
+         because the classifier found a supported [2>/dev/null] first. *)
+      | `Command_separator
       | `Unknown_construct _ ) -> Injection
 ;;
 

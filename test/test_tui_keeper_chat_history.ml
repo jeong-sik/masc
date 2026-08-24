@@ -34,6 +34,35 @@ let kind_to_string : History.kind -> string = function
   | History.Delivery_failed -> "delivery_failed"
   | History.Tool_calls rows ->
       Printf.sprintf "tools[%s]" (String.concat " | " rows)
+  | History.Reasoning lines ->
+      Printf.sprintf "thinking[%s]" (String.concat " | " lines)
+
+(* An assistant row the way an autonomous turn persists it: blank [content]
+   and a [t: "trace"] block of steps. *)
+let autonomous_turn ?(ts = 1.0) ?(content = "") ?omitted steps =
+  `Assoc
+    [ "id", `String "autonomous:trace-1#54"
+    ; "role", `String "assistant"
+    ; "content", `String content
+    ; "ts", `Float ts
+    ; ( "blocks"
+      , `List
+          [ `Assoc
+              ([ "t", `String "trace"; "trace", `List steps ]
+               @ (match omitted with None -> [] | Some n -> [ "omitted", `Int n ]))
+          ] )
+    ]
+
+let think_withheld =
+  `Assoc [ "kind", `String "think"; "text", `String ""; "content_withheld", `Bool true ]
+
+let reason text = `Assoc [ "kind", `String "reason"; "text", `String text ]
+
+let tool ?status ?dur name =
+  `Assoc
+    ([ "kind", `String "tool"; "name", `String name ]
+     @ (match status with None -> [] | Some s -> [ "status", `String s ])
+     @ (match dur with None -> [] | Some d -> [ "dur", `String d ]))
 
 let decode json =
   match History.rows_of_json json with
@@ -67,7 +96,8 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
         History.addressed_label speaker surface
-    | History.Said_by_keeper | History.Delivery_failed | History.Tool_calls _ ->
+    | History.Said_by_keeper | History.Delivery_failed | History.Tool_calls _
+    | History.Reasoning _ ->
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
@@ -133,7 +163,7 @@ let test_consecutive_tool_rows_become_one_block () =
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
-       | History.Delivery_failed ->
+       | History.Delivery_failed | History.Reasoning _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -155,6 +185,93 @@ let test_tool_blocks_separated_by_speech_stay_separate () =
             match r.History.kind with
             | History.Tool_calls _ -> "tools"
             | other -> kind_to_string other))
+
+(* On one live keeper 32 of 183 assistant rows had a blank [content] and a
+   trace block behind it -- 1,333 tool steps and 917 withheld reasoning steps
+   -- and every one drew as a timestamp over an empty line. *)
+let test_an_autonomous_turn_draws_what_it_did () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~ts:5.0
+             [ think_withheld
+             ; tool ~status:"ok" ~dur:"32ms" "masc_task_history"
+             ; think_withheld
+             ; tool ~status:"err" ~dur:"1.2s" "tool_execute"
+             ; tool ~status:"pending" "keeper_task_claim"
+             ; tool "read_file"
+             ]
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  match decoded.History.rows with
+  | [ thinking; tools ] ->
+      check string "the withheld reasoning is counted, not drawn blank"
+        "thinking[(2 reasoning steps, content withheld)]"
+        (kind_to_string thinking.History.kind);
+      (match tools.History.kind with
+       | History.Tool_calls rows ->
+           check int "every tool step is a row" 4 (List.length rows);
+           let starts_with prefix row =
+             String.length row >= String.length prefix
+             && String.equal (String.sub row 0 (String.length prefix)) prefix
+           in
+           let row n = List.nth rows n in
+           check bool "a call that returned carries the finished glyph" true
+             (starts_with "\xe2\x9c\x93 masc_task_history" (row 0));
+           check bool "and its duration" true
+             (starts_with "\xe2\x9c\x93 masc_task_history \xc2\xb7 32ms" (row 0));
+           check bool "a call that returned an error carries its own glyph" true
+             (starts_with "\xe2\x9c\x97 tool_execute" (row 1));
+           check bool "a call the trace never saw finish carries the open glyph"
+             true
+             (starts_with "\xc2\xb7 keeper_task_claim" (row 2));
+           check bool "a step with no status says it was not recorded" true
+             (starts_with "? read_file" (row 3))
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Delivery_failed | History.Reasoning _ ->
+           fail "expected the second row to be a tool block");
+      check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
+  | rows -> failf "expected two rows, got %d" (List.length rows)
+
+let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~ts:6.0 ~content:"\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94"
+             [ reason "the test names the old label"
+             ; tool ~status:"ok" "edit_file"
+             ]
+         ])
+  in
+  check (list string) "reasoning, then calls, then what it said"
+    [ "thinking[the test names the old label]"; "tools"; "keeper" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other));
+  check string "the text is the keeper's own row"
+    "\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94"
+    (List.nth decoded.History.rows 2).History.text
+
+let test_steps_the_server_dropped_are_counted () =
+  let decoded =
+    decode (`List [ autonomous_turn ~omitted:3 [ tool ~status:"ok" "read_file" ] ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Tool_calls rows; _ } ] ->
+      check string "the count closes the block"
+        "(3 steps not carried by the transcript)"
+        (List.nth rows (List.length rows - 1))
+  | _ -> fail "expected one tool block"
+
+let test_a_blank_turn_with_no_trace_keeps_its_line () =
+  (* The server holds an empty row for it; drawing nothing would hide that a
+     turn happened. Unchanged from before trace blocks were read. *)
+  let decoded = decode (`List [ row ~ts:7.0 ~role:"assistant" "" ]) in
+  check (list string) "one keeper row, blank" [ "keeper" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
 let test_server_order_is_kept () =
   (* The server appends in order and asks a client not to reposition rows that
@@ -290,6 +407,14 @@ let () =
         ; test_case "speech splits tool blocks" `Quick
             test_tool_blocks_separated_by_speech_stay_separate
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept
+        ; test_case "an autonomous turn draws what it did" `Quick
+            test_an_autonomous_turn_draws_what_it_did
+        ; test_case "a turn that also spoke keeps the order it ran in" `Quick
+            test_a_turn_that_also_spoke_keeps_the_order_it_ran_in
+        ; test_case "steps the server dropped are counted" `Quick
+            test_steps_the_server_dropped_are_counted
+        ; test_case "a blank turn with no trace keeps its line" `Quick
+            test_a_blank_turn_with_no_trace_keeps_its_line
         ] )
     ; ( "paging"
       , [ test_case "a page decodes its rows and cursor" `Quick

@@ -57,7 +57,19 @@ val input_cursor_row :
 
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer
-    immediately before the right border. *)
+    immediately before the right border. Measured from the prefix the pane
+    renders ([chat_input_prompt_prefix]), so the caret lands where the typed
+    text ends. *)
+
+val chat_input_prompt_prefix : string
+(** The chat pane's composer prefix. The pane renders it and the caret is
+    measured from it; both sites share this constant so they cannot drift. *)
+
+val chat_input_prompt_cells : int
+
+val align_role_label : string -> string
+(** Pad (or ellipsis-truncate) a metadata role label to one fixed cell column,
+    so [timestamp] speaker request rows align down the pane. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool

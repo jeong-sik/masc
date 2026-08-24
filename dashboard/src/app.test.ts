@@ -348,22 +348,33 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
   })
 
-  it('keeps floating status and focus chrome on operational surfaces', () => {
+  it('keeps floating status and focus chrome on non-rail surfaces', () => {
     window.innerWidth = 1280
-    // `command` is a non-primary operational surface; `monitoring` moved into
-    // V2_PRIMARY_SURFACE_IDS (#23578) so it now suppresses floating chrome.
-    window.location.hash = '#command/operations'
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 (the
+    // prototype rail carries the 명령·Lab group), so they render the v2 shell
+    // and suppress floating chrome. `cockpit` stays off the rail.
+    window.location.hash = '#cockpit'
+    route.value = { tab: 'cockpit', params: {}, postId: null }
     renderApp()
 
     expect(container.querySelector('[data-testid="dashboard-status-tray"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
+
+    // On the now-primary 명령 surface the v2 rail renders and the floating
+    // chrome is gone (the top bar carries the operational facts there).
+    window.location.hash = '#command/operations'
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    renderApp()
+    expect(container.querySelector('nav.v2-nav')).not.toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
   })
 
   it('focus mode does not permanently hide the rail', async () => {
     window.innerWidth = 1280
-    window.location.hash = '#command/operations'
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    // The focus toggle rides the floating chrome, so exercise it on `cockpit`;
+    // `command` became a rail surface in #29798 and no longer carries the toggle.
+    window.location.hash = '#cockpit'
+    route.value = { tab: 'cockpit', params: {}, postId: null }
     renderApp()
 
     // Rail (now `nav.v2-nav`) should be visible initially.
@@ -390,7 +401,7 @@ describe('App v2 header chrome', () => {
   it('keeps the command palette chunk out of the initial dashboard render', () => {
     renderApp()
 
-    expect(container.querySelector('ninja-keys')).toBeNull()
+    expect(container.querySelector('.cmdk-backdrop')).toBeNull()
   })
 })
 
@@ -448,14 +459,26 @@ describe('shouldSuppressFloatingChrome', () => {
     })).toBe(true)
   })
 
-  it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {
+  it('keeps floating chrome only for surfaces outside the prototype rail', () => {
+    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 — the
+    // prototype rail (shell.jsx) carries the 명령·Lab group.
     expect(shouldSuppressFloatingChrome({
       currentTab: 'command',
       keeperDetailMode: false,
       mobileDrawerOpen: false,
+    })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'lab',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'cockpit',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
     })).toBe(false)
     expect(shouldSuppressFloatingChrome({
-      currentTab: 'command',
+      currentTab: 'cockpit',
       keeperDetailMode: false,
       mobileDrawerOpen: true,
     })).toBe(true)

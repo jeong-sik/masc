@@ -345,6 +345,29 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          far back is worse than a key that ends the trip. *)
       state.msg_scroll <- 0;
       true
+    end else if c = Some 11 then begin
+      (* Ctrl-K: drop the newest waiting line without sending it. The queue
+         shows what waits in the order it will go; the newest is the one a
+         mis-send just hit, and dropping it is local — nothing was
+         dispatched. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
+       | Some ((queued_keeper, _), rest) ->
+         state.msg_queued <- rest;
+         add_event state "info"
+           (Printf.sprintf "Cancelled queued message to %s"
+              (Keeper_chat.terminal_safe_text queued_keeper)));
+      true
+    end else if c = Some 16 then begin
+      (* Ctrl-P: pull the newest waiting line back into the composer. That is
+         the edit: fix it and Enter queues it again. *)
+      (match Chat_queue.take_newest state.msg_queued with
+       | None -> ()
+       | Some ((_, text), rest) ->
+         state.msg_queued <- rest;
+         Buffer.clear state.msg_input;
+         Buffer.add_string state.msg_input text);
+      true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       Buffer.add_string state.msg_input s;
       true
@@ -435,6 +458,8 @@ type async_msg =
   | Board_new_post_done of (string, string) result
   | Board_vote_done of (string, string) result
   | Goal_transition_done of (string, string) result
+  | Schedules_loaded of (schedule_snapshot, string) result
+  | Schedule_cancel_done of (string, string) result
 
 let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
 
@@ -598,6 +623,25 @@ let launch_tools_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
+let launch_schedules_load state ~mailbox =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_schedules ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Schedules_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Schedules_loaded (Error "Eio switch is unavailable"))
+
 let launch_autonomy_load state ~mailbox =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -754,7 +798,8 @@ let forget_session_rows_the_transcript_holds state keeper_name =
         ||
         match entry.me_role with
         | Message_status | Message_error -> true
-        | Message_user _ | Message_keeper | Message_tool -> false)
+        | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
+            false)
       state.msg_history
 
 let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
@@ -767,6 +812,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
     | Keeper_chat_history.Delivery_failed -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls rows ->
         (Message_tool, String.concat "\n" rows)
+    | Keeper_chat_history.Reasoning lines ->
+        (Message_thinking, String.concat "\n" lines)
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
@@ -2235,6 +2282,51 @@ let handle_board_vote_key state ~mailbox ~(up : bool) =
                    post.bp_id)))
   | Board_read _ | Board_compose -> ()
 
+(* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
+   the other writes; the server's store rules decide whether the row is still
+   cancellable, so the TUI does not pre-guess from the status column. *)
+let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
+  state.schedule_cancel_error <- None;
+  add_event state "system"
+    (Printf.sprintf "cancelling schedule %s" schedule_id);
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run_cancel () =
+    let result =
+      match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+    in
+    enqueue_async mailbox (Schedule_cancel_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_cancel
+  | None -> run_cancel ()
+
+(* The cancel key on the row under the cursor. Two presses, like the vote
+   keys: the first names the schedule, the same press again sends it. The
+   schedule id is captured at arm time, so moving the cursor between presses
+   re-arms for the new row rather than cancelling the one the operator left. *)
+let handle_schedule_cancel_key state ~mailbox =
+  let rows =
+    match state.schedules with
+    | None -> []
+    | Some snapshot -> snapshot.scs_rows
+  in
+  match List.nth_opt rows state.schedule_cursor with
+  | None -> ()
+  | Some row -> (
+      match state.schedule_cancel_armed with
+      | Some armed when String.equal armed row.sch_schedule_id ->
+          state.schedule_cancel_armed <- None;
+          start_schedule_cancel state ~mailbox
+            ~schedule_id:row.sch_schedule_id
+      | Some _ | None ->
+          state.schedule_cancel_armed <- Some row.sch_schedule_id;
+          state.schedule_cancel_error <- None;
+          add_event state "system"
+            (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
+
 let handle_board_compose_key state ~mailbox (key : string) : bool =
   if
     state.board_compose_armed
@@ -2483,6 +2575,30 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error err ->
           state.goal_action_armed <- None;
           state.goal_action_error <- Some err)
+  | Schedules_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.schedules <- Some snapshot;
+          state.schedules_error <- None;
+          (* The cursor can outlive a list whose rows changed underneath it;
+             clamping to the new tail keeps the cancel key pointing at a row
+             that exists. *)
+          let count = List.length snapshot.scs_rows in
+          if state.schedule_cursor >= count then
+            state.schedule_cursor <- max 0 (count - 1)
+      | Error err -> state.schedules_error <- Some err)
+  | Schedule_cancel_done result -> (
+      match result with
+      | Ok message ->
+          state.schedule_cancel_armed <- None;
+          state.schedule_cancel_error <- None;
+          add_event state "system" ("Schedule: " ^ message);
+          (* The row shown still carries the old status until this lands; a
+             cancelled row that reads "scheduled" invites a second cancel. *)
+          launch_schedules_load state ~mailbox
+      | Error err ->
+          state.schedule_cancel_armed <- None;
+          state.schedule_cancel_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -3013,6 +3129,8 @@ let main () =
        | Board, Some _ -> state.board_vote_armed <- None
        | Planning, Some ("c" | "C" | "x" | "X" | "o" | "O") -> ()
        | Planning, Some _ -> state.goal_action_armed <- None
+       | Schedules, Some ("x" | "X") -> ()
+       | Schedules, Some _ -> state.schedule_cancel_armed <- None
        | _ -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
@@ -3130,6 +3248,7 @@ let main () =
             | Connectors -> launch_connectors_load state ~mailbox:async_messages
             | Tools -> launch_tools_load state ~mailbox:async_messages
             | Autonomy -> launch_autonomy_load state ~mailbox:async_messages
+            | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Overview | Keepers Keeper_list | Keepers Keeper_detail
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -3143,6 +3262,12 @@ let main () =
                 state.view <- Board
             | Board -> state.view <- Planning
             | Planning ->
+                (* Loaded on arrival: the schedule page is a snapshot of the
+                   store, and a stale one would answer "why is this keeper
+                   awake" with yesterday's rows. *)
+                launch_schedules_load state ~mailbox:async_messages;
+                state.view <- Schedules
+            | Schedules ->
                 (* Loaded on arrival: the queue is what the surface is, so
                    showing it empty until a refresh would read as "nothing is
                    waiting". *)
@@ -3217,8 +3342,9 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Keepers Keeper_list | Approvals | Verification | Harness
-            | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
+            | Keepers Keeper_list | Approvals | Schedules | Verification
+            | Harness | Repositories | Connectors | Tools | Autonomy
+            | System_logs -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -3262,6 +3388,14 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
+            | Schedules ->
+                let count =
+                  match state.schedules with
+                  | None -> 0
+                  | Some snapshot -> List.length snapshot.scs_rows
+                in
+                if state.schedule_cursor < count - 1 then
+                  state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- state.task_detail_scroll + 1
@@ -3330,6 +3464,9 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
+            | Schedules ->
+                if state.schedule_cursor > 0 then
+                  state.schedule_cursor <- state.schedule_cursor - 1
             | Overview ->
                 if Option.is_some state.task_detail_id then begin
                   if state.task_detail_scroll > 0 then
@@ -3420,7 +3557,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Verification | Harness | Repositories
+            | Approvals | Schedules | Verification | Harness | Repositories
             | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
@@ -3429,7 +3566,7 @@ let main () =
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
                 if not state.task_focus then state.task_cursor <- 0
-            | Overview | Keepers _ | Board | Approvals | Planning
+            | Overview | Keepers _ | Board | Approvals | Planning | Schedules
             | Verification | Harness | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "c" | Some "C" | Some "x" | Some "X" | Some "o" | Some "O" when state.view = Planning ->
            (* Goal lifecycle, detail only: the list keeps j/k/Enter and the
@@ -3470,6 +3607,11 @@ let main () =
               choose one. *)
            handle_board_vote_key state ~mailbox:async_messages
              ~up:(match key with Some "v" -> true | _ -> false)
+       | Some "x" | Some "X" when state.view = Schedules ->
+           (* Two presses, like every irreversible action here: the first
+              names the schedule, the second cancels it. Whether the row is
+              still cancellable is the server's store rules to say. *)
+           handle_schedule_cancel_key state ~mailbox:async_messages
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -3487,7 +3629,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from detail only. Opening detail is the act that names the
@@ -3507,7 +3649,7 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
@@ -3528,7 +3670,7 @@ let main () =
                       "No lifecycle action applies to this keeper yet"
                 | None -> ())
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
@@ -3536,7 +3678,7 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Verification | Harness
             | Repositories | Connectors | Tools | Autonomy | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,
@@ -3556,8 +3698,9 @@ let main () =
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Planning | Verification | Harness | Repositories
-            | Connectors | Tools | Autonomy | System_logs -> ())
+            | Approvals | Planning | Schedules | Verification | Harness
+            | Repositories | Connectors | Tools | Autonomy | System_logs
+            -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -3611,6 +3754,11 @@ let main () =
                 the runtime runs, so it refreshes rather than holding the
                 reading taken when the operator arrived. *)
              launch_autonomy_load state ~mailbox:async_messages
+         | Schedules ->
+             (* Rows cross their due time and turn terminal while an operator
+                watches; the page that answers "why is this keeper awake"
+                holds a reading from when the operator arrived otherwise. *)
+             launch_schedules_load state ~mailbox:async_messages
          | Overview | Keepers Keeper_list | Keepers Keeper_message
          | Approvals | Planning | System_logs -> ());
         last_check_ns := now_ns;

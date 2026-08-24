@@ -19,9 +19,7 @@ let curl_write_out =
   curl_meta_marker
   ^ "%{http_code}\n%{url_effective}\n%{redirect_url}\n%{content_type}\n%{size_download}"
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
+let trim_to_option = String_util.trim_nonempty
 
 let find_last_substring ~needle haystack =
   let needle_len = String.length needle in

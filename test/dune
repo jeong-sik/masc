@@ -2413,7 +2413,7 @@
 (test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
- (libraries alcotest masc.string_util)
+ (libraries alcotest masc.string_util masc_core yojson)
  (deps
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))

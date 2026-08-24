@@ -50,6 +50,28 @@ let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
         bindings and suppressed transition action=%s."
        task_id action_s)
 
+(* Callers spell themselves both ways: the recorded traffic carries plain
+   "executor" and the "keeper-<name>-agent" session identity for the same
+   actor. [resolve_agent_name] only widens a short name to a registered file,
+   so the keeper-prefixed spelling has to be reduced before the comparison or
+   every caller using it reads as a proxy (#26847). *)
+let strip_keeper_agent_spelling name =
+  let name = String.trim name in
+  match String.starts_with ~prefix:"keeper-" name, String.ends_with ~suffix:"-agent" name with
+  | true, true ->
+    let start = String.length "keeper-" in
+    let stop = String.length name - String.length "-agent" in
+    if stop > start then String.sub name start (stop - start) else name
+  | _ -> name
+;;
+
+let same_transition_actor config ~requested ~caller =
+  let canonical value =
+    Workspace.resolve_agent_name config (strip_keeper_agent_spelling value)
+  in
+  String.equal (canonical requested) (canonical caller)
+;;
+
 let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   let evidence_refs = get_string_list args "evidence_refs" in
@@ -94,6 +116,38 @@ and handle_transition ~tool_name ~start_time ctx args =
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         names (String.concat ", " transition_known_args))
   else
+  (* The schema declares [agent_name] and this handler transitions
+     [ctx.agent_name], so a caller naming someone else had its argument
+     silently dropped and read the refusal -- which names the caller -- as its
+     own state blocking it. taskmaster spent 34 calls that way trying to claim
+     for rondo, sangsu, analyst and lane-smith (#26847).
+
+     Callers that name themselves are the other 871, so this refuses the
+     mismatch rather than the parameter. Both sides go through
+     [resolve_agent_name] first: "keeper-rondo-agent" and "rondo" are the same
+     actor and only the spelling differs. *)
+  let proxy_rejection =
+    match get_string_opt args "agent_name" with
+    | None -> None
+    | Some requested ->
+      let requested = String.trim requested in
+      if String.equal requested "" then None
+      else if same_transition_actor ctx.config ~requested ~caller:ctx.agent_name
+      then None
+      else Some requested
+  in
+  match proxy_rejection with
+  | Some requested ->
+    Tool_result.error
+      ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name
+      ~start_time
+      (Printf.sprintf
+         "agent_name %S is not this caller (%s). masc_transition acts for the \
+          calling agent only; it cannot transition another agent's task."
+         requested
+         ctx.agent_name)
+  | None ->
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response ~tool_name ~start_time (Error e)

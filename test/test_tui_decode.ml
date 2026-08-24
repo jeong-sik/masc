@@ -2054,7 +2054,7 @@ let keeper_tool_approvals_json =
     [ ( "pending"
       , `List
           [ `Assoc
-              [ ("keeper", `String "sangsu")
+              [ ("keeper", `String "orbiter")
               ; ("tool_call_id", `String "call-1")
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
@@ -2069,7 +2069,7 @@ let test_decode_keeper_tool_approvals () =
   match Tui_decode.decode_keeper_tool_approvals keeper_tool_approvals_json with
   | Error err -> Alcotest.fail err
   | Ok [ held ] ->
-      Alcotest.(check string) "keeper" "sangsu" held.Tui_decode.kta_keeper;
+      Alcotest.(check string) "keeper" "orbiter" held.Tui_decode.kta_keeper;
       Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
@@ -2080,7 +2080,7 @@ let test_decode_keeper_tool_approvals () =
 
 let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   let thin =
-    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "sangsu") ] ]) ]
+    `Assoc [ ("pending", `List [ `Assoc [ ("keeper", `String "orbiter") ] ]) ]
   in
   match Tui_decode.decode_keeper_tool_approvals thin with
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
@@ -2129,7 +2129,7 @@ let runtime_resolved_json =
     ; ( "assignments"
       , `List
           [ `Assoc
-              [ ("keeper", `String "sangsu")
+              [ ("keeper", `String "orbiter")
               ; ("assignment_source", `String "explicit")
               ; ( "resolved"
                 , `Assoc
@@ -2154,7 +2154,7 @@ let test_decode_runtime_resolved () =
        | [] -> Alcotest.fail "no runtimes");
       (match assignments with
        | [ a ] ->
-           Alcotest.(check string) "keeper" "sangsu" a.Tui_decode.ra_keeper;
+           Alcotest.(check string) "keeper" "orbiter" a.Tui_decode.ra_keeper;
            Alcotest.(check string) "source" "explicit" a.ra_source;
            Alcotest.(check (option string)) "resolved id"
              (Some "ollama_cloud.deepseek") a.ra_target_id
@@ -2280,7 +2280,7 @@ let runtime_resolved_surface_json ?(broken_preference = false) () =
     ; ( "assignments"
       , `List
           [ `Assoc
-              [ "keeper", `String "sangsu"
+              [ "keeper", `String "orbiter"
               ; "assignment_source", `String "default"
               ; ( "resolved"
                 , `Assoc [ "kind", `String "lane"; "id", `String "primary" ] )

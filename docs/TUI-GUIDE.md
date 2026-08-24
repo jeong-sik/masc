@@ -383,6 +383,29 @@ running for one keeper does not decide what `Enter` does in another's window;
 sends going elsewhere show as `(also sending to X)`. Drafts are retained per
 keeper while navigating.
 
+#### Pasting
+
+The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a
+terminal delivers a paste as the keys it looks like, and the line break in
+pasted text is the same byte Return sends: a three-line paste becomes three
+messages, and during a turn, three queued fragments. With it the payload
+arrives as text and lands in the draft whole, so Markdown blocks, URLs, and
+log excerpts keep the shape they were copied in.
+
+A paste while the composer row is idle takes focus for it, so pasted text
+always lands somewhere visible and addressed to the keeper the row named. With
+no keeper to send to, the paste is refused out loud in Recent Events rather
+than dropped.
+
+Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
+was copied; all three become one LF in the draft. Everything else that is not
+printable becomes a space - a paste is the one way a terminal escape sequence
+could reach a message, since typed keys are filtered one scalar at a time.
+
+A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
+has to be consumed, or the tail of the paste arrives as keystrokes - and
+counted, and Recent Events says how many bytes are not in the draft.
+
 #### Lines typed during a turn
 
 Enter during a running turn holds the line for the next one rather than

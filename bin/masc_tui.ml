@@ -115,17 +115,41 @@ let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows ())
     ~error:state.log_error
 
-(** Read a single byte from stdin, returning Some char or None. *)
-let read_byte_unix ?(timeout = 0.1) () : char option =
+(* Bytes the terminal has delivered that the reader has not served yet.
+
+   One [Unix.read] per byte is one syscall per character, which is invisible
+   while a person types and expensive the moment they do not: a paste is
+   thousands of bytes arriving at once, and the terminal hands them over in
+   one read whether or not this asks for them one at a time.
+
+   The unserved tail is also the pushback: an invalid UTF-8 continuation has
+   to leave the byte it rejected for the next key, and stepping [position]
+   back one is that, with no second place for a byte to hide. *)
+type input_reader = {
+  bytes : Bytes.t;
+  mutable filled : int;
+  mutable position : int;
+}
+
+(* One terminal read. Bigger than any escape sequence and big enough that a
+   pasted screenful arrives whole; a paste larger than this is read in as many
+   passes as it takes, which is the same loop either way. *)
+let input_buffer_bytes = 8192
+
+let create_input_reader () =
+  { bytes = Bytes.create input_buffer_bytes; filled = 0; position = 0 }
+
+let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
   in
   let poll remaining =
     match Unix.select [Unix.stdin] [] [] remaining with
     | ready, _, _ when ready <> [] ->
-        let buf = Bytes.create 1 in
-        (match Unix.read Unix.stdin buf 0 1 with
-         | n when n > 0 -> Render_schedule.Input_wait.Ready (Bytes.get buf 0)
+        (match
+           Unix.read Unix.stdin reader.bytes 0 (Bytes.length reader.bytes)
+         with
+         | count when count > 0 -> Render_schedule.Input_wait.Ready count
          | _ -> Render_schedule.Input_wait.Timed_out
          | exception Unix.Unix_error (Unix.EINTR, _, _) ->
              Render_schedule.Input_wait.Interrupted)
@@ -133,25 +157,32 @@ let read_byte_unix ?(timeout = 0.1) () : char option =
     | exception Unix.Unix_error (Unix.EINTR, _, _) ->
         Render_schedule.Input_wait.Interrupted
   in
-  Render_schedule.Input_wait.await ~now_ns:Mtime_clock.elapsed_ns ~timeout_ns
-    ~poll
-
-(** Read a single byte from stdin, returning Some char or None. *)
-let read_byte () : char option =
-  Eio_guard.run_in_systhread (fun () -> read_byte_unix ())
-
-(** One byte of pushback keeps an invalid UTF-8 continuation from swallowing
-    the next independent ASCII key. *)
-type input_reader = { mutable pending_byte : char option }
-
-let create_input_reader () = { pending_byte = None }
+  match
+    Render_schedule.Input_wait.await ~now_ns:Mtime_clock.elapsed_ns ~timeout_ns
+      ~poll
+  with
+  | Some count ->
+      reader.filled <- count;
+      reader.position <- 0;
+      true
+  | None -> false
 
 let take_input_byte reader ~timeout =
-  match reader.pending_byte with
-  | Some byte ->
-      reader.pending_byte <- None;
-      Some byte
-  | None -> read_byte_unix ~timeout ()
+  if
+    reader.position >= reader.filled
+    && not (refill_input_reader reader ~timeout)
+  then None
+  else begin
+    let byte = Bytes.get reader.bytes reader.position in
+    reader.position <- reader.position + 1;
+    Some byte
+  end
+
+(* Give back the byte just taken. Only ever called on the byte this reader
+   served last, which is still the one before [position] in the same buffer: a
+   refill happens only when the buffer runs out, and taking a byte leaves at
+   least that one behind. *)
+let return_input_byte reader = reader.position <- max 0 (reader.position - 1)
 
 let is_utf8_continuation byte =
   let code = Char.code byte in
@@ -170,15 +201,31 @@ let read_utf8_scalar reader first expected_length =
       | Some byte when is_utf8_continuation byte ->
           Bytes.set bytes index byte;
           fill (index + 1)
-      | Some byte ->
-          reader.pending_byte <- Some byte;
+      | Some _ ->
+          return_input_byte reader;
           Some "invalid-utf8"
   in
   fill 1
 
-(** Try to read an escape sequence. Returns a key description. *)
-let read_key ?(timeout = 0.1) reader () : string option =
+(* A paste is not a key and does not become one. Encoding the payload into
+   the key channel would put a second meaning on a string every surface reads
+   as a key name, and the caller would have to tell the two apart by looking
+   at the text -- the classifier this codebase spent RFC-0042 removing. The
+   two kinds travel as two constructors instead, and only the paste path can
+   carry text. *)
+type input_event =
+  | Key of string
+  | Pasted of Masc_tui_paste.t
+
+(* How long to wait for the next byte of a paste already in progress. The
+   terminal writes the payload in one go behind the start marker, so this is a
+   liveness bound on a stream that stalled, not a pace. *)
+let paste_byte_timeout_seconds = 0.5
+
+(** Read one key, or one paste. *)
+let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread (fun () ->
+      let key name = Some (Key name) in
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
@@ -199,16 +246,25 @@ let read_key ?(timeout = 0.1) reader () : string option =
                     if Buffer.length parameters > 16 then None else read_csi ()
               in
               (match read_csi () with
-               | None -> Some "esc"
-               | Some ("", 'A') -> Some "up"
-               | Some ("", 'B') -> Some "down"
-               | Some ("", 'H') -> Some "home"
-               | Some ("", 'F') -> Some "end"
-               | Some ("", 'Z') -> Some "shift-tab"
-               | Some ("1", '~') -> Some "home"
-               | Some ("4", '~') -> Some "end"
-               | Some ("5", '~') -> Some "pageup"
-               | Some ("6", '~') -> Some "pagedown"
+               | None -> key "esc"
+               | Some ("", 'A') -> key "up"
+               | Some ("", 'B') -> key "down"
+               | Some ("", 'H') -> key "home"
+               | Some ("", 'F') -> key "end"
+               | Some ("", 'Z') -> key "shift-tab"
+               | Some ("1", '~') -> key "home"
+               | Some ("4", '~') -> key "end"
+               (* The terminal says the next bytes were pasted, not typed.
+                  Every newline in them is text; without this mode each one
+                  arrives as Return and a three-line paste is three sends. *)
+               | Some ("200", '~') ->
+                   Some
+                     (Pasted
+                        (Masc_tui_paste.read ~next_byte:(fun () ->
+                             take_input_byte reader
+                               ~timeout:paste_byte_timeout_seconds)))
+               | Some ("5", '~') -> key "pageup"
+               | Some ("6", '~') -> key "pagedown"
                (* A parameter span starting with [<] is an SGR mouse report.
                   Wheel reports become the same keys the arrows make, so every
                   surface's scroll binding answers the wheel; a report nothing
@@ -216,8 +272,8 @@ let read_key ?(timeout = 0.1) reader () : string option =
                | Some (params, final)
                  when String.length params > 0 && params.[0] = '<' -> (
                    match Masc.Tui_decode.sgr_wheel_key params final with
-                   | Some key -> Some key
-                   | None -> Some "unknown-esc")
+                   | Some wheel_key -> key wheel_key
+                   | None -> key "unknown-esc")
                (* A bare [CSI M] is the legacy X10 mouse report: three raw
                   bytes follow and belong to the report, not to the typist.
                   Terminals that ignore the SGR half of the [?1006;1000h]
@@ -230,18 +286,21 @@ let read_key ?(timeout = 0.1) reader () : string option =
                    let _column = take_input_byte reader ~timeout:0.05 in
                    let _row = take_input_byte reader ~timeout:0.05 in
                    (match button with
-                    | None -> Some "unknown-esc"
+                    | None -> key "unknown-esc"
                     | Some button -> (
                         match Masc.Tui_decode.x10_wheel_key button with
-                        | Some key -> Some key
-                        | None -> Some "unknown-esc"))
-               | Some (_, _) -> Some "unknown-esc")
-          | Some _ | None -> Some "esc")
+                        | Some wheel_key -> key wheel_key
+                        | None -> key "unknown-esc"))
+               | Some (_, _) -> key "unknown-esc")
+          | Some _ | None -> key "esc")
       | Some byte -> (
           match Masc_tui_message_layout.utf8_scalar_byte_length byte with
-          | Some 1 -> Some (String.make 1 byte)
-          | Some expected_length -> read_utf8_scalar reader byte expected_length
-          | None -> Some "invalid-utf8"))
+          | Some 1 -> key (String.make 1 byte)
+          | Some expected_length ->
+              Option.map
+                (fun scalar -> Key scalar)
+                (read_utf8_scalar reader byte expected_length)
+          | None -> key "invalid-utf8"))
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -2928,6 +2987,42 @@ let handle_composer_key state ~base_path ~mailbox key =
       in
       true
 
+(* Where a paste lands.
+
+   The composer row and the chat pane hold one draft between them
+   ([msg_input]), so a paste has one destination whatever surface is on
+   screen. When the row is idle the paste takes focus for it, through the same
+   path the focus key takes: focus is what names the recipient, and text
+   dropped into a draft whose keeper was never resolved is a message with
+   nowhere to go.
+
+   The text is sanitized the way every other text this process draws is.
+   Typed keys reach the draft only through [is_printable_utf8_scalar], so a
+   control byte cannot get in one keystroke at a time; a paste is the one way
+   a terminal escape could arrive, and it arrives as spaces instead. *)
+let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
+  let in_chat = state.view = Keepers Keeper_message in
+  if not (in_chat || state.composer_focused) then
+    ignore
+      (handle_composer_key state ~base_path ~mailbox Composer.focus_key : bool);
+  if not (in_chat || state.composer_focused) then
+    (* No keeper is selected, or the one that is cannot be written to. A paste
+       that says nothing and goes nowhere is the silence this surface keeps
+       being caught by. *)
+    add_event state "error"
+      (Printf.sprintf "Pasted %d character(s) with no Keeper to send them to"
+         (String.length paste.Masc_tui_paste.text))
+  else begin
+    forget_recall state;
+    Buffer.add_string state.msg_input
+      (Keeper_chat.terminal_safe_text ~preserve_newlines:true
+         paste.Masc_tui_paste.text);
+    if paste.Masc_tui_paste.dropped > 0 then
+      add_event state "error"
+        (Printf.sprintf "Paste kept the first %d bytes; %d more were dropped"
+           Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
+  end
+
 let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   function
   | Http_refresh_done results ->
@@ -3525,7 +3620,7 @@ let request_console_write_repair render_schedule =
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
    TUI's frame on a non-alternate screen -- or turns it into arrow keys only
-   if configured to. With it, wheel reports arrive here and read_key maps
+   if configured to. With it, wheel reports arrive here and read_input maps
    them to the same keys the arrows make. *)
 let mouse_tracking_enable = "\x1b[?1006;1000h"
 let mouse_tracking_disable = "\x1b[?1006;1000l"
@@ -3542,6 +3637,18 @@ let toggle_mouse_tracking () =
   Atomic.set mouse_tracking_on on;
   output_string stdout (if on then mouse_tracking_enable else mouse_tracking_disable);
   flush stdout
+
+(* One enable/disable pair for bracketed paste. Without it the terminal
+   delivers a paste as the keys it looks like, so every newline in it is
+   Return: a three-line paste is three messages, a pasted Markdown block
+   arrives as three sends, and the operator gets a queue full of fragments
+   instead of the thing they copied. With it the payload comes wrapped in
+   ESC[200~ and ESC[201~ and the text arrives as text.
+
+   Written and cleared beside the mouse mode, for the reasons its comment
+   gives about when a byte may be put on this stream. *)
+let bracketed_paste_enable = "\x1b[?2004h"
+let bracketed_paste_disable = "\x1b[?2004l"
 
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
@@ -3624,6 +3731,7 @@ let main () =
          line is the last thing a reader matches on -- a byte after it cannot
          disturb that read. *)
       output_string stdout mouse_tracking_disable;
+      output_string stdout bracketed_paste_disable;
       flush stdout
     end
   in
@@ -3666,6 +3774,7 @@ let main () =
   Frame_presenter.setup frame_presenter ~write:(output_string stdout)
     ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
+  output_string stdout bracketed_paste_enable;
   flush stdout;
 
   (* Initial load *)
@@ -3791,8 +3900,21 @@ let main () =
           ~now_ns:(Mtime_clock.elapsed_ns ())
           ~maximum:maximum_input_wait_seconds
       in
-      let key = read_key ~timeout:input_timeout input_reader () in
-      if Option.is_some key then
+      let input = read_input ~timeout:input_timeout input_reader () in
+      (* The key channel stays exactly what it was: every surface below reads
+         [key] the way it always has, and a paste is simply not one. Splitting
+         here rather than inside the surfaces is what keeps a paste from
+         needing a name in the key vocabulary. *)
+      let key =
+        match input with
+        | Some (Key name) -> Some name
+        | Some (Pasted _) | None -> None
+      in
+      (match input with
+       | Some (Pasted paste) ->
+           handle_paste state ~base_path ~mailbox:async_messages ~paste
+       | Some (Key _) | None -> ());
+      if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
       let terminal_rows, _terminal_columns = get_terminal_size () in
       let compact_viewport =

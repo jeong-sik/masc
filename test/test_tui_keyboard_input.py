@@ -3037,6 +3037,99 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
+BRACKETED_PASTE_ON = b"\x1b[?2004h"
+PASTE_START = b"\x1b[200~"
+PASTE_END = b"\x1b[201~"
+
+
+def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
+    """A multi-line paste is one draft, not one message per line.
+
+    Without the mode the terminal delivers a paste as the keys it looks like,
+    so each newline in it is Return. The three lines below would be three
+    sends -- and while a turn was running, three queued fragments."""
+
+    # A terminal writes CR for a line break in pasted text -- the same byte
+    # Return sends, which is exactly why a paste without this mode is one
+    # message per line. Pasting the shape that breaks is the point.
+    on_the_wire = b"first line\rsecond line\r- https://example.invalid/a?b=1"
+    expected_draft = "first line\nsecond line\n- https://example.invalid/a?b=1"
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The mode has to be on before a paste can arrive as a paste. Asserted
+        # on the stream rather than inferred from the behaviour below: a
+        # terminal that never saw the enable would deliver Return, and the
+        # difference between "the enable was not written" and "the reader
+        # mishandled it" is the thing this pins down.
+        wait_for_output(
+            process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
+        )
+
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        frame = send_and_wait(
+            process,
+            master_fd,
+            output,
+            PASTE_START + on_the_wire + PASTE_END,
+            b"example.invalid",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        for line in (b"first line", b"second line", b"- https://example.invalid"):
+            if line not in plain:
+                raise AssertionError(f"the draft lost {line!r}: {plain!r}")
+
+        # Three lines, one draft: nothing was sent and nothing is queued.
+        posted = [path for path, _ in requests if path.endswith("/chat/stream")]
+        if posted:
+            raise AssertionError(
+                f"a pasted newline was taken as Return: {posted!r}"
+            )
+        if b"queued 1" in plain or b"(sending " in plain:
+            raise AssertionError(f"the paste dispatched something: {plain!r}")
+
+        # Enter still sends, and it sends the whole thing at once.
+        os.write(master_fd, b"\r")
+        body = wait_for_http_request(
+            process,
+            master_fd,
+            output,
+            requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != expected_draft:
+            raise AssertionError(
+                f"the keeper was sent something other than what was pasted: "
+                f"{message!r}"
+            )
+        # Chat opened from detail, so Esc goes back there first.
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     # The turn has to still be running while the scenario types the lines that
     # queue behind it, so the fixture holds the answer rather than sending one.
@@ -4864,6 +4957,19 @@ def run_keyboard_regression(executable: str) -> None:
         runtime_http_fixtures()
     )
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    paste_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="Bracketed paste is one draft",
+        interact=bracketed_paste_interaction(paste_requests),
+        http_fixtures={
+            "/api/v1/keepers/chat/stream": (
+                503,
+                {"error": "stop after the paste request capture"},
+            )
+        },
+        http_requests=paste_requests,
+    )
     chat_queue_fixtures, chat_queue_gate = chat_queue_http_fixtures()
     run_terminal_scenario(
         executable,

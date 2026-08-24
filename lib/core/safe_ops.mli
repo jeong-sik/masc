@@ -205,9 +205,6 @@ val json_list : string -> Yojson.Safe.t -> Yojson.Safe.t list
 val json_list_opt : string -> Yojson.Safe.t -> Yojson.Safe.t list option
 (** Extract a JSON list by key. Returns [None] if missing or non-list. *)
 
-val json_assoc : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
-(** Extract a JSON object by key. Returns [[]] if missing or non-object. *)
-
 val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** Extract any non-null JSON value by key. Returns [None] for [`Null] or missing key. *)
 

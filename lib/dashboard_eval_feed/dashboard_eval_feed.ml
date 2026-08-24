@@ -53,9 +53,36 @@ let read_verdict_json (json : Yojson.Safe.t)
       (Printf.sprintf "unsupported schema_version: %d (expected 1)"
          schema_version)
   else
-    let all_passed = Safe_ops.json_bool ~default:false "all_passed" json in
-    let coverage = Safe_ops.json_float ~default:0.0 "coverage" json in
-    let layer_jsons = Safe_ops.json_list "layer_results" json in
+    (* RFC-OAS-002 lists all_passed, coverage and layer_results beside
+       schema_version in the report's required set, so a report missing one is
+       damaged. Defaulting them turned that into a passing-shaped verdict with
+       no layers, which reads on the dashboard exactly like a run that had
+       nothing to check (#29355). *)
+    let required name project =
+      match Safe_ops.json_member_opt name json with
+      | None -> Error (Printf.sprintf "schema_version 1 report requires %S" name)
+      | Some value ->
+          (match project value with
+           | Some projected -> Ok projected
+           | None ->
+               Error
+                 (Printf.sprintf
+                    "schema_version 1 report field %S has the wrong JSON type"
+                    name))
+    in
+    let ( let* ) = Result.bind in
+    let* all_passed =
+      required "all_passed" (function `Bool b -> Some b | _ -> None)
+    in
+    let* coverage =
+      required "coverage" (function
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | _ -> None)
+    in
+    let* layer_jsons =
+      required "layer_results" (function `List l -> Some l | _ -> None)
+    in
     let rec parse_layers acc = function
       | [] -> Ok (List.rev acc)
       | hd :: tl -> (

@@ -33,6 +33,15 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable assistant_turn_texts : string list
+    (* One entry per completed provider turn, newest first, written by the
+       after_turn hook and read by the cooperative-yield probe's
+       repeated-assistant-text detector. Each entry is the turn's [Text]
+       blocks concatenated in emission order with no separator and no other
+       transformation; thinking, reasoning, and tool blocks are excluded. A
+       turn without a [Text] block contributes "" so positions stay aligned
+       with provider turns — blank entries never satisfy the detector, they
+       only break a streak. *)
   }
 
 type hook_outputs =
@@ -58,4 +67,25 @@ let freeze (acc : hook_accumulator) : hook_outputs =
 
 let record_requested_tool_names (acc : hook_accumulator) requested =
   acc.requested_tool_names <- requested
+;;
+
+let record_assistant_turn_text
+      (acc : hook_accumulator)
+      (response : Agent_core.Types.api_response)
+  =
+  let turn_text =
+    response.Agent_core.Types.content
+    |> List.filter_map (function
+      | Agent_core.Types.Text text -> Some text
+      | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ToolUse _
+      | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Image _
+      | Agent_core.Types.Document _
+      | Agent_core.Types.Audio _ -> None)
+    |> String.concat ""
+  in
+  acc.assistant_turn_texts <- turn_text :: acc.assistant_turn_texts
 ;;

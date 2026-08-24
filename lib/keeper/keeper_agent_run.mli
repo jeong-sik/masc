@@ -122,6 +122,13 @@ module For_testing : sig
     -> tool_call_detail list
     -> (string * int) option
 
+  (** Newest-first per-turn assistant texts; [Some streak] when the last
+      [threshold]+ consecutive turns carry the same non-blank text. *)
+  val repeated_assistant_text
+    :  threshold:int
+    -> string list
+    -> int option
+
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
     -> dispatch:(unit -> ('a, Agent_core.Error.t) result)

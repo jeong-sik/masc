@@ -73,6 +73,10 @@ type stop_reason =
       ; tool_name : string
       ; repeated_count : int
       }
+  | Yielded_after_repeated_assistant_text of
+      { turns_used : int
+      ; repeated_count : int
+      }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
@@ -86,6 +90,7 @@ type cooperative_yield_reason =
       { tool_name : string
       ; repeated_count : int
       }
+  | Repeated_assistant_text of { repeated_count : int }
   | Terminal_tool_completed
 
 type cooperative_yield_decision =
@@ -788,6 +793,8 @@ let stop_reason_of_cooperative_yield ~turns_used = function
   | Repeated_tool_call { tool_name; repeated_count } ->
     Yielded_after_repeated_tool_call
       { turns_used; tool_name; repeated_count }
+  | Repeated_assistant_text { repeated_count } ->
+    Yielded_after_repeated_assistant_text { turns_used; repeated_count }
   (* The provider loop yielded at AGENT_CORE's durable post-tool boundary because
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
@@ -902,6 +909,9 @@ let dashboard_status_of_stop_reason = function
   | Yielded_after_repeated_tool_call _ ->
       Dashboard_agent_core_bridge.Cancelled
         { reason = "yielded_after_repeated_tool_call" }
+  | Yielded_after_repeated_assistant_text _ ->
+      Dashboard_agent_core_bridge.Cancelled
+        { reason = "yielded_after_repeated_assistant_text" }
   | InputRequired _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "input_required" }
 

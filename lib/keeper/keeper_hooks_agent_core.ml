@@ -132,6 +132,9 @@ let make_hooks
     ~(trace_id : string)
     ~(keeper_turn_id : int)
     ~(on_after_turn_ordinal : int -> unit)
+    ?(on_after_turn_response :
+        response:Agent_core.Types.api_response -> unit =
+        fun ~response:_ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         success:bool -> duration_ms:float -> provider:string ->
@@ -164,6 +167,7 @@ let make_hooks
       match event with
       | Agent_core.Hooks.AfterTurn { turn; response } ->
         on_after_turn_ordinal turn;
+        on_after_turn_response ~response;
         record_progress "agent_core_after_turn";
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in

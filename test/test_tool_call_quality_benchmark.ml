@@ -17,6 +17,40 @@ let fixture_runs repo_root =
 let repo_source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
 
+(* A tool call without [tool_name] used to decode to one named "", which
+   matches no selector and is indistinguishable from a tool actually named ""
+   (#29396 A5). Absence is now a load error naming the field. *)
+let test_evidence_run_without_tool_name_is_rejected () =
+  let dir = Filename.temp_file "tcqb_missing_tool_name" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let path = Filename.concat dir "evidence_runs.json" in
+  let contents =
+    {|{"runs":[{"case_id":"c","provider":"p","model":"m","keeper_profile":"k",|}
+    ^ {|"tool_calls":[{"success":true}]}]}|}
+  in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      (try Sys.remove path with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+       output_string oc contents;
+       close_out oc;
+       match Tool_call_quality_benchmark.load_runs_from_file path with
+       | Ok runs ->
+         failf "a tool call without tool_name loaded as %d run(s)" (List.length runs)
+       | Error msg ->
+         check bool
+           ("the error names the missing field: " ^ msg)
+           true
+           (let needle = "tool_name" in
+            let n = String.length needle and h = String.length msg in
+            let rec scan i = i + n <= h && (String.sub msg i n = needle || scan (i + 1)) in
+            scan 0))
+;;
+
 let load_fixture () =
   let repo_root = repo_source_root () in
   let cases =
@@ -591,5 +625,7 @@ let () =
              test_case_selectors_resolve_to_live_descriptors;
            test_case "arg check paths exist in descriptor schema" `Quick
              test_arg_check_paths_exist_in_descriptor_schema;
+           test_case "a tool call without tool_name is rejected" `Quick
+             test_evidence_run_without_tool_name_is_rejected;
          ]);
     ]

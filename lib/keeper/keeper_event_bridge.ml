@@ -118,7 +118,9 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
          grep-friendly line with a stable hash so operators can confirm
          which tools were on the LLM's surface for a given turn without
          enabling verbose tool dumps. *)
-    let names_hash = Digest.to_hex (Digest.string (String.concat "\n" tool_names)) in
+    let names_hash =
+      Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
+    in
     log_routine
       (Printf.sprintf
          "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
@@ -357,7 +359,9 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
   | Agent_core.Event_bus.TurnReady { agent_name; turn; tool_names } ->
-    let names_hash = Digest.to_hex (Digest.string (String.concat "\n" tool_names)) in
+    let names_hash =
+      Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
+    in
     let payload =
       `Assoc
         [ "agent_name", `String agent_name

@@ -56,15 +56,11 @@ type roster_failure =
   | Roster_unreachable of string
   | Roster_malformed of string
 
-(* Same split as the chat surface: telling an operator who already presented a
-   credential to set one is wrong advice. From #29790. *)
 let roster_failure_message ~credential_sent = function
-  | Roster_unauthorized when credential_sent ->
-      "live keeper status was refused: the operator token this masc-tui \
-       presented was rejected — re-run masc login and restart masc-tui"
   | Roster_unauthorized ->
-      "live keeper status and lifecycle actions need an operator token — run \
-       masc login, or export MASC_TOKEN, and restart masc-tui"
+      Printf.sprintf
+        "live keeper status and lifecycle actions are unavailable: %s"
+        (Masc_tui_credential.refusal ~credential_sent)
   | Roster_unreachable detail -> "live keeper status unavailable: " ^ detail
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 

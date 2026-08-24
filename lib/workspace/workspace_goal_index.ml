@@ -89,18 +89,27 @@ let link_of_yojson = function
   | _ -> None
 ;;
 
+(* The writer above always emits an object with a "links" list, so a file that
+   is neither is damaged, not empty. Folding both to [] made a corrupt registry
+   read as "this goal has no linked tasks" — the reader below already fails
+   closed on an unreadable file, and this is the same fact arriving one layer
+   in (#29355). *)
 let links_of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "links" fields with
-     | Some (`List values) -> normalize_link_set (List.filter_map link_of_yojson values)
-     | _ -> [])
-  | _ -> []
+     | Some (`List values) ->
+       Ok (normalize_link_set (List.filter_map link_of_yojson values))
+     | Some _ -> Error "goal_task_links: \"links\" is present but not a list"
+     (* [read_json_result] answers a missing key with [`Assoc []], so an absent
+        "links" is a registry nobody has written yet, not a damaged one. *)
+     | None -> Ok [])
+  | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
 let read_goal_task_links_r config =
   let primary_path = goal_task_links_path config in
   match read_json_result config primary_path with
-  | Ok json -> Ok (links_of_yojson json)
+  | Ok json -> links_of_yojson json
   | Error primary_msg ->
     let recovery_path = goal_task_links_recovery_path config in
     (match read_json_result config recovery_path with
@@ -109,7 +118,7 @@ let read_goal_task_links_r config =
          "read_goal_task_links: primary unreadable, recovered from %s (%s)"
          recovery_path
          primary_msg;
-       Ok (links_of_yojson json)
+       links_of_yojson json
      | Error recovery_msg ->
        if not (path_exists config primary_path) then Ok []
        else
@@ -133,7 +142,7 @@ let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
   try
     write_json config path json;
     match read_json_result config path with
-    | Ok written when links_of_yojson written = expected_links -> Ok ()
+    | Ok written when links_of_yojson written = Ok expected_links -> Ok ()
     | Ok _ ->
       Error
         (Printf.sprintf

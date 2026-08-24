@@ -47,21 +47,20 @@ run_opam_install_attempt() {
   echo "Starting opam install attempt ${attempt}/3 (timeout: ${INSTALL_TIMEOUT_MINUTES}m)"
 
   set +e
-  # WORKAROUND: production-blocking, deprecated path. --locked belongs here and
-  # #29746 put it here for a reason: without it a cache miss re-solves
-  # masc.opam's floors and takes whatever is newest, which is how yojson 3.0
-  # broke every build on main (#28327). It is off because masc.opam.locked
-  # currently describes a switch opam can no longer build from today's
-  # repository, so every install failed from #29746 onward:
+  # --locked: install what masc.opam.locked pins, not whatever the solver picks
+  # today from masc.opam's lower bounds. Without it, yojson 3.0 arrived on a
+  # cache miss and broke every build on main (#28327); the same door stands
+  # open for the next major bump, and it opens at cache expiry rather than at
+  # a commit anyone can point at (#28543). The keeper-sandbox image already
+  # built from the lock, so CI and the sandbox could resolve different graphs.
   #
-  #   ocamlfind = 1.9.8         needs ocaml < 5.5.0~, and masc pins 5.5.0
-  #   compiler-cloning enabled  ocaml-compiler = 5.5.0 now requires it disabled
-  #
-  # Both are lock contents, not solver behaviour, so the flag cannot come back
-  # until the lock is regenerated on the platform CI installs on.
-  # removal target: #29811 (regenerate masc.opam.locked against OCaml 5.5.0)
+  # Off from #29746 to #29812 because the lock still described a 0.23.0 switch:
+  # ocamlfind 1.9.8 wanted ocaml < 5.5.0~ and compiler-cloning was enabled,
+  # neither of which opam can build against the pinned 5.5.0. The lock in this
+  # commit is regenerated on a 5.5.0 switch, so the flag comes back with it --
+  # and this install step is what proves the regenerated lock resolves.
   timeout --signal=TERM --kill-after=60s "${INSTALL_TIMEOUT_MINUTES}m" \
-    opam install . --deps-only "${install_args[@]}" --yes &
+    opam install . --deps-only --locked "${install_args[@]}" --yes &
   opam_pid=$!
   (
     while kill -0 "${opam_pid}" 2>/dev/null; do

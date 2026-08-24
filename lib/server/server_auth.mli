@@ -23,7 +23,6 @@ val strip_suffix : suffix:string -> string -> string
 
 (** {1 Bind host / loopback classification} *)
 
-val ipaddr_is_unspecified : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
 val is_loopback_host : string -> bool
 val is_unspecified_host : string -> bool
 

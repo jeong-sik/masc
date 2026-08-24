@@ -61,6 +61,10 @@ describe('lifecycleEventLabel', () => {
     expect(lifecycleEventLabel('supervisor_cleaned')).toBe('부재 Keeper 정리됨')
   })
 
+  it('maps admission_denied to Korean label', () => {
+    expect(lifecycleEventLabel('admission_denied')).toBe('기동 거부됨')
+  })
+
   it('maps purged to Korean label', () => {
     expect(lifecycleEventLabel('purged')).toBe('완전 삭제됨')
   })

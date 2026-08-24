@@ -60,6 +60,7 @@ function KeeperPersistenceTierCard({ tier }: { tier: KeeperPersistenceTierProof 
       data-observed-count=${tier.observedCount}
       data-keeper-count=${tier.keeperCount}
       data-missing-count=${tier.missingCount}
+      data-undetermined-count=${tier.undeterminedCount}
     >
       <div class="flex items-center justify-between gap-2">
         <strong class="text-base tabular-nums text-[var(--color-fg-primary)]">${tier.id}</strong>
@@ -80,6 +81,20 @@ function KeeperPersistenceTierCard({ tier }: { tier: KeeperPersistenceTierProof 
               <summary class="cursor-pointer">근거 부족 ${tier.missingCount}</summary>
               <div class="mt-1 break-words" data-testid=${`keeper-persistence-missing-${tier.id}`}>
                 ${tier.missingKeepers.join(', ')}
+              </div>
+            </details>
+          `
+        : null}
+      ${tier.undeterminedKeepers.length > 0
+        ? html`
+            <details class="mt-2 text-xs text-[var(--color-fg-muted)]">
+              <summary class="cursor-pointer">확인 못 함 ${tier.undeterminedCount}</summary>
+              <div
+                class="mt-1 break-words"
+                data-testid=${`keeper-persistence-undetermined-${tier.id}`}
+              >
+                기록을 끝까지 읽지 못해 이 Keeper 의 지속 시간을 알 수 없어요.
+                ${tier.undeterminedKeepers.join(', ')}
               </div>
             </details>
           `

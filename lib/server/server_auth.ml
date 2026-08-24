@@ -8,16 +8,9 @@ let trim_opt = Env_config_core.trim_opt
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
-let ipaddr_is_unspecified = function
-  | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-
 let is_loopback_host = Masc_network_defaults.is_loopback_host
 
-let is_unspecified_host host =
-  match Ipaddr.of_string (String.trim host) with
-  | Ok ip -> ipaddr_is_unspecified ip
-  | Error _ -> false
+let is_unspecified_host = Masc_network_defaults.is_unspecified_host
 
 let base_url_has_non_loopback_host () =
   match Env_config_core.masc_http_base_url_result () with

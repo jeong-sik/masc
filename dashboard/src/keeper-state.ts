@@ -685,13 +685,12 @@ const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_sta
 
 const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
   new Set<NonNullable<KeeperDiagnostic['quiet_reason']>>([
-    'quiet_hours', 'min_gap', 'no_recent_activity', 'disabled',
-    'startup', 'model_error', 'graphql_error', 'never_started', 'unknown',
+    'disabled', 'not_running', 'startup', 'never_started',
   ])
 
 const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
   new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
-    'direct_message', 'probe', 'recover',
+    'auto_restart', 'recover', 'probe', 'direct_message',
   ])
 
 const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =

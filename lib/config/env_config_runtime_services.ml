@@ -75,16 +75,6 @@ end
 (** {1 Agent Autonomy Configuration}
     Primary env vars: MASC_AUTONOMY_*. *)
 
-module Autonomy = struct
-  (** Quiet hours start (0-23). Keeper suppresses actions in this window. *)
-  let quiet_start =
-    get_int ~default:3 "MASC_AUTONOMY_QUIET_START"
-
-  (** Quiet hours end (0-23). *)
-  let quiet_end =
-    get_int ~default:7 "MASC_AUTONOMY_QUIET_END"
-end
-
 (** {1 Timeouts & Buffer Sizes} *)
 
 module Timeouts = struct

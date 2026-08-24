@@ -34,6 +34,44 @@ let check_effective label expected meta =
     (Keeper_types_profile_sandbox.network_mode_to_string expected_network)
     (Keeper_types_profile_sandbox.network_mode_to_string network)
 
+(* #21837 asked for this as an invariant: a Docker-profiled keeper's resolved
+   playground root always carries the /docker/ segment. Execute and Read take
+   their default cwd from this root, and the failure it measured was a Docker
+   keeper resolving to the Local root, where its checkout does not exist. *)
+let contains needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  scan 0
+;;
+
+let test_docker_profile_playground_root_is_docker_scoped () =
+  let meta =
+    make_meta
+      ~name:"root-docker"
+      ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+  in
+  let root = Masc.Keeper_sandbox.host_root_rel_of_meta ~meta in
+  check bool
+    ("docker playground root carries the docker segment: " ^ root)
+    true
+    (contains "/docker/" root)
+;;
+
+let test_local_profile_playground_root_is_not_docker_scoped () =
+  let meta =
+    make_meta
+      ~name:"root-local"
+      ~sandbox_profile:Keeper_types_profile_sandbox.Local
+      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+  in
+  let root = Masc.Keeper_sandbox.host_root_rel_of_meta ~meta in
+  check bool
+    ("local playground root has no docker segment: " ^ root)
+    false
+    (contains "/docker/" root)
+;;
+
 let test_local_profile_stays_local_when_docker_playground_enabled () =
   check bool
     "test action enabled Docker playground"
@@ -71,5 +109,15 @@ let () =
           `Quick
           test_local_profile_stays_local_when_docker_playground_enabled
       ; test_case "docker profile stays docker" `Quick test_docker_profile_stays_docker
+      ]
+    ; "playground root",
+      [ test_case
+          "docker profile resolves under /docker/"
+          `Quick
+          test_docker_profile_playground_root_is_docker_scoped
+      ; test_case
+          "local profile does not"
+          `Quick
+          test_local_profile_playground_root_is_not_docker_scoped
       ]
     ]

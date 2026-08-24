@@ -202,6 +202,7 @@ normal_targets=(
   @test/runtest-test_blocker_class_mirror
   @test/runtest-test_board_author_identity_10297
   @test/runtest-test_board_collect_pause_gate
+  @test/runtest-test_board_comment_id_is_visible
   @test/runtest-test_board_context_inference_resolution
   @test/runtest-test_board_core_payload
   @test/runtest-test_transport_integration
@@ -517,6 +518,7 @@ newly_wired_targets=(
   @test/runtest-test_grpc_client
   @test/runtest-test_health
   @test/runtest-test_health_status
+  @test/runtest-test_heartbeat_integration
   @test/runtest-test_heartbeat_qw
   @test/runtest-test_host_config_resolution
   @test/runtest-test_http_negotiation
@@ -907,11 +909,13 @@ sse_targets=(
   @test/runtest-test_tui_chat_queue_wiring
   @test/runtest-test_tui_chat_surface_mirror
   @test/runtest-test_tui_keeper_chat_live
+  @test/runtest-test_tui_observer
   @test/runtest-test_tui_keeper_chat_transcript
   @test/runtest-test_tui_keeper_chat_projection
   @test/runtest-test_tui_keeper_chat_recovery
   @test/runtest-test_tui_composer
   @test/runtest-test_tui_markdown
+  @test/runtest-test_tui_credential
   @test/runtest-test_tui_keeper_control
   @test/runtest-test_tui_keeper_selection
   @test/runtest-test_tui_keyboard_input

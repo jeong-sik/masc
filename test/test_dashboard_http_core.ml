@@ -1080,11 +1080,43 @@ let test_dashboard_query_cache_key_partitions_route_params () =
         (not (String.equal session_a session_b));
       check bool "actor partitions route cache" true
         (not (String.equal session_a actor_b));
+      (* The partition is the directory the cached state lives in, so a
+         scope switch cannot serve the previous workspace's projection
+         (#24504). It used to be the constant "default". *)
       check string "deterministic key shape"
         (Printf.sprintf
-           "session:%s:default:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
-           config.base_path)
+           "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
+           (Workspace_utils.masc_root_dir config))
         session_a)
+
+(* Two clusters can share a base path — the store separates them under
+   .masc/clusters/<name>. The cache partition was the constant "default", so
+   the keys did not, and a scope switch could serve the previous workspace's
+   projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_cluster () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let other_cluster =
+        { config with
+          backend_config =
+            { config.Workspace_utils.backend_config with
+              Backend_types.cluster_name = "cluster-b"
+            }
+        }
+      in
+      check bool "the two configs share a base path" true
+        (String.equal config.Workspace_utils.base_path
+           other_cluster.Workspace_utils.base_path);
+      check bool "but their cache keys differ" true
+        (not
+           (String.equal
+              (Server_dashboard_http_core_cache.dashboard_cache_key config
+                 "session" "s")
+              (Server_dashboard_http_core_cache.dashboard_cache_key
+                 other_cluster "session" "s"))))
 
 let test_dashboard_query_cache_key_encodes_delimiter_values () =
   let dir = test_dir () in
@@ -3329,6 +3361,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "cache key partitions by cluster" `Quick
+            test_dashboard_cache_key_partitions_by_cluster;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick

@@ -7,6 +7,11 @@ let describe = function
   | Command.Say text -> "say:" ^ text
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
+  | Command.Help -> "help"
+  | Command.Switch_keeper name -> "keeper:" ^ name
+  | Command.Switch_keeper_missing_name -> "keeper-missing-name"
+  | Command.Interrupt_turn -> "interrupt"
+  | Command.Toggle_thinking -> "toggle-thinking"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_plain_text_is_a_message () =
@@ -27,6 +32,29 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task"));
   check string "and so is /task with only blanks" "task-missing-title"
     (describe (Command.parse "/task   "))
+
+let test_pane_commands_parse_by_word () =
+  check (list string) "help, keeper, interrupt and thinking"
+    [ "help"
+    ; "keeper:sangsu"
+    ; "keeper-missing-name"
+    ; "interrupt"
+    ; "toggle-thinking"
+    ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/help"; "/keeper sangsu"; "/keeper   "; "/interrupt"; "/thinking" ])
+
+let test_every_command_has_a_help_line () =
+  (* /help itself and every slash word the parser knows appear in the list,
+     so a new command cannot ship silently undocumented. *)
+  List.iter
+    (fun word ->
+      check bool (Printf.sprintf "help mentions /%s" word) true
+        (List.exists
+           (fun line -> String.starts_with ~prefix:("/" ^ word) line)
+           Command.help_lines))
+    [ "task"; "keeper"; "interrupt"; "thinking"; "help" ]
 
 let test_an_unknown_command_is_named_not_sent () =
   check (list string) "the word after the slash, nothing else"
@@ -119,6 +147,10 @@ let () =
   run "tui command"
     [ ( "composer"
       , [ test_case "plain text is a message" `Quick test_plain_text_is_a_message
+        ; test_case "pane commands parse by word" `Quick
+            test_pane_commands_parse_by_word
+        ; test_case "every command has a help line" `Quick
+            test_every_command_has_a_help_line
         ; test_case "/task takes the line as title and the rest as body" `Quick
             test_task_takes_the_line_as_title_and_the_rest_as_body
         ; test_case "an unknown command is named, not sent" `Quick

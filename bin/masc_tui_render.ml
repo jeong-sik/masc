@@ -101,10 +101,33 @@ let chat_body_style : Message_layout.style -> string = function
   | Message_layout.Error -> Ansi.red
   | Message_layout.Tool | Message_layout.Thinking -> Ansi.dim
 
+(* How many reasoning lines a folded block stands for. The count is the
+   non-blank lines, matching what the unfolded block draws. *)
+let folded_thinking_summary body =
+  let lines =
+    String.split_on_char '\n' body
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  Printf.sprintf "(%d reasoning line(s) folded - /thinking to unfold)"
+    (List.length lines)
+
 let render_chat_row buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Body ->
-      box_line_styled buf cols ~style:(chat_body_style row.style) row.text
+      (* The two indent cells the layout reserves become a gutter in the
+         block's own colour, so where one block ends and the next begins
+         reads at a glance instead of from the headings alone. *)
+      let text = row.text in
+      if
+        String.length text >= 2 && Char.equal text.[0] ' '
+        && Char.equal text.[1] ' '
+      then (
+        let rest = String.sub text 2 (String.length text - 2) in
+        box_line buf cols
+          (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
+             (chat_origin_style row.style) Ansi.reset
+             (chat_body_style row.style) rest Ansi.reset))
+      else box_line_styled buf cols ~style:(chat_body_style row.style) text
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
         (Printf.sprintf "[%s]" timestamp)
@@ -2382,12 +2405,19 @@ let render_keeper_message (state : state) =
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
           let role_label = Message_layout.align_role_label role_label in
+          let body =
+            match message.me_role with
+            | Message_thinking when state.msg_thinking_collapsed ->
+                folded_thinking_summary message.me_text
+            | Message_thinking | Message_user _ | Message_keeper
+            | Message_status | Message_error | Message_tool -> message.me_text
+          in
           ({ style;
              timestamp = message.me_timestamp;
              role_label;
              request_label =
                Keeper_chat.compact_request_id message.me_request_id;
-             body = message.me_text;
+             body;
            }
             : Message_layout.entry))
         messages
@@ -2430,7 +2460,9 @@ let render_keeper_message (state : state) =
               match item with
               | Keeper_chat_transcript.Trail_thinking lines ->
                   entry Message_layout.Thinking "thinking"
-                    (String.concat "\n" lines)
+                    (if state.msg_thinking_collapsed
+                     then folded_thinking_summary (String.concat "\n" lines)
+                     else String.concat "\n" lines)
               | Keeper_chat_transcript.Trail_tools rows ->
                   entry Message_layout.Tool "tools" (String.concat "\n" rows)
               | Keeper_chat_transcript.Trail_text text ->

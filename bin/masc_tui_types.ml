@@ -621,6 +621,9 @@ type state = {
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
   mutable msg_older_error: string option;
+  (* Whether this pane folds reasoning blocks to a one-line count. A view
+     preference, not data: toggled by /thinking and never persisted. *)
+  mutable msg_thinking_collapsed: bool;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -826,6 +829,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_exist = false;
   msg_older_loading = false;
   msg_older_error = None;
+  msg_thinking_collapsed = false;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
   detail_scroll = 0;

@@ -5,7 +5,22 @@ type t =
       body : string;
     }
   | Task_missing_title
+  | Help
+  | Switch_keeper of string
+  | Switch_keeper_missing_name
+  | Interrupt_turn
+  | Toggle_thinking
   | Unknown of string
+
+(* One list, drawn by /help and kept beside the parser so a new command
+   cannot ship without its line. *)
+let help_lines =
+  [ "/task <title>   create a task for this keeper (lines below become the body)"
+  ; "/keeper <name>  switch this pane to another keeper"
+  ; "/interrupt      signal the streaming turn to stop"
+  ; "/thinking       fold or unfold reasoning blocks in this pane"
+  ; "/help           this list"
+  ]
 
 let slash = '/'
 
@@ -34,6 +49,11 @@ let parse text =
     match split_word line with
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
+    | "help", _ -> Help
+    | "keeper", "" -> Switch_keeper_missing_name
+    | "keeper", name -> Switch_keeper name
+    | "interrupt", _ -> Interrupt_turn
+    | "thinking", _ -> Toggle_thinking
     | word, _ -> Unknown word
 
 let task_message ~task_id ~title ~body =

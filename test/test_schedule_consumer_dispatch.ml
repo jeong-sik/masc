@@ -62,13 +62,11 @@ let read_file path =
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Common.keepers_runtime_dir_of_base ~base_path)
-          keeper_name)
-       "reaction-ledger")
-    "v6"
+  (* Ask the writer where it writes. Rebuilding the path here made a storage
+     generation bump silently point the test at an empty old namespace. *)
+  Masc.Keeper_reaction_ledger.store_dir
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -1854,7 +1852,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
        ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
        ())
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v6"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name

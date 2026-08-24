@@ -4,6 +4,7 @@ type location =
       relative_path : string;
     }
   | In_bundle of { bundle_path : string }
+  | At_absolute_path of { path : string }
 
 type kind =
   | Edited of {
@@ -115,7 +116,11 @@ let required_string row key =
 (* The target as the write path resolved it, not as the model typed it.
    [input.file_path] is the raw tool argument and carries whichever vocabulary
    the keeper happened to use (#28582); [action_radius.target_path] is the
-   resolver's output and is always relative to the keeper's bundle root. *)
+   resolver's output.
+
+   The resolver's output is mostly bundle-relative and sometimes absolute --
+   528 against 40 over 2026-08-22..24 -- so the shape is decided by looking,
+   not assumed. *)
 let target_path_of_row row =
   match Json_field.assoc row "action_radius" with
   | Json_field.Field_absent -> Error (Malformed "action_radius is absent")
@@ -123,19 +128,21 @@ let target_path_of_row row =
       Error (Malformed (Printf.sprintf "action_radius is %s, expected %s" got expected))
   | Json_field.Found fields -> required_string (`Assoc fields) "target_path"
 
-(* Where a bundle-relative target sits, decided by the playground layout SSOT
-   rather than by looking for a "repos" segment here.
+(* Where the target sits. A relative target is read as the bundle-relative
+   path it is, not rebuilt into an absolute one first: whether the keeper ran
+   local or in Docker changes where its bundle sits on disk and nothing about
+   the path inside it, so composing an absolute path here would mean picking a
+   sandbox flavour this projection has no reason to know.
 
-   The target is read as the bundle-relative path it is, not rebuilt into an
-   absolute one first. Whether the keeper ran local or in Docker changes where
-   its bundle sits on disk and nothing about the path inside it, so composing
-   an absolute path here would mean picking a sandbox flavour this projection
-   has no reason to know — and picking wrong for the eight Docker calls the
-   log carried over 2026-08-22..24. *)
+   An absolute target is reported as one. It is neither a repository address
+   nor a path under a bundle root, and calling it either would put a name on
+   the file that nothing can resolve. *)
 let location_of_target ~target_path =
-  match Playground_paths.parse_bundle_relative_repo_path target_path with
-  | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
-  | None -> In_bundle { bundle_path = target_path }
+  if not (Filename.is_relative target_path) then At_absolute_path { path = target_path }
+  else
+    match Playground_paths.parse_bundle_relative_repo_path target_path with
+    | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
+    | None -> In_bundle { bundle_path = target_path }
 
 let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) input =
   match handler with
@@ -274,6 +281,7 @@ let location_to_json = function
         ]
   | In_bundle { bundle_path } ->
       `Assoc [ ("kind", `String "bundle"); ("path", `String bundle_path) ]
+  | At_absolute_path { path } -> `Assoc [ ("kind", `String "absolute"); ("path", `String path) ]
 
 let kind_to_json = function
   | Edited { before; after; replace_all } ->

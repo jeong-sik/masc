@@ -23,11 +23,21 @@ type location =
           [relative_path] is relative to that clone's root, which is the
           address the same file has in anyone else's checkout. *)
   | In_bundle of { bundle_path : string }
-      (** The file sits in the keeper's playground but under no repository —
-          a scratch script, a note. Real, and not addressable as repository
-          code. Kept rather than dropped: a keeper that wrote a file did
-          write a file, and a projection that silently omitted it would
-          undercount the turn's work. *)
+      (** The file sits in the keeper's playground but under no repository
+          clone — a scratch script, a note. Real, and not addressable as
+          repository code. Kept rather than dropped: a keeper that wrote a
+          file did write a file, and a projection that silently omitted it
+          would undercount the turn's work. *)
+  | At_absolute_path of { path : string }
+      (** The write resolver recorded an absolute path. Two live shapes, and
+          neither is repository-addressable: a worktree checked out at the
+          bundle's own level rather than under [repos/] (see #28968), and a
+          write into the operator's own tree, outside any playground.
+
+          Separate from {!In_bundle} because it is not relative to anything —
+          40 of 568 changes over 2026-08-22..24 arrive this way, and folding
+          them in would have every one of them read as a path under a bundle
+          root they do not sit in. *)
 
 type kind =
   | Edited of {

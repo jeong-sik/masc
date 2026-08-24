@@ -87,6 +87,7 @@ let test_repo_relative_address () =
       check string "repo" "masc" repo_id;
       check string "path" "test/test_ci_run_tests_script.ml" relative_path
   | Change.In_bundle { bundle_path } -> failf "expected In_repo, got bundle %s" bundle_path
+  | Change.At_absolute_path { path } -> failf "expected In_repo, got absolute %s" path
 ;;
 
 (* A scratch file in the playground root is still a file the keeper wrote.
@@ -101,6 +102,34 @@ let test_outside_a_repo_is_kept_as_bundle () =
   match change.Change.location with
   | Change.In_bundle { bundle_path } -> check string "bundle path" "verify-468.sh" bundle_path
   | Change.In_repo { repo_id; _ } -> failf "expected In_bundle, got repo %s" repo_id
+  | Change.At_absolute_path { path } -> failf "expected In_bundle, got absolute %s" path
+;;
+
+(* The resolver sometimes records an absolute path — 40 of 568 changes over
+   2026-08-22..24, in two shapes. Neither is repository-addressable, and
+   calling either a bundle path would name a file under a bundle root it does
+   not sit in. *)
+let absolute_location description target_path =
+  let change = change_of (row ~target_path (edit_input ~before:"a" ~after:"b" ())) in
+  match change.Change.location with
+  | Change.At_absolute_path { path } -> check string description target_path path
+  | Change.In_repo { repo_id; relative_path } ->
+      failf "expected an absolute path, got repo %s / %s" repo_id relative_path
+  | Change.In_bundle { bundle_path } ->
+      failf "an absolute path is not relative to a bundle: %s" bundle_path
+;;
+
+(* A worktree checked out at the bundle's own level rather than under
+   [repos/] — the shape #28968 describes. *)
+let test_absolute_worktree_checkout () =
+  absolute_location "worktree checkout"
+    "/Users/dancer/me/.masc/playground/polisher/masc-task238/lib/keeper/keeper_gate.ml"
+;;
+
+(* A write into the operator's own tree, outside any playground. *)
+let test_absolute_outside_any_playground () =
+  absolute_location "operator tree"
+    "/Users/dancer/me/workspace/yousleepwhen/masc/lib/dashboard/dashboard_events.ml"
 ;;
 
 let test_metadata_round_trip () =
@@ -254,6 +283,8 @@ let () =
     ; ( "address"
       , [ test_case "repo-relative" `Quick test_repo_relative_address
         ; test_case "outside a repo stays a bundle path" `Quick test_outside_a_repo_is_kept_as_bundle
+        ; test_case "absolute worktree checkout" `Quick test_absolute_worktree_checkout
+        ; test_case "absolute outside any playground" `Quick test_absolute_outside_any_playground
         ] )
     ; ( "metadata"
       , [ test_case "round trip" `Quick test_metadata_round_trip

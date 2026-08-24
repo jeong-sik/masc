@@ -874,7 +874,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
    containment over history: an old Tool message earlier in the conversation
    must not read as "this round follows tool execution" — that misread
    suppressed the world state on the first round of ordinary turns
-   (sangsu turn 15, 2026-08-24). *)
+   (haneul turn 15, 2026-08-24). *)
 let message role content : Agent_core.Types.message =
   { role; content = [ Agent_core.Types.Text content ]; name = None
   ; tool_call_id = None; metadata = []

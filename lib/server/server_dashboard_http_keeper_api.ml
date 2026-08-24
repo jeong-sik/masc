@@ -37,6 +37,21 @@ let tool_calls_fleet_cache_key ~masc_root =
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
 
+(* [/file-changes] answers over a trailing time window rather than a row count.
+
+   A count was tried first and could not say what it had covered:
+   [Keeper_tool_call_log.read_recent] fills [n] rows for one keeper by scanning
+   a multiple of [n] fleet rows, so asking for 500 of rondo's calls returned
+   454 on 2026-08-24 and asking for 5,000 returned 1,409 -- and a caller
+   cannot tell a keeper that made no more calls from a scan that stopped short.
+   [read_window] has no row cap, so everything in the window is in the answer
+   and the window is a fact the response can state.
+
+   The ceiling is the tool-call log's own default retention: past it there is
+   nothing left on disk to read, so a wider window would only cost the scan. *)
+let file_changes_default_window_hours = 24.0
+let file_changes_max_window_hours = 24.0 *. 30.0
+
 (* Maximum per-keeper entries for /tool-calls; also sizes the shared
    fleet-row window that per-keeper responses derive from. *)
 let tool_calls_limit_max = 200
@@ -731,6 +746,41 @@ let handle_keeper_get_subroutes state req request reqd =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
+  else if ends_with keeper_suffix_file_changes then
+    let name = extract_name keeper_suffix_file_changes in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else
+      let window_hours =
+        match Server_utils.query_param req "window_hours" with
+        | None -> file_changes_default_window_hours
+        | Some raw -> (
+            match float_of_string_opt (String.trim raw) with
+            | Some hours when hours > 0.0 -> Float.min hours file_changes_max_window_hours
+            | Some _ | None -> file_changes_default_window_hours)
+      in
+      let rows = Keeper_tool_call_log.read_window ~keeper_name:name ~window_hours () in
+      let tally = Keeper_tool_call_file_change.classify_all rows in
+      let json =
+        `Assoc
+          [ ("keeper", `String name)
+            (* The window this answer covers, and how many of the keeper's
+               calls fell inside it. Both are stated because the changes alone
+               do not say what was looked at: no changes in an hour and no
+               calls in an hour are different facts. *)
+          ; ("window_hours", `Float window_hours)
+          ; ("calls_in_window", `Int (List.length rows))
+          ; ( "changes"
+            , `List (List.map Keeper_tool_call_file_change.to_json tally.Keeper_tool_call_file_change.changes) )
+            (* Both counts ride the answer rather than a log line. A reader
+               drawing changes has to be able to say that a turn wrote more
+               than it can show: over_budget rows are changes whose text the
+               log did not keep. *)
+          ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
+          ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
+          ]
+      in
+      Http.Response.json_value ~status:`OK ~compress:true ~request:req json reqd
   else if ends_with keeper_suffix_paused_work then
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then

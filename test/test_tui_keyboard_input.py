@@ -1974,6 +1974,7 @@ def quit_from_compact_message(
     _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
     resize_and_wait(
@@ -2996,6 +2997,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         _base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
 
@@ -3174,6 +3176,7 @@ def autonomous_turn_history_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         pane_start = len(output)
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
@@ -3233,6 +3236,7 @@ def message_origin_badge_interaction(
     _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
@@ -3631,6 +3635,7 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         _base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
 

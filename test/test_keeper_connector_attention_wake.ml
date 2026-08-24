@@ -310,7 +310,8 @@ let test_external_attention_projects_to_prompt_event () =
    | WO.Fusion_completed
    | WO.Schedule_due _
    | WO.Completion_authority_rejected _
-   | WO.Task_cancelled _ ->
+   | WO.Task_cancelled _
+   | WO.Delegate_completed ->
      fail "connector attention must retain its typed counterpart projection")
 
 let () =

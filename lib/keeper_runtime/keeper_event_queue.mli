@@ -126,6 +126,14 @@ type stimulus_payload =
           also an entry in the linear per-Keeper drain — ordered against every
           other stimulus, deduplicated by request identity, and durable across
           a restart. *)
+  | Delegate_completed of delegate_completion
+      (** A turn one Keeper asked another to run has ended, and this carries
+          the answer back to the asker. [masc_keeper_delegate] returns an id
+          and nothing else, so before this payload the answer reached the
+          asker only if it went back and read the id — measured over
+          2026-08-17..24, no Keeper ever did (4 delegations, 0 status reads,
+          10 cancels). Mirrors [Fusion_completed] and [Hitl_resolved]: an
+          async completion the waiting Keeper has to be told about. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -155,6 +163,25 @@ and fusion_terminal =
     it from an error string. The string payloads are the synthesized answer or
     explicit failure detail. [board_post_id] correlates to the sink's board
     evidence post ("" when none was created). *)
+
+and delegate_completion = {
+  dc_operation_id : string;
+  dc_keeper : string;
+  dc_terminal : delegate_terminal;
+}
+(** Payload for [Delegate_completed]. [dc_operation_id] is the id
+    [masc_keeper_delegate] returned, so the asker matches the answer to its
+    own request; [dc_keeper] is the Keeper that ran the turn. *)
+
+and delegate_terminal =
+  | Delegate_replied of string
+  | Delegate_no_reply
+  | Delegate_failed of string
+(** Typed outcome for [Delegate_completed]. [Delegate_replied] carries the
+    visible reply. [Delegate_no_reply] means the turn ended with no text to
+    hand back — it either did its work through a tool that posted elsewhere,
+    or said nothing; the two are not told apart because neither gives the
+    asker something to read. [Delegate_failed] carries the failure detail. *)
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -236,6 +263,11 @@ val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
     ["fusion-run:<run_id>"]. Board projection availability is not event
     identity. *)
+
+val delegate_completion_post_id : delegate_completion -> post_id
+(** Dedup/correlation id for [Delegate_completed]:
+    ["keeper-delegate:<operation_id>"]. One delegation answers once, so the
+    operation id alone is a complete key. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].

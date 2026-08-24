@@ -65,7 +65,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _ ->
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -206,10 +207,12 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Manual_compaction_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
-  | Keeper_event_queue.Fusion_completed _ ->
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Delegate_completed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle and proceed on its
-       own state. *)
+       own state. The answer travels in the Board Activity row, so the turn
+       does not have to be named for the Keeper to read it. *)
     None
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Some Keeper_world_observation.Completion_authority_rejection_stimulus
@@ -332,6 +335,21 @@ let consume_single_heartbeat_stimulus
         (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
         meta_after_triage.name;
       Stimulus_consumed []
+    | Keeper_event_queue.Delegate_completed dc ->
+      (* Same shape as [Fusion_completed]: a turn this Keeper asked another to
+         run has ended, and the answer is surfaced as a pending_board_event so
+         this turn acts on it. *)
+      Log.Keeper.info
+        "turn entry: delegation answer delivered operation_id=%s from=%s \
+         outcome=%s (keeper=%s)"
+        dc.dc_operation_id
+        dc.dc_keeper
+        (match dc.dc_terminal with
+         | Keeper_event_queue.Delegate_replied _ -> "replied"
+         | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+         | Keeper_event_queue.Delegate_failed _ -> "failed")
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Workspace_message message ->
       (* The transcript row committed at the delivery boundary carries the
          content and the message lane reads it, so there is no observation to
@@ -379,7 +397,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Workspace_message _ ->
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ ->
     true
 ;;
 
@@ -411,7 +430,8 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
-         | Keeper_event_queue.Workspace_message _ -> None)
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _ -> None)
       (Keeper_event_queue.to_list pending)
 ;;
 
@@ -489,7 +509,10 @@ let reconcile_spent_selection
   | Task_cancelled _
   (* A committed workspace message cannot be withdrawn, so the selection stays
      worth a turn. *)
-  | Workspace_message _ ->
+  | Workspace_message _
+  (* An answer that has arrived cannot be un-sent, so the selection stays worth
+     a turn. *)
+  | Delegate_completed _ ->
     Ok Selection_actionable
 ;;
 
@@ -542,7 +565,8 @@ let heartbeat_event_intake
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
-      | Keeper_event_queue.Workspace_message _ ->
+      | Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Delegate_completed _ ->
         false
     in
     match select_pending_matching manual_compaction_ready with
@@ -611,7 +635,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _
-    | Keeper_event_queue.Workspace_message _ ->
+    | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ ->
       None
   in
   (* RFC-0377 P1-1: preload every batch member's recorded attention item in
@@ -766,7 +791,8 @@ let heartbeat_event_intake
             | Keeper_world_observation.Fusion_completed
             | Keeper_world_observation.External_attention _
             | Keeper_world_observation.Completion_authority_rejected _
-            | Keeper_world_observation.Task_cancelled _ ->
+            | Keeper_world_observation.Task_cancelled _
+            | Keeper_world_observation.Delegate_completed ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

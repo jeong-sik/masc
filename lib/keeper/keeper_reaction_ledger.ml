@@ -10,6 +10,7 @@ type stimulus_kind =
   | Completion_authority_rejected
   | Task_cancelled
   | Workspace_message
+  | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
 
 type reaction_kind =
   | Turn_started
@@ -36,6 +37,7 @@ let stimulus_kind_to_string = function
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
   | Workspace_message -> "workspace_message"
+  | Delegate_completed -> "keeper_delegate_completed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -53,6 +55,7 @@ let stimulus_kind_of_string = function
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
   | "workspace_message" -> Some Workspace_message
+  | "keeper_delegate_completed" -> Some Delegate_completed
   | _ -> None
 ;;
 
@@ -96,6 +99,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
   | Keeper_event_queue.Workspace_message _ -> Workspace_message
+  | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -213,6 +217,15 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "workspace_message request_id=%s from=%s"
       message.wmsg_request_id
       message.wmsg_from
+  | Keeper_event_queue.Delegate_completed dc ->
+    Printf.sprintf
+      "keeper_delegate_completed operation_id=%s keeper=%s outcome=%s"
+      dc.dc_operation_id
+      dc.dc_keeper
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_replied _ -> "replied"
+       | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+       | Keeper_event_queue.Delegate_failed _ -> "failed")
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -232,6 +245,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
     | Keeper_event_queue.Workspace_message _ -> None
+    | Keeper_event_queue.Delegate_completed _ -> None
   in
   `Assoc
     (base_fields
@@ -843,7 +857,8 @@ let decode_current_row ~keeper_name row =
         | Manual_compaction
         | Completion_authority_rejected
         | Task_cancelled
-        | Workspace_message ),
+        | Workspace_message
+        | Delegate_completed ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1312,7 +1327,8 @@ let board_stimulus_token metadata stimulus_kind =
   | Manual_compaction
   | Completion_authority_rejected
   | Task_cancelled
-  | Workspace_message -> None
+  | Workspace_message
+  | Delegate_completed -> None
 ;;
 
 (* The per-keeper status this module publishes. The fleet roll-up used to

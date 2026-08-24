@@ -468,9 +468,15 @@ let test_tui_current_projection_wiring () =
        ~binding_name:"render_keeper_logs"
        ~callee:"Metrics_tail.empty_message"
      = 1);
-  (* Exact, not substring: the retired alias is the whole key "running", and
-     the fleet reading legitimately holds "running_keeper_fiber_count". *)
-  check int "retired planning running alias absent" 0
+  (* Exact, not substring: [fusion_run_status_to_string] is the canonical
+     serializer for the one legitimate "running" expression literal.
+     [decode_fusion_run] matches the same wire value as a pattern, which this
+     expression-only counter does not see. A retired planning alias returning
+     as an expression would raise this ratchet from one to two. *)
+  check int "Fusion running serializer is canonical" 1
+    (Ast_grep.count_value_bindings
+       ~module_path:"lib/tui_decode.ml" ~name:"fusion_run_status_to_string");
+  check int "running expression literal is only the Fusion serializer" 1
     (Ast_grep.count_exact_string_literals
        ~module_path:"lib/tui_decode.ml"
        ~needle:"running");

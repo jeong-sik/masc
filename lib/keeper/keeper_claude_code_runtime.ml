@@ -61,9 +61,12 @@ let measure_model_input_message_bytes message =
 ;;
 
 (* Keep the durable conversation intact and narrow only the provider-bound
-   start seed after Claude has explicitly rejected the prior view as too
-   large. The next structural boundary is computed before source projections
-   append synthetic evidence, matching the Codex official-client path. *)
+   start seed. A runtime that declares max-prompt-bytes starts inside it; one
+   that does not starts unbounded and narrows after Claude has explicitly
+   rejected the prior view as too large. Waiting for that rejection in both
+   cases is what made a declared ceiling cost a full turn to discover. The
+   next structural boundary is computed before source projections append
+   synthetic evidence, matching the Codex official-client path. *)
 let model_input_projection_for_capacity
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
@@ -903,10 +906,26 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let starting_capacity_bytes =
+    (* [max_capacity_bytes] is the runtime's declared ceiling: the shrink state
+       reads it to discard a remembered capacity that now exceeds it. This lane
+       passed [max_int], so a model that declares max-prompt-bytes was sent the
+       whole history anyway and learned its ceiling only from the provider's
+       rejection -- after the turn had already run. claude-sonnet-5 declares
+       524288, and rondo spent 29 minutes per attempt discovering it
+       (2026-08-24). A runtime that declares nothing keeps the old behaviour.
+
+       The ceiling is the smaller of the model's max-prompt-bytes and the
+       binding's max-request-body-bytes, which is what
+       [declared_input_byte_ceiling_of_runtime_id] answers. keeper_unified_turn
+       already sizes the pinned briefing from the same number and says the
+       projection cuts the conversation window; this is that cut. *)
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name
       ~runtime_id
-      ~max_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~max_capacity_bytes:
+        (Option.value
+           (Runtime.declared_input_byte_ceiling_of_runtime_id runtime_id)
+           ~default:unbounded_model_input_capacity_bytes)
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->

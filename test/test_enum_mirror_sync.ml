@@ -230,6 +230,45 @@ let test_keeper_status_bounds_match_their_owner () =
     ]
 ;;
 
+(* keeper_artifact_read states its max_bytes bounds and default, and
+   analyze_image its media-type vocabulary. [Keeper_artifact_read] and
+   [Keeper_vision_tool] own them; in config/tools/*.toml they are literals. *)
+let test_runtime_tool_owners_match () =
+  check
+    (list string)
+    "analyze_image media types match Keeper_vision_tool"
+    (List.sort_uniq String.compare Masc.Keeper_vision_tool.supported_image_media_types)
+    (advertised_values_for_schemas
+       Masc.Keeper_tool_runtime_schemas.schemas
+       ~property:"media_type");
+  let artifact =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_artifact_read")
+        Masc.Keeper_tool_runtime_schemas.schemas
+    with
+    | Some s -> s
+    | None -> failf "keeper_artifact_read is absent"
+  in
+  let field key =
+    match artifact.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "max_bytes.%s is absent or not an integer" key)
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "max_bytes minimum" Masc.Keeper_artifact_read.minimum_max_bytes (field "minimum");
+  check int "max_bytes maximum" Masc.Keeper_artifact_read.maximum_max_bytes (field "maximum");
+  check int "max_bytes default" Masc.Keeper_artifact_read.default_max_bytes (field "default")
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -355,6 +394,7 @@ let () =
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
+        ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match
         ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors
         ; test_case
             "keeper status bounds"

@@ -31,3 +31,6 @@ let schema_of_name name : Masc_domain.tool_schema =
 ;;
 
 let fusion = schema_of_name "masc_fusion"
+let fusion_status = schema_of_name "masc_fusion_status"
+let artifact_read = schema_of_name "keeper_artifact_read"
+let analyze_image = schema_of_name "analyze_image"

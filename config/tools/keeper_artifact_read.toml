@@ -1,0 +1,28 @@
+name = "keeper_artifact_read"
+description = """
+Read an explicit byte range from a [masc:blob ...] ToolResult. Use the \
+marker's sha256, then continue with the returned next_offset. Text pages use \
+UTF-8; arbitrary bytes use base64. The full artifact is never restored into \
+model history."""
+additional_properties = false
+
+[[params]]
+name = "sha256"
+type = "string"
+required = true
+description = "Exact sha256 from a [masc:blob ...] ToolResult."
+
+[[params]]
+name = "offset"
+type = "integer"
+minimum = 0
+default = 0
+description = "Byte offset to read from."
+
+[[params]]
+name = "max_bytes"
+type = "integer"
+minimum = 1
+maximum = 65536
+default = 65536
+description = "Maximum source bytes to expose in this model-visible page."

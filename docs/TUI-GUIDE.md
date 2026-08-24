@@ -257,8 +257,10 @@ rows, so its trace block is not drawn a second time.
 Only a request-correlated terminal keeper result is rendered as a reply.
 Interrupted streams, protocol errors, rejected turns, and terminal outcomes
 without visible text become explicit status or error rows; partial text is never
-promoted to a successful reply. One request may be in flight at a time. Drafts
-are retained per keeper while navigating.
+promoted to a successful reply. Requests are tracked per keeper, so a turn
+running for one keeper does not decide what `Enter` does in another's window;
+sends going elsewhere show as `(also sending to X)`. Drafts are retained per
+keeper while navigating.
 
 A failed roster read blocks sending. When `.masc/keepers/` cannot be read
 reliably, a stale entry may still name the target, so membership alone does not
@@ -445,12 +447,8 @@ Per surface:
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
-| `Ctrl-R` | Message | Claim a prepared fence, reconcile a fail-closed fence, replay only a replayable fence, or remove a rejected or settled fence by exact durable ID |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
-
-`Ctrl-R` stays available even when extra status rows leave the terminal too
-small for normal message input.
 
 ## Navigation
 

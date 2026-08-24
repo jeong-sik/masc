@@ -2251,7 +2251,7 @@ let render_keeper_message (state : state) =
            ~terminal_cols:cols ~status_rows)
     then begin
       let notice =
-        " Keeper chat needs a larger terminal; resize to type (Ctrl-R:recover, Esc:back)"
+        " Keeper chat needs a larger terminal; resize to type (Esc:back)"
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));

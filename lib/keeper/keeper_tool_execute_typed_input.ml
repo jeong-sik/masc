@@ -859,9 +859,75 @@ let to_shell_ir_unvalidated
     | And_then -> Masc_exec.Shell_ir.And_if
     | Or_else -> Masc_exec.Shell_ir.Or_if
   in
-  match source with
-  | Script script -> script_to_shell_ir ~sandbox ~cwd ~env script
-  | Staged { program; next } ->
+  (* RFC execute-subset-dispositions §3.7 step 4, for the representable only.
+
+     [argv:["sh";"-c";S]] reaches the gate as one opaque program, so nothing
+     inside S is path-scoped, redirect-policed, or held to the connector rules.
+     Where the corpus census says S carries nothing the IR cannot hold -- 1212
+     of 1584 recorded costumes -- lowering S is the same work under the
+     boundary rather than beside it. Where it does not, today's path stays: a
+     blanket flip would refuse calls that run.
+
+     Three guards, and the third is the one that bites. [resolve_arg] answers
+     [$FOO] from *this* process's environment, while a shell would answer it
+     from the child's, which [Env_keeper_scrub] has filtered. Lowering a script
+     that mentions a variable would quietly change the value, in the direction
+     of the unfiltered one. *)
+  let rec arg_mentions_a_variable = function
+    | Masc_exec.Shell_ir.Var _ -> true
+    | Masc_exec.Shell_ir.Lit _ -> false
+    | Masc_exec.Shell_ir.Concat parts -> List.exists arg_mentions_a_variable parts
+  in
+  let rec mentions_a_variable (ir : Masc_exec.Shell_ir.t) =
+    match ir with
+    | Masc_exec.Shell_ir.Simple simple ->
+      List.exists arg_mentions_a_variable simple.Masc_exec.Shell_ir.args
+      || List.exists
+           (fun (_, value) -> arg_mentions_a_variable value)
+           simple.Masc_exec.Shell_ir.env
+    | Masc_exec.Shell_ir.Pipeline stages -> List.exists mentions_a_variable stages
+    | Masc_exec.Shell_ir.Sequence { head; tail } ->
+      mentions_a_variable head
+      || List.exists (fun (_, part) -> mentions_a_variable part) tail
+  in
+  let script_worth_lowering stage =
+    match stage.stdin, stage.stdout, stage.stderr with
+    (* A stage that declares its own streams would have to merge them with
+       whatever the script declares, which is a different question. *)
+    | Inherit_input, Inherit_output, Inherit_output ->
+      Option.bind
+        (Keeper_tooling.Shell_costume.of_argv stage.argv)
+        (fun costume ->
+           let gate_sandbox = { Shell_gate.target = sandbox } in
+           let syntax_policy =
+             { Shell_gate.redirect_allowed = true; allow_pipes = true }
+           in
+           match
+             Keeper_tooling.Shell_costume.classify
+               ~syntax_policy
+               ~sandbox:gate_sandbox
+               costume
+           with
+           | Keeper_tooling.Shell_costume.Representable ->
+             Some costume.Keeper_tooling.Shell_costume.script
+           | Keeper_tooling.Shell_costume.Refused_by_policy _
+           | Keeper_tooling.Shell_costume.Outside_the_subset _
+           | Keeper_tooling.Shell_costume.Unparsable _ -> None)
+    | _ -> None
+  in
+  let lowered_costume =
+    match source with
+    | Staged { program = { head; tail = [] }; next = [] } ->
+      Option.bind (script_worth_lowering head) (fun script ->
+        match script_to_shell_ir ~sandbox ~cwd ~env script with
+        | Ok ir when not (mentions_a_variable ir) -> Some ir
+        | Ok _ | Error _ -> None)
+    | Staged _ | Script _ -> None
+  in
+  match lowered_costume, source with
+  | Some ir, _ -> Ok ir
+  | None, Script script -> script_to_shell_ir ~sandbox ~cwd ~env script
+  | None, Staged { program; next } ->
   let* head = lower_program program in
   match next with
   | [] -> Ok head

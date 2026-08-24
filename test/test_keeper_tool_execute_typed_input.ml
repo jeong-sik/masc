@@ -1640,6 +1640,60 @@ let test_stdin_literal_excludes_the_other_shapes () =
     (Astring.String.is_infix ~affix:"literal" msg)
 ;;
 
+(* RFC execute-subset-dispositions §3.7 step 4. A costume whose script the IR
+   can hold is lowered through the gate; everything else keeps today's path,
+   because a blanket flip would refuse calls that run. *)
+let lowered_bin json =
+  match Execute_input.to_shell_ir_unvalidated (parse_json_exn json) with
+  | Error _ -> Alcotest.fail "lowering must not fail for these inputs"
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+  | Ok _ -> "<not a simple>"
+;;
+
+let costume script =
+  `Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String script ] ]
+;;
+
+let test_a_representable_costume_is_lowered () =
+  (* The shell disappears: what runs is the command it would have run. *)
+  Alcotest.(check string) "echo hi" "echo" (lowered_bin (costume "echo hi"))
+;;
+
+let test_what_the_ir_cannot_hold_keeps_todays_path () =
+  (* [;] is the largest refusal in the corpus (252). Lowering it would refuse a
+     call that runs today, so it stays on the shell. *)
+  Alcotest.(check string) "a ; b" "sh" (lowered_bin (costume "false; echo hi"));
+  Alcotest.(check string) "heredoc" "sh" (lowered_bin (costume "cat <<'EOF'\nx\nEOF"))
+;;
+
+let test_a_script_that_names_a_variable_keeps_todays_path () =
+  (* [resolve_arg] answers a variable from this process's environment, and a
+     shell answers it from the child's, which Env_keeper_scrub has filtered.
+     Lowering would change the value, toward the unfiltered one. *)
+  Alcotest.(check string) "echo $HOME" "sh" (lowered_bin (costume "echo $HOME"));
+  Alcotest.(check string) "braced" "sh" (lowered_bin (costume "echo ${HOME}"))
+;;
+
+let test_a_stage_with_its_own_streams_keeps_todays_path () =
+  (* Merging the stage's redirects with the script's is a different question. *)
+  Alcotest.(check string)
+    "stdin declared"
+    "sh"
+    (lowered_bin
+       (`Assoc
+           [ "argv", `List [ `String "sh"; `String "-c"; `String "echo hi" ]
+           ; "stdin", `Assoc [ "discard", `Bool true ]
+           ]))
+;;
+
+let test_an_ordinary_program_is_untouched () =
+  Alcotest.(check string)
+    "rg"
+    "rg"
+    (lowered_bin (`Assoc [ "argv", `List [ `String "rg"; `String "pattern" ] ]))
+;;
+
 let suite =
   ("typed tool_execute argv schema",
     List.map
@@ -1924,6 +1978,26 @@ let suite =
           "stdin literal excludes the other shapes"
           `Quick
           test_stdin_literal_excludes_the_other_shapes
+      ; Alcotest.test_case
+          "a representable costume is lowered"
+          `Quick
+          test_a_representable_costume_is_lowered
+      ; Alcotest.test_case
+          "what the IR cannot hold keeps today's path"
+          `Quick
+          test_what_the_ir_cannot_hold_keeps_todays_path
+      ; Alcotest.test_case
+          "a script that names a variable keeps today's path"
+          `Quick
+          test_a_script_that_names_a_variable_keeps_todays_path
+      ; Alcotest.test_case
+          "a stage with its own streams keeps today's path"
+          `Quick
+          test_a_stage_with_its_own_streams_keeps_todays_path
+      ; Alcotest.test_case
+          "an ordinary program is untouched"
+          `Quick
+          test_an_ordinary_program_is_untouched
       ])
 ;;
 

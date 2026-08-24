@@ -1,4 +1,4 @@
 (executable
  (name main)
  (modules main)
- (libraries masc.keeper_tooling masc.masc_exec masc.masc_exec_command_gate yojson unix))
+ (libraries masc masc.keeper_tooling masc.masc_exec masc.masc_exec_command_gate yojson unix))

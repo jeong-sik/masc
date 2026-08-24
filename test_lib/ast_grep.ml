@@ -1002,6 +1002,45 @@ let count_exact_string_literals ~module_path ~needle =
   !count
 ;;
 
+(* File scope is the wrong scope once two unrelated concepts share a literal.
+   "running" was a retired planning alias and is now also the wire value of a
+   Fusion run state, so a file-wide count cannot tell the alias coming back
+   from a new decoder doing its job.  Scoping to the binding that would carry
+   the alias asks the question the guard actually means. *)
+let count_exact_string_literals_in_value_binding ~module_path ~binding_name ~needle =
+  let structure = parse_implementation_or_fail module_path in
+  let count_in_expr expr =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self e ->
+            (match e.pexp_desc with
+             | Pexp_constant { pconst_desc = Pconst_string (s, _, _); _ } ->
+               if String.equal s needle then incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self e)
+      }
+    in
+    iter.expr iter expr;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when txt = binding_name ->
+             total := !total + count_in_expr vb.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self vb)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
 let count_string_literals_across_files ~module_paths ~needle =
   List.fold_left
     (fun acc module_path -> acc + count_string_literals ~module_path ~needle)

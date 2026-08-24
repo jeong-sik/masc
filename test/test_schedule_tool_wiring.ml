@@ -187,8 +187,16 @@ let test_flat_tool_surface () =
   let open Yojson.Safe.Util in
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
+  (* Absent and empty mean the same thing to every reader of this schema:
+     [Agent_core_tool_contract.required_names] answers [[]] for both, and the
+     hand-written schemas in lib/tool_schemas emit the key only when it has
+     members.  Asserting the serialised shape made this test fail when the
+     tools moved to TOML (#30035) without anything about the contract
+     changing. *)
   check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+    (match create_schema.input_schema |> member "required" with
+     | `Null -> 0
+     | required -> required |> to_list |> List.length);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in

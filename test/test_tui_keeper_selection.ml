@@ -20,6 +20,14 @@ let pp_navigation formatter = function
 
 let navigation = testable pp_navigation ( = )
 
+let pp_message_switch formatter = function
+  | Selection.No_alternative -> Format.pp_print_string formatter "No_alternative"
+  | Selection.Switch_to { keeper_name; cursor } ->
+      Format.fprintf formatter "Switch_to { keeper_name = %S; cursor = %d }"
+        keeper_name cursor
+
+let message_switch = testable pp_message_switch ( = )
+
 let reconcile current_ids current next_ids =
   Selection.reconcile ~current_ids ~next_ids ~current
 
@@ -98,6 +106,24 @@ let test_pathological_cursors_are_total () =
        (Selection.Message_keeper { keeper_name = "missing"; cursor = min_int })
        [ "sangsu"; "seongsu" ])
 
+let test_message_switch_wraps_and_recovers () =
+  let next current_keeper keeper_ids =
+    Selection.next_message_target ~current_keeper ~keeper_ids
+  in
+  check message_switch "an empty roster has no destination"
+    Selection.No_alternative (next "alpha" []);
+  check message_switch "one current Keeper has no alternative"
+    Selection.No_alternative (next "alpha" [ "alpha" ]);
+  check message_switch "a missing current Keeper recovers to the first row"
+    (Selection.Switch_to { keeper_name = "alpha"; cursor = 0 })
+    (next "missing" [ "alpha" ]);
+  check message_switch "the next row is selected"
+    (Selection.Switch_to { keeper_name = "beta"; cursor = 1 })
+    (next "alpha" [ "alpha"; "beta"; "gamma" ]);
+  check message_switch "the final row wraps to the first"
+    (Selection.Switch_to { keeper_name = "alpha"; cursor = 0 })
+    (next "gamma" [ "alpha"; "beta"; "gamma" ])
+
 let () =
   run "tui_keeper_selection"
     [ ( "selection identity"
@@ -109,5 +135,7 @@ let () =
             test_message_target_survives_unavailability
         ; test_case "pathological cursors" `Quick
             test_pathological_cursors_are_total
+        ; test_case "message switch wraps and recovers" `Quick
+            test_message_switch_wraps_and_recovers
         ] )
     ]

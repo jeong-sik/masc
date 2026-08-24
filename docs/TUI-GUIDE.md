@@ -280,14 +280,23 @@ turn runs. `Esc` returns to the roster when chat opened there, and to detail
 when chat opened from detail.
 
 ```
- Message to: sangsu  (port 8935)
+ Message to: sangsu  ● active · running claude-opus-5  (port 8935)
    [14:35:01] From [you             ] tui-019...
      hello, how are you?
    [14:35:03] From [sangsu          ] tui-019...
      ...reply text...
    > type here_
-  Enter:send  Esc:list  Ctrl-U:clear line
+  Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
+
+The header joins the selected Keeper's published status with its typed runtime
+phase and model, using the same roster reading as the Keepers table. While no
+turn is starting or running, `Ctrl-G` selects the next readable Keeper and
+wraps at the end of the roster. Each Keeper keeps its own draft. Every history
+GET carries a load generation, so a response that finishes after the operator
+switched away or left and returned is discarded instead of replacing the
+newer transcript. The shortcut is withdrawn while a turn is in flight or the
+roster cannot be read.
 
 `From` is a fixed-width reverse-video badge: operator sources are cyan,
 Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is
@@ -513,6 +522,7 @@ Per surface:
 | `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
 | `Esc` | any detail or logs view | Back one level |
 | `Enter` | Message | Send |
+| `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
 

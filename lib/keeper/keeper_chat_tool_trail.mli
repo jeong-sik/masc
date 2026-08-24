@@ -51,6 +51,13 @@ val append_to : ?max_rows:int -> t -> text:string -> string
     keeps whatever no-text outcome its adapter already has rather than being
     answered with a bare trail. *)
 
+val tool_result_digest : result:string -> string option
+(** One short line for what a call answered, from the result text as served.
+
+    A sibling of {!tool_subject}: that one names a call by what it was asked,
+    this one by what it said back. [None] means the result was empty -- a call
+    that answered nothing, which a row can leave blank rather than pad. *)
+
 val tool_subject : name:string -> args:string -> string option
 (** The one argument a reader identifies a call by, or [None] when the
     argument shape carries none of the known keys.

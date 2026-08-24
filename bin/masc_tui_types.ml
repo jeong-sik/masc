@@ -252,7 +252,8 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_active_agents: int;
+  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
@@ -349,6 +350,7 @@ type keeper_mode =
 (** Top-level TUI surface. *)
 type surface =
   | Overview
+  | Acting
   | Keepers of keeper_mode
   | Board
   | Approvals
@@ -376,6 +378,7 @@ type surface_needs = {
 
 let surface_needs : surface -> surface_needs = function
   | Overview -> { needs_transport = true; needs_keeper_roster = false }
+  | Acting -> { needs_transport = false; needs_keeper_roster = false }
   | Keepers _ -> { needs_transport = false; needs_keeper_roster = true }
   | Board | Approvals | Planning | Schedules | Verification | Harness
   | Repositories | Connectors | Tools | Autonomy | System_logs ->
@@ -523,6 +526,10 @@ type state = {
   mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
+  mutable acting_undecodable_last: string option;  (** why, for the most recent one *)
+  mutable acting_scroll: int;  (** rows from the newest, 0 = pinned to the newest *)
+  mutable acting_unseen: int;  (** events that arrived while scrolled away from the newest *)
+  mutable acting_filter: Masc_tui_acting.filter;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
@@ -594,20 +601,12 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
-(* [prepared], [cleanup_pending], [recovery_blocked] and [unverified] were the
-   durable chat fence's states. The fence is gone — the server refuses a second
-   submission of the same request id, so the client does not carry its own —
-   and with it those four are always absent. Passed as [None] rather than
-   removed from the vocabulary: this module's ordering contract is what makes
-   the footer and the send path agree, and narrowing it is a separate change
-   from removing the states it ranked. *)
 let send_disposition state ~keeper_name : send_disposition =
-  Masc_tui_send_disposition.of_state ~prepared:None ~cleanup_pending:None
-    ~recovery_blocked:None
+  Masc_tui_send_disposition.of_state
     ~inflight:
-      (Option.map (fun entry -> entry.sent_request)
+      (Option.map
+         (fun entry -> entry.sent_request)
          (inflight_for_keeper state keeper_name))
-    ~unverified:None
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -732,6 +731,10 @@ let create_state ~workspace ~port ~refresh_interval = {
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
+  acting_undecodable_last = None;
+  acting_scroll = 0;
+  acting_unseen = 0;
+  acting_filter = Masc_tui_acting.Actions;
   verification = None;
   verification_error = None;
   verification_scroll = 0;
@@ -838,7 +841,6 @@ let keeper_message_status_rows (state : state) =
   + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
-  + (if state.msg_scroll > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
   + composer_extra_rows state

@@ -312,6 +312,19 @@ let chat_input_prompt_cells = display_width chat_input_prompt_prefix
    space after it before any content starts. *)
 let chat_input_box_cells = 2
 
+let scroll_hint ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then "up:scroll back"
+  else if older_exist then
+    Printf.sprintf "up/down:scroll  Ctrl-E:newest  (%d back)" scrolled_back
+  else
+    (* At the oldest row with nothing more to fetch that is the more useful
+       fact than the distance: an operator pressing up against a pane that will
+       not move should know it is the start of the conversation rather than a
+       stuck key, and at the start the distance says what "start" already
+       says. Saying both is also what would have made this hint wider than the
+       one it replaced. *)
+    "up/down:scroll  Ctrl-E:newest  (start of conversation)"
+
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in
   (* Three things sit left of the caret: the box, the prompt, and what was
@@ -525,6 +538,23 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
             older
     in
     min requested (max 0 (count 0 (List.rev entries) - height))
+  end
+
+let last_page_start ~height row_costs =
+  let costs = Array.of_list row_costs in
+  let count = Array.length costs in
+  if count = 0 then 0
+  else begin
+    let height = max 1 height in
+    let rec walk index used =
+      if index < 0 then 0
+      else
+        (* A row is the least an item can cost; a zero would let the walk
+           claim the whole list fits in any height. *)
+        let cost = max 1 costs.(index) in
+        if used + cost > height then index + 1 else walk (index - 1) (used + cost)
+    in
+    min (count - 1) (walk (count - 1) 0)
   end
 
 let age_text ~now ~since =

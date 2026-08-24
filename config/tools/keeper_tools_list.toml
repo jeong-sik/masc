@@ -1,0 +1,10 @@
+name = "keeper_tools_list"
+description = """
+List all tools currently available to you, grouped by category. Use when \
+asked 'what can you do?' or when you need to discover your capabilities. Do \
+not use this to answer connector content questions or channel registry \
+questions; use keeper_surface_read only for current conversation context and \
+state the limitation if a connector-wide registry is unavailable. Returns \
+tool names organized by category plus descriptor_surface metadata with \
+executor, schema-shape, and typed usage examples."""
+additional_properties = false

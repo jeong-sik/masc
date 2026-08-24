@@ -1,0 +1,30 @@
+name = "keeper_voice_speak"
+description = """
+Speak a short utterance via the voice bridge. Blocks until local playback \
+finishes: status='spoken' with played_seconds means the user has already \
+heard it — do NOT repeat or rephrase the same content. Duplicate identical \
+messages within 30s return status='dedup_skipped' without playing. TTS or \
+playback failures are returned as errors (ok=false), not silent successes. \
+Concurrent calls are serialized by a global lock."""
+
+[[params]]
+name = "message"
+type = "string"
+required = true
+description = "Text to speak"
+
+[[params]]
+name = "provider"
+type = "string"
+description = "Optional voice provider override"
+
+[[params]]
+name = "priority"
+type = "integer"
+description = "Optional priority hint for the TTS endpoint"
+
+[[params]]
+name = "audio_device"
+type = "string"
+description = """
+Optional target output device id/name for the dashboard/client"""

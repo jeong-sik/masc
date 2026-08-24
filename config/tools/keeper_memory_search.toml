@@ -1,0 +1,28 @@
+name = "keeper_memory_search"
+description = """
+Search your durable Memory OS facts or conversation history. Memory OS fact \
+results preserve snapshot order and include category and insertion \
+timestamp. Default searches the durable fact store. Use source='history' for \
+raw user messages, source='all' for both."""
+additional_properties = false
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = "keyword to search for"
+
+[[params]]
+name = "limit"
+type = "integer"
+description = """
+max results (1-10, default 5). Must be a bare integer (e.g. 5); a quoted \
+value is rejected."""
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["memory", "history", "all"]
+description = """
+Search scope: memory (default, durable facts), history (raw messages), or \
+all"""

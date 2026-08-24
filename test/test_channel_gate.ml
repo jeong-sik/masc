@@ -50,7 +50,7 @@ let test_failed_validation_does_not_poison_retry () =
 let test_validation_error_to_string () =
   check string "empty content" "content is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_content);
-  check string "empty keeper name" "keeper_name is required"
+  check string "empty keeper name" "destination_id is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_keeper_name)
 
 let test_inbound_of_json_normalizes_channel_label () =

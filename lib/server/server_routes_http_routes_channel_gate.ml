@@ -27,7 +27,7 @@ module Http = Http_server_eio
         "channel_user_id": "123456789",
         "channel_user_name": "user#1234",
         "channel_workspace_id": "987654321",
-        "keeper_name": "luna",
+        "destination_id": "luna",
         "content": "What is the project status?",
         "idempotency_key": "discord-msg-abc123",
         "metadata": {}
@@ -66,7 +66,7 @@ module Http = Http_server_eio
     ]}
 
     Response (error):
-    {[ { "ok": false, "error": "keeper_name is required" } ]}
+    {[ { "ok": false, "error": "destination_id is required" } ]}
 *)
 (** Map typed gate_error to HTTP status code. *)
 let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = function

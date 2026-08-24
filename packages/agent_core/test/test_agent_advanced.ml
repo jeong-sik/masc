@@ -64,6 +64,7 @@ let sequence_transport ?(on_call = ignore) responses =
 
 let make_agent_with_options
       ?event_bus
+      ?max_tool_rounds
       ~net
       ~transport
       ~raw_trace
@@ -91,6 +92,7 @@ let make_agent_with_options
     { (Types.default_config ~model:"mock-model") with
       name = "advanced-boundary-test"
     ; yield_on_tool = true
+    ; max_tool_rounds
     }
   in
   Agent.create ~net ~config ~tools:[ tool ] ~options ~checkpoint_sink ()
@@ -811,6 +813,71 @@ let test_terminal_success_stops_advanced_before_next_provider () =
   Alcotest.(check int) "one provider call" 1 !call_count
 ;;
 
+(* The loop used to recurse on every tool round with no counter, so a run
+   ended by exhausting wall clock or context rather than by any declared bound.
+   These two pin both halves: the ceiling stops the run and says so, and an
+   undeclared ceiling still lets the same transcript finish. *)
+let run_tool_rounds ?max_tool_rounds ~sw ~env ~trace ~responses () =
+  let transport, call_count = sequence_transport responses in
+  let agent =
+    make_agent_with_options
+      ?max_tool_rounds
+      ~net:env#net
+      ~transport
+      ~raw_trace:trace
+      ~checkpoint_sink:(fun _ -> Ok ())
+      ~context_injector:None
+      ~on_run_complete:None
+      ~tool:(time_tool ignore)
+      ()
+  in
+  Agent.run_blocks ~sw agent [ Types.Text "work" ], call_count
+;;
+
+let looping_transcript =
+  [ tool_use_response; tool_use_response; tool_use_response; text_response "done" ]
+;;
+
+let test_tool_round_ceiling_fails_the_run () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let result, call_count =
+    run_tool_rounds ~max_tool_rounds:2 ~sw ~env ~trace ~responses:looping_transcript ()
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "run past its declared ceiling reported success"
+   | Error (Error.Agent (Error.ToolRoundLimitExceeded { rounds; limit })) ->
+     Alcotest.(check int) "rounds executed" 2 rounds;
+     Alcotest.(check int) "declared ceiling" 2 limit
+   | Error other ->
+     Alcotest.fail ("unexpected error: " ^ Error.to_string other));
+  Alcotest.(check int) "stopped calling the provider at the ceiling" 2 !call_count
+;;
+
+let test_no_ceiling_leaves_the_loop_unbounded () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let result, call_count = run_tool_rounds ~sw ~env ~trace ~responses:looping_transcript () in
+  (match result with
+   | Ok response ->
+     Alcotest.(check string)
+       "the same transcript finishes when nothing bounds it"
+       "done"
+       (Types.visible_text_of_response response)
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "ran every round the transcript asked for" 4 !call_count
+;;
+
 let test_terminal_typed_error_allows_correction () =
   with_temp_trace
   @@ fun trace_path ->
@@ -1226,6 +1293,14 @@ let () =
             "terminal unknown-effect error is typed"
             `Quick
             test_terminal_unknown_effect_error_is_typed
+        ; Alcotest.test_case
+            "declared tool-round ceiling fails the run"
+            `Quick
+            test_tool_round_ceiling_fails_the_run
+        ; Alcotest.test_case
+            "no declared ceiling leaves the loop unbounded"
+            `Quick
+            test_no_ceiling_leaves_the_loop_unbounded
         ; Alcotest.test_case
             "terminal stream detail preserves provider response"
             `Quick

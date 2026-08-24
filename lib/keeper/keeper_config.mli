@@ -113,6 +113,13 @@ val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool
 
+(** Ceiling on tool-continuation rounds in one keeper turn. [None] leaves the
+    AGENT_CORE run loop unbounded, which is what it was. Reaching the ceiling
+    fails the run with [ToolRoundLimitExceeded] rather than returning a
+    truncated run as a finished one. Hot-reloadable via
+    [keeper.turn.max_tool_rounds]; 0 means unbounded. *)
+val keeper_max_tool_rounds : unit -> int option
+
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)

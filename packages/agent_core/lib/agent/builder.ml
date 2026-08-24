@@ -49,6 +49,7 @@ type t =
   ; periodic_callbacks : Agent.periodic_callback list
   ; contract : Contract.t
   ; yield_on_tool : bool
+  ; max_tool_rounds : int option
   ; slot_id : int option
   ; on_run_complete : (bool -> unit) option
   ; journal : Durable_event.journal option
@@ -109,6 +110,7 @@ let create ~net ~model =
   ; periodic_callbacks = []
   ; contract = Contract.empty
   ; yield_on_tool = false
+  ; max_tool_rounds = None
   ; slot_id = None
   ; on_run_complete = None
   ; journal = None
@@ -209,6 +211,7 @@ let with_initial_messages msgs b = { b with initial_messages = msgs }
 let with_cache_system_prompt v b = { b with cache_system_prompt = v }
 let with_cache_extended_ttl v b = { b with cache_extended_ttl = v }
 let with_yield_on_tool v b = { b with yield_on_tool = v }
+let with_max_tool_rounds v b = { b with max_tool_rounds = Some v }
 let with_event_bus bus b = { b with event_bus = Some bus }
 let without_event_bus b = { b with event_bus = None }
 let with_stream_idle_timeout s b = { b with stream_idle_timeout_s = Some s }
@@ -262,6 +265,7 @@ let build b =
     ; cache_extended_ttl = b.cache_extended_ttl
     ; initial_messages = b.initial_messages
     ; yield_on_tool = b.yield_on_tool
+    ; max_tool_rounds = b.max_tool_rounds
     }
   in
   let options =

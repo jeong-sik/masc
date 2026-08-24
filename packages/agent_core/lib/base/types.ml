@@ -107,6 +107,15 @@ type agent_config =
     (* Seed conversation with prior history on first run *)
   ; yield_on_tool : bool
     (** Release LLM slot during tool execution, re-acquire before next turn. @since 0.100.0 *)
+  ; max_tool_rounds : int option
+    (** Ceiling on how many times one run may continue after executing tools.
+        [None] leaves the loop unbounded, which is what it was: the loop
+        recursed on every tool round and stopped only when the model finished,
+        errored, or ran a terminal tool, so a turn ended by exhausting wall
+        clock or context rather than by any declared bound. Reaching the
+        ceiling is reported as [`Tool_round_limit_exceeded] rather than a
+        quiet stop, because a truncated run that looks like a completed one is
+        worse than a failed one. *)
   }
 [@@deriving show]
 
@@ -130,6 +139,7 @@ let default_config ~model =
   ; cache_extended_ttl = false
   ; initial_messages = []
   ; yield_on_tool = false
+  ; max_tool_rounds = None
   }
 ;;
 

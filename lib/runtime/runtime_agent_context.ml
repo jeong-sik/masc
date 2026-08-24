@@ -107,6 +107,12 @@ type config =
   ; checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
+  ; max_tool_rounds : int option
+    (** Ceiling on tool-continuation rounds in one AGENT_CORE run. [None] leaves
+        the loop unbounded, which is what it was: a turn ended by exhausting
+        wall clock or context rather than by any declared bound. Measured
+        2026-08-24 over 4,416 keeper turns: p50 0 rounds, p90 6, p99 56, max
+        279. *)
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; thinking_budget : int option
@@ -167,6 +173,7 @@ let default_config
   ; checkpoint_sidecar = None
   ; cache_system_prompt = false
   ; yield_on_tool = false
+  ; max_tool_rounds = None
   ; context_injector = None
   ; context = None
   ; thinking_budget = None
@@ -229,6 +236,7 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
       config.cache_system_prompt || provider.cache_system_prompt
   ; initial_messages = config.initial_messages
   ; yield_on_tool = config.yield_on_tool
+  ; max_tool_rounds = config.max_tool_rounds
   }
 ;;
 
@@ -310,6 +318,11 @@ let builder
     if config.yield_on_tool
     then Agent_core.Builder.with_yield_on_tool true builder
     else builder
+  in
+  let builder =
+    match config.max_tool_rounds with
+    | Some rounds -> Agent_core.Builder.with_max_tool_rounds rounds builder
+    | None -> builder
   in
   let builder =
     if config.initial_messages <> []

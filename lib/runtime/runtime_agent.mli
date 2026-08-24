@@ -129,6 +129,7 @@ type config = Runtime_agent_context.config = {
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
+  max_tool_rounds : int option;
   context_injector : Agent_core.Hooks.context_injector option;
   context : Agent_core.Context.t option;
   thinking_budget : int option;

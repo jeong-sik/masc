@@ -39,6 +39,10 @@ val terminal_effect_disposition
 
 type agent_error =
   | UnrecognizedStopReason of { reason : string }
+  | ToolRoundLimitExceeded of
+      { rounds : int
+      ; limit : int
+      }
   | HookExecutionFailed of
       { hook_name : string
       ; stage : string

@@ -107,6 +107,7 @@ let core_termination_semantics = function
     Agent_core_tripwire_violation
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired _) -> Agent_core_input_required
   | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _)
+  | Agent_core.Error.Agent (Agent_core.Error.ToolRoundLimitExceeded _)
   | Agent_core.Error.Agent (Agent_core.Error.HookExecutionFailed _)
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolEffectFailed _)
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
@@ -175,6 +176,8 @@ let terminal_effect_disposition_to_wire effect_disposition =
 let agent_error_terminal_reason_code = function
   | Agent_core.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
+  | Agent_core.Error.ToolRoundLimitExceeded { rounds; limit } ->
+    Printf.sprintf "agent_error_tool_round_limit_exceeded:rounds=%d,limit=%d" rounds limit
   | Agent_core.Error.HookExecutionFailed { hook_name; stage; _ } ->
     Printf.sprintf
       "agent_error_hook_execution_failed:hook=%s,stage=%s"

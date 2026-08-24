@@ -80,6 +80,10 @@ type agent_error =
       Tool_contract.Invocation.t * Error.closed_terminal_effect * string
     (** exact invocation, effect disposition, detail *)
   | `Unrecognized_stop_reason of string
+  | `Tool_round_limit_exceeded of int * int
+    (** rounds executed, declared ceiling. The run kept continuing after tool
+        execution past the ceiling its config declared. Reported instead of a
+        quiet stop so a truncated run is never mistaken for a finished one. *)
   ]
 
 (** {1 Infrastructure errors} *)

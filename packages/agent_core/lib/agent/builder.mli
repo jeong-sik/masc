@@ -41,6 +41,11 @@ val with_cache_extended_ttl : bool -> t -> t
     @since 0.99.7 *)
 val with_yield_on_tool : bool -> t -> t
 
+(** Ceiling on tool-continuation rounds in one run. Unset leaves the loop
+    unbounded. Reaching it fails the run with [`Tool_round_limit_exceeded]
+    rather than returning a truncated run as a completed one. *)
+val with_max_tool_rounds : int -> t -> t
+
 (** {2 Tools and MCP} *)
 
 val with_tools : Tool.t list -> t -> t

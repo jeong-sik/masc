@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/keeper/keeper_agent_run.ml
-  - lib/keeper/keeper_post_turn.ml
-  - lib/keeper/keeper_checkpoint_store.ml
 ---
 
 # Checkpoint Truth and Replay RFC

@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-05-15
-code_refs:
-  - lib/keeper/keeper_keepalive.ml
-  - lib/keeper/keeper_supervisor.ml
-  - lib/mcp_server.ml
 ---
 
 # MASC Product Review

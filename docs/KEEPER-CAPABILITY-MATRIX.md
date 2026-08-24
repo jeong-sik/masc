@@ -1,12 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-01
-code_refs:
-  - lib/keeper/keeper_tool_descriptor.ml
-  - lib/tool_surface/
-  - lib/tool_schemas/tool_schemas_schedule.ml
-  - lib/tool_schemas/tool_schemas_workspace_extra.ml
-  - lib/tool_catalog_surfaces/tool_catalog_surfaces.ml
 ---
 
 # Keeper Capability Matrix

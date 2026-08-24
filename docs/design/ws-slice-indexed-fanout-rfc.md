@@ -1,10 +1,5 @@
 ---
 status: rfc
-last_verified: 2026-04-25
-code_refs:
-  - lib/sse.ml
-  - lib/server/server_mcp_transport_ws.ml
-  - lib/server/masc_grpc_service.ml
 ---
 
 # WS Slice-Indexed Fan-Out (RFC)

@@ -1,6 +1,5 @@
 ---
 status: historical
-last_verified: 2026-07-13
 ---
 
 # Historical Keeper turn-FSM metrics

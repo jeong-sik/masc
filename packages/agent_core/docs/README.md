@@ -1,8 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-10
-code_refs:
-  - packages/agent_core/lib
 ---
 
 # Agent Core specifications

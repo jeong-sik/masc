@@ -1,13 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-13
-code_refs:
-  - lib/workspace/
-  - lib/workspace_goals.ml
-  - lib/goal/
-  - lib/task/tool_task.ml
-  - lib/tool_agent.ml
-  - lib/workspace/workspace_task_claim.ml
 ---
 
 # Workspace State

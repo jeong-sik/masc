@@ -1,10 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-06-29
-code_refs:
-  - lib/mcp_server.ml
-  - lib/keeper/
-  - lib/keeper/keeper_runtime.ml
 ---
 
 # Release Evidence

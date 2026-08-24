@@ -373,6 +373,56 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     None
     (current_task_for observer);
 
+  (* The reactive path clears only after reading the canonical backlog and
+     finding the task terminal, so it is the one that names a real desync. The
+     after-commit sweeps that run on every transition emit their own name, or
+     their volume buries this signal -- two thirds of 3,000 recorded events
+     came from one after-commit site (#27411). *)
+  let event_types () =
+    let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+    let rec files dir =
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.concat_map (fun name ->
+        let path = Filename.concat dir name in
+        if Sys.is_directory path then files path else [ path ])
+    in
+    if not (Sys.file_exists events_dir)
+    then []
+    else
+      files events_dir
+      |> List.concat_map (fun path ->
+        In_channel.with_open_text path In_channel.input_all
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+          if String.length line = 0
+          then None
+          else
+            match Yojson.Safe.from_string line with
+            | `Assoc fields ->
+              (match List.assoc_opt "type" fields with
+               | Some (`String t) -> Some t
+               | _ -> None)
+            | _ -> None
+            | exception _ -> None))
+  in
+  let types = event_types () in
+  Alcotest.(check bool)
+    "the reactive clear is recorded as a desync"
+    true
+    (List.exists (String.equal "cache_desync.cleared") types);
+  (* This run also claimed and completed a task, so the after-commit sweeps
+     ran. They have to appear under their own name, or the split did not
+     actually separate the two populations. *)
+  Alcotest.(check bool)
+    "after-commit sweeps are recorded under their own name"
+    true
+    (List.exists (String.equal "task_cache.cleared_after_commit") types);
+  Alcotest.(check int)
+    "the reactive clear is the only desync in this run"
+    1
+    (List.length (List.filter (String.equal "cache_desync.cleared") types));
+
   let before_rejected =
     Workspace.get_all_messages_raw config ~since_seq:0 |> List.length
   in

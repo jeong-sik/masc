@@ -32,6 +32,7 @@ let delete_task_r config ~task_id : unit Masc_domain.masc_result =
     let after_commit () =
       Task_cache_invariant.clear_stale_agent_task_for_task
         config
+        ~cause:Task_cache_invariant.After_commit
         ~task_id
         ~status
         ~module_name:"workspace_task.delete_task_r"
@@ -205,6 +206,7 @@ let recover_owned_task_to_todo_r
       ; run_post_commit "task_cache_invariant" (fun () ->
           Task_cache_invariant.clear_stale_agent_task
             config
+            ~cause:Task_cache_invariant.After_commit
             ~agent_name:previous_assignee
             ~task_id
             ~status:Masc_domain.Todo

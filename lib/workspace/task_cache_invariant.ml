@@ -49,11 +49,31 @@ type agent_task_match =
     [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
 let is_terminal = Masc_domain.task_status_is_terminal
 
-let emit_cache_desync_event config ~agent_name ~task_id ~status_label ~module_name =
+(** Why an agent record had its [current_task] cleared.
+
+    [After_commit] is the routine sweep a writer runs once its backlog commit
+    lands: the previous assignee stops owning a task that just moved. Nothing
+    was out of step. [Desync] is the reactive path, which clears only after
+    reading the canonical backlog and finding the task terminal or gone.
+
+    Both used to emit [cache_desync.cleared]. Two thirds of 3,000 recorded
+    events came from [transition_task_r], an after-commit site, so the count
+    could not answer whether agent caches actually drift -- the question
+    #27411 has to settle before deciding what the seven repair sites are
+    for. *)
+type clear_cause =
+  | After_commit
+  | Desync
+
+let clear_cause_event_type = function
+  | After_commit -> "task_cache.cleared_after_commit"
+  | Desync -> "cache_desync.cleared"
+
+let emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name =
   try
     log_event config
       (`Assoc
-        [ "type", `String "cache_desync.cleared"
+        [ "type", `String (clear_cause_event_type cause)
         ; "module", `String module_name
         ; "agent", `String agent_name
         ; "task_id", `String task_id
@@ -90,6 +110,7 @@ let agent_current_task_match config ~agent_name ~task_id =
 
 let clear_stale_agent_task_if_matching
       config
+      ~(cause : clear_cause)
       ~(agent_name : string)
       ~(task_id : string)
       ~(status_label : string)
@@ -118,17 +139,18 @@ let clear_stale_agent_task_if_matching
   in
   (match outcome with
    | Matches ->
-     emit_cache_desync_event config ~agent_name ~task_id ~status_label ~module_name
+     emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name
    | Mismatch | Missing | Unreadable _ -> ());
   outcome
 ;;
 
 (** Clear the agent's [current_task] field on disk when it equals [task_id]
-    and log a [cache_desync.cleared] diagnostic event. *)
-let clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name =
+    and log one diagnostic event named by [cause]. *)
+let clear_stale_agent_task config ~cause ~agent_name ~task_id ~status ~module_name =
   ignore
     (clear_stale_agent_task_if_matching
        config
+       ~cause
        ~agent_name
        ~task_id
        ~status_label:(Masc_domain.task_status_to_string status)
@@ -138,13 +160,14 @@ let clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name =
 (** Scan every on-disk agent record and clear [current_task] when it equals
     [task_id].  Use this when the backlog no longer references the task
     (terminal status or deletion) and the exact previous assignee is not
-    known.  Logs one [cache_desync.cleared] event per affected agent.
+    known.  Logs one event per affected agent, named by [cause].
 
     The read is best-effort and unlocked; [clear_stale_agent_task] re-checks
     the match under the per-agent file lock before writing, so the worst race
     is a no-op or a duplicate log rather than a corrupt agent record. *)
 let clear_stale_agent_task_for_task
       config
+      ~(cause : clear_cause)
       ~(task_id : string)
       ~(status : Masc_domain.task_status)
       ~(module_name : string)
@@ -165,6 +188,7 @@ let clear_stale_agent_task_for_task
                   match agent_of_yojson json with
                   | Ok agent when agent.current_task = Some task_id ->
                       clear_stale_agent_task config
+                        ~cause
                         ~agent_name:agent.name
                         ~task_id
                         ~status

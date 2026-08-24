@@ -1,0 +1,32 @@
+name = "masc_keeper_sandbox_stop"
+description = "Stop the managed sandbox container(s) for a keeper or fleet."
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+description = """
+Optional keeper handle. When omitted, stop matching containers across the \
+active fleet."""
+
+[[params]]
+name = "container_kind"
+type = "string"
+enum = ["managed", "turn", "all"]
+default = "managed"
+description = """
+Container scope to stop: managed, turn, or all (default: managed)."""
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+required = true
+exclusive_minimum = 0.0
+description = "Explicit sandbox stop timeout in seconds."
+
+[[params]]
+name = "prune_stale"
+type = "boolean"
+default = false
+description = """
+Also remove stale managed sandbox containers after the targeted stop."""

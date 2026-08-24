@@ -1,0 +1,31 @@
+name = "masc_keeper_sandbox_start"
+description = "Start the managed sandbox container for a keeper."
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Keeper handle whose managed sandbox should be started."
+
+[[params]]
+name = "network_mode"
+type = "string"
+enum = ["none", "inherit"]
+description = """
+Optional sandbox network mode. Defaults to the keeper's configured network \
+mode."""
+
+[[params]]
+name = "ttl_sec"
+type = "number"
+minimum = 0.0
+description = """
+Managed sandbox lifetime in seconds; omit or use 0 for no automatic expiry."""
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+required = true
+exclusive_minimum = 0.0
+description = "Explicit sandbox start timeout in seconds."

@@ -174,6 +174,62 @@ let test_library_source_mirrors_its_owner () =
     (advertised_values_for_schemas Tool_schemas_library.schemas ~property:"source")
 ;;
 
+(* The keeper sandbox and status vocabularies. Their owners are
+   [Keeper_types_profile_sandbox], [Keeper_sandbox_control_contract] and
+   [Masc.Keeper_status_options_defaults]; the schemas write the strings in
+   config/tools/masc_keeper_*.toml, where nothing reads an OCaml value. *)
+let test_keeper_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Keeper property %s matches its typed owner" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Masc.Keeper_schema.schemas ~property))
+    [ "network_mode", Keeper_types_profile_sandbox.valid_network_mode_strings
+    ; "container_kind", Masc.Keeper_sandbox_control_contract.stop_scope_strings
+    ; "tail_order", Masc.Keeper_status_options_defaults.valid_tail_order_strings
+    ]
+;;
+
+(* masc_keeper_status states its bounds twice -- once as minimum/maximum and
+   once inside the sentence a model reads -- and both were built from
+   [Masc.Keeper_status_options_defaults] by Printf. In TOML they are literals, so
+   check the numbers rather than trusting them to agree. *)
+let test_keeper_status_bounds_match_their_owner () =
+  let status =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_keeper_status")
+        Masc.Keeper_schema.schemas
+    with
+    | Some s -> s
+    | None -> failf "masc_keeper_status is absent"
+  in
+  let bound property key =
+    match status.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s.%s is absent or not an integer" property key)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let open Masc.Keeper_status_options_defaults in
+  List.iter
+    (fun (property, lo, hi) ->
+      check int (property ^ " minimum") lo (bound property "minimum");
+      check int (property ^ " maximum") hi (bound property "maximum"))
+    [ Argument.tail_turns, min_tail_turns, max_tail_turns
+    ; Argument.tail_messages, min_tail_messages, max_tail_messages
+    ; Argument.tail_bytes, min_tail_bytes, max_tail_bytes
+    ]
+;;
+
 let test_goal_tool_enum_mirrors () =
   List.iter
     (fun (property, owner) ->
@@ -299,6 +355,11 @@ let () =
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
+        ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors
+        ; test_case
+            "keeper status bounds"
+            `Quick
+            test_keeper_status_bounds_match_their_owner
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode

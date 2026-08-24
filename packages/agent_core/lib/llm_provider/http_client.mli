@@ -371,7 +371,9 @@ type raw_sync_response =
   }
 
 (** GET a URL synchronously, returning the full response.
-    Returns [(status_code, body_string)] on success.
+    Returns status, body, and the response-header evidence the caller needs
+    ([Retry-After], [Content-Type]) on success — the same
+    {!raw_sync_response} {!post_sync} returns.
 
     Without [cache], the connection is closed immediately after the
     request completes. With [cache], the connection is bound to the

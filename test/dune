@@ -2771,6 +2771,16 @@
  (libraries alcotest masc_tui_markdown_render_cache))
 
 (test
+ (name test_tui_diff)
+ (modules test_tui_diff)
+ (libraries alcotest masc_tui_diff))
+
+(test
+ (name test_tui_span)
+ (modules test_tui_span)
+ (libraries alcotest masc_tui_span))
+
+(test
  (name test_tui_csi)
  (modules test_tui_csi)
  (libraries alcotest masc_tui_csi))

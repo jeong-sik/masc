@@ -312,6 +312,17 @@
  (libraries base64))
 
 (library
+ (name masc_tui_diff)
+ (wrapped false)
+ (modules masc_tui_diff))
+
+(library
+ (name masc_tui_span)
+ (wrapped false)
+ (modules masc_tui_span)
+ (libraries masc_tui_message_layout))
+
+(library
  (name masc_tui_message_layout)
  (wrapped false)
  (modules masc_tui_message_layout)
@@ -468,6 +479,8 @@
   masc_tui_keeper_control
   masc_tui_keeper_selection
   masc_tui_message_layout
+  masc_tui_span
+  masc_tui_diff
   masc_tui_metrics_tail
   masc_tui_observer
   masc_tui_operator_projection

@@ -2325,9 +2325,18 @@ let descriptor_in_surface ~surface descriptor =
     List.mem descriptor.keeper_tool_group (groups @ always_retained_groups)
 ;;
 
-let model_visible_schemas ~surface =
+(* RFC-0389: the model-visible descriptors narrowed to [surface]. [All] returns
+   every model-visible descriptor (the pre-feature behaviour); [Declared]
+   keeps only the declared groups plus the always-retained Core/Meta. This is
+   the descriptor-level projection that [make_tool_bundle] consumes so a
+   declared Keeper's actual turn payload narrows, not just its discovery JSON. *)
+let model_visible_descriptors_for_surface ~surface =
   model_visible_descriptors ()
   |> List.filter (descriptor_in_surface ~surface)
+;;
+
+let model_visible_schemas ~surface =
+  model_visible_descriptors_for_surface ~surface
   |> List.concat_map (fun descriptor ->
     keeper_model_names descriptor
     |> List.map (fun name ->

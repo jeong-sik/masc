@@ -230,6 +230,13 @@ val model_schema_errors : t -> string list
     missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
 
+(** RFC-0389: the model-visible descriptors narrowed to [surface]. [All]
+    returns every model-visible descriptor (pre-feature behaviour); [Declared]
+    keeps only the declared groups plus the always-retained Core/Meta. This is
+    the descriptor-level projection [make_tool_bundle] consumes so a declared
+    Keeper's actual turn payload narrows. *)
+val model_visible_descriptors_for_surface : surface:tool_surface -> t list
+
 (** Exact schema projection admitted by the Keeper model surface.
 
     [All] returns every model-visible descriptor (the current behavior).

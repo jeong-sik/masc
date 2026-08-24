@@ -450,6 +450,25 @@ let test_rejections () =
 
 (* ── Embedded tree validation ─────────────────────────────────────────── *)
 
+(* The synthetic tree below proves the validator's arms. It cannot prove the
+   tree we actually ship, and that gap let a definition without a "name" key
+   reach main: #30266 added config/tools/keeper_tasks_list.toml carrying only
+   a [help] table, `dune build @check` stayed green, and every server refused
+   to boot on it (masc#30278). Boot calls exactly this pair
+   (server_runtime_bootstrap.ml: validate_embedded_tool_definitions), so
+   running it here fails the build instead of the fleet. *)
+let test_shipped_embedded_tree_loads () =
+  match
+    Tool_definition_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message ->
+    failf "the shipped embedded tool tree does not load: %s" message
+;;
+
+
 let test_validate_embedded () =
   let good = minimal "masc_example_ok" in
   let embedded =
@@ -942,6 +961,8 @@ let () =
     ; ( "validate_embedded"
       , [ test_case "walks tools/, skips the manifest, fails closed" `Quick
             test_validate_embedded
+        ; test_case "the shipped embedded tree loads" `Quick
+            test_shipped_embedded_tree_loads
         ] )
     ]
 ;;

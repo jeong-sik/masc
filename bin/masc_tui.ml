@@ -2777,6 +2777,11 @@ let main () =
       ~finally:(fun () ->
         Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
         Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        (* restore_terminal above gave the alternate screen back so the shell
+           was usable while stopped. Take it again before the repaint, or the
+           frame lands on top of whatever the user did meanwhile. *)
+        Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+          ~flush:(fun () -> flush stdout);
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
@@ -2796,6 +2801,10 @@ let main () =
      entry and the first frame the stream is quiet, and the enable is not
      urgent anyway -- the first wheel event always arrives after the first
      frame. *)
+  (* Before the first frame and after session entry, so the at_exit cleanup
+     that gives this back is already installed. *)
+  Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+    ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
   flush stdout;
 

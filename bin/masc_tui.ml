@@ -397,8 +397,49 @@ let save_message_draft state =
         if String.equal text "" then other_drafts
         else (keeper_name, text) :: other_drafts
 
+(* Put a spilled paste back where its placeholder stands.
+
+   The draft holds one line saying what was pasted; the keeper is sent the
+   text. Substituting here, on the one path every send goes through, is what
+   keeps the two from drifting: a placeholder that reached a keeper would be a
+   message about a paste instead of the paste.
+
+   The spill is dropped whether or not its line was still there. An operator
+   who deleted the placeholder meant to drop the paste, and a spill that
+   outlived the draft would attach itself to the next message. *)
+let restore_spilled_paste state text =
+  match state.msg_spill with
+  | None -> text
+  | Some spill ->
+      state.msg_spill <- None;
+      let placeholder = Masc_tui_paste_spill.draft_line spill in
+      let placeholder_length = String.length placeholder in
+      let text_length = String.length text in
+      let rec find start =
+        if start + placeholder_length > text_length then None
+        else if
+          String.equal (String.sub text start placeholder_length) placeholder
+        then Some start
+        else find (start + 1)
+      in
+      (match find 0 with
+       | None -> text
+       | Some at ->
+           String.sub text 0 at
+           ^ spill.Masc_tui_paste_spill.text
+           ^ String.sub text
+               (at + placeholder_length)
+               (text_length - at - placeholder_length))
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name =
+  (* The paste goes back into the draft before the draft is put away. A spill
+     lives with the composer; a saved draft has to stand on its own, and a
+     placeholder without its text would reach the keeper as a sentence about a
+     paste instead of the paste. *)
+  (let materialised = restore_spilled_paste state (Buffer.contents state.msg_input) in
+   Buffer.clear state.msg_input;
+   Buffer.add_string state.msg_input materialised);
   save_message_draft state;
   state.msg_target_keeper_name <- Some keeper_name;
   state.msg_return <- return_to;
@@ -612,7 +653,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        transcript reloads after every settle, so there is nothing here for a
        key to reconcile. *)
     if c = Some 21 then begin
-      (* Ctrl-U: clear the composer *)
+      (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
+         is the operator saying they do not want what is there, and a spill
+         that outlived it would attach to the next message. *)
+      state.msg_spill <- None;
       Buffer.clear state.msg_input;
       true
     end else if c = Some 5 then begin
@@ -1731,6 +1775,7 @@ let queue_keeper_message state ~keeper_name text =
    unverified outcome, a blocked recovery, each with its own Ctrl-R — is gone
    with the fence that produced them. *)
 let start_keeper_message ?keeper_name state ~mailbox text =
+  let text = restore_spilled_paste state text in
   match
     match keeper_name with
     | Some _ -> keeper_name
@@ -3267,6 +3312,17 @@ let handle_composer_key state ~base_path ~mailbox key =
    Typed keys reach the draft only through [is_printable_utf8_scalar], so a
    control byte cannot get in one keystroke at a time; a paste is the one way
    a terminal escape could arrive, and it arrives as spaces instead. *)
+(* Names for a spilled paste's file. Read from the clock and from the request
+   ids this process already mints, so two pastes in the same second cannot
+   claim one name. *)
+let spill_stamp () =
+  let time = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%04d%02d%02d-%02d%02d" (time.Unix.tm_year + 1900)
+    (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min
+
+let spill_nonce () =
+  String.sub (Random_id.uuid_v7 ()) 0 8
+
 let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
@@ -3281,9 +3337,24 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
          (String.length paste.Masc_tui_paste.text))
   else begin
     forget_recall state;
-    Buffer.add_string state.msg_input
-      (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-         paste.Masc_tui_paste.text);
+    let text =
+      Keeper_chat.terminal_safe_text ~preserve_newlines:true
+        paste.Masc_tui_paste.text
+    in
+    (match
+       Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
+         ~nonce:(spill_nonce ()) text
+     with
+     | None -> Buffer.add_string state.msg_input text
+     | Some spill ->
+         (* One line in the draft, the text kept beside it. The composer is
+            five rows: a four-hundred-line paste in it is a draft the operator
+            cannot read, and a draft they cannot read is a message they cannot
+            check before sending. The text goes back in on the way out, so
+            what the keeper receives is what was pasted. *)
+         state.msg_spill <- Some spill;
+         Buffer.add_string state.msg_input
+           (Masc_tui_paste_spill.draft_line spill));
     if paste.Masc_tui_paste.dropped > 0 then
       add_event state "error"
         (Printf.sprintf "Paste kept the first %d bytes; %d more were dropped"

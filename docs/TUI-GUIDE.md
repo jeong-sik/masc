@@ -407,6 +407,20 @@ always lands somewhere visible and addressed to the keeper the row named. With
 no keeper to send to, the paste is refused out loud in Recent Events rather
 than dropped.
 
+A paste longer than 50 lines, or larger than 8 KiB, is not put into the draft.
+The composer is five rows; a four-hundred-line paste in it is a draft nobody
+can read, and a draft nobody can read is a message nobody can check before
+sending. One line stands in its place:
+
+```
+   > [pasted 400 line(s), 3489 bytes → pasted-20260825-0211-01a034c1.txt]
+```
+
+The text is kept beside the draft and goes back in where that line stands when
+the message is sent, so the Keeper receives what was pasted. `Ctrl-U` drops
+both. Switching Keepers puts the text back into the draft first, so a saved
+draft never holds a placeholder whose text has gone.
+
 Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
 was copied; all three become one LF in the draft. Everything else that is not
 printable becomes a space - a paste is the one way a terminal escape sequence

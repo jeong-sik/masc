@@ -295,6 +295,12 @@
  (modules masc_tui_paste))
 
 (library
+ (name masc_tui_paste_spill)
+ (wrapped false)
+ (modules masc_tui_paste_spill)
+ (libraries masc_tui_message_layout))
+
+(library
  (name masc_tui_graphics)
  (wrapped false)
  (modules masc_tui_graphics)
@@ -433,6 +439,7 @@
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
+  masc_tui_paste_spill
   masc_tui_send_disposition
   unix
   yojson))
@@ -450,6 +457,7 @@
  (libraries
   masc
   masc.auth
+  masc.masc_random_id
   terminal_size
   masc_tui_credential
   masc_tui_types
@@ -477,6 +485,7 @@
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_paste
+  masc_tui_paste_spill
   masc_tui_scroll
   masc_tui_send_disposition
   masc_tui_metrics_tail

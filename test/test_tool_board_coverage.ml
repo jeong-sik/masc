@@ -155,7 +155,21 @@ let test_board_error_to_string () =
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
   let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
-  Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
+  Alcotest.(check bool) "validation_error" true (String.contains s2 'b');
+  (* A guessed id can carry the accepted c-hex shape (keeper:polisher voted
+     c-000…0 on 2026-08-24), so the shape check lets it through and the
+     lookup miss is the only reply the caller gets. It must name the two
+     producers of real ids instead of only repeating the dead one. *)
+  let s3 =
+    Board_tool.board_error_to_string
+      (Board.Comment_not_found "c-00000000000000000000000000000000")
+  in
+  Alcotest.(check bool)
+    "comment_not_found names the post_get producer" true
+    (String_util.contains_substring s3 "masc_board_post_get");
+  Alcotest.(check bool)
+    "comment_not_found names the comment producer" true
+    (String_util.contains_substring s3 "masc_board_comment")
 
 let test_is_agent () =
   with_eio @@ fun env ->

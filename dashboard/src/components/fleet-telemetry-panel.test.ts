@@ -484,7 +484,6 @@ describe('FleetTelemetryPanel', () => {
         context_ratio: 0.3,
         total_turns: 5,
         last_model_used: 'unknown',
-        last_autonomous_action_at: '2026-04-24T12:00:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
         active_model: 'gpt-5.4',
         metrics_series: [

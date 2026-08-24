@@ -95,12 +95,6 @@ let current_keeper_json ?(last_turn_ts = 0.0) ?(paused = false)
        ; ("total_cost_usd", `Float 0.42)
        ; ("last_turn_ts", `Float last_turn_ts)
        ; ("compaction_count", `Int 1)
-       ; ("autonomous_turn_count", `Int 7)
-       ; ("autonomous_text_turn_count", `Int 5)
-       ; ("autonomous_tool_turn_count", `Int 2)
-       ; ("board_reactive_turn_count", `Int 3)
-       ; ("mention_reactive_turn_count", `Int 1)
-       ; ("noop_turn_count", `Int 4)
        ; ("last_proactive_outcome", `String "tool_use")
        ; ("created_at", `String "2026-08-20T01:02:03Z")
        ; ("updated_at", `String "2026-08-21T04:05:06Z")
@@ -124,22 +118,11 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check bool) "paused" true keeper.k_paused;
       Alcotest.(check (option string)) "current task" (Some "task-42")
         keeper.k_current_task_id;
-      Alcotest.(check int) "autonomous turns" 7
-        keeper.k_autonomous_turn_count;
       Alcotest.(check int) "total turns" 4 keeper.k_total_turns;
       Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
         keeper.k_total_cost_usd;
       Alcotest.(check int) "compactions" 1 keeper.k_compaction_count;
-      Alcotest.(check int) "autonomous text turns" 5
-        keeper.k_autonomous_text_turn_count;
-      Alcotest.(check int) "autonomous tool turns" 2
-        keeper.k_autonomous_tool_turn_count;
-      Alcotest.(check int) "board turns" 3
-        keeper.k_board_reactive_turn_count;
-      Alcotest.(check int) "mention turns" 1
-        keeper.k_mention_reactive_turn_count;
-      Alcotest.(check int) "no-op turns" 4 keeper.k_noop_turn_count;
       Alcotest.(check string) "last outcome" "tool_use"
         keeper.k_last_proactive_outcome;
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"

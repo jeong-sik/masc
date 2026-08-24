@@ -269,14 +269,6 @@ type agent_runtime_state =
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
-  ; last_autonomous_action_at : string
-  ; autonomous_action_count : int
-  ; autonomous_turn_count : int
-  ; autonomous_text_turn_count : int
-  ; autonomous_tool_turn_count : int
-  ; board_reactive_turn_count : int
-  ; mention_reactive_turn_count : int
-  ; noop_turn_count : int
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected

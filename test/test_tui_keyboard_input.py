@@ -604,7 +604,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "last_proactive_outcome": "never_started",
         "last_proactive_reason": "",
         "last_proactive_preview": "",
-        "last_autonomous_action_at": "",
         "message_scope_ack_id": None,
         "last_runtime_attempt": None,
         "paused": False,
@@ -634,13 +633,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "proactive_visible_count_total",
         "last_visible_proactive_ts",
         "consecutive_noop_count",
-        "autonomous_action_count",
-        "autonomous_turn_count",
-        "autonomous_text_turn_count",
-        "autonomous_tool_turn_count",
-        "board_reactive_turn_count",
-        "mention_reactive_turn_count",
-        "noop_turn_count",
     ):
         metadata[field] = 0
     return metadata

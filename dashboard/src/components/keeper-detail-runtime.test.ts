@@ -239,24 +239,24 @@ describe('RuntimeSignals', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
-      mention_reactive_turn_count: 3,
       metrics_window: {
         intervention_share: 0.4,
+        intervention_per_turn: 1.5,
       },
     }
 
     render(h(RuntimeSignals, { keeper }))
 
-    // Before filtering: labels from multiple groups are visible.
-    expect(screen.getByText('멘션 반응')).toBeInTheDocument()
+    // Before filtering: both rows are visible.
     expect(screen.getByText('개입 비중')).toBeInTheDocument()
+    expect(screen.getByText('턴당 개입')).toBeInTheDocument()
 
     const input = screen.getByPlaceholderText('신호 지표 필터 (예: 개입)') as HTMLInputElement
-    fireEvent.input(input, { target: { value: '개입' } })
+    fireEvent.input(input, { target: { value: '턴당' } })
 
     // Non-matching labels are gone, matching ones remain.
-    expect(screen.queryByText('멘션 반응')).not.toBeInTheDocument()
-    expect(screen.getByText('개입 비중')).toBeInTheDocument()
+    expect(screen.queryByText('개입 비중')).not.toBeInTheDocument()
+    expect(screen.getByText('턴당 개입')).toBeInTheDocument()
   })
 
   it('shows the filter-specific empty state when no rows match', () => {

@@ -203,14 +203,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
-          last_autonomous_action_at = "";
-          autonomous_action_count = 0;
-          autonomous_turn_count = 0;
-          autonomous_text_turn_count = 0;
-          autonomous_tool_turn_count = 0;
-          board_reactive_turn_count = 0;
-          mention_reactive_turn_count = 0;
-          noop_turn_count = 0;
           message_scope_ack_id = None;
 	          last_runtime_attempt = None;
 	        };

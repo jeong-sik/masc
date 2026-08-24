@@ -99,14 +99,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_compaction_after_tokens
         | Schema.Proactive_count_total
         | Schema.Proactive_visible_count_total
-        | Schema.Consecutive_noop_count
-        | Schema.Autonomous_action_count
-        | Schema.Autonomous_turn_count
-        | Schema.Autonomous_text_turn_count
-        | Schema.Autonomous_tool_turn_count
-        | Schema.Board_reactive_turn_count
-        | Schema.Mention_reactive_turn_count
-        | Schema.Noop_turn_count -> `Int 0
+        | Schema.Consecutive_noop_count -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts
         | Schema.Last_compaction_ts
@@ -117,8 +110,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
             (Masc.Keeper_meta_contract.proactive_cycle_outcome_to_string
                Masc.Keeper_meta_contract.Proactive_never_started)
         | Schema.Last_proactive_reason
-        | Schema.Last_proactive_preview
-        | Schema.Last_autonomous_action_at -> `String ""
+        | Schema.Last_proactive_preview -> `String ""
         | Schema.Message_scope_ack_id
         | Schema.Last_runtime_attempt
         | Schema.Latched_reason

@@ -15,13 +15,6 @@ type usage_delta =
 type turn_counter_deltas =
   { proactive_count : int
   ; proactive_visible_count : int
-  ; autonomous_action_count : int
-  ; autonomous_turn_count : int
-  ; autonomous_text_turn_count : int
-  ; autonomous_tool_turn_count : int
-  ; board_reactive_turn_count : int
-  ; mention_reactive_turn_count : int
-  ; noop_turn_count : int
   ; compaction_count : int
   }
 
@@ -40,7 +33,6 @@ type turn_runtime_delta =
   ; next_last_handoff_ts : float
   ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
-  ; last_autonomous_action_at : string observed_change
   ; message_scope_ack_id : string option observed_change
   ; updated_at : string
   }
@@ -281,48 +273,6 @@ let turn_runtime_delta_of_snapshots
         before_rt.proactive_rt.visible_count_total
         after_rt.proactive_rt.visible_count_total
     in
-    let* autonomous_action_count =
-      nonnegative_difference
-        "autonomous_action_count"
-        before_rt.autonomous_action_count
-        after_rt.autonomous_action_count
-    in
-    let* autonomous_turn_count =
-      nonnegative_difference
-        "autonomous_turn_count"
-        before_rt.autonomous_turn_count
-        after_rt.autonomous_turn_count
-    in
-    let* autonomous_text_turn_count =
-      nonnegative_difference
-        "autonomous_text_turn_count"
-        before_rt.autonomous_text_turn_count
-        after_rt.autonomous_text_turn_count
-    in
-    let* autonomous_tool_turn_count =
-      nonnegative_difference
-        "autonomous_tool_turn_count"
-        before_rt.autonomous_tool_turn_count
-        after_rt.autonomous_tool_turn_count
-    in
-    let* board_reactive_turn_count =
-      nonnegative_difference
-        "board_reactive_turn_count"
-        before_rt.board_reactive_turn_count
-        after_rt.board_reactive_turn_count
-    in
-    let* mention_reactive_turn_count =
-      nonnegative_difference
-        "mention_reactive_turn_count"
-        before_rt.mention_reactive_turn_count
-        after_rt.mention_reactive_turn_count
-    in
-    let* noop_turn_count =
-      nonnegative_difference
-        "noop_turn_count"
-        before_rt.noop_turn_count
-        after_rt.noop_turn_count
-    in
     let* compaction_count =
       nonnegative_difference
         "compaction_count"
@@ -350,13 +300,6 @@ let turn_runtime_delta_of_snapshots
       ; counters =
           { proactive_count
           ; proactive_visible_count
-          ; autonomous_action_count
-          ; autonomous_turn_count
-          ; autonomous_text_turn_count
-          ; autonomous_tool_turn_count
-          ; board_reactive_turn_count
-          ; mention_reactive_turn_count
-          ; noop_turn_count
           ; compaction_count
           }
       ; next_keeper_id = after.keeper_id
@@ -368,10 +311,6 @@ let turn_runtime_delta_of_snapshots
           observed_change before_rt.compaction_rt after_rt.compaction_rt
       ; proactive_observation =
           observed_change before_rt.proactive_rt after_rt.proactive_rt
-      ; last_autonomous_action_at =
-          observed_change
-            before_rt.last_autonomous_action_at
-            after_rt.last_autonomous_action_at
       ; message_scope_ack_id =
           observed_change before_rt.message_scope_ack_id after_rt.message_scope_ack_id
       ; updated_at = after.updated_at
@@ -446,45 +385,6 @@ let apply_turn_runtime_delta
         runtime.proactive_rt.visible_count_total
         counters.proactive_visible_count
     in
-    let* autonomous_action_count =
-      checked_add
-        "autonomous_action_count"
-        runtime.autonomous_action_count
-        counters.autonomous_action_count
-    in
-    let* autonomous_turn_count =
-      checked_add
-        "autonomous_turn_count"
-        runtime.autonomous_turn_count
-        counters.autonomous_turn_count
-    in
-    let* autonomous_text_turn_count =
-      checked_add
-        "autonomous_text_turn_count"
-        runtime.autonomous_text_turn_count
-        counters.autonomous_text_turn_count
-    in
-    let* autonomous_tool_turn_count =
-      checked_add
-        "autonomous_tool_turn_count"
-        runtime.autonomous_tool_turn_count
-        counters.autonomous_tool_turn_count
-    in
-    let* board_reactive_turn_count =
-      checked_add
-        "board_reactive_turn_count"
-        runtime.board_reactive_turn_count
-        counters.board_reactive_turn_count
-    in
-    let* mention_reactive_turn_count =
-      checked_add
-        "mention_reactive_turn_count"
-        runtime.mention_reactive_turn_count
-        counters.mention_reactive_turn_count
-    in
-    let* noop_turn_count =
-      checked_add "noop_turn_count" runtime.noop_turn_count counters.noop_turn_count
-    in
     let* compaction_count =
       checked_add
         "compaction_count"
@@ -513,17 +413,6 @@ let apply_turn_runtime_delta
       ; last_handoff_ts = delta.next_last_handoff_ts
       ; compaction_rt
       ; proactive_rt
-      ; last_autonomous_action_at =
-          apply_observed_change
-            runtime.last_autonomous_action_at
-            delta.last_autonomous_action_at
-      ; autonomous_action_count
-      ; autonomous_turn_count
-      ; autonomous_text_turn_count
-      ; autonomous_tool_turn_count
-      ; board_reactive_turn_count
-      ; mention_reactive_turn_count
-      ; noop_turn_count
       ; message_scope_ack_id =
           apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
       }

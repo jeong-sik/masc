@@ -75,10 +75,28 @@ let typed_input_has_env
    own budget, and being stopped is how its author finds that out. *)
 let default_timeout_sec = 600.
 
-let typed_input_timeout_sec
+(* Who set the budget, kept beside the number. A run stopped at a limit its
+   caller never chose reads as exit 124, which [Process_eio] documents as
+   indistinguishable from a program that exits 124 on its own — so the result
+   has to be able to say which limit stopped it. *)
+type timeout_budget =
+  | Named_by_caller of float
+  | Default of float
+
+let timeout_budget_seconds = function
+  | Named_by_caller seconds | Default seconds -> seconds
+;;
+
+let typed_input_timeout_budget
       ({ timeout_sec; _ } : Keeper_tool_execute_typed_input.execute_input)
   =
-  Option.value timeout_sec ~default:default_timeout_sec
+  match timeout_sec with
+  | Some seconds -> Named_by_caller seconds
+  | None -> Default default_timeout_sec
+;;
+
+let typed_input_timeout_sec input =
+  timeout_budget_seconds (typed_input_timeout_budget input)
 ;;
 
 let typed_validation_error_text error =

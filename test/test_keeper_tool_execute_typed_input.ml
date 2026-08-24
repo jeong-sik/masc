@@ -301,7 +301,23 @@ let test_absent_timeout_resolves_to_the_default () =
     "the default sits inside the range callers already ask for"
     true
     (Keeper_tool_execute_input.default_timeout_sec > 0.
-     && Keeper_tool_execute_input.default_timeout_sec <= 900.)
+     && Keeper_tool_execute_input.default_timeout_sec <= 900.);
+  (* A run stopped at 600s exits 124, which Process_eio documents as
+     indistinguishable from a program that exits 124 by itself. The result can
+     only say which limit stopped it if the number arrives with its source. *)
+  Alcotest.(check bool)
+    "an unnamed budget is marked as one the caller did not choose"
+    true
+    (match Keeper_tool_execute_input.typed_input_timeout_budget without_timeout with
+     | Keeper_tool_execute_input.Default seconds ->
+       Float.equal seconds Keeper_tool_execute_input.default_timeout_sec
+     | Keeper_tool_execute_input.Named_by_caller _ -> false);
+  Alcotest.(check bool)
+    "a named budget is marked as the caller's own"
+    true
+    (match Keeper_tool_execute_input.typed_input_timeout_budget with_timeout with
+     | Keeper_tool_execute_input.Named_by_caller seconds -> Float.equal seconds 12.5
+     | Keeper_tool_execute_input.Default _ -> false)
 ;;
 
 let test_of_json_rejects_invalid_explicit_timeout () =

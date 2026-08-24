@@ -102,6 +102,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   let suffix_result =
     match action with
     | "boot" -> Ok keeper_suffix_boot
+    | "up" -> Ok keeper_suffix_up
     | "shutdown" -> Ok keeper_suffix_shutdown
     | "reset" -> Ok keeper_suffix_reset
     | "clear" -> Ok keeper_suffix_clear
@@ -192,6 +193,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           match body_str with
           | None ->
               Error "request body is required for clear"
+          | Some raw -> (
+              try
+                let parsed = Yojson.Safe.from_string raw in
+                match parsed with
+                | `Assoc fields ->
+                    Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
+                | _ ->
+                    Error "request body must be a JSON object"
+              with
+              | Yojson.Json_error err ->
+                  Error (Printf.sprintf "invalid json: %s" err)))
+      | "up" -> (
+          (* The body carries the create-or-update settings (instructions,
+             mention_targets, ...). Empty body still dispatches name-only so
+             the contract's own validation — not this route — decides what a
+             bare up means. *)
+          match body_str with
+          | None | Some "" -> Ok (`Assoc [("name", `String name)])
           | Some raw -> (
               try
                 let parsed = Yojson.Safe.from_string raw in

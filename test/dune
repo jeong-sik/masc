@@ -1085,6 +1085,7 @@
   test_dashboard_verification
   test_tool_quality_classify
   test_tui_decode
+  test_terminal_size
   test_dashboard_labels
   test_activity_graph
   test_tool_agent_timeline_build
@@ -1227,6 +1228,7 @@
   test_dashboard_verification
   test_tool_quality_classify
   test_tui_decode
+  test_terminal_size
   test_dashboard_labels
   test_activity_graph
   test_tool_agent_timeline_build
@@ -1358,6 +1360,8 @@
   masc_test_runtime
   masc.embedded_config
   bigstringaf
+  ; test_terminal_size reads the tty size through the ioctl stub
+  terminal_size
   ; test_activity_graph checks its day file against the layout owner
   masc.jsonl_writer
   ; test_compression decodes its own gzip output with the library's reader

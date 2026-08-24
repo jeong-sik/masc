@@ -433,6 +433,7 @@
  (libraries
   masc
   masc.auth
+  terminal_size
   masc_tui_credential
   masc_tui_types
   masc.runtime

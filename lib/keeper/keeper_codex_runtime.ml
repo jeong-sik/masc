@@ -395,6 +395,40 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Protocol_failed
 ;;
 
+(* Codex ships its own file tools and neither it nor MASC can switch them
+   off -- [permissions_profile_of_posture] says as much. Under [Native_read]
+   they run in a read-only sandbox, so the model holds a working [Write] and a
+   refused [apply_patch] at the same time and cannot tell them apart until one
+   of them fails. The refusal it meets first is the one it reports: a keeper
+   with an open write path stopped for six hours saying the workspace was
+   read-only.
+
+   This states which of the two the session refused. It is a projection of the
+   configuration MASC already chose, not an instruction -- what the keeper does
+   about it stays the keeper's.
+
+   Checked against codex-cli 0.149.1 on 2026-08-25. Its app-server schema
+   names [SandboxMode] as [read-only | workspace-write | danger-full-access],
+   and a read-only session refuses a built-in patch with the wording this note
+   contradicts: "patch rejected: writing is blocked by read-only sandbox"
+   (openai/codex#30712, #24806).
+
+   The MASC tools go on working because Codex does not apply the sandbox to
+   MCP-provided tools. That is reported as a hole rather than a promise --
+   openai/codex#4152, closed without an answer -- so it is the assumption to
+   check first if writes start failing. If Codex closes it, [Native_read]
+   leaves a keeper with no write path at all, and the posture is what has to
+   change; a note about which tool to reach for would then be wrong. *)
+let native_posture_note = function
+  | Runtime_native_tools.Native_read ->
+    [ "Your built-in file edits run under a read-only sandbox in this session, \
+       so apply_patch and every other built-in write is refused. File changes \
+       go through the Write and Edit tools, which are not sandboxed that way. \
+       A refused built-in write does not mean the workspace is read-only."
+    ]
+  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
+;;
+
 let run_without_lifecycle ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
@@ -530,7 +564,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
     let developer_instructions =
-      prepared.system_prompt :: developer_messages
+      (prepared.system_prompt :: native_posture_note native_posture)
+      @ developer_messages
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
       |> String_util.trim_nonempty
@@ -1095,6 +1130,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
+  let native_posture_note = native_posture_note
   let codex_error_to_core_error = codex_error_to_core_error
   let clamp_reasoning_effort_to_catalog = clamp_reasoning_effort_to_catalog
 

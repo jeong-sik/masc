@@ -388,6 +388,62 @@ let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
           Error ("annotations were not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_ide_annotations json)
 
+(** The keeper edits recorded over [file_path] in [codebase]
+    ([/api/v1/ide/regions]). *)
+let fetch_ide_regions ~(host : string) ~(port : int) ~(codebase : string)
+    ~(file_path : string) : (Masc.Tui_decode.ide_region list, string) result =
+  let route =
+    Printf.sprintf "/api/v1/ide/regions?codebase=%s&file_path=%s"
+      (percent_encode_query_value codebase)
+      (percent_encode_query_value file_path)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "regions returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("regions were not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_ide_regions json)
+
+(** Add a note to [file_path] in [codebase]
+    ([POST /api/v1/ide/annotations]). The route wants a write-tier bearer;
+    the admin token this process mints carries it. The server answers the
+    created note, which the caller re-reads through the listing rather than
+    splicing locally. *)
+let post_ide_annotation ~(host : string) ~(port : int) ~(codebase : string)
+    ~(file_path : string) ~(line_start : int) ~(line_end : int)
+    ~(kind : string) ~(content : string) : (unit, string) result =
+  let path =
+    Printf.sprintf "/api/v1/ide/annotations?codebase=%s"
+      (percent_encode_query_value codebase)
+  in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("file_path", `String file_path)
+         ; ("line_start", `Int line_start)
+         ; ("line_end", `Int line_end)
+         ; ("kind", `String kind)
+         ; ("content", `String content)
+         ])
+  in
+  match post_json ~host ~port ~path ~body with
+  | Error detail -> Error detail
+  | Ok json -> (
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "ok" fields with
+          | Some (`Bool true) -> Ok ()
+          | Some (`Bool false) -> (
+              match List.assoc_opt "error" fields with
+              | Some (`String e) -> Error e
+              | Some _ | None -> Error "note rejected")
+          | Some _ | None -> Error "unexpected note response envelope")
+      | _ -> Error "unexpected note response envelope")
+
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =
@@ -518,6 +574,39 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
        | json -> Masc_tui_keeper_chat_history.memory_rows_of_json json
        | exception Yojson.Json_error detail ->
            Error ("memory journal was not JSON: " ^ detail))
+
+(** Fetch the two independent observations the context inspector joins. A
+    failure on one stays beside the other instead of blanking the whole view:
+    turn records can still prove composition when exact prompt text was never
+    captured, and the prompt can still be read during a transient record-store
+    failure. *)
+let fetch_keeper_context_inspector ~(host : string) ~(port : int)
+    ~(keeper_name : string) : Masc_tui_context_inspector.reading =
+  let fetch ~label ~path ~decode =
+    match http_get ~host ~port ~path with
+    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+        Error (Printf.sprintf "%s returned %d: %s" label status body)
+    | Ok (_, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> decode json
+         | exception Yojson.Json_error detail ->
+             Error (label ^ " was not JSON: " ^ detail))
+  in
+  let encoded = percent_encode_path_segment keeper_name in
+  let turn =
+    fetch ~label:"turn-records"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~decode:Masc_tui_context_inspector.decode_turn_records
+  in
+  let prompt =
+    fetch ~label:"last-prompt"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/last-prompt" encoded)
+      ~decode:
+        (Masc_tui_context_inspector.decode_prompt_capture
+           ~expected_keeper:keeper_name)
+  in
+  { Masc_tui_context_inspector.turn; prompt }
 
 (** Fetch one page of chat rows older than [before].
 

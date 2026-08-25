@@ -216,7 +216,7 @@ let persist_checkpoint_source_exn
   in
   match
     Masc.Keeper_context_core.save_agent_core_checkpoint_classified
-      ~multimodal_policy:meta.multimodal_policy
+      ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
       ~keeper_name:meta.name
       ~session
       ~agent_name:meta.agent_name
@@ -688,7 +688,7 @@ let test_prepare_commit_source_cas () =
        let context = Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
        (match
           Masc.Keeper_context_core.save_agent_core_checkpoint_classified
-            ~multimodal_policy:meta.multimodal_policy
+            ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
             ~keeper_name:meta.name
             ~session
             ~agent_name:meta.agent_name
@@ -869,7 +869,7 @@ let test_post_install_cancellation_returns_committed_failure () =
        in
        (match
           Masc.Keeper_context_core.save_agent_core_checkpoint_classified
-            ~multimodal_policy:meta.multimodal_policy
+            ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
             ~keeper_name:meta.name
             ~session
             ~agent_name:meta.agent_name

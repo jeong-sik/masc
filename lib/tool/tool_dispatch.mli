@@ -136,7 +136,7 @@ type module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
-  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn | Mod_misc
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn | Mod_code_query | Mod_misc
   | Mod_library
   (* [Mod_external]: dispatched by a server-boundary handler in the
      composition root, not by a peer [Tool_*] module. The tool layer

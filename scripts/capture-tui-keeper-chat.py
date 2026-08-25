@@ -93,7 +93,7 @@ def current_keeper_meta() -> dict[str, object]:
         "agent_name": f"keeper-{KEEPER}-agent",
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
         "autonomous_instructions": None, "trace_id": "trace-capture-v3",
-        "multimodal_policy": "inherit", "trace_history": [], "generation": 1,
+        "trace_history": [], "generation": 1,
         "created_at": "2026-08-22T00:00:00Z", "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started", "last_proactive_reason": "",
         "last_proactive_preview": "", "last_compaction_decision": "",

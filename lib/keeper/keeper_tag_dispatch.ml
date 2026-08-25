@@ -26,6 +26,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_schedule -> "schedule"
   | Mod_spawn -> "spawn"
+  | Mod_code_query -> "code_query"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -110,6 +111,10 @@ let dispatch
        turn's registry and switch together, and those are read where the turn
        bound them. *)
     | Mod_spawn -> None
+    (* Routed by the descriptor runtime for the same reason: a code query
+       needs the turn's language-server pool, which is read where the turn
+       bound it. *)
+    | Mod_code_query -> None
     | Mod_schedule ->
       Tool_schedule.dispatch
         { Tool_schedule.config

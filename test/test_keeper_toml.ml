@@ -606,7 +606,6 @@ let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
     ; "mention_targets", "true", "string array"
     ]
 
-
 (* RFC-0390: [keeper.tools] carries exactly one key. The declared kind list
    makes any sibling an unknown key, so a typo cannot silently keep the
    runtime's default posture. *)
@@ -664,7 +663,6 @@ let test_profile_rejects_unknown_tools_sibling_key () =
          (String_util.contains_substring detail "unknown keeper TOML keys");
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.tools.group"))
-
 
 (* RFC-0389: a typo in [keeper.tools.groups] must fail the load. All-unknown
    used to fall back to All, which quietly cancelled the narrowing the
@@ -749,36 +747,6 @@ max_context_override = 0
      | Error message ->
        check bool "names max_context_override" true
          (String_util.contains_substring message "max_context_override"))
-
-let test_profile_parses_multimodal_policy () =
-  let input = {|
-[keeper]
-multimodal_policy = "delegate"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Error e -> fail e
-    | Ok d ->
-      check (option string) "multimodal_policy" (Some "delegate")
-        (Option.map KTP.multimodal_policy_to_string d.multimodal_policy)
-
-let test_profile_rejects_invalid_multimodal_policy () =
-  let input = {|
-[keeper]
-multimodal_policy = "silent_default"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected invalid multimodal_policy error"
-     | Error msg ->
-       check bool "mentions multimodal_policy" true
-         (String_util.contains_substring msg "invalid multimodal_policy");
-       check bool "mentions allowed values" true
-         (String_util.contains_substring msg "delegate"))
 
 (* ================================================================ *)
 (* File loading tests                                                *)
@@ -1729,10 +1697,6 @@ let () =
             test_profile_rejects_wrong_known_field_shape;
           test_case "rejects invalid max_context_override" `Quick
             test_profile_rejects_invalid_max_context_override;
-          test_case "parses multimodal_policy" `Quick
-            test_profile_parses_multimodal_policy;
-          test_case "rejects invalid multimodal_policy" `Quick
-            test_profile_rejects_invalid_multimodal_policy;
         ] );
       ( "writer",
         [

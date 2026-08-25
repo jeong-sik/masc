@@ -79,6 +79,18 @@ let ends_with_tool_results (messages : Agent_core.Types.message list) =
       }
   | None -> false
 
+(* Whether this dispatch is a later round of a turn already under way, which is
+   what the per-round block filter is actually asking. The message shape alone
+   cannot say it: a keeper whose previous turn ended on a tool result — the
+   ordinary way a turn ends — replays exactly that shape into the first round
+   of its next turn, so the filter fired on turns that had injected nothing
+   yet (39 of 108 turns on 2026-08-25). [injected_this_turn] is the half the
+   history does not carry. *)
+let is_later_round_of_this_turn ~injected_this_turn messages =
+  injected_this_turn && ends_with_tool_results messages
+;;
+
+
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :

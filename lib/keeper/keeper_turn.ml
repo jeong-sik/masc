@@ -431,16 +431,19 @@ let run_keeper_invocation_turn_admitted_inner
        with
        | Error error -> tool_result_error error
        | Ok meta ->
-      (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
+      (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
+         runtime cannot take an image on its own,
          evict each image to the artifact store + an eager analyze_image reading
          BEFORE it enters the turn, so the main history stays text-only and
-         RFC-0265 never recomputes required=['image'] from it. No-op for
-         Inherit/Reroute keepers (safe-by-default). *)
+         RFC-0265 never recomputes required=['image'] from it. A runtime that
+         takes the image itself keeps it — seeing the pixels beats a reading. *)
       let user_blocks =
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~mode:Keeper_vision_ingest.Eager
-             ~policy:meta.multimodal_policy
+             ~delegate:
+               (Keeper_vision_ingest.delegates_media
+                  ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta))
              ~keeper_name:meta.name)
           user_blocks
       in

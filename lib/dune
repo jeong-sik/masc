@@ -166,6 +166,9 @@
   masc.dashboard_utils
   masc.masc_dashboard_api_types
   masc.tool_schemas
+  ;; RFC a-language-server-the-keeper-can-ask: keeper_tool_code_query asks a
+  ;; language server, and the client sits below this library so it can.
+  masc.lsp_client
   masc.tool_spawn
   masc.masc_tool_blob_store
   masc.activity_graph

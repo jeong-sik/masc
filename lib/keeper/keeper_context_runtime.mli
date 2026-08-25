@@ -53,7 +53,7 @@ val context_of_agent_core_checkpoint
   -> working_context
 
 val save_agent_core_checkpoint
-  :  multimodal_policy:Keeper_types_profile.multimodal_policy
+  :  runtime_id:string
   -> keeper_name:string
   -> session:session_context
   -> agent_name:string

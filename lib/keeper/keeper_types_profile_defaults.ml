@@ -14,7 +14,6 @@ type keeper_profile_defaults = {
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
   (* User message this keeper's autonomous turns are woken with, overriding the
      fleet [autonomous.wake_prompt]. Distinct from [instructions]: that frames
      the system prompt once, this is the conversation input the keeper receives
@@ -55,7 +54,6 @@ let empty_keeper_profile_defaults =
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;
-    multimodal_policy = None;
     autonomous_wake_prompt = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;

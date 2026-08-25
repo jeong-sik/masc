@@ -6086,6 +6086,7 @@ let render_code (state : state) =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
+    let activity_showing = state.code_activity_open in
     let title =
       match state.code_file with
       | Some (path, _) ->
@@ -6096,12 +6097,14 @@ let render_code (state : state) =
             if
               state.code_file_hscroll > 0 && not history_showing
               && not diff_showing && not notes_showing
+              && not activity_showing
             then
               Printf.sprintf "%s  (col %d)" path
                 (state.code_file_hscroll + 1)
             else path
           in
-          if notes_showing then "notes: " ^ path
+          if activity_showing then "activity: " ^ path
+          else if notes_showing then "notes: " ^ path
           else if diff_showing then "diff vs HEAD: " ^ path
           else if history_showing then "history: " ^ path
           else path
@@ -6117,7 +6120,63 @@ let render_code (state : state) =
     (* Five chrome rows: top gap, title, divider, bottom gap, and the
        footer this pane must leave room for. *)
     let content_height = max 1 (rows - 5) in
-    (if notes_showing then
+    (if activity_showing then
+       match state.code_activity_error, state.code_activity with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (loading activity)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, []) ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (no keeper edit is recorded over this file)"
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, regions) ->
+           let total = List.length regions in
+           let max_scroll = max 0 (total - content_height) in
+           let scroll =
+             max 0 (min state.code_activity_scroll max_scroll)
+           in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt regions (scroll + i) with
+             | Some region ->
+                 let open Masc.Tui_decode in
+                 let anchor =
+                   if region.ir_line_start = region.ir_line_end then
+                     Printf.sprintf "L%d" region.ir_line_start
+                   else
+                     Printf.sprintf "L%d-%d" region.ir_line_start
+                       region.ir_line_end
+                 in
+                 let at =
+                   let t =
+                     Unix.localtime (region.ir_at_ms /. 1000.)
+                   in
+                   Printf.sprintf "%02d-%02d %02d:%02d"
+                     (t.Unix.tm_mon + 1) t.Unix.tm_mday t.Unix.tm_hour
+                     t.Unix.tm_min
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
+                      at Ansi.reset Ansi.dim anchor Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      (Terminal_text.single_line region.ir_keeper)
+                      Ansi.reset
+                      (Terminal_text.single_line region.ir_source))
+             | None -> box_empty pane_buf pane_cols
+           done
+     else if notes_showing then
        match state.code_notes_error, state.code_notes with
        | Some detail, _ ->
            box_line pane_buf pane_cols
@@ -6315,13 +6374,17 @@ let render_code (state : state) =
             (if
                state.code_focus_file && not state.code_history_open
                && not state.code_diff_open && not state.code_notes_open
+               && not state.code_activity_open
              then "h/l:pan  "
              else "")
-            (if state.code_focus_file then "d:diff  H:history  m:notes  "
+            (if state.code_notes_open then
+               "w:add  d:diff  H:history  m:notes  "
+             else if state.code_focus_file then
+               "c:activity  d:diff  H:history  m:notes  "
              else "")
             (if
                state.code_history_open || state.code_diff_open
-               || state.code_notes_open
+               || state.code_notes_open || state.code_activity_open
              then "code"
              else if state.code_focus_file then "list"
              else "up")));
@@ -6682,19 +6745,293 @@ let help_sections : (string * (string * string) list) list =
   Masc_tui_keys.help_sections ()
 
 let help_lines () =
-  help_sections
-  |> List.concat_map (fun (title, entries) ->
-       (Ansi.bold ^ title ^ Ansi.reset)
-       :: List.map
-            (fun (key, action) ->
-              Printf.sprintf
-                "  %s%-18s%s %s"
-                Ansi.cyan
-                key
-                Ansi.reset
-                action)
-            entries
-       @ [ "" ])
+  let keys =
+    help_sections
+    |> List.concat_map (fun (title, entries) ->
+         (Ansi.bold ^ title ^ Ansi.reset)
+         :: List.map
+              (fun (key, action) ->
+                Printf.sprintf
+                  "  %s%-18s%s %s"
+                  Ansi.cyan
+                  key
+                  Ansi.reset
+                  action)
+              entries
+         @ [ "" ])
+  in
+  [ Ansi.bold ^ "Slash commands" ^ Ansi.reset ]
+  @ List.map
+      (fun line -> "  " ^ Ansi.cyan ^ line ^ Ansi.reset)
+      Masc_tui_command.help_lines
+  @ [ "" ]
+  @ keys
+
+let context_ratio_bar ~width ~tokens ~maximum =
+  let ratio =
+    if maximum <= 0 then 0.
+    else Float.min 1. (Float.max 0. (float tokens /. float maximum))
+  in
+  let filled = int_of_float (Float.round (ratio *. float width)) in
+  Ansi.cyan ^ String.make filled '#'
+  ^ Ansi.dim ^ String.make (max 0 (width - filled)) '-'
+  ^ Ansi.reset
+
+let context_component_style = function
+  | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
+      Ansi.bold ^ Ansi.magenta
+  | Turn_record.Prompt_block _ -> Ansi.bold
+  | Turn_record.Tool_schemas -> Theme.warn
+  | Turn_record.Message_user -> Theme.info
+  | Turn_record.Message_tool_use
+  | Turn_record.Message_tool_result -> Ansi.cyan
+  | Turn_record.Message_system
+  | Turn_record.Message_assistant_text
+  | Turn_record.Message_thinking
+  | Turn_record.Message_redacted_thinking
+  | Turn_record.Message_image
+  | Turn_record.Message_document
+  | Turn_record.Message_audio -> Ansi.reset
+
+let context_composition_lines (record : Turn_record.t) =
+  let module Inspector = Masc_tui_context_inspector in
+  let selected_model =
+    Option.value ~default:"model not observed" record.selected_model
+  in
+  let identity =
+    Printf.sprintf "  %s%s%s  %s%s%s"
+      Ansi.bold
+      (Keeper_chat.terminal_safe_text selected_model)
+      Ansi.reset
+      Ansi.dim
+      (Keeper_chat.terminal_safe_text record.runtime_profile)
+      Ansi.reset
+  in
+  let turn =
+    Printf.sprintf "  Last observed  %s#%d  %s"
+      (Keeper_chat.terminal_safe_text record.trace_id)
+      record.absolute_turn
+      (Masc_domain.iso8601_of_unix_seconds record.ts)
+  in
+  let token_lines =
+    match record.usage.input_tokens, record.context_window with
+    | Some tokens, Some maximum when maximum > 0 ->
+        let ratio = float tokens /. float maximum in
+        [ Printf.sprintf "  Context  %s / %s tokens  (%.1f%%)"
+            (Inspector.format_tokens tokens)
+            (Inspector.format_tokens maximum)
+            (ratio *. 100.)
+        ; "  " ^ context_ratio_bar ~width:30 ~tokens ~maximum
+        ; Printf.sprintf "  Remaining to context ceiling  %s tokens"
+            (Inspector.format_tokens (max 0 (maximum - tokens)))
+        ]
+    | Some tokens, (None | Some _) ->
+        [ Printf.sprintf "  Context  %s input tokens; window not observed"
+            (Inspector.format_tokens tokens) ]
+    | None, _ -> [ "  Context usage was not reported for this turn" ]
+  in
+  let cache_lines =
+    let parts =
+      List.filter_map Fun.id
+        [ Option.map
+            (fun n -> "cache read " ^ Inspector.format_tokens n)
+            record.usage.cache_read_input_tokens
+        ; Option.map
+            (fun n -> "cache created " ^ Inspector.format_tokens n)
+            record.usage.cache_creation_input_tokens
+        ; Option.map
+            (fun n -> "output " ^ Inspector.format_tokens n)
+            record.usage.output_tokens
+        ]
+    in
+    match parts with [] -> [] | _ -> [ "  Usage  " ^ String.concat "  ·  " parts ]
+  in
+  let wire_lines =
+    match record.request_wire_observation with
+    | Some observation ->
+        [ Printf.sprintf "  Provider request  %s  ·  %s"
+            (Inspector.format_bytes observation.body_bytes)
+            (Keeper_chat.terminal_safe_text observation.runtime_profile) ]
+    | None -> [ "  Provider request bytes were not observed" ]
+  in
+  let history_lines =
+    match record.model_input_window with
+    | Some window ->
+        [ Printf.sprintf "  Conversation history  %d / %d atoms  ·  %s"
+            window.transmitted_atoms window.total_atoms
+            (match window.measurement with
+             | Turn_record.Wire_shape -> "wire shape"
+             | Turn_record.Durable_shape -> "durable shape") ]
+    | None -> [ "  Conversation history window was not observed" ]
+  in
+  let components =
+    match record.input_components with
+    | None -> [ Theme.bad ^ "  Exact component attribution unavailable" ^ Ansi.reset ]
+    | Some components ->
+        let total = Option.value ~default:0 (Inspector.attributed_bytes record) in
+        let heading =
+          Printf.sprintf "  %sInput composition%s  %s attributed"
+            Ansi.bold Ansi.reset (Inspector.format_bytes total)
+        in
+        heading
+        :: List.map
+             (fun (component : Turn_record.input_component) ->
+               let share =
+                 if total = 0 then 0.
+                 else float component.bytes /. float total *. 100.
+               in
+               Printf.sprintf "  %s%-24s%s %9s  %5.1f%%"
+                 (context_component_style component.component)
+                 (Inspector.input_component_label component.component)
+                 Ansi.reset
+                 (Inspector.format_bytes component.bytes)
+                 share)
+             components
+  in
+  [ identity; turn; "" ] @ token_lines @ cache_lines @ [ "" ] @ wire_lines
+  @ history_lines @ [ "" ] @ components
+  @ [ ""
+    ; Ansi.dim
+      ^ "  Bytes are exact attributed content; provider-envelope bytes are shown separately."
+      ^ Ansi.reset
+    ]
+
+let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
+  let module Inspector = Masc_tui_context_inspector in
+  match state.context_inspector_exact with
+  | Some index ->
+      (match List.nth_opt capture.blocks index with
+       | None -> [ Theme.bad ^ "  Selected prompt block is no longer present" ^ Ansi.reset ]
+       | Some block ->
+           let width = max 8 (snd (get_terminal_size ()) - 6) in
+           let heading =
+             Printf.sprintf "  %s%s%s  ·  %s"
+               Ansi.bold
+               (Inspector.prompt_block_label block.id)
+               Ansi.reset
+               (Inspector.format_bytes (String.length block.text))
+           in
+           let body =
+             Message_layout.wrap_body ~max_cells:width
+               ~sanitize:Keeper_chat.terminal_safe_text block.text
+             |> List.map (fun line -> "  " ^ line)
+           in
+           heading :: "" :: body)
+  | None ->
+      let identity =
+        Printf.sprintf "  Last captured prompt blocks  %s#%d  %s"
+          (Keeper_chat.terminal_safe_text capture.trace_id)
+          capture.absolute_turn
+          (Masc_domain.iso8601_of_unix_seconds capture.captured_at)
+      in
+      let relation =
+        match state.context_inspector_reading with
+        | Some (_, { Masc_tui_context_inspector.turn = Ok record; _ })
+          when String.equal record.trace_id capture.trace_id
+               && record.absolute_turn = capture.absolute_turn ->
+            []
+        | Some (_, { Masc_tui_context_inspector.turn = Ok _; _ }) ->
+            [ Theme.warn
+              ^ "  Prompt capture and component summary describe different turns."
+              ^ Ansi.reset ]
+        | Some _ | None -> []
+      in
+      let rows =
+        List.mapi
+          (fun index (block : Masc.Keeper_prompt_capture.block) ->
+             let selected = index = state.context_inspector_cursor in
+             let marker, style =
+               if selected then (">", Theme.selection) else (" ", Ansi.reset)
+             in
+             Printf.sprintf "%s %s %d  %-24s %9s%s"
+               style marker (index + 1)
+               (Inspector.prompt_block_label block.id)
+               (Inspector.format_bytes (String.length block.text))
+               Ansi.reset)
+          capture.blocks
+      in
+      identity :: relation
+      @ [ ""
+        ; Ansi.bold ^ "  Exact turn-added prompt text" ^ Ansi.reset
+        ]
+      @ (if rows = [] then [ "  (this turn assembled no prompt blocks)" ] else rows)
+      @ [ ""
+        ; Ansi.dim
+          ^ "  Enter reads one block. Base prompt, tool schemas, and conversation text are not captured here."
+          ^ Ansi.reset
+        ]
+
+let context_inspector_content_lines state =
+  match state.context_inspector_reading with
+  | None ->
+      [ if state.context_inspector_loading then "  Loading provider-input evidence..."
+        else "  No context reading has been requested." ]
+  | Some (_, reading) ->
+      (match state.context_inspector_tab with
+       | Masc_tui_context_inspector.Composition ->
+           (match reading.turn with
+            | Ok record -> context_composition_lines record
+            | Error detail ->
+                [ Theme.bad ^ "  Composition unavailable: "
+                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+       | Masc_tui_context_inspector.Prompt_blocks ->
+           (match reading.prompt with
+            | Ok capture -> context_prompt_lines state capture
+            | Error detail ->
+                [ Theme.bad ^ "  Prompt text unavailable: "
+                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]))
+
+let context_inspector_viewport state =
+  let terminal_rows, _ = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  (List.length (context_inspector_content_lines state), max 1 (rows - 5))
+
+let render_context_inspector state =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 8192 in
+  let keeper =
+    Option.value ~default:"no Keeper" state.context_inspector_keeper
+    |> Keeper_chat.terminal_safe_text
+  in
+  let refreshing =
+    if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
+    else ""
+  in
+  let tab_label tab number label =
+    if state.context_inspector_tab = tab then
+      Ansi.bold ^ Theme.info ^ number ^ ":" ^ label ^ Ansi.reset
+    else Ansi.dim ^ number ^ ":" ^ label ^ Ansi.reset
+  in
+  framed_top buf cols;
+  framed_line buf cols
+    (Printf.sprintf "%s Context  %s%s  %s  %s"
+       (screen_title "") keeper refreshing
+       (tab_label Masc_tui_context_inspector.Composition "1" "composition")
+       (tab_label Masc_tui_context_inspector.Prompt_blocks "2" "prompt"));
+  framed_divider buf cols;
+  let lines = context_inspector_content_lines state in
+  let content_height = max 1 (rows - 5) in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines)
+      ~height:content_height state.context_inspector_scroll
+  in
+  lines
+  |> List.filteri (fun index _ ->
+       index >= scroll && index < scroll + content_height)
+  |> List.iter (framed_line buf cols);
+  for _ = 1 to max 0 (content_height - min content_height (List.length lines - scroll)) do
+    framed_line buf cols ""
+  done;
+  framed_bottom buf cols;
+  let hints =
+    match state.context_inspector_exact with
+    | Some _ -> "j/k:scroll  Esc:prompt blocks"
+    | None -> "1/2 or Tab:switch  j/k:move  Enter:exact text  r:refresh  Esc:close"
+  in
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows
+    ~cols buf
 
 (* What the help overlay can show right now: the rows its sheet folds to at
    this width, and the height it draws them in. The key handler bounds its
@@ -6796,5 +7133,6 @@ let render (state : state) =
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
   else if state.palette_open then render_palette state
+  else if state.context_inspector_open then render_context_inspector state
   else if state.help_open then render_help state
   else render_surface state

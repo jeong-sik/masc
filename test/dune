@@ -117,6 +117,7 @@
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
+  test_keeper_codex_write_path_note
   test_domain_pool
   test_sse
   test_graphql_api
@@ -184,6 +185,7 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_keeper_tool_code_query
   test_lsp_questions
   test_lsp_workspace_pool
   test_ide_annotations
@@ -456,6 +458,7 @@
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
+  test_keeper_codex_write_path_note
   test_domain_pool
   test_sse
   test_graphql_api
@@ -523,6 +526,7 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_keeper_tool_code_query
   test_lsp_questions
   test_lsp_workspace_pool
   test_ide_annotations
@@ -2844,6 +2848,11 @@
  (name test_tui_context_state)
  (modules test_tui_context_state)
  (libraries alcotest masc_tui_context_state masc))
+
+(test
+ (name test_tui_context_inspector)
+ (modules test_tui_context_inspector)
+ (libraries alcotest masc_tui_context_inspector masc masc.masc_types))
 
 (test
  (name test_tui_frame_presenter)

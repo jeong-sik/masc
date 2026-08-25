@@ -91,6 +91,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_code_query_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -151,6 +152,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_code_query_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -340,6 +342,13 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_keeper_spawn_dispatch ->
     Some (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome ~name ~args)
+  | Tool_keeper_code_query_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_keeper_code_query_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_masc_schedule_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome

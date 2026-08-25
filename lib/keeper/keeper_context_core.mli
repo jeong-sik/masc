@@ -94,18 +94,18 @@ val checkpoint_write_error_to_string
     structure is rejected as [Tool_history_invalid] before any store call. No
     repair, synthetic ToolResult, or implicit context reduction occurs here. *)
 val save_agent_core_checkpoint :
-  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  runtime_id:string ->
   keeper_name:string ->
   session:session_context ->
   agent_name:string ->
   ctx:working_context ->
   (Agent_core.Checkpoint.t, string checkpoint_write_error) result
-(** [multimodal_policy]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
+(** [runtime_id]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
     checkpoint write boundary (Store_only); required so every write path is
-    compiler-forced to declare its policy (N-of-M closure). *)
+    compiler-forced to name the runtime it persists for (N-of-M closure). *)
 
 val save_agent_core_checkpoint_classified :
-  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  runtime_id:string ->
   keeper_name:string ->
   session:session_context ->
   agent_name:string ->
@@ -119,7 +119,7 @@ val save_agent_core_checkpoint_classified :
     has [expected_source_ref]. Equal-turn content changes are rejected by the
     checkpoint store's exact byte-identity CAS. *)
 val save_agent_core_checkpoint_if_source :
-  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  runtime_id:string ->
   keeper_name:string ->
   session:session_context ->
   agent_name:string ->
@@ -133,7 +133,7 @@ module For_testing : sig
   val save_agent_core_checkpoint_if_source_with_history :
     save_agent_core_history:
       (session_dir:string -> Agent_core.Checkpoint.t -> unit) ->
-    multimodal_policy:Keeper_types_profile.multimodal_policy ->
+    runtime_id:string ->
     keeper_name:string ->
     session:session_context ->
     agent_name:string ->

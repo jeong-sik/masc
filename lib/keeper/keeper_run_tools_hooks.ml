@@ -445,7 +445,21 @@ let assemble_hooks
                    the first round of ordinary turns (live: one keeper's turn 15,
                    2026-08-24 08:08Z). *)
                 let post_tool_round =
-                  Keeper_run_prompt.ends_with_tool_results messages
+                  (* [ends_with_tool_results] answers a question about the
+                     replayed history, not about this turn. A keeper whose
+                     previous turn ended on a tool result — the ordinary way a
+                     turn ends — starts its next one with exactly that shape,
+                     so the world state was filtered out of the first round of
+                     every such turn: 39 of 108 turns on 2026-08-25, the same
+                     keeper carrying it on some turns and not others.
+
+                     The accumulator is built once per keeper turn and its
+                     block list is empty until this turn's first assembly, so
+                     it says the part the history cannot: whether anything has
+                     been injected yet on this turn. *)
+                  Keeper_run_prompt.is_later_round_of_this_turn
+                    ~injected_this_turn:(acc.prompt_blocks <> [])
+                    messages
                 in
                 (if String.trim dynamic_context <> ""
                  then

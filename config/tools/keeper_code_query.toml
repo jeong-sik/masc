@@ -1,0 +1,33 @@
+name = "keeper_code_query"
+description = "Ask the language server about a name in a file: where it is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. This does not answer where a name is used; Grep still does that."
+additional_properties = false
+
+[[params]]
+name = "question"
+type = "string"
+enum = ["definition", "hover"]
+required = true
+description = "definition is where the name comes from. hover is its type and its documentation comment."
+
+[[params]]
+name = "path"
+type = "string"
+required = true
+description = "File to ask about, inside the keeper workspace. The language server is started at the project this file belongs to, not at the workspace root."
+
+[[params]]
+name = "line"
+type = "integer"
+required = true
+description = "Line the name is on, counted from 1 the way Grep and Read report it."
+
+[[params]]
+name = "symbol"
+type = "string"
+required = true
+description = "The name to ask about, matched literally against that line. Give the last part of a qualified name: for Executable_path.path_has_executable, give path_has_executable."
+
+[[params]]
+name = "occurrence"
+type = "integer"
+description = "Which occurrence on that line, counted from 1. Defaults to the first. Only needed when the name appears more than once on the line, which the answer says when it does."

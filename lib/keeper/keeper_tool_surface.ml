@@ -414,7 +414,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            | Some meta ->
                (match
                   Keeper_context_runtime.save_agent_core_checkpoint
-                    ~multimodal_policy:meta.multimodal_policy
+                    ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                     ~keeper_name:meta.name
                     ~session
                     ~agent_name:meta.agent_name

@@ -1079,6 +1079,8 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Context_inspector_loaded of
+      int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -1161,6 +1163,10 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the note anchored to; success re-reads the listing. *)
+  | Code_note_written of string * (unit, string) result
+  | Code_activity_loaded of
+      string * (Masc.Tui_decode.ide_region list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1794,6 +1800,50 @@ let launch_code_notes_load state ~mailbox ~codebase ~path =
   | None ->
       enqueue_async mailbox
         (Code_notes_loaded (path, Error "Eio switch is unavailable"))
+
+(* Same fiber-and-mailbox shape as the other writes. *)
+let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
+    ~kind ~content =
+  add_event state "system" ("adding a note to " ^ path);
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_ide_annotation ~host ~port ~codebase
+          ~file_path:path ~line_start ~line_end ~kind ~content
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_note_written (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run
+  | None -> run ()
+
+let launch_code_activity_load state ~mailbox ~codebase ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
+          ~file_path:path
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_activity_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -2513,6 +2563,52 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
            , Error "Eio switch is unavailable"
            , Error "Eio switch is unavailable" ))
 
+let launch_context_inspector_load state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  state.context_inspector_generation <- state.context_inspector_generation + 1;
+  state.context_inspector_loading <- true;
+  let generation = state.context_inspector_generation in
+  let run () =
+    let reading =
+      try
+        Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          let error = Error (Printexc.to_string exn) in
+          { Masc_tui_context_inspector.turn = error; prompt = error }
+    in
+    enqueue_async mailbox
+      (Context_inspector_loaded (generation, keeper_name, reading))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      let error = Error "Eio switch is unavailable" in
+      enqueue_async mailbox
+        (Context_inspector_loaded
+           ( generation
+           , keeper_name
+           , { Masc_tui_context_inspector.turn = error; prompt = error } ))
+
+let open_context_inspector state ~mailbox ~keeper_name =
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some keeper_name;
+  (* A fresh Keeper target starts unread. Showing the previous Keeper's
+     already-loaded composition under this name while the GET is in flight
+     would be a more dangerous lie than a loading row. Refreshing the same
+     target keeps its reading; opening a target does not. *)
+  state.context_inspector_reading <- None;
+  state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
+  state.context_inspector_cursor <- 0;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_exact <- None;
+  launch_context_inspector_load state ~mailbox ~keeper_name
+
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
   | Masc_tui_keeper_selection.No_alternative -> ()
@@ -3121,6 +3217,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_memory_visible
          then "Librarian/Memory timeline shown (/memory to hide)"
          else "Librarian/Memory timeline hidden (/memory to show)")
+  | Masc_tui_command.Inspect_context ->
+      (match target with
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           open_context_inspector state ~mailbox ~keeper_name
+       | None ->
+           notice ~role:Message_error
+             "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -4419,6 +4523,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -4776,7 +4881,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_activity <- None;
+          state.code_activity_error <- None;
+          state.code_activity_open <- false;
+          state.code_activity_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
@@ -4791,6 +4900,37 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.code_notes_error <- None;
             state.code_notes_scroll <- 0
         | Error detail -> state.code_notes_error <- Some detail)
+  | Code_note_written (path, result) -> (
+      match result with
+      | Ok () ->
+          add_event state "system" ("note added to " ^ path);
+          (* Re-read rather than splice: the server owns ids and order. *)
+          let still_current =
+            match state.code_file with
+            | Some (open_path, _) -> String.equal open_path path
+            | None -> false
+          in
+          if still_current then (
+            match code_scope_codebase state with
+            | Ok codebase ->
+                state.code_notes <- None;
+                state.code_notes_error <- None;
+                launch_code_notes_load state ~mailbox ~codebase ~path
+            | Error _ -> ())
+      | Error detail -> state.code_notes_error <- Some detail)
+  | Code_activity_loaded (path, result) ->
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok regions ->
+            state.code_activity <- Some (path, regions);
+            state.code_activity_error <- None;
+            state.code_activity_scroll <- 0
+        | Error detail -> state.code_activity_error <- Some detail)
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
@@ -5113,6 +5253,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
+  | Context_inspector_loaded (generation, keeper_name, reading) ->
+      if
+        generation = state.context_inspector_generation
+        && Option.exists (String.equal keeper_name)
+             state.context_inspector_keeper
+      then begin
+        state.context_inspector_loading <- false;
+        state.context_inspector_reading <- Some (keeper_name, reading)
+      end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
@@ -5818,6 +5967,72 @@ let main () =
           ~body_json:(Yojson.Safe.to_string json))
       ()
   in
+  (* A new note over the open file: $EDITOR is the form, and the editor is
+     the confirmation step -- a non-zero exit or an empty content leaves the
+     file unannotated. Reachable only from the notes view, which already
+     proved the scope has a codebase slug. *)
+  let handle_code_note_write () =
+    match state.code_file with
+    | None -> ()
+    | Some (path, _) -> (
+        match code_scope_codebase state with
+        | Error why -> add_event state "system" ("notes: " ^ why)
+        | Ok codebase -> (
+            match Masc_tui_editor.editor_command () with
+            | None ->
+                add_event state "error"
+                  "no $EDITOR set; export EDITOR to add a note here"
+            | Some _ -> (
+                let stem =
+                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                in
+                match
+                  Masc_tui_editor.roundtrip ~restore:restore_terminal
+                    ~reenter:reenter_terminal stem
+                with
+                | None -> add_event state "system" "note cancelled"
+                | Some body -> (
+                    match Yojson.Safe.from_string body with
+                    | exception Yojson.Json_error e ->
+                        add_event state "error"
+                          ("note: body is not JSON: " ^ e)
+                    | json ->
+                        let field key =
+                          match json with
+                          | `Assoc fields -> List.assoc_opt key fields
+                          | _ -> None
+                        in
+                        let int_field key =
+                          match field key with
+                          | Some (`Int n) -> Some n
+                          | Some _ | None -> None
+                        in
+                        let content =
+                          match field "content" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> ""
+                        in
+                        let kind =
+                          match field "kind" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "Comment"
+                        in
+                        if String.equal content "" then
+                          add_event state "system"
+                            "note cancelled (empty content)"
+                        else (
+                          match
+                            (int_field "line_start", int_field "line_end")
+                          with
+                          | Some line_start, Some line_end ->
+                              start_code_note_write state
+                                ~mailbox:async_messages ~codebase ~path
+                                ~line_start ~line_end ~kind ~content
+                          | _ ->
+                              add_event state "error"
+                                "note: line_start and line_end must be \
+                                 integers")))))
+  in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or
      an empty reason leaves the task unjudged, so no arming gate sits in
@@ -6151,6 +6366,7 @@ let main () =
       let composer_claimed =
         (not compact_viewport)
         && (not state.help_open)
+        && (not state.context_inspector_open)
         && (not state.palette_open)
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
@@ -6188,6 +6404,87 @@ let main () =
        | Some k when String.equal k toggle_roster_pane_key ->
            state.roster_pane_hidden <- not state.roster_pane_hidden;
            Render_schedule.request render_schedule Render_schedule.Force
+       (* [/context] is modal: the summary and exact prompt text must not leak
+          keys into the composer underneath. The quit confirmation and chrome
+          toggles remain global above it, matching Help and Palette. *)
+       | Some k when state.context_inspector_open && not compact_viewport ->
+           let prompt_blocks () =
+             match state.context_inspector_reading with
+             | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
+                 capture.Masc.Keeper_prompt_capture.blocks
+             | Some _ | None -> []
+           in
+           let close () =
+             state.context_inspector_open <- false;
+             state.context_inspector_exact <- None;
+             state.context_inspector_scroll <- 0
+           in
+           (match k with
+            | "esc" ->
+                (match state.context_inspector_exact with
+                 | Some _ ->
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0
+                 | None -> close ())
+            | "r" ->
+                Option.iter
+                  (fun keeper_name ->
+                     launch_context_inspector_load state
+                       ~mailbox:async_messages ~keeper_name)
+                  state.context_inspector_keeper
+            | "1" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Composition;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "2" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Prompt_blocks;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
+                state.context_inspector_tab <-
+                  (match state.context_inspector_tab with
+                   | Masc_tui_context_inspector.Composition ->
+                       Masc_tui_context_inspector.Prompt_blocks
+                   | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Composition);
+                state.context_inspector_cursor <- 0;
+                state.context_inspector_scroll <- 0
+            | ("j" | "down" | "k" | "up")
+              when Option.is_some state.context_inspector_exact
+                   || state.context_inspector_tab
+                      = Masc_tui_context_inspector.Composition ->
+                let count, height =
+                  Masc_tui_render.context_inspector_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_scroll <-
+                  move ~count ~height state.context_inspector_scroll
+            | "j" | "down" ->
+                let last = max 0 (List.length (prompt_blocks ()) - 1) in
+                state.context_inspector_cursor <-
+                  min last (state.context_inspector_cursor + 1)
+            | "k" | "up" ->
+                state.context_inspector_cursor <-
+                  max 0 (state.context_inspector_cursor - 1)
+            | "\r" ->
+                if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Prompt_blocks
+                then begin
+                  match List.nth_opt (prompt_blocks ()) state.context_inspector_cursor with
+                  | Some _ ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | None -> ()
+                end
+            | _ -> ())
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
@@ -6372,6 +6669,14 @@ let main () =
            search_jump state ~query:state.search_last ~after
              ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
+       (* In chat, printable keys normally belong to the draft. Keep [?] as
+          the documented global Help key when the draft is empty; once a
+          sentence has started it remains an ordinary question mark. This
+          makes shortcuts and slash commands discoverable without discarding
+          text the operator is already writing. *)
+       | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
+           state.help_open <- true;
+           state.help_scroll <- 0
        | Some k when message_mode ->
            let reasoning_key =
              String.length k = 1 && Char.code k.[0] = 18
@@ -6457,6 +6762,38 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "c" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* Which keeper wrote which lines of the open file, through what,
+              and when. Repository scope, like the notes: the regions are
+              keyed by the same server-minted codebase slug. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else
+                  match code_scope_codebase state with
+                  | Error why ->
+                      add_event state "system" ("activity: " ^ why)
+                  | Ok codebase ->
+                      state.code_activity_open <- true;
+                      state.code_notes_open <- false;
+                      state.code_diff_open <- false;
+                      state.code_history_open <- false;
+                      (match state.code_activity with
+                       | Some (loaded_path, _)
+                         when String.equal loaded_path path ->
+                           ()
+                       | Some _ | None ->
+                           state.code_activity <- None;
+                           state.code_activity_error <- None;
+                           launch_code_activity_load state
+                             ~mailbox:async_messages ~codebase ~path))
+       | Some "w" when state.view = Code && state.code_notes_open ->
+           (* Adding a note lives inside the notes view: the view proves the
+              scope, and the fresh listing lands where the writer looks. *)
+           handle_code_note_write ()
        | Some "m" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:
@@ -6474,6 +6811,7 @@ let main () =
                       state.code_notes_open <- true;
                       state.code_diff_open <- false;
                       state.code_history_open <- false;
+                      state.code_activity_open <- false;
                       (match state.code_notes with
                        | Some (loaded_path, _)
                          when String.equal loaded_path path ->
@@ -6497,6 +6835,7 @@ let main () =
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
+                  state.code_activity_open <- false;
                   (match state.code_diff with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6520,6 +6859,7 @@ let main () =
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
+                  state.code_activity_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6700,7 +7040,9 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -6821,7 +7163,9 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -6894,7 +7238,15 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_notes_open then (
+                  if state.code_activity_open then (
+                    match state.code_activity with
+                    | Some (_, regions) ->
+                        state.code_activity_scroll <-
+                          min
+                            (max 0 (List.length regions - 1))
+                            (state.code_activity_scroll + 1)
+                    | None -> ())
+                  else if state.code_notes_open then (
                     match state.code_notes with
                     | Some (_, notes) ->
                         state.code_notes_scroll <-
@@ -7121,7 +7473,10 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_notes_open then
+                  if state.code_activity_open then
+                    state.code_activity_scroll <-
+                      max 0 (state.code_activity_scroll - 1)
+                  else if state.code_notes_open then
                     state.code_notes_scroll <-
                       max 0 (state.code_notes_scroll - 1)
                   else if state.code_diff_open then

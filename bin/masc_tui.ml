@@ -156,6 +156,8 @@ type input_reader = {
   mutable filled : int;
   mutable position : int;
   mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
+  mutable late_palette_publisher :
+    (Masc_tui_terminal_palette.t -> unit) option;
   mutable last_source : input_source option;
   mutable partial_scalar : string;
       (** The head of a multi-byte character whose tail has not arrived.
@@ -185,6 +187,7 @@ let create_input_reader () =
     filled = 0;
     position = 0;
     terminal_probe = None;
+    late_palette_publisher = None;
     last_source = None;
     partial_scalar = "";
   }
@@ -227,6 +230,34 @@ let take_terminal_buffer_byte reader ~timeout =
     Some byte
   end
 
+let take_late_palette_publisher reader =
+  match reader.late_palette_publisher with
+  | None -> None
+  | Some publish ->
+    reader.late_palette_publisher <- None;
+    Some publish
+;;
+
+let publish_late_terminal_palette reader decoder =
+  match reader.late_palette_publisher with
+  | None -> ()
+  | Some _ ->
+    (match Masc_tui_terminal_probe.palette decoder with
+     | None -> ()
+     | Some palette ->
+       (match take_late_palette_publisher reader with
+        | None -> ()
+        | Some publish -> publish palette))
+;;
+
+let install_late_palette_publisher reader ~request_full_repaint =
+  reader.late_palette_publisher <-
+    Some
+      (fun palette ->
+        Masc_tui_terminal_palette.set_current (Some palette);
+        request_full_repaint 0)
+;;
+
 let take_input_byte reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
@@ -253,6 +284,7 @@ let take_input_byte reader ~timeout =
   | Some decoder
     when (not (Masc_tui_terminal_probe.has_replay decoder))
          && Masc_tui_terminal_probe.complete decoder ->
+    publish_late_terminal_palette reader decoder;
     reader.terminal_probe <- None;
     (match terminal_byte () with
      | None ->
@@ -262,7 +294,9 @@ let take_input_byte reader ~timeout =
        reader.last_source <- Some Terminal_buffer;
        Some byte)
   | Some decoder ->
-    (match Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte with
+    let next = Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte in
+    publish_late_terminal_palette reader decoder;
+    (match next with
      | Some byte ->
        reader.last_source <- Some Probe_replay;
        Some byte
@@ -270,7 +304,10 @@ let take_input_byte reader ~timeout =
        if
          (not (Masc_tui_terminal_probe.has_replay decoder))
          && Masc_tui_terminal_probe.complete decoder
-       then reader.terminal_probe <- None;
+       then begin
+         publish_late_terminal_palette reader decoder;
+         reader.terminal_probe <- None
+       end;
        reader.last_source <- None;
        None)
 
@@ -5294,6 +5331,10 @@ let main () =
      exact state before serving its replay or unread terminal-buffer tail. *)
   input_reader.terminal_probe <- Some terminal_probe_decoder;
   Masc_tui_terminal_palette.set_current terminal_probe.palette;
+  (match palette_requested, terminal_probe.palette with
+   | true, None ->
+     install_late_palette_publisher input_reader ~request_full_repaint
+   | true, Some _ | false, _ -> ());
   terminal_draws_images :=
     Some
       (match terminal_probe.graphics with

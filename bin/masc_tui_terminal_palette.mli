@@ -105,3 +105,12 @@ val current : unit -> t option
 val set_current : t option -> unit
 (** Process-local palette authority. Startup writes it once; later rendering
     stages read it without inventing a fallback. *)
+
+type snapshot
+
+val snapshot : unit -> snapshot
+val snapshot_palette : snapshot -> t option
+val snapshot_generation : snapshot -> int
+(** One atomic read of the process palette and its monotonic generation. A
+    captured snapshot remains internally consistent if [set_current] runs
+    later. *)

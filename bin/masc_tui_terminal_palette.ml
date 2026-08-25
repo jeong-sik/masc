@@ -246,6 +246,20 @@ let of_responses ~foreground ~background =
   | Some _, None | None, Some _ | None, None -> None
 ;;
 
-let process_palette : t option Atomic.t = Atomic.make None
-let current () = Atomic.get process_palette
-let set_current palette = Atomic.set process_palette palette
+type snapshot =
+  { palette : t option
+  ; generation : int
+  }
+
+let process_palette = Atomic.make { palette = None; generation = 0 }
+let snapshot () = Atomic.get process_palette
+let snapshot_palette snapshot = snapshot.palette
+let snapshot_generation snapshot = snapshot.generation
+let current () = (snapshot ()).palette
+
+let rec set_current palette =
+  let previous = snapshot () in
+  let next = { palette; generation = previous.generation + 1 } in
+  if not (Atomic.compare_and_set process_palette previous next) then
+    set_current palette
+;;

@@ -25,6 +25,10 @@ val complete : decoder -> bool
     palette slot have answered. It permits an early end without rescanning the
     captured prefix after every byte. *)
 
+val palette : decoder -> Masc_tui_terminal_palette.t option
+(** The complete palette available now, if any. O(1) and does not materialize
+    or copy replay bytes. *)
+
 val snapshot : decoder -> result
 (** The answers and replay bytes available now, without flushing a partial
     terminal response. Startup reads this at its deadline, then hands the same

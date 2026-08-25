@@ -67,6 +67,69 @@ let test_projected_background_bytes () =
   check str "unsupported level keeps the default background" ""
     (Masc_tui_theme.Sgr.background None)
 
+let rgb red green blue =
+  Masc_tui_terminal_palette.make_rgb ~red ~green ~blue
+;;
+
+let check_rgb label (red, green, blue) color =
+  check Alcotest.(triple int int int) label (red, green, blue)
+    ( Masc_tui_terminal_palette.red color
+    , Masc_tui_terminal_palette.green color
+    , Masc_tui_terminal_palette.blue color )
+;;
+
+let palette background =
+  Masc_tui_terminal_palette.of_responses
+    ~foreground:(Some (rgb 255 255 255)) ~background:(Some background)
+;;
+
+let user_background ~colors_enabled ~level background =
+  Masc_tui_theme.For_testing.user_message_background ~colors_enabled
+    ~project:
+      (Masc_tui_terminal_palette.For_testing.best_color_for_level ~level)
+    (palette background)
+;;
+
+let test_user_message_background_blend () =
+  let blend = Masc_tui_theme.For_testing.user_message_background_rgb in
+  check_rgb "dark blends twelve percent toward white" (30, 30, 30)
+    (blend (rgb 0 0 0));
+  check_rgb "light blends four percent toward black" (244, 244, 244)
+    (blend (rgb 255 255 255));
+  check_rgb "the weighted luminance picks the dark branch" (206, 118, 74)
+    (blend (rgb 200 100 50))
+;;
+
+let test_user_message_background_fallbacks () =
+  check str "truecolor keeps the blended RGB" "\027[48;2;30;30;30m"
+    (user_background ~colors_enabled:true
+       ~level:Masc_tui_terminal_palette.True_color (rgb 0 0 0));
+  check str "ANSI256 uses the nearest fixed xterm entry" "\027[48;5;234m"
+    (user_background ~colors_enabled:true
+       ~level:Masc_tui_terminal_palette.Ansi256 (rgb 0 0 0));
+  List.iter
+    (fun level ->
+      check str "unsupported capability keeps the terminal background" ""
+        (user_background ~colors_enabled:true ~level (rgb 0 0 0)))
+    [ Masc_tui_terminal_palette.Ansi16
+    ; Masc_tui_terminal_palette.Unknown
+    ];
+  check str "an unknown palette stays unstyled" ""
+    (Masc_tui_theme.For_testing.user_message_background ~colors_enabled:true
+       ~project:
+         (Masc_tui_terminal_palette.For_testing.best_color_for_level
+            ~level:Masc_tui_terminal_palette.True_color)
+       None);
+  let projected = ref false in
+  check str "NO_COLOR stays unstyled" ""
+    (Masc_tui_theme.For_testing.user_message_background ~colors_enabled:false
+       ~project:(fun _ ->
+         projected := true;
+         None)
+       (palette (rgb 0 0 0)));
+  check bool "NO_COLOR does not project a hidden colour" false !projected
+;;
+
 let test_colour_environment_policy () =
   let enabled = Masc_tui_theme.For_testing.colors_enabled in
   check bool "NO_COLOR disables styling" false
@@ -163,6 +226,8 @@ let () =
             test_conditional_tokens_agree_with_the_flag
         ; Alcotest.test_case "projected backgrounds own their bytes" `Quick
             test_projected_background_bytes
+        ; Alcotest.test_case "user background preserves capability fallbacks"
+            `Quick test_user_message_background_fallbacks
         ; Alcotest.test_case "colour environment policy is deterministic" `Quick
             test_colour_environment_policy
         ; Alcotest.test_case "the flag reflects the environment" `Quick
@@ -177,6 +242,8 @@ let () =
             test_tone_is_three_values
         ; Alcotest.test_case "glyphs hold their bytes" `Quick
             test_glyphs_hold_their_bytes
+        ; Alcotest.test_case "user background uses the low-contrast blend"
+            `Quick test_user_message_background_blend
         ; Alcotest.test_case "strip_sgr removes only styles" `Quick
             test_strip_sgr_removes_only_styles
         ] )

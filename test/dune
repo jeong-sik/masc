@@ -2658,7 +2658,7 @@
 (test
  (name test_tui_http_ast)
  (modules test_tui_http_ast)
- (libraries alcotest ast_grep)
+ (libraries alcotest ast_grep compiler-libs.common)
  (deps
   (source_tree ../lib)
   (source_tree ../bin)

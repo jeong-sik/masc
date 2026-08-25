@@ -3,6 +3,8 @@
    these values, and byte-identical frames are the acceptance test for the
    move. *)
 
+module Terminal_palette = Masc_tui_terminal_palette
+
 let colors_enabled_for_environment ~force_color ~no_color =
   match force_color with
   | Some "1" -> true
@@ -11,16 +13,70 @@ let colors_enabled_for_environment ~force_color ~no_color =
      | Some value when String.length value > 0 -> false
      | Some _ | None -> true)
 
-module For_testing = struct
-  let colors_enabled = colors_enabled_for_environment
-end
-
 let colors_enabled =
   colors_enabled_for_environment
     ~force_color:(Sys.getenv_opt "MASC_TUI_FORCE_COLOR")
     ~no_color:(Sys.getenv_opt "NO_COLOR")
 
-let style code = if colors_enabled then code else ""
+let style_for ~colors_enabled code = if colors_enabled then code else ""
+let style code = style_for ~colors_enabled code
+
+let projected_background ~colors_enabled = function
+  | Some projected ->
+    Terminal_palette.fold_projected_color
+      ~rgb:(fun color ->
+        style_for ~colors_enabled
+          (Printf.sprintf "\027[48;2;%d;%d;%dm"
+             (Terminal_palette.red color)
+             (Terminal_palette.green color)
+             (Terminal_palette.blue color)))
+      ~indexed:(fun index ->
+        style_for ~colors_enabled (Printf.sprintf "\027[48;5;%dm" index))
+      projected
+  | None -> ""
+;;
+
+let blend_component ~toward ~ratio component =
+  let source_weight = 1. -. ratio in
+  ((float_of_int toward *. ratio)
+   +. (float_of_int component *. source_weight))
+  |> int_of_float
+;;
+
+let user_message_background_rgb background =
+  let red = Terminal_palette.red background in
+  let green = Terminal_palette.green background in
+  let blue = Terminal_palette.blue background in
+  let luminance =
+    (0.299 *. float_of_int red)
+    +. (0.587 *. float_of_int green)
+    +. (0.114 *. float_of_int blue)
+  in
+  let toward, ratio = if luminance > 128. then 0, 0.04 else 255, 0.12 in
+  Terminal_palette.make_rgb
+    ~red:(blend_component ~toward ~ratio red)
+    ~green:(blend_component ~toward ~ratio green)
+    ~blue:(blend_component ~toward ~ratio blue)
+;;
+
+let user_message_background_for ~colors_enabled ~project palette =
+  if not colors_enabled then ""
+  else
+    match palette with
+    | Some palette ->
+      palette
+      |> Terminal_palette.background
+      |> user_message_background_rgb
+      |> project
+      |> projected_background ~colors_enabled
+    | None -> ""
+;;
+
+module For_testing = struct
+  let colors_enabled = colors_enabled_for_environment
+  let user_message_background_rgb = user_message_background_rgb
+  let user_message_background = user_message_background_for
+end
 
 module Sgr = struct
   let reset = "\027[0m"
@@ -39,25 +95,18 @@ module Sgr = struct
   let default_fg = style "\027[39m"
   let gray = style "\027[90m"
 
-  let background = function
-    | Some projected ->
-      Masc_tui_terminal_palette.fold_projected_color
-        ~rgb:(fun color ->
-          style
-            (Printf.sprintf "\027[48;2;%d;%d;%dm"
-               (Masc_tui_terminal_palette.red color)
-               (Masc_tui_terminal_palette.green color)
-               (Masc_tui_terminal_palette.blue color)))
-        ~indexed:(fun index -> style (Printf.sprintf "\027[48;5;%dm" index))
-        projected
-    | None -> ""
-  ;;
+  let background = projected_background ~colors_enabled
 
   let bg_removed = style "\027[48;5;52m"
   let bg_added = style "\027[48;5;22m"
 
   let reverse = "\027[7m"
 end
+
+let user_message_background palette =
+  user_message_background_for ~colors_enabled
+    ~project:Terminal_palette.best_color palette
+;;
 
 module Term = struct
   let clear = "\027[2J\027[H"

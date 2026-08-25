@@ -1985,6 +1985,19 @@ let code_cursor_line_symbols (state : state) =
             segments;
           List.rev !names)
 
+(* The Code pane asks the server for at most this many entries per directory
+   and the server answers a bare list, so a full page is the only sign that a
+   directory holds more. The title says so rather than presenting the page as
+   the total: masc's own test/ has 955 entries. *)
+let workspace_entries_limit =
+  Server_routes_http_routes_workspace.max_tree_node_limit
+
+let workspace_entries_count_label total =
+  if total = 0 then ""
+  else if total >= workspace_entries_limit then
+    Printf.sprintf " (%d+, more not listed)" total
+  else Printf.sprintf " (%d)" total
+
 let palette_entries (state : state) =
   List.map
     (fun (surface, label) -> ("go " ^ label, Palette_goto surface))

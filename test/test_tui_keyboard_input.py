@@ -5583,8 +5583,8 @@ def enter_outside_changes_interaction(
 
 
 
-WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/tree?depth=0&limit=200"
-WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=500"
+WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/children?path=&limit=2000"
+WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=2000"
 WORKSPACE_FILE_AML_PATH = "/api/v1/workspace/file?path=lib/a.ml"
 
 
@@ -6960,8 +6960,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     code_file = (200, {"ok": True, "content": "let a = 2\n"})
     for children_path in (
-        "/api/v1/workspace/children?path=repos/masc/lib&limit=500&keeper=alpha",
-        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=500&keeper=alpha",
+        "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
+        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
     ):
         changes_navigation_fixtures[children_path] = code_children
     for file_path in (
@@ -7032,7 +7032,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     repositories_fixtures = keeper_runtime_http_fixtures()
     repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
-    repositories_fixtures["/api/v1/workspace/tree?depth=0&limit=200&repo_id=masc"] = (
+    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
         200,
         [
             {"path": "src", "label": "src", "depth": 0, "parent": "",

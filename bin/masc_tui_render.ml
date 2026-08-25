@@ -6220,7 +6220,7 @@ let render_code (state : state) =
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
        ^ " " ^ Terminal_text.single_line where
-       ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
+       ^ workspace_entries_count_label total
        ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;

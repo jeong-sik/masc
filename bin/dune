@@ -572,7 +572,8 @@
   masc_tui_utf8_input
   masc_tui_send_disposition
   unix
-  yojson))
+  yojson
+  masc.server))
 
 (library
  (name masc_tui_composer_projection)

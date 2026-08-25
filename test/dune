@@ -2810,6 +2810,11 @@
  (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types))
 
 (test
+ (name test_tui_workspace_entries)
+ (modules test_tui_workspace_entries)
+ (libraries alcotest masc.server masc_tui_types))
+
+(test
  (name test_tui_acting)
  (modules test_tui_acting)
  (libraries alcotest masc_tui_acting masc_tui_observer))

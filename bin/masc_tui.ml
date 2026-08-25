@@ -6542,17 +6542,48 @@ let main () =
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
-          Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal "{\n}\n"
+          Masc_tui_loader.load_keeper_config_editor ~host ~port
+            ~keeper_name:keeper.k_name
         with
-        | None -> add_event state "system" (keeper.k_name ^ ": settings unchanged")
-        | Some patch -> (
+        | Error detail -> add_event state "error" detail
+        | Ok (observed, stem) -> (
           match
-            Masc_tui_http.post_keeper_config ~host ~port
-              ~keeper_name:keeper.k_name ~patch_json:patch
+            Masc_tui_editor.roundtrip ~restore:restore_terminal
+              ~reenter:reenter_terminal stem
           with
-          | Ok _ -> add_event state "system" (keeper.k_name ^ ": settings applied")
-          | Error detail -> add_event state "error" detail)))
+          | None ->
+              add_event state "system" (keeper.k_name ^ ": settings unchanged")
+          | Some edited -> (
+            match Yojson.Safe.from_string edited with
+            | exception Yojson.Json_error detail ->
+                add_event state "error" ("settings are not JSON: " ^ detail)
+            | edited_json -> (
+              match
+                Masc_tui_keeper_config.patch_of_edit ~before:observed
+                  ~after:edited_json
+              with
+              | Error detail -> add_event state "error" detail
+              | Ok (`Assoc []) ->
+                  add_event state "system"
+                    (keeper.k_name ^ ": no settings changed")
+              | Ok patch -> (
+                match
+                  Masc_tui_http.post_keeper_config ~host ~port
+                    ~keeper_name:keeper.k_name
+                    ~patch_json:(Yojson.Safe.to_string patch)
+                with
+                | Error detail -> add_event state "error" detail
+                | Ok _ ->
+                    add_event state "system"
+                      (keeper.k_name ^ ": changed settings applied");
+                    if
+                      state.view = Keepers Keeper_detail
+                      && state.detail_tab = Detail_instructions
+                    then (
+                      state.keeper_config_view <- None;
+                      state.keeper_config_view_error <- None;
+                      launch_keeper_config_view state
+                        ~mailbox:async_messages keeper.k_name)))))))
   in
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with

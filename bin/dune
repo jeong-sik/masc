@@ -528,6 +528,12 @@
  (libraries unix))
 
 (library
+ (name masc_tui_keeper_config)
+ (wrapped false)
+ (modules masc_tui_keeper_config)
+ (libraries yojson))
+
+(library
  (name masc_tui_csi)
  (wrapped false)
  (modules masc_tui_csi))
@@ -640,6 +646,7 @@
   masc_tui_composer
   masc_tui_composer_projection
   masc_tui_keeper_control
+  masc_tui_keeper_config
   masc_tui_markdown
   masc_tui_graphics
   masc_tui_markdown_render_cache

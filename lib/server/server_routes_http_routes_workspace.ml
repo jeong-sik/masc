@@ -623,12 +623,43 @@ let git_diff_badges ~base =
 let git_run_lines_or_error ~cwd args =
   Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
 
+(* The repository that owns [path], searched upward from the file and stopped
+   at [base].
+
+   git does not stop. Asked about a file under a playground that holds its
+   clones in [repos/<id>/], git finds no repository at the playground root,
+   walks past it, and answers from whichever repository encloses MASC's own
+   checkout. There the path does not exist, so git prints nothing and the
+   route reports a modified file as unchanged -- a wrong answer with a 200 on
+   it, which is worse than a failure the caller can see (#30322).
+
+   [base] is the far edge because it is where the caller's authority ends: a
+   query names a keeper or a repository, and an answer from outside that is
+   not an answer to the question asked. *)
+let repository_owning ~base ~path =
+  let normalise dir =
+    let n = String.length dir in
+    if n > 1 && dir.[n - 1] = '/' then String.sub dir 0 (n - 1) else dir
+  in
+  let base = normalise base in
+  let rec walk dir =
+    let dir = normalise dir in
+    if not (String.equal dir base || String.starts_with ~prefix:(base ^ "/") dir)
+    then None
+    else if Sys.file_exists (Filename.concat dir ".git") then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk parent
+  in
+  walk (Filename.dirname path)
+
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
   let parse_git_numstat_line = parse_git_numstat_line
   type safe_workspace_file = workspace_file
   let resolve_workspace_file = resolve_workspace_file
+  let repository_owning = repository_owning
   let load_workspace_file_content = load_workspace_file_content
 end
 
@@ -994,10 +1025,15 @@ let add_routes router =
                 if not (Sys.file_exists safe.resolved_path) then
                   json_response ~status:`Not_found request reqd (json_error "File not found")
                 else
-                  let rel = rel_under base safe.lexical_path in
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                  let rel = rel_under repo_root safe.lexical_path in
                   let cache_key =
                     Printf.sprintf "git:blame:%s:%s:%s"
-                      base
+                      repo_root
                       (source_to_string source)
                       rel
                   in
@@ -1006,7 +1042,7 @@ let add_routes router =
                       ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                       (fun () ->
                          Domain_pool_ref.submit_io_or_inline (fun () ->
-                           match git_run_lines ~cwd:base
+                           match git_run_lines ~cwd:repo_root
                                    ["blame"; "--porcelain"; "--"; rel]
                            with
                            | [] -> `List []
@@ -1015,7 +1051,7 @@ let add_routes router =
                              let grouped = group_blame_entries rel entries in
                              `List grouped))
                   in
-                  json_response_with_source ~status:`OK ~source request reqd json))
+                  json_response_with_source ~status:`OK ~source request reqd json)))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
@@ -1044,10 +1080,18 @@ let add_routes router =
               | Error _ ->
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
               | Ok safe ->
-                let rel = rel_under base safe.lexical_path in
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   (* Saying so beats the empty diff git would print from
+                      whatever repository encloses this one: an answer from
+                      outside the queried scope is not an answer. *)
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                let rel = rel_under repo_root safe.lexical_path in
                 let cache_key =
                   Printf.sprintf "git:diff:%s:%s:%s:%s"
-                    base
+                    repo_root
                     (source_to_string source)
                     base_ref
                     rel
@@ -1057,7 +1101,7 @@ let add_routes router =
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                     (fun () ->
                        Domain_pool_ref.submit_io_or_inline (fun () ->
-                         match git_run_lines_or_error ~cwd:base
+                         match git_run_lines_or_error ~cwd:repo_root
                                  ["diff"; base_ref; "--"; rel]
                          with
                          | Error _ ->
@@ -1076,5 +1120,5 @@ let add_routes router =
                    json_response ~status:`Bad_request request reqd
                      (json_error "git diff failed")
                  | data ->
-                   json_response_with_source ~status:`OK ~source request reqd data)))
+                   json_response_with_source ~status:`OK ~source request reqd data))))
          request reqd)

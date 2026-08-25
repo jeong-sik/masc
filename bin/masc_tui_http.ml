@@ -285,6 +285,45 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     keeper that made no more calls and a scan that stopped short arrive
     looking the same. The server bounds the window at what the read costs and
     states in its answer the window it actually covered. *)
+(** One directory level of the workspace ([/api/v1/workspace/children];
+    an empty [path] asks [/workspace/tree] for the root). *)
+let fetch_workspace_entries ~(host : string) ~(port : int) ~(path : string) :
+    (Masc.Tui_decode.workspace_tree_node list, string) result =
+  let route =
+    if String.equal path "" then "/api/v1/workspace/tree?depth=0&limit=200"
+    else
+      Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
+        (percent_encode_query_value path)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "workspace entries returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("workspace entries were not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_workspace_tree json)
+
+(** The whole file at [path] ([/api/v1/workspace/file]). *)
+let fetch_workspace_file ~(host : string) ~(port : int) ~(path : string) :
+    (string, string) result =
+  let route =
+    Printf.sprintf "/api/v1/workspace/file?path=%s"
+      (percent_encode_query_value path)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "workspace file returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("workspace file was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_workspace_file json)
+
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =

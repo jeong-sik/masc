@@ -390,7 +390,12 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
        ~callee:"replace_board_posts");
-  check int "Board detail success uses shared post replacement" 1
+  (* Detail success deliberately does *not* go through the shared replacement.
+     That helper reranks the list, and reranking on a detail response made rapid
+     j/k navigation snap back to row zero as answers arrived (#30409). A detail
+     response enriches one row; it does not decide the order. Pinned at zero so
+     that putting the call back has to come with a new answer for that. *)
+  check int "Board detail success does not rerank the list" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"replace_board_posts");
@@ -403,7 +408,12 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"start_board_post_refresh"
        ~callee:"Board_detail.start");
-  check int "Board detail success validates the response post identity" 1
+  (* Two identity comparisons, and both have to stay. The guard refuses a
+     response carrying a different post than the one asked for; the in-place
+     map then picks the row to enrich (#30409 replaced a reranking call with
+     it). Counting them together is what this can see, so the count moves when
+     either one goes. *)
+  check int "Board detail success compares the post identity twice" 2
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"String.equal");

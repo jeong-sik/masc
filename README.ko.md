@@ -5,20 +5,37 @@
 
 [English](README.md)
 
-MASC(Multi-Agent Shared Context)는 같은 프로젝트에서 일하는 여러
-에이전트가 작업 상태를 공유하도록 돕는 로컬 MCP 서버입니다. 목표, 작업,
-담당자, 보드 글, 실행 근거를 한 작업 공간에 저장하고 MCP와 웹 대시보드로
-보여줍니다.
+MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 작업 공간입니다.
+내 컴퓨터에서 돌아가고, 프로젝트 하나의 목표와 작업, 누가 뭘 맡았는지, 보드에 오간
+글, 그리고 무엇을 했는지 남긴 기록을 `.masc/` 디렉터리 한 곳에 모아 둡니다. 이
+상태를 MCP로 열어 주기 때문에, MCP를 지원하는 클라이언트라면 무엇이든 같은 작업
+공간에 들어올 수 있습니다.
 
-**Keeper**는 MASC가 관리하는 선택형 상주 에이전트입니다. 공유 작업 공간에서
-이벤트를 받아 장기 작업을 수행합니다. MASC를 협업용 MCP 서버로만 쓸 때는
-Keeper가 없어도 됩니다.
+만든 이유는 이렇습니다. 같은 저장소에서 에이전트를 둘 돌리면 각자 자기 기억만
+가집니다. 같은 결정을 다시 내리고, 같은 파일을 동시에 잡고, 상대가 이미 해 본 걸
+볼 방법이 없습니다. MASC는 그 상태를 에이전트 밖으로 꺼내서, 둘 다 읽고 쓰는 한
+곳에 둡니다.
 
-> **개발 상태:** MASC는 로컬의 신뢰할 수 있는 환경을 대상으로 하는 pre-1.0
-> 프로젝트입니다. 운영 서비스나 보안 경계로 사용할 수 없습니다. Gate, 사람
-> 승인(HITL), Docker 실행은 일부 작업을 제한하지만, 무인 에이전트의 모든 위험한
-> 행동을 막아주지는 않습니다. IDE와 TUI는 실험 단계입니다. `main`의 코드는
-> 최신 공개 바이너리보다 앞서 있을 수 있습니다.
+**Keeper**는 MASC가 직접 띄우고 지켜보는 상주 에이전트입니다. 작업을 집어 들고,
+셸 명령을 돌리고, 파일을 고치고, 무엇을 했는지 작업 공간에 다시 올립니다. 꼭
+있어야 하는 건 아닙니다. Keeper 없이 MCP 협업 서버로만 써도 됩니다.
+
+> **개발 상태:** MASC는 1.0 이전 프로젝트이고, 믿을 수 있는 내 컴퓨터 안에서 쓰는
+> 걸 전제로 합니다. 운영 서비스가 아니고 보안 경계도 아닙니다. Gate, 사람
+> 승인(HITL), Docker 실행은 특정 작업을 막아 주지만, 사람이 보지 않는 사이에
+> 에이전트가 하는 위험한 일을 전부 막지는 못합니다. `main`은 빠르게 바뀌어서 최신
+> 공개 바이너리보다 한참 앞서 있을 수 있습니다.
+
+## 들어가는 길 세 가지
+
+같은 작업 공간을 세 가지 방법으로 볼 수 있습니다. 셋 다 같은 `.masc/` 상태를 읽고
+씁니다. 지금 하려는 일에 맞는 걸 고르면 됩니다.
+
+| 방법 | 이럴 때 씁니다 | 어떻게 얻나요 |
+|---|---|---|
+| **MCP** | 내가 쓰는 에이전트를 작업 공간에 참여시킬 때. 작업을 잡고, 보드에 글을 쓰고, 기록을 남깁니다 | MCP 클라이언트로 `http://127.0.0.1:8935/mcp` 에 붙습니다 |
+| **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
+| **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | 소스를 받아서 빌드합니다 (`masc-tui`) |
 
 ![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-21/01-overview.png)
 
@@ -26,12 +43,12 @@ Keeper가 없어도 됩니다.
 바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)에서
 24개 화면과 캡처 조건을 확인할 수 있습니다.
 
-## 먼저 실행하기
+## 처음 실행하기
 
-### 로컬 소스에서 실행
+### 소스에서 실행
 
-OCaml 의존성을 한 번 설치한 뒤 작업 공간 서버를 실행합니다. 기본 quickstart는
-Keeper를 시작하지 않으며 모델 프로바이더 키도 요구하지 않습니다.
+OCaml 의존성을 한 번 설치한 뒤 서버를 띄웁니다. 기본 quickstart는 Keeper를 띄우지
+않고, 모델 프로바이더 키도 필요 없습니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
@@ -46,7 +63,7 @@ source "$BASE_PATH/.masc/config/mcp-client.env"
 curl http://127.0.0.1:8935/health
 ```
 
-기본값은 다음과 같습니다.
+기본값은 이렇습니다.
 
 - 런타임 상태: `~/masc-quickstart/.masc`
 - HTTP 포트: `8935`
@@ -57,24 +74,24 @@ curl http://127.0.0.1:8935/health
 - MCP bearer export: `~/masc-quickstart/.masc/config/mcp-client.env`
 
 `--base-path`, `--team`, `--port`, `--no-open`, `--no-start` 옵션은
-`./quickstart.sh --help`에서 확인할 수 있습니다.
+`./quickstart.sh --help`에서 볼 수 있습니다.
 
-`classic` Keeper 구성을 함께 시작하려면 첫 실행 때 모델 키를 제공합니다.
+`classic` Keeper 구성으로 시작하려면 첫 실행에 모델 키를 넘깁니다.
 
 ```bash
 export OLLAMA_CLOUD_API_KEY=...
 ./quickstart.sh --team classic
 ```
 
-필요한 OCaml과 Dune 버전은 `dune-project`에 적혀 있습니다. 첫 소스 실행은
-OCaml 서버와 대시보드를 빌드하므로 몇 분 걸릴 수 있습니다.
+컴파일러와 Dune 버전은 `dune-project`에 적혀 있습니다. 소스에서 처음 실행하면
+OCaml 서버와 대시보드를 같이 빌드하므로 몇 분 걸립니다.
 
-### 공개 바이너리 설치
+### 공개 바이너리
 
-공개 릴리스는 `main`보다 늦을 수 있습니다. 먼저
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 설치할 태그를
-고르세요. 설치 스크립트도 같은 태그에서 내려받아야 새 설치 스크립트와 예전
-릴리스 파일을 섞지 않을 수 있습니다.
+공개된 릴리스는 `main`보다 뒤처져 있을 수 있습니다.
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그를 하나
+고르고, 설치 스크립트도 **같은 태그의 것**을 쓰세요. 둘을 섞으면 새 설치
+스크립트가 옛 릴리스 파일을 다루게 됩니다.
 
 ```bash
 TAG=vX.Y.Z
@@ -84,24 +101,26 @@ less /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
 ```
 
-설치 방식은 선택한 태그에 따라 달라집니다. 최근 릴리스의 스크립트는
-`SHA256SUMS`가 있으면 내려받은 파일을 검증하고, 필요한 파일이 없으면 설치를
-중단합니다. 지원 플랫폼은 각 릴리스에 첨부된 파일을 기준으로 확인하세요. 설치가
-끝나면 스크립트가 출력한 login과 시작 명령을 따릅니다. login 명령은 MCP
-클라이언트용 worker bearer를 만듭니다. 기본 설정의 MCP endpoint는 인증 없는
-클라이언트를 받지 않습니다.
+설치 동작은 고른 태그를 따라갑니다. 최근 릴리스 스크립트는 `SHA256SUMS`가 있으면
+검증하고, 꼭 필요한 파일이 없으면 멈춥니다. 지원 플랫폼은 그 릴리스에 붙은
+자산이 전부입니다. 설치가 끝나면 화면에 찍힌 login과 start 명령을 그대로
+따르세요. login 명령이 MCP 클라이언트용 worker bearer를 만들어 줍니다. 기본
+설정에서는 토큰 없는 클라이언트를 받지 않습니다.
 
-## MCP 클라이언트 연결
+릴리스에는 서버 바이너리와 배포 점검 도구만 들어갑니다. 터미널 UI는 여기에 없으니,
+터미널로 쓰려면 위의 소스 설치가 필요합니다.
 
-공개 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를 현재
-셸에 읽습니다.
+## MCP 클라이언트 설정
+
+공개된 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를
+불러옵니다.
 
 ```bash
 BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
 source "$BASE_PATH/.masc/config/mcp-client.env"
 ```
 
-bearer 환경 변수를 지원하는 클라이언트에는 다음 형태로 등록합니다.
+bearer 토큰을 환경 변수로 받는 클라이언트라면 이런 모양으로 씁니다.
 
 ```toml
 [mcp_servers.masc]
@@ -110,59 +129,107 @@ bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-클라이언트가 연결되면 아래 두 호출로 첫 작업을 시작할 수 있습니다.
+클라이언트가 붙고 나면 가장 짧은 시작 흐름은 이렇습니다.
 
 ```text
-masc_start(path="/path/to/project", task_title="첫 작업 설명")
+masc_start(path="/path/to/project", task_title="첫 작업을 한 줄로 적습니다")
 masc_status()
 ```
 
-`masc_start`는 작업할 프로젝트를 선택하고 작업 공간에 참여합니다. 제목을
-전달하면 새 작업을 만들고 자신이 맡습니다. 이후 MASC 도구를 통해 목표, 작업,
-보드 글, 상태 변경을 다른 에이전트와 공유합니다.
+`masc_start`가 프로젝트를 고르고, 작업 공간에 참여시키고, 원하면 작업을 하나
+만들어서 바로 담당까지 잡아 줍니다. 그다음부터는 목표, 작업, 보드 글, 상태 변경이
+MASC 도구를 통해 공유됩니다. 지금 공개된 MCP 도구는 39개이고, 작업 공간 참여와
+메시지, 작업, 목표, 계획, Keeper 조작, 보드로 나뉩니다. 클라이언트 안에서
+`masc_tool_help`로 각 도구 설명을 볼 수 있습니다.
 
-기본 로컬 인증에서는 URL만 등록하면 `401 Unauthorized`가 납니다. 다른
-클라이언트 형식, initialize 직접 확인, 수동 bearer 생성은
-[`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md)를 참고하세요. admin 전용 대시보드
-작업은 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에
-정리돼 있습니다.
+URL만 적어 두면 기본 인증 설정에서 `401 Unauthorized`가 납니다. 다른 클라이언트
+형식, initialize 직접 확인, bearer 수동 발급은
+[`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md)에 있습니다. 관리자만 쓸 수 있는
+대시보드 조작은
+[`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)를
+보세요.
 
-## 현재 범위
+## 터미널 UI
 
-| 영역 | 현재 용도 | 알아둘 점 |
+`masc-tui`는 같은 작업 공간을 터미널에서 보는 프로그램입니다. `.masc/`를 디스크에서
+바로 읽고, 서버가 떠 있으면 HTTP로만 볼 수 있는 화면까지 더해 줍니다. 소스에서
+빌드해야 하고, 공개 바이너리 릴리스에는 들어 있지 않습니다.
+
+```bash
+dune build --root . bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path /path/to/project
+```
+
+넘기는 경로 바로 아래에 `.masc`가 있어야 합니다. `--base-path`를 안 주면
+`MASC_BASE_PATH`를, 그것도 없으면 현재 디렉터리를 씁니다. `dune install`이나 opam
+설치를 하면 `masc-tui` 이름으로 `PATH`에 올라갑니다.
+
+`Tab`을 누르면 화면 20개를 돌아가며 보여 주고, 지금 보는 화면은 맨 윗줄 띠에
+표시됩니다.
+
+| 화면 | 보여 주는 것 |
+|---|---|
+| Overview | 작업 공간 요약, 할 일 목록, 지금 손이 필요한 것 |
+| Acting | 모든 Keeper의 도구 호출, 턴 시작과 종료를 들어오는 대로 |
+| Keepers | Keeper 명단, 그리고 Keeper별 대화·로그·도구 호출·런타임 |
+| Lanes, Runtime | 런타임 레인과 후보 순서, 프로바이더에 실제로 닿는지 |
+| Approvals | Gate 승인 대기 목록. 터미널에서 바로 승인하거나 거절합니다 |
+| Board | 사람, 에이전트, 자동화, 시스템이 올린 글 |
+| Planning, Schedules, Verify | 계획과 목표, 예약된 작업, 검증 판정 |
+| Repositories, Code, Changes | 등록된 저장소, 그 안의 파일 탐색, Keeper가 최근에 고친 것 |
+| Harness, Fusion, Tools, Resources, Config, Connectors, Logs | 하네스 실행, 패널·심사 실행, 도구 목록, MCP 리소스, `runtime.toml`, 외부 채널 연결, 런타임 로그 |
+
+보기만 하는 화면은 아닙니다. 맨 아래 입력줄은 지금 지정된 Keeper에게 메시지를
+보내고, `/task <제목>`을 치면 `masc_add_task`로 작업을 만든 뒤 그 작업 번호를 붙여
+Keeper에게 바로 넘깁니다. Code 화면에서는 `Enter`로 파일을 열고, `d`로 HEAD 대비
+지금 고친 내용을, `H`로 그 파일을 건드린 커밋을, `m`으로 그 파일에 달린 메모를
+봅니다.
+
+서버가 꺼져 있어도 Keeper 명단, Keeper 상세, 할 일 목록은 디스크에서 읽으므로 그대로
+보입니다. Approvals, Board, Planning, Fusion, Runtime, 로그, 메시지 보내기는 서버가
+있어야 하고, 없으면 빈 목록 대신 안 됐다고 말합니다. `data unreliable` 옆의 `0`은
+"읽기가 실패했다"는 뜻이지 "비어 있다"는 뜻이 아닙니다.
+
+TUI는 입력을 받을 수 있는 TTY가 필요하고, `dumb`이 아닌 터미널이어야 합니다. 키
+목록과 화면별 동작, 문제 해결은 [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md)에 있습니다.
+
+## 지금 할 수 있는 것
+
+| 영역 | 지금 쓰는 방식 | 알아 둘 한계 |
 |---|---|---|
-| 작업 공간 협업 | MCP로 목표(Goal), 작업(Task), 담당자, 상태 변경, 보드 글, 검증 근거를 공유합니다 | 협업 정보는 여러 에이전트가 동시에 같은 소스 파일을 고칠 때 발생하는 충돌을 완전히 막지 못합니다 |
-| Keeper | 설정된 에이전트가 작업 공간의 이벤트를 받아 작업하고 실행 기록을 남깁니다 | 고급 기능이며 선택한 런타임과 Keeper 설정에 따라 동작이 달라집니다 |
-| 대시보드 | 작업 공간과 런타임 상태를 보고 운영 명령을 실행합니다 | 대시보드 빌드 상태와 인증 방식에 따라 화면 및 쓰기 권한이 달라집니다 |
-| Gate와 사람 승인 | 지원하는 외부 작업에 Always Allow, 모델 판단, 사람 승인을 적용합니다 | 승인 절차이며 샌드박스나 자격증명 보호 장치가 아닙니다 |
-| 런타임 선택 | Keeper마다 프로바이더와 모델을 지정하고 순서가 있는 후보 목록을 설정합니다 | 올바른 카탈로그와 프로바이더 자격증명이 필요합니다 |
-| Fusion | `masc_fusion`으로 여러 모델의 답과 심판 결과를 모읍니다 | 사용 전에 preset과 심판 런타임을 설정해야 합니다 |
-| 외부 채널 | Discord와 Slack 등 지원 채널을 작업 공간에 연결합니다 | token과 채널별 Keeper 연결을 운영자가 직접 설정해야 합니다 |
-| 로컬 또는 Docker 실행 | Keeper의 셸 작업에 `local` 또는 `docker`를 선택합니다 | `local`은 호스트에서 실행됩니다. Docker도 완전한 보안 경계가 아닙니다 |
-| IDE와 TUI | 실험 중인 화면과 터미널 UI를 살펴봅니다 | 일반 작업을 시작하는 기본 경로가 아닙니다 |
+| 작업 공간 협업 | 목표, 작업, 담당, 상태 전이, 보드 글, 검증 기록을 MCP로 공유 | 여기 담긴 정보가 동시 코드 수정을 막아 주지는 않습니다 |
+| Keeper | 설정한 에이전트가 작업 공간 이벤트에 반응하고 실행 기록을 남김 | 익숙해진 다음에 쓰는 기능입니다. 고른 런타임과 Keeper 설정에 따라 동작이 달라집니다 |
+| 대시보드 | 작업 공간과 런타임 상태를 읽고 운영자로서 조작 | 빌드된 SPA와 인증 방식에 따라 쓸 수 있는 범위가 달라집니다 |
+| 터미널 UI | Keeper를 지켜보고, Gate 대기 목록에 답하고, 메시지를 보내고, 저장소 파일과 diff를 봄 | 소스 빌드로만 씁니다. `main`에서 화면 구성이 자주 바뀝니다 |
+| Gate와 사람 승인 | 외부에 영향을 주는 작업을 항상 허용 / 모델 판단 / 사람 승인 중 하나로 처리 | 승인 절차이지 샌드박스나 자격증명 경계가 아닙니다 |
+| 런타임 배정 | Keeper마다 프로바이더와 모델을 정하고, 레인에 후보 순서를 지정 | 유효한 카탈로그와 프로바이더 자격증명은 따로 필요합니다 |
+| Fusion | `masc_fusion`으로 패널과 심사 흐름을 실행 | 미리 정의한 구성과 심사 런타임이 있어야 합니다 |
+| 커넥터 | 작업 공간 활동을 Discord, Slack 같은 외부 채널에 연결 | 토큰과 채널–Keeper 연결은 운영자가 직접 설정합니다 |
+| 로컬 / Docker 실행 | Keeper의 셸 작업을 `local` 또는 `docker`로 실행 | `local`은 호스트에서 그대로 돕니다. Docker 프로파일도 완전한 보안 경계는 아닙니다 |
+| IDE | 대시보드 안의 실험적인 협업 화면 | 평소 작업의 정식 입구가 아닙니다 |
 
-현재 제품의 기본 경로는 저장소 작업 공간 협업입니다. Keeper 운영과 운영자
-기능은 그다음 단계입니다. 원격 환경의 안전성, 클러스터 배포, 운영 서비스 수준은
-현재 보장하지 않습니다. 범위와 우선순위는
-[`docs/PRODUCT-OPERATING-PLAN.md`](docs/PRODUCT-OPERATING-PLAN.md)를 참고하세요.
+제품의 정식 입구는 저장소 작업 공간 협업입니다. Keeper 감독과 운영자 조작은 그
+다음입니다. 원격에서 안전하게 쓰기, 클러스터 배포, 운영 서비스 수준의 보장은 아직
+약속하는 범위가 아닙니다. [`docs/PRODUCT-OPERATING-PLAN.md`](docs/PRODUCT-OPERATING-PLAN.md)를
+보세요.
 
 ## 설정
 
-MASC는 런타임 상태를 `<base-path>/.masc` 아래에 둡니다. 사용자가 작성하는
-설정은 기본적으로 `<base-path>/.masc/config`에 있습니다. `MASC_CONFIG_DIR`를
-지정하면 다른 설정 폴더를 사용할 수 있습니다.
+MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. 사람이 쓰는 설정은
+`<base-path>/.masc/config` 아래에 둡니다. `MASC_CONFIG_DIR`로 다른 위치를 지정하면
+그쪽을 씁니다.
 
 | 경로 | 용도 |
 |---|---|
-| `runtime.toml` | 프로바이더와 모델 목록, 필수 `[runtime].default`, 런타임 후보 목록, Keeper별 런타임 지정 |
-| `agent-core-models-overlay.toml` | 배포 환경에서 추가하는 모델 기능 정보. 파일이 없으면 Agent Core에 포함된 기본 카탈로그만 사용합니다 |
-| `keepers/<name>.toml` | Keeper 실행 설정 |
-| `keepers/<name>/AGENT.md` | Keeper의 전체 프롬프트. TOML로 만든 Keeper마다 필요합니다 |
-| `repositories.toml` | 저장소 작업에 사용할 저장소 이름과 체크아웃 정보 |
-| `keeper_repo_mappings.toml` | Keeper별 저장소 선호값. 기본 선택에만 쓰며 접근 권한을 제한하지 않습니다 |
-| `.env.local` | 현재 설치 스크립트와 빠른 실행 절차가 기록하는 프로바이더 환경 변수 |
+| `runtime.toml` | 프로바이더·모델 목록, 필수 항목인 `[runtime].default`, 런타임 레인, Keeper 배정 |
+| `agent-core-models-overlay.toml` | 배포 환경에서만 쓰는 모델 능력 항목. 파일이 없으면 내장 Agent Core 목록을 씁니다 |
+| `keepers/<name>.toml` | Keeper 운영 설정 |
+| `keepers/<name>/AGENT.md` | Keeper 프롬프트 전문. TOML로 만든 모든 Keeper에 필요합니다 |
+| `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
+| `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
+| `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
 
-Keeper 하나에는 사용자가 작성하는 파일 두 개가 필요합니다.
+Keeper 하나는 사람이 쓰는 파일 두 개로 만듭니다.
 
 ```text
 <base-path>/.masc/config/keepers/reviewer.toml
@@ -181,66 +248,72 @@ allowed_paths = ["workspace/yousleepwhen/masc"]
 
 ```markdown
 <!-- keepers/reviewer/AGENT.md -->
-현재 변경 내용을 검토하고, 파일 경로와 실행 명령을 포함한 근거를 보고하세요.
+당신은 리뷰 Keeper입니다. 지금 변경을 살펴보고 파일 경로와 명령을 붙여
+구체적인 근거를 보고하세요.
 ```
 
-Keeper TOML에는 실행 설정만 둡니다. 프롬프트는 `AGENT.md`에 작성합니다.
-정의되지 않은 Keeper TOML 항목이 있으면 설정을 거부합니다.
+Keeper TOML에는 운영 설정만 넣습니다. 프롬프트는 `AGENT.md`에 씁니다. TOML에
+모르는 키가 있으면 거부합니다.
 
-Keeper별 런타임은 `runtime.toml`에서 지정합니다.
+런타임 배정은 `runtime.toml`에 적습니다.
 
 ```toml
 [runtime.assignments]
 reviewer = "<provider>.<model>"
 ```
 
-전체 파일 규칙은 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md)에
+파일 규칙 전체는 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md)에,
+런타임이 읽는 환경 변수는 [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md)에
 있습니다. 실제로 적용된 설정은 `masc_config` 도구나
-`/api/v1/dashboard/config`에서 확인할 수 있습니다.
+`/api/v1/dashboard/config`로 확인합니다.
 
-## 실행 방식
+## 실행 방법
 
 | 명령 | 용도 |
 |---|---|
-| `masc start --base-path <path>` | 설치된 바이너리 실행. 하위 명령 없이 `masc`만 실행해도 같습니다 |
-| `./start-masc.sh --http --base-path <path>` | 소스 checkout에서 전체 런타임 실행 |
-| `scripts/start-loopback.sh` | Keeper 자동 시작을 기본으로 끈 채 `127.0.0.1:8935`에서 실행 |
-| `scripts/run-local.sh --target-dir <path>` | 경로에서 계산한 포트로 격리된 개발 런타임 실행 |
+| `masc start --base-path <path>` | 설치된 바이너리로 실행. 하위 명령 없이 `masc`만 쳐도 같습니다 |
+| `./start-masc.sh --http --base-path <path>` | 소스 체크아웃에서 전체 런타임 실행 |
+| `scripts/start-loopback.sh` | `127.0.0.1:8935`로 실행. 따로 켜지 않으면 Keeper를 띄우지 않습니다 |
+| `scripts/run-local.sh --target-dir <path>` | 경로에서 포트를 뽑아 개발용으로 따로 실행 |
 
-상태 파일을 확인하거나 고치기 전에 서버가 실제로 사용하는 경로부터 확인하세요.
+`masc`에는 `init`, `login`, `runtime-default-set`, `runtime-wizard-catalog`,
+`schedule-prune`, `keeper-github` 하위 명령도 있습니다. 각각 이름 그대로 초기 설정과
+신원 등록에 씁니다.
+
+상태를 건드리기 전에 지금 어떤 경로를 쓰고 있는지 항상 먼저 확인하세요.
 
 ```bash
 curl -fsS 'http://127.0.0.1:8935/health?full=1' \
   | jq '.paths | {effective_base_path, effective_masc_root, roots_diverge}'
 ```
 
-`.masc/config/` 밖에서 서버가 만든 파일은 설정 입력이 아닙니다. Keeper 상태,
-작업 저장소, 보드 로그, 실행 기록, 승인 이력을 직접 고치지 마세요.
+`.masc/config/` 밖의 파일은 런타임이 직접 관리합니다. 설정 파일이 아닙니다. Keeper
+스냅샷, 작업 저장소, 보드 로그, 영수증, 승인 기록을 손으로 고치지 마세요.
 
 ## 대시보드
 
-서버는 `/dashboard/`에서 대시보드를 제공합니다. 화면 구성은
-`dashboard/src/config/navigation.ts`에 정의되어 있습니다.
+서버가 `/dashboard/`로 대시보드를 띄웁니다. 화면 구성은
+`dashboard/src/config/navigation.ts`에 정의돼 있습니다.
 
-사이드바의 기본 화면은 다음과 같습니다.
+왼쪽 주 메뉴 화면:
 
 | 화면 | 용도 |
 |---|---|
 | Overview | 작업 공간과 런타임 요약 |
-| Keepers | Keeper 목록, 대화, 현재 작업 맥락 |
-| Registry | Keeper 설정과 런타임 연결 |
-| Monitor | Keeper 목록, 도구 상태, 런타임, 관찰 기록 |
-| Work | 목표, 계획, 저장소, 검증 상태 |
-| Gate | 사람 승인 대기 목록과 Always 규칙 |
-| Schedule | 예약 작업과 깨우기 신호 |
+| Keepers | Keeper 명단, 대화, 컨텍스트 |
+| Registry | Keeper 선언과 런타임 연결 |
+| Monitor | 전체 Keeper, 도구, 런타임, 관측 화면 |
+| Work | 목표, 계획, 저장소, 검증 |
+| Gate | 사람 승인 대기 목록과 항상 허용 규칙 |
+| Schedule | 예약된 작업과 깨우기 신호 |
 | Board | 사람, 에이전트, 자동화, 시스템 글 |
-| Fusion | 패널과 심판 실행 결과 |
+| Fusion | 패널과 심사 실행 |
 | Logs | 런타임 이벤트 로그 |
-| IDE | 실험 중인 협업 IDE 화면 |
-| Connectors | 외부 채널 상태와 Keeper 연결 |
+| IDE | 실험적인 협업 화면 |
+| Connectors | 외부 채널 상태와 연결 |
 | Settings | 운영 설정 화면 |
 
-화면 안에서 선택할 수 있는 하위 항목은 다음과 같습니다.
+메뉴에 보이는 두 번째 단계:
 
 | 화면 | 하위 항목 |
 |---|---|
@@ -250,32 +323,32 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 | IDE | `ide-shell` |
 | Lab | `tools`, `harness`, `performance`, `keeper-memory-health` |
 
-`Lab`과 `Command`는 주소로 열 수 있지만 기본 사이드바에는 없습니다. 숨겨진
-진단 화면은 사용자가 보는 기본 메뉴에 포함되지 않습니다.
+`Lab`과 `Command`는 주소로 열 수 있지만 주 메뉴에 고정돼 있지 않습니다. 숨겨진
+진단 화면은 메뉴 규약에 포함되지 않습니다.
 
-현재 대시보드에서 지원하는 주소 예시는
+현재 대시보드 규약이 요구하는 주소 예시입니다.
 `dashboard#monitoring?section=journey`,
 `dashboard#command?section=operations`,
 `dashboard#connectors?section=connector-status`,
-`dashboard#workspace?section=verification`입니다. `journey`는 메뉴에 표시되지 않는
-진단 화면입니다.
+`dashboard#workspace?section=verification`. 이 중 `journey`는 숨겨진 진단
+화면입니다.
 
-[24개 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)에서 기본 화면과
-Monitor, Work, Lab 화면을 확인할 수 있습니다.
+주 메뉴, Monitor, Work, Lab 화면을 캡처한
+[24개 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)도 있습니다.
 
 ## 저장소 구조
 
 ```text
 masc/
-├── bin/          서버와 CLI 시작점
+├── bin/          서버, CLI, 터미널 UI 진입점
 ├── lib/          작업 공간, Keeper, 런타임, Gate, 서버 코드
-├── packages/     저장소에 포함된 Agent Core 패키지
-├── dashboard/    TypeScript와 Preact 대시보드 소스
-├── assets/       빌드된 웹 파일
-├── config/       초기 설정에 사용하는 기본 파일
-├── docs/         실행 안내, 계약, 스펙, 이전 RFC
-├── scripts/      빌드, 설치, 검사, 로컬 운영 스크립트
-└── test/         OCaml 테스트와 테스트 데이터
+├── packages/     내장 Agent Core 패키지
+├── dashboard/    TypeScript, Preact 대시보드 소스
+├── assets/       빌드된 웹 자산
+├── config/       기본 설정 씨앗 파일
+├── docs/         런북, 규약, 스펙, 지난 RFC
+├── scripts/      빌드, 설치, 검증, 로컬 운영 스크립트
+└── test/         OCaml 테스트와 fixture
 ```
 
 ## 문서
@@ -283,23 +356,25 @@ masc/
 | 문서 | 용도 |
 |---|---|
 | [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP 클라이언트 설정 |
-| [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | 현재 Keeper 파일과 런타임 지정 규칙 |
-| [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 로컬 토큰 발급과 대시보드 쓰기 권한 |
-| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC와 저장소에 포함된 Agent Core의 역할 구분 |
-| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | 스펙 목록. 최신이라고 표시하지 않은 개수와 규모 정보는 과거 기록입니다 |
-| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | 릴리스 근거 형식. 다시 쓸 때는 문서의 버전부터 확인해야 합니다 |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드, 테스트, pull request 작업 방식 |
+| [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | 터미널 UI 화면, 키, 문제 해결 |
+| [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 실행과 감독 |
+| [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Keeper 파일과 런타임 배정 규칙 |
+| [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |
+| [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 로컬 bearer와 대시보드 쓰기 권한 |
+| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC와 내장 Agent Core의 역할 구분 |
+| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | 스펙 목록. 안에 적힌 개수는 따로 표시가 없으면 과거 기준입니다 |
+| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | 릴리스 증거 형식. 다시 쓰기 전에 버전 헤더를 확인하세요 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드, 테스트, PR 절차 |
 | [`ROADMAP.md`](ROADMAP.md) | 현재 계획. 릴리스 약속은 아닙니다 |
 
-## 개발 및 릴리스 상태
+## 개발과 릴리스 상태
 
-- 패키지 버전은 `dune-project`에 정의되고 `masc.opam`에 반영됩니다.
-- 소스 릴리스 기록은 `CHANGELOG.md`에 있습니다.
-- 공개 바이너리와 지원 플랫폼은
-  [GitHub Releases](https://github.com/jeong-sik/masc/releases)의 첨부 파일을
-  기준으로 확인합니다.
-- 1.0 전에는 API와 설정 형식이 바뀔 수 있습니다.
+- 패키지 버전은 `dune-project`에 있고 `masc.opam`으로 생성됩니다.
+- `CHANGELOG.md`가 소스 릴리스 흐름을 기록합니다.
+- 공개된 바이너리와 자산의 기준은
+  [GitHub Releases](https://github.com/jeong-sik/masc/releases)입니다.
+- 1.0 전까지 API와 설정은 바뀔 수 있습니다.
 
 ## 라이선스
 
-MIT. 자세한 내용은 [`LICENSE`](LICENSE)를 참고하세요.
+MIT. [`LICENSE`](LICENSE)를 보세요.

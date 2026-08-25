@@ -6,9 +6,10 @@ status: runbook
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
-rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
-Board, Planning, Schedules, Verification, Harness, Fusion, Repositories,
-Connectors, Runtime, Tools, System Logs.
+rotate with `Tab` in the order `surface_ring` spells in
+`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Lanes, Approvals, Board,
+Planning, Schedules, Verify, Harness, Fusion, Repos, Code, Changes, Connectors,
+Runtime, Config, Resources, Tools, Logs.
 
 ## Quick Start
 

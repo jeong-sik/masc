@@ -229,6 +229,9 @@ let for_surface = function
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"the open file's working tree against HEAD (d or Esc closes)"
+      ; b Act "Enter (history)" "PR"
+          ~help:"the top commit's pull request, from its (#N) and the \
+                 repository's remote"
       ; b Act "H" "history"
           ~help:"the commits that touched the open file (H or Esc closes)"
       ]

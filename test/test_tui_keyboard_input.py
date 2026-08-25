@@ -4766,6 +4766,7 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
             "repositories": [
                 {"id": "masc", "name": "masc",
                  "codebase": "github.com_jeong-sik_masc",
+                 "url": "git@github.com:jeong-sik/masc.git",
                  "local_path": "workspace/masc", "default_branch": "main",
                  "status": "ready", "keepers": ["alpha"], "auto_sync": True},
             ],
@@ -4827,6 +4828,14 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the note anchor mark is missing from the gutter: {back!r}"
             )
+        # H over the repo-scoped file, then Enter on the top commit: its
+        # subject's (#N) plus the registered remote become the PR link.
+        send_and_wait(process, master_fd, output, b"H", b"seed the file")
+        send_and_wait(
+            process, master_fd, output, b"\r",
+            b"github.com/jeong-sik/masc/pull/1256",
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"let")
         # c: which keeper wrote which lines, through what, and when.
         activity = send_and_wait(
             process, master_fd, output, b"c", b"Edit (turn 7)"
@@ -6810,6 +6819,15 @@ def run_keyboard_regression(executable: str) -> None:
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = notes_response
+    repositories_fixtures[
+        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
+    ] = (
+        200,
+        {"ok": True, "commits": [
+            {"hash": "abc1234", "date": "2026-08-25", "author": "keeper",
+             "subject": "docs: seed the file (#1256)"},
+        ]},
+    )
     repositories_fixtures[
         "/api/v1/ide/regions?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = (

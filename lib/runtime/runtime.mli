@@ -503,12 +503,12 @@ val save_config_text :
 
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
-(** Run the raw runtime.toml save precondition — TOML parse, config
-    materialization, and dispatch-cap validation — without writing or mutating
-    the active registry. Preview endpoints call this so [can_save] reflects the
-    same runtime-parser rejection {!save_config_text} enforces, not only the
-    keeper-schema report. Returns [Ok ()] when the text would be accepted for
-    save; [Error msg] with the runtime-parser reason otherwise. *)
+(** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
+    source validation, config materialization, and dispatch-cap validation —
+    without writing or mutating the active registry. Preview endpoints call
+    this so [can_save] reflects the same rejection {!save_config_text}
+    enforces. Returns [Ok ()] when the text would be accepted for save;
+    [Error msg] with the reason otherwise. *)
 
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->

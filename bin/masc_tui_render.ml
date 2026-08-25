@@ -6337,6 +6337,34 @@ let render_code (state : state) =
                (min state.code_file_hscroll
                   (max 0 (state.code_file_max_width - 1)))
            in
+           (* Which lines carry a note or a recorded keeper edit -- only
+              what is already loaded (m or c has been opened for this
+              file); the pane does not fetch to decorate. A line with both
+              shows the note's mark. *)
+           let loaded_for l =
+             match l with
+             | Some (loaded_path, rows) when
+                 (match state.code_file with
+                  | Some (open_path, _) ->
+                      String.equal loaded_path open_path
+                  | None -> false) -> rows
+             | _ -> []
+           in
+           let note_spans =
+             List.map
+               (fun (n : Masc.Tui_decode.ide_annotation) ->
+                 (n.ia_line_start, n.ia_line_end))
+               (loaded_for state.code_notes)
+           in
+           let edit_spans =
+             List.map
+               (fun (r : Masc.Tui_decode.ide_region) ->
+                 (r.ir_line_start, r.ir_line_end))
+               (loaded_for state.code_activity)
+           in
+           let covers line spans =
+             List.exists (fun (a, b) -> line >= a && line <= b) spans
+           in
            for i = 0 to content_height - 1 do
              match List.nth_opt file_rows (scroll + i) with
              | Some segments ->
@@ -6353,9 +6381,18 @@ let render_code (state : state) =
                    if row_index = state.code_file_cursor then Ansi.reverse
                    else Ansi.dim
                  in
+                 let mark =
+                   let line = row_index + 1 in
+                   if covers line note_spans then
+                     Masc_tui_theme.tone Masc_tui_theme.Accent
+                     ^ "\xe2\x97\x8f" ^ Ansi.reset
+                   else if covers line edit_spans then
+                     Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
+                   else " "
+                 in
                  box_line pane_buf pane_cols
-                   (Printf.sprintf "%s%4d%s %s" gutter_style (row_index + 1)
-                      Ansi.reset body)
+                   (Printf.sprintf "%s%s%4d%s %s" mark gutter_style
+                      (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
            done);
     box_bottom pane_buf pane_cols

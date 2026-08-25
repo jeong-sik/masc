@@ -722,6 +722,10 @@ than slowly. The pane then answers three more questions in place:
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
+- Once the notes or the activity have been read (m or c), the lines they
+  anchor to carry a gutter mark — an accent dot for a note, a dim one for
+  a recorded edit. The pane decorates only what is already loaded; it does
+  not fetch to decorate.
 - `c` swaps it for the recorded keeper activity — which keeper wrote which
   lines, through what tool call (or manual note), and when. Same
   repository-scope rule as the notes.

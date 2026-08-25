@@ -435,6 +435,7 @@ type surface =
   | Harness
   | Fusion
   | Repositories
+  | Code
   | Changes
   | Connectors
   | Runtime
@@ -459,6 +460,7 @@ let surface_ring : (surface * string) list =
     (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
+    (Code, "Code");
     (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
@@ -534,7 +536,8 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools ->
+  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -777,6 +780,16 @@ type state = {
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
+  (* Code surface: one directory level at a time through the lazy /children
+     route; the file arrives whole and is lexed once at load. *)
+  mutable code_dir: string;
+  mutable code_entries: Tui_decode.workspace_tree_node list;
+  mutable code_entries_error: string option;
+  mutable code_cursor: int;
+  mutable code_file: (string * (string * string) list list) option;
+  mutable code_file_error: string option;
+  mutable code_file_scroll: int;
+  mutable code_focus_file: bool;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -1120,6 +1133,14 @@ let create_state ~workspace ~port ~refresh_interval = {
   repositories_error = None;
   repositories_scroll = 0;
   repositories_cursor = 0;
+  code_dir = "";
+  code_entries = [];
+  code_entries_error = None;
+  code_cursor = 0;
+  code_file = None;
+  code_file_error = None;
+  code_file_scroll = 0;
+  code_focus_file = false;
   changes_keeper = None;
   changes = None;
   changes_error = None;
@@ -1342,7 +1363,7 @@ let scrolled_surface (state : state) : surface -> scrolled option =
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-  | Fusion | Resources ->
+  | Fusion | Resources | Code ->
       None
 
 (* The text a "/" search reads for each row: the identifiers an operator
@@ -1408,6 +1429,11 @@ let surface_row_texts (state : state) : surface -> string list option = function
               ^ " " ^ e.Tui_decode.sl_message)
             s.Tui_decode.sys_entries)
         state.system_logs
+  | Code ->
+      Some
+        (List.map
+           (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
+           state.code_entries)
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Changes | Config | Tools ->

@@ -1762,7 +1762,21 @@ describe('settings read-surface helpers', () => {
         message: 'masc_trace_window 실패',
       }),
     )
-    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', true])
+    // The last field is the tool chip. This entry carries no category, so it is
+    // not a tool row — it used to be one because the message contains "masc_".
+    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', false])
+  })
+
+  it('logEntryToSysRow does not read the message body to find tool rows', () => {
+    // Each of these contains "masc_" and none is a tool: the logging module's
+    // own warnings, the agent-core error prefix, and a staging path (#24036).
+    for (const message of [
+      '[masc_log] WARN: unrecognised log level, defaulting to Info',
+      '[masc_agent_core_error] provider returned no content',
+      'renamed .masc_atomic_stage_9f2 into place',
+    ]) {
+      expect(logEntryToSysRow(makeLogEntry({ message }))[5]).toBe(false)
+    }
   })
 
   it('logEntryToSysRow preserves structured tool classification for filters', () => {

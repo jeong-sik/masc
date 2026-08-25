@@ -20,7 +20,7 @@ type t =
   { runtime_awareness : string option
   ; trigger : trigger option
   ; instruction_layers : instruction_layer list
-  ; skills : Skill.t list
+  ; skills : Skill_document.t list
   }
 
 let context_key = "agent_core.contract"
@@ -35,15 +35,10 @@ let trim_to_option value =
 ;;
 
 let dedupe_skills skills =
-  let key_of_skill (skill : Skill.t) =
-    match skill.path with
-    | Some path -> path
-    | None -> skill.name
-  in
   let seen = Hashtbl.create (List.length skills) in
   skills
   |> List.filter (fun skill ->
-    let key = key_of_skill skill in
+    let key = skill.Skill_document.name in
     if Hashtbl.mem seen key
     then false
     else (
@@ -128,12 +123,11 @@ let instruction_layer_to_json layer =
     [ "label", Util.json_of_string_opt layer.label; "content", `String layer.content ]
 ;;
 
-let skill_to_json (skill : Skill.t) =
+let skill_to_json (skill : Skill_document.t) =
   `Assoc
     [ "name", `String skill.name
-    ; "description", Util.json_of_string_opt skill.description
-    ; "path", Util.json_of_string_opt skill.path
-    ; "allowed_tools", Util.json_of_string_list skill.allowed_tools
+    ; "description", `String skill.description
+    ; "allowed_tools", Util.json_of_string_opt skill.allowed_tools
     ]
 ;;
 
@@ -172,8 +166,8 @@ let render_instruction_layer layer =
   | None -> Printf.sprintf "[Instruction Layer]\n%s" layer.content
 ;;
 
-let render_skill (skill : Skill.t) =
-  match trim_to_option (Skill.render_prompt skill) with
+let render_skill (skill : Skill_document.t) =
+  match trim_to_option skill.body with
   | None -> None
   | Some body -> Some (Printf.sprintf "[Skill: %s]\n%s" skill.name body)
 ;;

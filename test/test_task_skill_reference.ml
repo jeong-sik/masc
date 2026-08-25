@@ -40,12 +40,16 @@ let expect_error label base names expected =
     check bool label true (String_util.contains_substring detail expected)
 ;;
 
-let test_path_missing_mismatch_and_valid () =
+let test_path_missing_compatible_mismatch_and_valid () =
   with_base @@ fun base ->
   expect_error "path traversal" base [ "../x" ] "one non-empty portable path segment";
   expect_error "missing skill" base [ "missing" ] "does not exist";
   write_skill base ~directory:"guide" ~declared_name:"other";
-  expect_error "frontmatter mismatch" base [ "guide" ] "does not match directory";
+  (match
+     Masc_task_handlers.Task_skill_reference.validate_all ~base_path:base [ "guide" ]
+   with
+   | Ok () -> ()
+   | Error detail -> failf "compatible name mismatch was rejected: %s" detail);
   let linked_dir =
     Filename.concat
       (Filename.concat (Filename.concat base ".masc") "skills")
@@ -71,8 +75,8 @@ let () =
   Alcotest.run
     "task skill reference"
     [ ( "authoring"
-      , [ test_case "path, existence, name agreement, valid" `Quick
-            test_path_missing_mismatch_and_valid
+      , [ test_case "path, existence, compatibility, valid" `Quick
+            test_path_missing_compatible_mismatch_and_valid
         ] )
     ]
 ;;

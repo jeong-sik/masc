@@ -136,6 +136,13 @@ export type ToolCallEntry = {
   thinking_budget?: number
   tool_choice?: string
   prompt_fingerprint?: string
+  // Which file the tool's definition was read from, relative to the masc
+  // directory: 'tools/<name>.toml' for a shipped descriptor,
+  // 'skills/<name>/SKILL.md' for a composition built from a skill. Derived by
+  // the server from the tool name, so it is present on rows written before
+  // the projection existed. Absent means the tool is a built-in that ships no
+  // file — distinct from a file the reader failed to find.
+  definition_source?: string
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -291,6 +298,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     thinking_budget: asNumber(raw.thinking_budget),
     tool_choice: asString(raw.tool_choice),
     prompt_fingerprint: asString(raw.prompt_fingerprint),
+    definition_source: asString(raw.definition_source),
   }
 }
 

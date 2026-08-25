@@ -45,6 +45,47 @@ let default_workspace_state config = {
   speculation_budget = None;
 }
 
+(* Pull a counter that fell behind the store back up to it.
+
+   [default_workspace_state] resumes the counter, but only where there is no
+   state to read. A workspace that already reset does not pass that way again
+   and so never recovers on its own: on 2026-08-25 the live counter sat at 84
+   beside 2,604 filed messages for eight and a half hours, and every broadcast
+   in that window was filed below everything already there and unreachable to
+   a reader paging in sequence order. It took someone editing state.json by
+   hand.
+
+   Boot is where that is noticed, because it is the one moment the store and
+   the counter are both at rest. Raising the counter loses nothing: the
+   numbers between are simply never issued, and the store, not the counter,
+   is what says which messages exist. A counter already at or above the store
+   is left exactly as it is. *)
+let reconcile_message_seq config path =
+  let filed = resume_message_seq config in
+  if filed > 0 then
+    match read_json config path with
+    | exception _ ->
+      (* Unreadable state is [read_state]'s to repair; it has the typed
+         recovery and this does not. *)
+      ()
+    | `Assoc fields as json ->
+      let recorded = Safe_ops.json_int ~default:0 "message_seq" json in
+      if recorded < filed then begin
+        Log.Misc.warn
+          "workspace message counter behind the store (recorded=%d filed=%d): \
+           resuming above it"
+          recorded
+          filed;
+        write_json
+          config
+          path
+          (`Assoc
+            (List.remove_assoc "message_seq" fields
+             @ [ "message_seq", `Int filed ]))
+      end
+    | _ -> ()
+;;
+
 let ensure_workspace_bootstrap config =
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
@@ -75,7 +116,8 @@ let ensure_workspace_bootstrap config =
   let scoped_backlog = backlog_path config in
   List.iter mkdir_p [ masc_dir config; scoped_agents; scoped_tasks; scoped_messages ];
   if not (path_exists config scoped_state) then
-    write_json config scoped_state (workspace_state_to_yojson (default_workspace_state config));
+    write_json config scoped_state (workspace_state_to_yojson (default_workspace_state config))
+  else reconcile_message_seq config scoped_state;
   if not (path_exists config scoped_backlog) then
     write_json config scoped_backlog
       (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })

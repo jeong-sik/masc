@@ -91,6 +91,78 @@ let test_a_stray_file_does_not_lift_the_counter () =
     check int "only ours counts" 12
       (Bootstrap.default_workspace_state config).message_seq)
 
+(* Boot reconciliation: a workspace that already reset does not pass through
+   [default_workspace_state] again, so raising the counter has to happen where
+   the store and the counter are both at rest. Without this a reset workspace
+   stays broken until someone edits state.json, which is what 2026-08-25
+   required. *)
+
+(* State goes through the workspace's own reader and writer. A test that
+   touched the file directly would pass or fail on which storage backend the
+   run happened to pick, and this one picks Memory when there is no Eio fs
+   context. Message files stay on disk because [resume_message_seq] reads the
+   directory itself. *)
+let state_path config = Paths.state_path config
+
+let write_state_with config seq =
+  Workspace_utils_ops.write_json config (state_path config)
+    (`Assoc
+      [ "protocol_version", `String "0.1.0"
+      ; "project", `String "p"
+      ; "started_at", `String "t"
+      ; "message_seq", `Int seq
+      ; "active_agents", `List []
+      ]);
+  state_path config
+
+let recorded_seq config path =
+  match Workspace_utils_ops.read_json config path with
+  | `Assoc fields -> (
+      match List.assoc_opt "message_seq" fields with
+      | Some (`Int seq) -> seq
+      | Some _ | None -> -1)
+  | _ -> -1
+
+let test_boot_lifts_a_counter_that_fell_behind () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 1; 84; 2604 ];
+    let path = write_state_with config 84 in
+    Bootstrap.ensure_workspace_bootstrap config;
+    check int "raised to the store" 2604 (recorded_seq config path))
+
+let test_boot_leaves_a_counter_that_is_ahead () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 12 ];
+    let path = write_state_with config 900 in
+    Bootstrap.ensure_workspace_bootstrap config;
+    check int "untouched" 900 (recorded_seq config path))
+
+let test_boot_leaves_a_counter_that_matches () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 2604 ];
+    let path = write_state_with config 2604 in
+    Bootstrap.ensure_workspace_bootstrap config;
+    check int "untouched" 2604 (recorded_seq config path))
+
+let test_boot_leaves_the_counter_when_nothing_is_filed () =
+  with_workspace (fun config _messages ->
+    let path = write_state_with config 7 in
+    Bootstrap.ensure_workspace_bootstrap config;
+    check int "an empty store says nothing about the counter" 7
+      (recorded_seq config path))
+
+(* Unreadable state belongs to [read_state], which has the typed recovery.
+   Rewriting it here would throw away whatever that recovery could still
+   salvage from the file. *)
+let test_boot_does_not_touch_unreadable_state () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 2604 ];
+    let path = state_path config in
+    Workspace_utils_ops.write_json config path (`String "not a state object");
+    Bootstrap.ensure_workspace_bootstrap config;
+    check string "left for the typed recovery" {|"not a state object"|}
+      (Yojson.Safe.to_string (Workspace_utils_ops.read_json config path)))
+
 let () =
   run "workspace message seq resume"
     [ ( "filename"
@@ -110,5 +182,17 @@ let () =
             test_the_highest_wins_whatever_the_order_on_disk
         ; test_case "a stray file does not lift the counter" `Quick
             test_a_stray_file_does_not_lift_the_counter
+        ] )
+    ; ( "boot"
+      , [ test_case "boot lifts a counter that fell behind" `Quick
+            test_boot_lifts_a_counter_that_fell_behind
+        ; test_case "boot leaves a counter that is ahead" `Quick
+            test_boot_leaves_a_counter_that_is_ahead
+        ; test_case "boot leaves a counter that matches" `Quick
+            test_boot_leaves_a_counter_that_matches
+        ; test_case "boot leaves the counter when nothing is filed" `Quick
+            test_boot_leaves_the_counter_when_nothing_is_filed
+        ; test_case "boot does not touch unreadable state" `Quick
+            test_boot_does_not_touch_unreadable_state
         ] )
     ]

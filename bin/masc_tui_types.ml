@@ -1105,6 +1105,11 @@ type state = {
   mutable verification_error: string option;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* The request being read, not merely the current cursor position. A refresh
+     may reorder the queue; retaining the request id prevents the detail pane
+     and verdict keys from silently moving to a different task. *)
+  mutable verification_detail_request_id: string option;
+  mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
      press on a different row re-arms for that row. Reject carries no arm --
@@ -1508,6 +1513,8 @@ let create_state
   verification_error = None;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_detail_request_id = None;
+  verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
   system_logs_scroll = 0;
@@ -1645,6 +1652,7 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Verification_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -1663,6 +1671,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Verification_detail_scroll value ->
+      state.verification_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -1697,10 +1707,12 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         ; sc_preview_keep = None
         }
   | Verification ->
-      listing ~error:state.verification_error
-        (match state.verification with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.vs_requests)
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        listing ~error:state.verification_error
+          (match state.verification with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.vs_requests)
   | Lanes ->
       listing ~error:state.lanes_error
         (match state.lanes with
@@ -1774,14 +1786,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
           List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
         state.lanes
   | Verification ->
-      Option.map
-        (fun s ->
-          List.map
-            (fun r ->
-              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
-              ^ r.Tui_decode.vr_submitted_by)
-            s.Tui_decode.vs_requests)
-        state.verification
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        Option.map
+          (fun s ->
+            List.map
+              (fun r ->
+                r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+                ^ r.Tui_decode.vr_submitted_by)
+              s.Tui_decode.vs_requests)
+          state.verification
   | Harness ->
       Option.map
         (fun s ->

@@ -1,10 +1,19 @@
-(** Colour and glyph tokens for the TUI — the one module that names them.
+(** Colour and glyph tokens for the TUI — the one module that names and
+    serializes them.
 
-    Pure by construction: no Buffer, no terminal probing, no other TUI
-    libraries. Everything here is a string or a function of plain values, so
-    the renderer and its tests link the same code. [Masc_tui_ansi] re-exports
-    these under its historical names; new call sites use this module directly
-    so a theme swap moves every screen at once. *)
+    Pure by construction: no terminal probing. Everything here is a string or
+    a function of plain values, so the renderer and its tests link the same
+    code. [Masc_tui_ansi] re-exports these under its historical names; new call
+    sites use this module directly so a theme swap moves every screen at once. *)
+
+module For_testing : sig
+  val colors_enabled
+    :  force_color:string option
+    -> no_color:string option
+    -> bool
+  (** Pure environment-policy fixture. Only [force_color = Some "1"]
+      overrides a non-empty [no_color]. *)
+end
 
 val colors_enabled : bool
 (** no-color.org: a non-empty NO_COLOR suppresses styling. Structure —
@@ -40,6 +49,11 @@ module Sgr : sig
       and dim alone, so it can sit inside an emphasised run. *)
 
   val gray : string
+
+  val background : Masc_tui_terminal_palette.projected_color option -> string
+  (** Serialize a projected background as SGR [48;2] or [48;5]. [None] and
+      disabled colours produce the empty string. This is the only raw
+      projected-background serializer. *)
 
   val bg_removed : string
   val bg_added : string

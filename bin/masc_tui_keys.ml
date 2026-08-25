@@ -153,21 +153,26 @@ let for_surface = function
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ]
+  | Code ->
+      (* A row surface: masc_tui_types gives it a searchable row list
+         (code_entries), so the cursor and "/" are real here, and Enter drills
+         one directory level (the /workspace/children route is lazy). Claimed
+         from those two facts rather than from the render, so the footer does
+         not advertise a key nothing handles. *)
+      [ b Navigate "j/k" "move"
+      ; b Act "Enter" "open" ~help:"drill in, or open the file"
+        (* Esc walks back out the way Enter came in: it closes an open file
+           first, and only climbs a directory once no file is open
+           (masc_tui.ml:6001). A key that works and is not listed is the same
+           drift as a listed key that does nothing, pointing the other way. *)
+      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
+      ]
+      @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)
       b Navigate "j/k" "scroll" :: listing_meta
-  | Code ->
-      (* One surface, two things under the cursor: a directory listing, and a
-         file once one is open. Enter descends or opens; Esc closes the file
-         first and only then climbs a directory, so the same key walks back
-         out the way it came in. *)
-      [ b Navigate "j/k" "move" ~help:"move the listing; with a file open, scroll it"
-      ; b Act "Enter" "open" ~help:"enter the directory, or open the file"
-      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
-      ]
-      @ listing_meta
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 

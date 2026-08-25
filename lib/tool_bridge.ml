@@ -394,7 +394,3 @@ let agent_core_tool_of_masc_with_execution_env
   | Ok schema -> Agent_core.Base.Tool.of_schema ?descriptor schema agent_core_handler
   | Error detail ->
     invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
-
-let () =
-  Runtime_agent.set_agent_core_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->
-    agent_core_tool_of_masc ~name ~description ~input_schema handler)

@@ -3,13 +3,22 @@
    these values, and byte-identical frames are the acceptance test for the
    move. *)
 
-let colors_enabled =
-  match Sys.getenv_opt "MASC_TUI_FORCE_COLOR" with
+let colors_enabled_for_environment ~force_color ~no_color =
+  match force_color with
   | Some "1" -> true
   | Some _ | None ->
-    (match Sys.getenv_opt "NO_COLOR" with
+    (match no_color with
      | Some value when String.length value > 0 -> false
      | Some _ | None -> true)
+
+module For_testing = struct
+  let colors_enabled = colors_enabled_for_environment
+end
+
+let colors_enabled =
+  colors_enabled_for_environment
+    ~force_color:(Sys.getenv_opt "MASC_TUI_FORCE_COLOR")
+    ~no_color:(Sys.getenv_opt "NO_COLOR")
 
 let style code = if colors_enabled then code else ""
 
@@ -29,6 +38,20 @@ module Sgr = struct
 
   let default_fg = style "\027[39m"
   let gray = style "\027[90m"
+
+  let background = function
+    | Some projected ->
+      Masc_tui_terminal_palette.fold_projected_color
+        ~rgb:(fun color ->
+          style
+            (Printf.sprintf "\027[48;2;%d;%d;%dm"
+               (Masc_tui_terminal_palette.red color)
+               (Masc_tui_terminal_palette.green color)
+               (Masc_tui_terminal_palette.blue color)))
+        ~indexed:(fun index -> style (Printf.sprintf "\027[48;5;%dm" index))
+        projected
+    | None -> ""
+  ;;
 
   let bg_removed = style "\027[48;5;52m"
   let bg_added = style "\027[48;5;22m"

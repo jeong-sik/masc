@@ -38,9 +38,8 @@ val footer_hints : Masc_tui_types.surface -> string
     Meta order. *)
 
 val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
-(** The Fusion detail footer. Same projection as {!footer_hints}, with the
-    live scroll position appended: [view] stays [Fusion] there, so the
-    surface alone cannot say list from detail. *)
+(** The Fusion detail footer. Separate from {!footer_hints} because it appends
+    the live scroll position, which the static per-surface table cannot know. *)
 
 val help_sections : unit -> (string * (string * string) list) list
 (** The help overlay's sections: Global first, then one section per surface

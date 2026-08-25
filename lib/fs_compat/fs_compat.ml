@@ -140,8 +140,18 @@ let load_file_unix (path : string) : string =
        Stdlib.really_input_string ic len)
 ;;
 
+(* The Eio path below creates with 0o644. [Stdlib.open_out] creates with
+   0o666 masked by the process umask, so the same [save_file] call produced a
+   different mode depending on which branch ran — and which branch runs is
+   whether an Eio fs happens to be installed, not anything about the file
+   (#29358). The mode is named here so both branches agree. *)
+let save_file_mode = 0o644
+
 let save_file_unix (path : string) (content : string) : unit =
-  let oc = Stdlib.open_out path in
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] save_file_mode
+  in
+  let oc = Unix.out_channel_of_descr fd in
   Stdlib.Fun.protect
     ~finally:(fun () -> Stdlib.close_out_noerr oc)
     (fun () -> Stdlib.output_string oc content)
@@ -240,7 +250,7 @@ let save_file (path : string) (content : string) : unit =
     ~fallback:(fun () -> save_file_unix path content)
     (fun fs ->
        let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
+       Eio.Path.save ~create:(`Or_truncate save_file_mode) eio_path content)
 ;;
 
 let save_file_atomic path content =

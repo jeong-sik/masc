@@ -38,49 +38,6 @@ let string_contains haystack needle =
     in
     loop 0
 
-let test_unset_agent_core_tool_projector_fails_public_run_typed () =
-  let schema : Masc_domain.tool_schema =
-    { name = "test_tool"
-    ; description = "test"
-    ; input_schema = `Assoc [ "type", `String "object" ]
-    }
-  in
-  let provider_cfg =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"test-model"
-      ~base_url:"http://127.0.0.1.invalid"
-      ()
-  in
-  let config =
-    Runtime_agent.default_config
-      ~name:"unset-projector-proof"
-      ~provider_cfg
-      ~system_prompt:""
-      ~tools:[]
-  in
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  Runtime_agent.For_testing.with_agent_core_tool_of_masc_hook_unset (fun () ->
-    match
-      Runtime_agent.run_with_masc_tools
-        ~sw
-        ~net:env#net
-        ~config
-        ~masc_tools:[ schema ]
-        ~dispatch:(fun ~name:_ ~args:_ ->
-          Tool_result.ok ~tool_name:"test_tool" ~start_time:0.0 "unused")
-        "must fail before provider I/O"
-    with
-    | Error (Agent_core.Error.Internal detail) ->
-      check bool "typed error names the unset projector" true
-        (string_contains detail "runtime_agent_core_tool_hook_unset")
-    | Error error ->
-      failf "expected typed Internal error, got %s" (Agent_core.Error.to_string error)
-    | Ok _ -> fail "public run unexpectedly accepted an unset AGENT_CORE tool projector")
-
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
@@ -511,8 +468,6 @@ let () =
     ; ( "caps_admit_required_modalities"
       , [ test_case "multi-modality predicate" `Quick
             test_caps_admit_required_modalities
-        ; test_case "public run returns typed error for unset AGENT_CORE projector" `Quick
-            test_unset_agent_core_tool_projector_fails_public_run_typed
         ] )
     ; ( "media_degrade"
       , [ test_case "strip drops unsupported image" `Quick

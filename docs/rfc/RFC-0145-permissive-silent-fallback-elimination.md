@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088", "0109"]
-implementation_prs: []
 ---
 
 # RFC-0145 — Permissive-Silent-Fallback Elimination

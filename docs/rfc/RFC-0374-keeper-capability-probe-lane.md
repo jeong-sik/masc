@@ -3,7 +3,6 @@ title: Keeper Capability Probe Lane
 rfc: "0374"
 status: Draft
 created: 2026-08-12
-implementation_prs: []
 ---
 
 # RFC-0374: Keeper Capability Probe Lane

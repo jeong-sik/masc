@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0089", "0097", "0108", "0137", "0154"]
-implementation_prs: []
 ---
 
 # RFC-0162 — JSONL Write-Path FD Pressure Root-Fix

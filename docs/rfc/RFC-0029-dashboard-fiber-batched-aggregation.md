@@ -3,7 +3,6 @@ title: Dashboard Fiber-Batched Aggregation
 rfc: 0029
 status: Active
 created: 2026-05-05
-implementation_prs: []
 ---
 
 # RFC-0029 — Dashboard Fiber-Batched Aggregation

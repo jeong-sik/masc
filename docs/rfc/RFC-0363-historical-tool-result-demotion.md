@@ -1,10 +1,11 @@
 ---
+rfc: "0363"
 title: Historical tool-result demotion in the bounded transmission view
 status: Draft
-authors: Claude Opus 5 (1M context)
+author: Claude Opus 5 (1M context)
 created: 2026-08-05
 supersedes: []
-relates_to:
+related:
   - RFC-0351 (memory-first context management, compaction sunset) — this implements the L5 tool_result line
   - RFC-memory-os-bounded-context-and-librarian-curator (#26534)
   - "#26545 / #26551 / #26800 (Runtime_model_input_tail_window)"

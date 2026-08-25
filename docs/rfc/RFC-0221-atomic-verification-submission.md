@@ -3,7 +3,7 @@ rfc: "0221"
 title: "Atomic verification submission — task_status as the sole outcome authority"
 status: Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4)
 supersedes: "split verification evidence and status writes"
-date: 2026-06-09
+created: 2026-06-09
 ---
 
 # RFC-0221: Atomic verification submission

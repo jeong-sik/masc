@@ -6,7 +6,6 @@ created: 2026-08-13
 updated: 2026-08-13
 author: vincent
 related: ["0312", "0343", "0324", "0128"]
-implementation_prs: []
 ---
 
 # RFC — 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기)

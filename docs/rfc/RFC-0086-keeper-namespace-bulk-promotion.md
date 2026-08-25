@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0056", "0042", "0050"]
-implementation_prs: [15467,15474,15488,15493,15494,15522,15531]
 ---
 
 # RFC-0086 — Keeper namespace bulk promotion to sub-library

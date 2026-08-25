@@ -1,3 +1,8 @@
+---
+rfc: "0289"
+status: Draft
+---
+
 # RFC-0289: Extract progress-classification into its own library for a single substantive-evidence owner
 
 - Status: Draft

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223", "0225", "0226", "0228", "0230", "0231"]
-implementation_prs: []
 ---
 
 # RFC-0232: Typed lane event model

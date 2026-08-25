@@ -8,8 +8,6 @@ author: vincent + codex
 supersedes: []
 superseded_by: null
 related: ["0104", "0305"]
-implementation_prs:
-  - "#23359"
 ---
 
 # RFC-0312: Keeper repo mappings are advisory default scope, not access caps

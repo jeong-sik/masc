@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0064", "0097", "0179"]
-implementation_prs: ["18686"]
 ---
 
 # RFC-0180 — 24h Runtime ERROR 7-Pattern Sweep Roadmap

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0206", "0211", "0273"]
-implementation_prs: []
 ---
 
 # Per-runtime note field & dashboard surfacing
@@ -143,7 +142,7 @@ Direct grounding against `main` (worktree at anchor commit `6c9029bcbf`, 2026-06
 - No change to dispatch/routing semantics, no new endpoint, no comment migration mandate (comments stay valid for non-surfaced detail).
 - Runtime discovery / directory listing for inert/unassigned runtimes is out of scope; surfacing is limited to notes on the existing structured runtime list. A separate RFC may add a runtime directory.
 - Future: `note : string list` dated-entry array with per-entry author/timestamp, if a structured changelog is wanted over a multi-line string.
-- Promotion: status moves to `Active` when the first implementation PR is opened; to `Implemented` when all `implementation_prs` are merged.
+- Promotion: status moves to `Active` when the first implementation PR is opened; to `Implemented` when the last one merges. Which PRs those are is a git question, not a frontmatter one.
 
 ## 8. Workaround self-check (CLAUDE.md bar)
 

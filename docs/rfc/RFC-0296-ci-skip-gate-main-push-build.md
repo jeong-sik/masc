@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0270", "0206"]
-implementation_prs: []
 ---
 
 # RFC-0296: CI skip-gate main-push safety-net

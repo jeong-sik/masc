@@ -1,11 +1,9 @@
 ---
 rfc: "0107"
-phase: D
 status: Active
 created: 2026-05-17
 updated: 2026-05-18
 supplement_of: RFC-0107
-implementation_prs: [15950, 15965, 15985, 15990, 16017, 15993]
 # Excluded (design-spec doc merge): #15941 Phase D.1
 ---
 

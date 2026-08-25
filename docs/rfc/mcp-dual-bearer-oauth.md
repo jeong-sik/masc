@@ -8,7 +8,6 @@ author: codex
 supersedes: []
 superseded_by: null
 related: ["0292"]
-implementation_prs: []
 ---
 
 # RFC — MCP dual authentication: static bearer and local OAuth 2.1

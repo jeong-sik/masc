@@ -1,3 +1,8 @@
+---
+rfc: "0343"
+status: Draft
+---
+
 # RFC-0343 — Repo location SSOT (collapse dual-authority, attribute by git-remote)
 
 - Status: Draft — §3.1 (the sole LIVE item) is absorbed by RFC-keeper-workspace-root-only

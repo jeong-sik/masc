@@ -1,3 +1,8 @@
+---
+rfc: "0278"
+status: Draft
+---
+
 # RFC-0278 — Fusion: 같은 model을 다른 prompt로 (same-model panels via panel labels)
 
 - Status: Draft

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0058", "0078"]
-implementation_prs: [15211]
 ---
 
 # RFC-0079: Log row typed encoder + silent-drop removal

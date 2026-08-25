@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0064", "0179", "0182"]
-implementation_prs: []
 ---
 
 # RFC-0190 — Descriptor as Visibility/Metadata SSOT

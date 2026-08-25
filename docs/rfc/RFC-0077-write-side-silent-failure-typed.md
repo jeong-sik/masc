@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0062", "0063", "0071"]
-implementation_prs: [15054]
 ---
 
 # RFC-0077 — Write-side silent failure: typed propagation

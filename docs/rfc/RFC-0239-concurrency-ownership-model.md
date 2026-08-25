@@ -7,7 +7,6 @@ updated: 2026-06-15
 author: vincent
 supersedes: []
 related: ["RFC-0059", "RFC-0225", "RFC-0237"]
-implementation_prs: []
 ---
 
 # RFC-0239 — Concurrency ownership model

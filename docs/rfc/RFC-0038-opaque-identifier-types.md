@@ -1,3 +1,8 @@
+---
+rfc: "0038"
+status: Draft
+---
+
 # RFC-0038 — Opaque Identifier Types for Provider, Runtime, Model
 
 - **Status**: Draft

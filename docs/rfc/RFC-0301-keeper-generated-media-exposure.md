@@ -1,3 +1,8 @@
+---
+rfc: "0301"
+status: Draft
+---
+
 # RFC-0301: Keeper 생성 미디어(이미지/오디오) 대시보드 노출
 
 - Status: Draft

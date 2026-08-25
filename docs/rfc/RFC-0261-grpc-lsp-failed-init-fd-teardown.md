@@ -1,3 +1,8 @@
+---
+rfc: "0261"
+status: Draft
+---
+
 # RFC-0261 — gRPC LSP failed-initialize FD/process teardown
 
 - Status: Draft

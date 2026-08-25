@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0097", "0100", "0101"]
-implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991, 16102, 16150]
 # Excluded from list (RFC body / design-spec merges, per README convention):
 #   #15912  Phase C.0   — Eio_context audit + RFC §3.3 amend
 #   #15941  Phase D.1   — Pool design (interface-first spec)

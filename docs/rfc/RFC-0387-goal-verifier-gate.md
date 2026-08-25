@@ -8,7 +8,6 @@ author: agent-16 + kimi
 supersedes: []
 superseded_by: null
 related: ["0362", "0089", "0337", "0361"]
-implementation_prs: ["29152"]
 ---
 
 # RFC-0387: Goal verifier 게이트

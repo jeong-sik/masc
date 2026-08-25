@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223", "0226", "0228"]
-implementation_prs: []
 ---
 
 # RFC-0229: Keeper person notes

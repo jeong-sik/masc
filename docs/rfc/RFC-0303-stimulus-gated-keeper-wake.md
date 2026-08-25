@@ -1,3 +1,8 @@
+---
+rfc: "0303"
+status: Implemented
+---
+
 # RFC-0303 — Keeper wake without progress heuristics
 
 - Status: Implemented

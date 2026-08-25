@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0058"]
-implementation_prs: [14952]
 ---
 
 # RFC-0010 — ocamlformat config reconciliation

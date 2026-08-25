@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0235", "0313"]
-implementation_prs: []
 ---
 
 # Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog

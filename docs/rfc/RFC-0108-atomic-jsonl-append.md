@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0079", "0088"]
-implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 ---
 
 # RFC-0108: Atomic JSONL Append (in-process)

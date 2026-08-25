@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: []
 ---
 
 # Exact OCaml and TypeScript wire contracts

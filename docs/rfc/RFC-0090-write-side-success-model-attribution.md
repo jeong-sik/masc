@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0044", "0077", "0088"]
-implementation_prs: [15651]
 ---
 
 # RFC-0090 — Write-side success-model attribution: finish N-of-M migration

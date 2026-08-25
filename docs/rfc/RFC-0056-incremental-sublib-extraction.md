@@ -3,7 +3,6 @@ title: Incremental Sub-Library Extraction from Flat masc Library
 rfc: 0056
 status: Active
 created: 2026-05-09
-implementation_prs: []
 ---
 
 # RFC-0056 — Incremental Sub-Library Extraction from Flat masc Library

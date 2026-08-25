@@ -1,3 +1,8 @@
+---
+rfc: "0382"
+status: Draft
+---
+
 # RFC-0382: 런타임별 KV/prompt cache 재사용과 reasoning 연속성
 
 - 상태: Draft

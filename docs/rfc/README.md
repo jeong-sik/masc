@@ -23,7 +23,6 @@ created: 2026-05-12                # ISO date
 updated: 2026-05-12                # 본문 의미 변경 시 갱신, typo 수정은 생략 가능
 author: <github-handle 또는 vincent>
 related: []                        # 직접 참조하는 현재 RFC slug. 없으면 빈 배열
-implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body 머지 PR 은 제외, spec 구현 PR 만
 ---
 ```
 
@@ -34,6 +33,13 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | `Draft` | 작성 중. 본문/PR 변경 가능. 구현 시작 전 또는 spec 합의 미완. |
 | `Active` | spec 머지 완료, 구현이 진행 중인 RFC. 일부 Phase 가 main 에 들어갔으나 전체 closeout 미완. |
 | `Implemented` | 모든 Phase 가 main 에 머지 완료. 명시적 `docs(rfc): ... closeout` commit 또는 본문 *Implementation summary* 섹션이 있어야 한다. |
+| `Superseded` | 다른 RFC 가 이 자리를 대신한다. `superseded_by` 에 그 slug 를 적는다 — 비워두면 읽는 사람이 대신할 것을 찾을 데가 없다. |
+| `Dropped` | 하지 않기로 했다. 본문에 왜인지 적는다. 대신할 것이 없으므로 `superseded_by` 는 비운다. |
+
+`Dropped` 가 있어야 하는 이유: 이 값이 없으면 포기한 RFC 가 `Draft` 로 남는다.
+`Draft` 는 "아직 안 썼다" 이고 포기는 "안 쓴다" 인데, 인덱스에서 둘이 같은
+글자로 보인다. 2026-08-25 에 그 혼동으로 계획 하나가 잘못 쓰였다 — 살아있는
+RFC 를 죽은 것으로 읽었고, 되돌리는 데 한 라운드가 들었다.
 
 ## RFC 목록
 
@@ -45,14 +51,14 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC | Title | Status | Sub-docs |
 |---|---|---|---|
 | 0004 | Keep OCaml and TypeScript wire contracts exact | Active | - |
-| 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | - |
+| 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Implemented | - |
 | 0010 | ocamlformat config reconciliation | Implemented | - |
 | 0012 | Mid-Turn Progress Probe | Draft | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |
 | 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup | Draft | - |
-| 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Draft | - |
+| 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Active | - |
 | 0038 | Opaque Identifier Types for Provider, Runtime, Model | Draft | - |
 | 0043 | Distribute legacy metrics backend metric ownership to domain modules | Active | - |
 | 0044 | Typed persistence read-drop reason + Result-based reads | Active | - |
@@ -63,10 +69,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0052 | Boot-time Required Invariants (typed) | Implemented | - |
 | 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | - |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | - |
-| 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | - |
-| 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | - |
+| 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Implemented | - |
+| 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Active | - |
 | 0064 | Capacity Probe Adapter | Active | - |
-| 0067 | Goal-Scope Observation→Claim Atomicity | Draft | - |
+| 0067 | Goal-Scope Observation→Claim Atomicity | Active | - |
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | - |
 | 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Implemented | - |
 | 0072 | Type-encoded keeper sub-FSM transitions (runtime + turn_phase) | Implemented | - |
@@ -131,7 +137,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | - |
 | 0198 | Execute typed redirection | Implemented | - |
 | 0200 | Time constants 를 leaf library 로 분리 | Draft | - |
-| 0201 | Activity Events Wait-Free Snapshot | Draft | - |
+| 0201 | Activity events wait-free snapshot (RFC-0138 extension, file-base preserved) | Draft | - |
 | 0203 | In-process Discord connector | Implemented (Phase 3 cutover landed 2026-05-29) | - |
 | 0204 | Dashboard Read Serving Isolation from Fleet Compute | Draft | - |
 | 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | - |
@@ -184,7 +190,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0300 | RFC-0300 — Dashboard design-token scope consolidation (radius / shadow / type... | Draft | - |
 | 0301 | Keeper 생성 미디어(이미지/오디오) 대시보드 노출 | Draft | - |
 | 0302 | Keeper 메모리 파일 I/O off-main-domain 오프로드 (HOL fix) | Draft | - |
-| 0303 | Keeper wake without progress heuristics | Draft | - |
+| 0303 | Keeper wake without progress heuristics | Implemented | - |
 | 0306 | Typed, comment-preserving fusion settings editor | Draft | - |
 | 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | - |
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | - |
@@ -202,10 +208,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | - |
 | 0345 | Streaming idle-timeout fail-safe floor (#25128) | Draft | - |
 | 0348 | Bounded lane acquisition for durable keeper_msg writes (#25398) | Draft | - |
-| 0349 | Restore a reachable compaction admission path | Draft | - |
+| 0349 | Restore a reachable compaction admission path | Superseded | - |
 | 0350 | Unbounded request-fiber admission (durable queue + lifecycle-sibling worker +... | Draft | - |
 | 0351 | Memory-first context management and compaction sunset | Draft | - |
-| 0352 | Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청) | Draft | - |
+| 0352 | Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청) | Implemented | - |
 | 0353 | 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청) | Draft | - |
 | 0356 | Approval owns the effect (replay the approved payload, do not require byte-id... | Draft | - |
 | 0358 | 자율턴 신원과 exact raw-trace run을 turn record가 소유한다 | Implemented | - |
@@ -245,7 +251,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-dashboard-dev-token-configured-role | Loopback dashboard dev-token issues Admin | Draft | - |
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
-| RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |
+| RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |

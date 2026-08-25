@@ -1,6 +1,5 @@
 ---
 rfc: "0107"
-phase: C.0
 status: Evidence
 created: 2026-05-17
 supplement_of: RFC-0107

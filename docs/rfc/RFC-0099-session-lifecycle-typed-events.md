@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098"]
-implementation_prs: [15810, 15853]
 ---
 
 # RFC-0099 — Session lifecycle: typed events, explicit eviction, resume backpressure

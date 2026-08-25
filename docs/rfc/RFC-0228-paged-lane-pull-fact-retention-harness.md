@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223", "0226"]
-implementation_prs: []
 ---
 
 # RFC-0228: Paged lane pull + fact-retention harness

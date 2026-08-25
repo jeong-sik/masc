@@ -1,3 +1,8 @@
+---
+rfc: "0266"
+status: Draft
+---
+
 # RFC-0266 — Fusion async-completion wake + in-progress 가시성
 
 | | |

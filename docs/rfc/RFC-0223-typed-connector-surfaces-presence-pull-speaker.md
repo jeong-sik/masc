@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0218"]
-implementation_prs: []
 ---
 
 # RFC-0223: Typed connector surfaces — presence, pull-based lane context, speaker identity

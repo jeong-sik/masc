@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0062", "0063", "0077"]
-implementation_prs: ["15519"]
 ---
 
 # RFC-0088 — Counter-as-Fix → Result Propagation (umbrella scoping)

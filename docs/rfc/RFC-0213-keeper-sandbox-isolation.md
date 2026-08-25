@@ -7,7 +7,6 @@ updated: 2026-06-03
 author: jeong-sik
 supersedes: []
 related: ["0001", "0208"]
-implementation_prs: []
 ---
 
 # RFC-0213 — Keeper sandbox/playground isolation

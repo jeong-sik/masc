@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0381"]
-implementation_prs: [28794, 28826]
 ---
 
 # RFC-0383: 웹 아티팩트는 쌓이기만 한다

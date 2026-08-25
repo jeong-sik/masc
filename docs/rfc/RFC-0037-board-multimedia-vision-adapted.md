@@ -1,3 +1,8 @@
+---
+rfc: "0037"
+status: Draft
+---
+
 # RFC-0037: Board Multimedia & Vision — Eio/File-Based Adaptation
 
 - **Status**: Draft

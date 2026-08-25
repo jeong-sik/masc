@@ -1,3 +1,8 @@
+---
+rfc: "memory-os-bounded-context-and-librarian-curator"
+status: Draft
+---
+
 # RFC: Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약
 
 - Status: Draft

@@ -4,7 +4,6 @@ rfc: 0138
 status: Implemented
 created: 2026-05-19
 updated: 2026-05-22
-implementation_prs: [16673, 16694, 16730, 16738, 16752, 16761, 16782, 17157]
 ---
 
 # RFC-0138 — Dashboard Snapshot: Lock-Free Immutable Architecture (Phase 3 Root Fix)

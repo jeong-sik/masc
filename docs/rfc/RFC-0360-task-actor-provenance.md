@@ -1,3 +1,8 @@
+---
+rfc: "0360"
+status: Draft
+---
+
 # RFC-0360: Task actor provenance
 
 Status: Draft

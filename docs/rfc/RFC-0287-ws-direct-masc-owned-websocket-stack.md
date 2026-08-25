@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0281", "0203", "0100", "0204"]
-implementation_prs: []
 ---
 
 # RFC-0287: ws-direct — a single masc-owned WebSocket stack

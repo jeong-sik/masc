@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0368", "0129"]
-implementation_prs: []
 ---
 
 # RFC-0370: Provider profile SSOT · quota-as-state · Internal-carried 실패의 rotation 자격

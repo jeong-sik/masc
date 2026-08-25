@@ -1,5 +1,5 @@
 ---
-number: 0103
+rfc: "0103"
 title: Log retention opt-in + JSONL volume root reduction
 status: Draft
 author: Agent-LLM-A Opus 4.7 (agent)

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: []
 related: ["0042", "0257", "worldstate-observation-channel-split"]
-implementation_prs: [25270, 25281]
 ---
 
 # RFC-compaction-deterministic-floor

@@ -1,4 +1,5 @@
 ---
+rfc: "keeper-vision-delegation-tool"
 title: "Vision-as-a-tool delegation (decouple multimodal input from conversation runtime)"
 status: Draft
 supersedes-partial: RFC-0265 (image/document modality path)

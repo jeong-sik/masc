@@ -8,7 +8,6 @@ author: vincent (+ Claude Opus 4.8)
 supersedes: []
 superseded_by: null
 related: ["0315", "connector-ambient-attention-wake"]
-implementation_prs: []
 ---
 
 # RFC-0320: Keeper connector-aware continuation

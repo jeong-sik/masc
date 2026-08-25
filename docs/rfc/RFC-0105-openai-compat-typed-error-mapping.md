@@ -8,7 +8,6 @@ author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0098", "0095"]
-implementation_prs: [15899]
 ---
 
 # RFC-0105 — OpenAI-compat boundary typed error mapping

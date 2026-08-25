@@ -3,7 +3,6 @@ title: run_named closure decomposition
 rfc: 0051
 status: Active
 created: 2026-05-09
-implementation_prs: []
 ---
 
 # RFC-0051 — `run_named` closure decomposition

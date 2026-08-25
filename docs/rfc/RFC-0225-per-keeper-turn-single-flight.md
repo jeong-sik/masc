@@ -2,8 +2,7 @@
 rfc: "0225"
 title: "Per-keeper turn single-flight admission"
 status: Draft
-relates: "RFC-0153 (tier admission), 2026-06-10 voice repeat RCA (~/me/reports/2026-06-10-masc-voice-repeat-rca.md)"
-date: 2026-06-10
+created: 2026-06-10
 ---
 
 # RFC-0225: Per-keeper turn single-flight admission

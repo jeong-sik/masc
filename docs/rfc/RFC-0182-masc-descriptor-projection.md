@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0064", "0179"]
-implementation_prs: []
 ---
 
 # RFC-0182 — masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation

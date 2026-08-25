@@ -8,7 +8,6 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0361"]
-implementation_prs: []
 ---
 
 # RFC-0388: awaiting_tool 대기의 liveness

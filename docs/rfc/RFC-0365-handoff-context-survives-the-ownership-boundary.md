@@ -1,10 +1,11 @@
 ---
+rfc: "0365"
 title: handoff_context must survive the ownership boundary
 status: Draft
-authors: Claude Opus 5 (1M context)
+author: Claude Opus 5 (1M context)
 created: 2026-08-06
 supersedes: []
-relates_to:
+related:
   - RFC-0315 (current-task rendering in the world state)
   - RFC-0351 (memory-first context management) — §2 principle 2 constrains the fix
 ---

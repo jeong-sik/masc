@@ -584,13 +584,32 @@ let handle_tool_execute_typed
              this path, so it is counted here and nowhere else.  Recognition
              and classification only -- the dispatch below is unchanged, and
              what runs is exactly what ran before this line existed. *)
+          (* [lowered] is what the step-1 line was missing. The finding says
+             what was hidden inside the argv; it does not say whether step 4
+             then put the call under the boundary, because the tap reads the
+             input and the lowering happens after it. Measured on 27 live
+             records: 9 [representable], and no way to tell how many of them
+             the gate actually took.
+
+             It is a property of the call rather than of the stage: a lowered
+             call has one stage, and a call that kept its shell has whatever
+             the caller wrote. *)
+          let lowered =
+            match ir with
+            | Masc_exec.Shell_ir.Simple simple ->
+              not
+                (Keeper_tooling.Shell_costume.names_a_shell
+                   (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin))
+            | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ -> true
+          in
           List.iter
             (fun (shell, finding) ->
                Log.Keeper.info
-                 "shell_costume keeper=%s shell=%s finding=%s cmd=%s"
+                 "shell_costume keeper=%s shell=%s finding=%s lowered=%b cmd=%s"
                  meta.name
                  shell
                  finding
+                 lowered
                  cmd_for_log)
             (Keeper_tool_execute_typed_input.hidden_script_findings
                ~sandbox:dispatch_sandbox

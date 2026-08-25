@@ -106,13 +106,15 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
       install_always_allow_gate ~base;
       let meta = make_local_meta ~name:"costume-advice" in
       let cwd = playground_dir ~base ~name:"costume-advice" in
-      (* [;] is the one thing Shell_ir.connector deliberately cannot say, so
-         this costume is classified outside the subset and still runs. *)
+      (* [;] used to be the construct this test reached for; RFC-0391 put it
+         in Shell_ir.connector, so a substitution stands in. What is being
+         checked is unchanged: a costume the subset cannot say still runs, and
+         the caller is told what the typed call should have been. *)
       let execution =
         run_execute
           ~config
           ~meta
-          ~argv:[ "sh"; "-c"; "echo one; echo two" ]
+          ~argv:[ "sh"; "-c"; "echo $(echo two)" ]
           ~cwd
       in
       (match execution.disposition with
@@ -139,7 +141,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
            | Some (`String s) -> Some s
            | _ -> None);
         check (option string) "the construct the gate would have refused"
-          (Some "command_separator")
+          (Some "cmd_subst")
           (match List.assoc_opt "finding" entry with
            | Some (`String s) -> Some s
            | _ -> None);
@@ -150,7 +152,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
              (Keeper_tooling.Subset_rewrite.to_string
                 (Keeper_tooling.Subset_rewrite.of_reason
                    (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct
-                      `Command_separator))))
+                      `Cmd_subst))))
           (match List.assoc_opt "should_have_been" entry with
            | Some (`String s) -> Some s
            | _ -> None)

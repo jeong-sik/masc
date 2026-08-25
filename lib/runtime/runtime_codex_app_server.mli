@@ -18,6 +18,10 @@ type config =
   { cli_path : string
   ; model : string option
   ; developer_instructions : string option
+  ; native : Runtime_native_tools.posture
+    (** Built-in tool posture (RFC-0390): [Native_read] maps to the
+        [:read-only] sandbox profile, [Native_full] to [:workspace-write].
+        [Native_none] is unrepresentable on Codex and fails as config. *)
   ; admission_timeout_s : float
     (** Finite bound for post-spawn subscription/account checks, thread
         creation, history injection, and the complete [turn/start] write. *)

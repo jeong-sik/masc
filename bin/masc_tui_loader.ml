@@ -224,8 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime
-    | Config | Resources | Tools
+    | Verification | Harness | Fusion | Repositories | Code | Changes
+    | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =
@@ -441,24 +441,118 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
 
+let decode_schedule_actor json field =
+  match Yojson.Safe.Util.member field json with
+  | `Assoc _ as actor ->
+      let* id = required_string_field actor "id" in
+      let* kind = required_string_field actor "kind" in
+      let* display_name = optional_string_field actor "display_name" in
+      let name = Option.value ~default:id display_name in
+      Ok (Printf.sprintf "%s (%s)" name kind)
+  | value ->
+      Error
+        (Printf.sprintf "schedule %s must be an object: %s" field
+           (Yojson.Safe.to_string value))
+
+let optional_nested_string_field json object_field field =
+  match Yojson.Safe.Util.member object_field json with
+  | `Null -> Ok None
+  | `Assoc _ as nested -> optional_string_field nested field
+  | value ->
+      Error
+        (Printf.sprintf "schedule %s must be an object or null: %s"
+           object_field (Yojson.Safe.to_string value))
+
+let optional_nested_int_field json object_field field =
+  match Yojson.Safe.Util.member object_field json with
+  | `Null -> Ok None
+  | `Assoc _ as nested ->
+      (match Yojson.Safe.Util.member field nested with
+       | `Null -> Ok None
+       | `Int value -> Ok (Some value)
+       | value ->
+           Error
+             (Printf.sprintf "schedule %s.%s must be an integer or null: %s"
+                object_field field (Yojson.Safe.to_string value)))
+  | value ->
+      Error
+        (Printf.sprintf "schedule %s must be an object or null: %s"
+           object_field (Yojson.Safe.to_string value))
+
 let decode_schedule_row json =
+  let* sch_schedule_instance_id =
+    required_string_field json "schedule_instance_id"
+  in
   let* sch_schedule_id = required_string_field json "schedule_id" in
   let* sch_status = required_string_field json "status" in
+  let* sch_dispatch_status = required_string_field json "dispatch_status" in
   let* sch_source = required_string_field json "source" in
+  let* sch_requested_by = decode_schedule_actor json "requested_by" in
+  let* sch_scheduled_by = decode_schedule_actor json "scheduled_by" in
+  let* sch_requested_at_iso = required_string_field json "requested_at_iso" in
   let* sch_due_at_iso = optional_string_field json "due_at_iso" in
+  let* sch_next_due_at_iso = optional_string_field json "next_due_at_iso" in
+  let* sch_expires_at_iso = optional_string_field json "expires_at_iso" in
   let* sch_recurrence_summary =
     required_string_field json "recurrence_summary"
   in
+  let* sch_payload_digest = required_string_field json "payload_digest" in
+  let* sch_payload_kind = optional_string_field json "payload_kind" in
+  let* sch_payload_support = required_string_field json "payload_support" in
+  let* sch_payload_dispatch_tool =
+    optional_string_field json "payload_dispatch_tool"
+  in
   let* sch_payload_target = optional_string_field json "payload_target" in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
+  let* sch_last_wake_status =
+    optional_nested_string_field json "last_wake" "status"
+  in
+  let* sch_last_wake_started_at_iso =
+    optional_nested_string_field json "last_wake" "started_at_iso"
+  in
+  let* sch_last_wake_error =
+    optional_nested_string_field json "last_wake" "error"
+  in
+  let* sch_queue_projection_status =
+    optional_nested_string_field json "keeper_queue_evidence" "projection_status"
+  in
+  let* sch_queue_pending_count =
+    optional_nested_int_field json "keeper_queue_evidence" "pending_count"
+  in
+  let* sch_reaction_projection_status =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "projection_status"
+  in
+  let* sch_reaction_latest_at_iso =
+    optional_nested_string_field json "keeper_reaction_evidence"
+      "latest_recorded_at_iso"
+  in
   Ok
-    { sch_schedule_id
+    { sch_schedule_instance_id
+    ; sch_schedule_id
     ; sch_status
+    ; sch_dispatch_status
     ; sch_source
+    ; sch_requested_by
+    ; sch_scheduled_by
+    ; sch_requested_at_iso
     ; sch_due_at_iso
+    ; sch_next_due_at_iso
+    ; sch_expires_at_iso
     ; sch_recurrence_summary
+    ; sch_payload_digest
+    ; sch_payload_kind
+    ; sch_payload_support
+    ; sch_payload_dispatch_tool
     ; sch_payload_target
     ; sch_payload_summary
+    ; sch_last_wake_status
+    ; sch_last_wake_started_at_iso
+    ; sch_last_wake_error
+    ; sch_queue_projection_status
+    ; sch_queue_pending_count
+    ; sch_reaction_projection_status
+    ; sch_reaction_latest_at_iso
     }
 
 let decode_schedule_rows json_list =

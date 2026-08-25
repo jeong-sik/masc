@@ -67,7 +67,15 @@ let test_delegates_agree () =
       check_string
         (label ^ ": Gate_time_util.iso8601_of_unix")
         owner
-        (Gate_time_util.iso8601_of_unix seconds))
+        (Gate_time_util.iso8601_of_unix seconds);
+      (* This one is here because it was missing. [cutoff_of] hand-wrote the
+         format in bin/ and so was invisible to a list of delegates kept by
+         hand — the same shape #29358 is about. Its hours argument is the
+         offset it subtracts, so zero hours is the plain rendering. *)
+      check_string
+        (label ^ ": Masc_tui_keeper_activity.cutoff_of")
+        owner
+        (Masc_tui_keeper_activity.cutoff_of ~now:seconds ~hours:0))
     round_trip_cases
 ;;
 

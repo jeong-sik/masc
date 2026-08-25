@@ -8,6 +8,7 @@ type auth_change =
 type token_lifetime =
   | With_expiry
   | Long_lived
+  | Expires_in_hours of int
 
 type t = {
   base_path : string;
@@ -76,9 +77,24 @@ let ensure_required_bearer_auth ~base_path ~agent_name ~role =
     Auth.save_auth_config base_path { cfg with require_token = true };
     Ok Require_token_enabled)
 
+(* Two flags can name a lifetime, and they name different ones. Both at once is
+   refused rather than resolved by precedence: whichever one lost would hand the
+   operator a credential they did not ask for, and a bearer's lifetime is not a
+   thing to guess at. *)
+let lifetime_of_flags ~no_expiry ~expiry_hours =
+  match (no_expiry, expiry_hours) with
+  | true, Some _ ->
+      Error "--no-expiry and --expiry-hours name different lifetimes; pass one"
+  | true, None -> Ok Long_lived
+  | false, Some hours -> Ok (Expires_in_hours hours)
+  | false, None -> Ok With_expiry
+
 let create_token_for_lifetime = function
   | With_expiry -> Auth.create_token
   | Long_lived -> Auth.create_token_without_expiry
+  | Expires_in_hours hours ->
+      fun config ~agent_name ~role ->
+        Auth.create_token_expiring_in config ~agent_name ~role ~hours
 
 let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
     ~token_lifetime () =

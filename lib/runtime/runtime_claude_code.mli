@@ -18,6 +18,11 @@ type config =
   ; admission_timeout_s : float
     (** Finite bound for the post-spawn initialize exchange and callbacks
         before the user turn is written. *)
+  ; native : Runtime_native_tools.posture
+    (** How much of the CLI's built-in tool surface this turn may use
+        (RFC-0390). Built-in calls run inside the client and never reach the
+        MASC approval gate, so the keeper layer admits [Native_full] only
+        for Yolo keepers. *)
   ; timeout_s : float option
     (** [None] removes the deadline after the user message is written: the
         spawned client decides when its own turn ends. Initialization remains
@@ -168,6 +173,17 @@ val probe_subscription :
   (subscription, error) result
 (** Measure the official CLI login without submitting a model turn. The child
     receives the same credential-scrubbed environment as [run_turn]. *)
+
+val command :
+  config ->
+  dynamic_tools:dynamic_tool list ->
+  reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  session_mode:session_mode ->
+  session_id:string ->
+  (string list, error) result
+(** The exact argv handed to the CLI. Exposed because the flag set is a
+    contract with the installed client — tests pin how [config.native]
+    selects [--tools] and what [--allowedTools] pre-approves (RFC-0390). *)
 
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->

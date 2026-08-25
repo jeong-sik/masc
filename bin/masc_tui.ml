@@ -112,6 +112,26 @@ let surface_rows () =
   let terminal_rows, _columns = get_terminal_size () in
   max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
 
+(* Page keys move almost one visible body, leaving a few rows of overlap so
+   the reader keeps their place across the jump. Individual renderers clamp
+   the result against their exact wrapped-line count. *)
+let surface_page_rows () = max 1 (surface_rows () - 8)
+
+(* A row cursor over a plain listing: the keypress moves the cursor and the
+   window follows with the smallest move that keeps it visible. Reads the
+   same [scrolled_surface] bound the drawing uses, so the cursor cannot name
+   a row the frame will not draw. *)
+let move_row_cursor (state : state) ~delta ~cursor ~scroll =
+  match scrolled_surface state state.view with
+  | None -> (cursor, scroll + delta)
+  | Some { sc_count; sc_chrome } ->
+      let height = max 1 (surface_rows () - sc_chrome) in
+      let cursor =
+        if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
+        else Masc_tui_scroll.cursor_up ~count:sc_count cursor
+      in
+      (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+
 let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows ())
     ~error:state.log_error
@@ -124,12 +144,19 @@ let keeper_log_content_height (state : state) =
    one read whether or not this asks for them one at a time.
 
    The unserved tail is also the pushback: an invalid UTF-8 continuation has
-   to leave the byte it rejected for the next key, and stepping [position]
-   back one is that, with no second place for a byte to hide. *)
+   to leave the byte it rejected for the next key. [last_source] steps back
+   either the terminal probe's replay or [position], with no second reader for
+   a byte to hide in. *)
+type input_source =
+  | Probe_replay
+  | Terminal_buffer
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
   mutable position : int;
+  mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
+  mutable last_source : input_source option;
   mutable partial_scalar : string;
       (** The head of a multi-byte character whose tail has not arrived.
 
@@ -157,6 +184,8 @@ let create_input_reader () =
     bytes = Bytes.create input_buffer_bytes;
     filled = 0;
     position = 0;
+    terminal_probe = None;
+    last_source = None;
     partial_scalar = "";
   }
 
@@ -188,10 +217,9 @@ let refill_input_reader reader ~timeout =
       true
   | None -> false
 
-let take_input_byte reader ~timeout =
+let take_terminal_buffer_byte reader ~timeout =
   if
-    reader.position >= reader.filled
-    && not (refill_input_reader reader ~timeout)
+    reader.position >= reader.filled && not (refill_input_reader reader ~timeout)
   then None
   else begin
     let byte = Bytes.get reader.bytes reader.position in
@@ -199,11 +227,64 @@ let take_input_byte reader ~timeout =
     Some byte
   end
 
-(* Give back the byte just taken. Only ever called on the byte this reader
-   served last, which is still the one before [position] in the same buffer: a
-   refill happens only when the buffer runs out, and taking a byte leaves at
-   least that one behind. *)
-let return_input_byte reader = reader.position <- max 0 (reader.position - 1)
+let take_input_byte reader ~timeout =
+  let timeout_ns =
+    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+  in
+  let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+  let terminal_byte () =
+    let remaining_ns =
+      Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+    in
+    take_terminal_buffer_byte reader
+      ~timeout:
+        (if Int64.compare remaining_ns 0L <= 0 then 0.0
+         else Int64.to_float remaining_ns /. nanoseconds_per_second)
+  in
+  match reader.terminal_probe with
+  | None ->
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder
+    when (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder ->
+    reader.terminal_probe <- None;
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder ->
+    (match Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte with
+     | Some byte ->
+       reader.last_source <- Some Probe_replay;
+       Some byte
+     | None ->
+       if
+         (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder
+       then reader.terminal_probe <- None;
+       reader.last_source <- None;
+       None)
+
+(* Give back the byte just taken. Probe replay and the terminal buffer are two
+   sources inside this reader, not two readers. The source marker puts an
+   invalid UTF-8 continuation back where it came from. *)
+let return_input_byte reader =
+  (match reader.last_source with
+   | Some Probe_replay ->
+     Option.iter Masc_tui_terminal_probe.return_replay reader.terminal_probe
+   | Some Terminal_buffer -> reader.position <- max 0 (reader.position - 1)
+   | None -> ());
+  reader.last_source <- None
+;;
 
 let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
@@ -642,8 +723,9 @@ let own_typed_messages (state : state) =
     |> List.filter (fun entry ->
            (match entry.me_role with
             | Message_user label -> String.equal label "you"
-            | Message_keeper | Message_status | Message_error | Message_tool
-            | Message_thinking ->
+            | Message_keeper | Message_autonomous | Message_status
+            | Message_error | Message_tool
+            | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
     |> List.map (fun entry -> entry.me_text)
@@ -742,6 +824,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        thought. *)
     forget_recall state;
     Buffer.add_char state.msg_input '\n';
+    true
+  | "up" when state.msg_scroll > 0 ->
+    state.msg_scroll <- state.msg_scroll + 1;
+    (match state.msg_older_cursor with
+     | Some before when state.msg_older_exist && not state.msg_older_loading ->
+         load_older ~before
+     | Some _ | None -> ());
+    true
+  | "down" when state.msg_scroll > 0 ->
+    state.msg_scroll <- max 0 (state.msg_scroll - 1);
     true
   | "up" ->
     recall_older state;
@@ -897,7 +989,10 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      int * string * (Keeper_chat_history.decoded, string) result
+      int
+      * string
+      * (Keeper_chat_history.decoded, string) result
+      * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -961,6 +1056,9 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Resources_listed of ((string * string) list, string) result
+  | Code_entries_loaded of
+      string * (Masc.Tui_decode.workspace_tree_node list, string) result
+  | Code_file_loaded of string * (string, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1033,6 +1131,24 @@ let enqueue_dispatch_start mailbox request was_replay =
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
 (* Send the turn and read it as it arrives.
 
    Bounding the silence needs a clock. Without one the buffered send is used
@@ -1041,7 +1157,7 @@ let enqueue_dispatch_start mailbox request was_replay =
    passed over: a pane that quietly stops drawing looks like a keeper that
    stopped working. *)
 let post_keeper_chat_watching ~mailbox ~port request =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   match Eio_context.get_clock_opt () with
   | None ->
       enqueue_async mailbox
@@ -1120,7 +1236,7 @@ let settle_live_turn state (request : Keeper_chat.request) =
    a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1148,7 +1264,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
 let launch_keeper_tool_approvals_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1168,7 +1284,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1188,7 +1304,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
         (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1213,7 +1329,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
   let run () =
@@ -1245,7 +1361,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
    the pane stays responsive and a slow server costs the list rather than the
    keypress that asked for it. *)
 let launch_tools_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1263,7 +1379,7 @@ let launch_tools_load state ~mailbox =
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
 let launch_schedules_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1285,7 +1401,7 @@ let launch_schedules_load state ~mailbox =
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
 let launch_keeper_calls_load state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1312,7 +1428,7 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
 let launch_resources_list state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -1346,7 +1462,7 @@ let launch_resources_list state ~mailbox =
       enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
 
 let launch_resource_read state ~mailbox ~uri =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -1387,13 +1503,58 @@ let launch_resource_read state ~mailbox ~uri =
       enqueue_async mailbox
         (Resource_read (uri, Error "Eio switch is unavailable"))
 
+(* The Code surface's two loads: one directory level, one whole file. Plain
+   HTTP GETs forked off the render loop, answered on the async mailbox and
+   stamped with what they answer for, so a slow reply cannot dress a newer
+   selection. *)
+let launch_code_entries_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let dir = state.code_dir in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_workspace_entries ~host ~port ~path:dir with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_entries_loaded (dir, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_entries_loaded (dir, Error "Eio switch is unavailable"))
+
+let launch_code_file_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_workspace_file ~host ~port ~path with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_file_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_file_loaded (path, Error "Eio switch is unavailable"))
+
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
    in the GitHub tab as it arrives so the operator can read the code and
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
 let launch_github_login state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     match Eio_context.get_clock_opt () with
@@ -1466,7 +1627,7 @@ let launch_github_login state ~mailbox keeper_name =
         (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_runtime_config_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1486,7 +1647,7 @@ let launch_runtime_config_load state ~mailbox =
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_config_view state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1507,7 +1668,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1531,7 +1692,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1556,7 +1717,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_generation <- state.runtime_surface_generation + 1;
       let generation = state.runtime_surface_generation in
       state.runtime_surface_inflight <- Some generation;
-      let host = Env_config_core.masc_host () in
+      let host = server_peer_host in
       let port = state.port in
       let run () =
         let result =
@@ -1577,7 +1738,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
                 (generation, Error "Eio switch is unavailable")))
 
 let launch_repositories_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1678,7 +1839,7 @@ let change_line ~path (change : Masc.Tui_decode.file_change) =
 let changes_window_hours = 24.0
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1706,7 +1867,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
 let tree_diff_base_ref = "HEAD"
 
 let launch_git_diff_load state ~mailbox ~keeper ~path =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1729,7 +1890,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
         (Git_diff_loaded (path, Error "Eio switch is unavailable"))
 
 let launch_harness_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1753,7 +1914,7 @@ let launch_fusion_runs_load state ~mailbox =
       state.fusion_runs_generation <- state.fusion_runs_generation + 1;
       let generation = state.fusion_runs_generation in
       state.fusion_runs_inflight <- Some generation;
-      let host = Env_config_core.masc_host () in
+      let host = server_peer_host in
       let port = state.port in
       let run () =
         let result =
@@ -1785,7 +1946,7 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
     state.fusion_detail_generation <- state.fusion_detail_generation + 1;
     let generation = state.fusion_detail_generation in
     state.fusion_detail_inflight <- Some (generation, run_id);
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     let run () =
       let result =
@@ -1807,7 +1968,7 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
   end
 
 let launch_lanes_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1825,7 +1986,7 @@ let launch_lanes_load state ~mailbox =
   | None -> enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
 
 let launch_verification_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1842,28 +2003,81 @@ let launch_verification_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
 
-(* Move the roster cursor to the next keeper whose name contains [query],
-   scanning forward from [after] and wrapping. A miss moves nothing. *)
-let roster_search_jump state ~query ~after =
+(* Move the active surface's row cursor to the next row whose search text
+   contains [query], scanning from [after] and wrapping; [backwards] walks
+   the other way. A miss moves nothing. The searched list is the one
+   [surface_row_texts] answers -- the same list the row cursor names -- and
+   the window follows the landing so the match is visible. *)
+let search_row_cursor state =
+  match state.view with
+  | Keepers Keeper_list -> Some state.keeper_cursor
+  | Lanes -> Some state.lanes_cursor
+  | Verification -> Some state.verification_cursor
+  | Harness -> Some state.harness_cursor
+  | Repositories -> Some state.repositories_cursor
+  | Connectors -> Some state.connectors_cursor
+  | Runtime -> Some state.runtime_cursor
+  | System_logs -> Some state.system_logs_cursor
+  | _ -> None
+
+let search_land state index =
+  let follow scroll set_scroll =
+    match scrolled_surface state state.view with
+    | None -> ()
+    | Some { sc_count = _; sc_chrome } ->
+        let height = max 1 (surface_rows () - sc_chrome) in
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
+  in
+  match state.view with
+  | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Lanes ->
+      state.lanes_cursor <- index;
+      follow state.lanes_scroll (fun s -> state.lanes_scroll <- s)
+  | Verification ->
+      state.verification_cursor <- index;
+      follow state.verification_scroll (fun s -> state.verification_scroll <- s)
+  | Harness ->
+      state.harness_cursor <- index;
+      follow state.harness_scroll (fun s -> state.harness_scroll <- s)
+  | Repositories ->
+      state.repositories_cursor <- index;
+      follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
+  | Connectors ->
+      state.connectors_cursor <- index;
+      follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
+  | Runtime ->
+      state.runtime_cursor <- index;
+      follow state.runtime_surface_scroll
+        (fun s -> state.runtime_surface_scroll <- s)
+  | System_logs ->
+      state.system_logs_cursor <- index;
+      follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
+  | _ -> ()
+
+let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
-  let total = List.length state.keepers in
-  if String.length query > 0 && total > 0 then begin
-    let matches index =
-      match List.nth_opt state.keepers index with
-      | Some (k : keeper) ->
-          Masc_tui_types.palette_contains ~needle:query k.k_name
-      | None -> false
-    in
-    let rec scan step =
-      if step > total then ()
-      else begin
-        let index = (after + step + total) mod total in
-        if matches index then state.keeper_cursor <- index
-        else scan (step + 1)
+  match surface_row_texts state state.view with
+  | None -> ()
+  | Some texts ->
+      let total = List.length texts in
+      if String.length query > 0 && total > 0 then begin
+        let matches index =
+          match List.nth_opt texts index with
+          | Some text -> Masc_tui_types.palette_contains ~needle:query text
+          | None -> false
+        in
+        let rec scan step =
+          if step > total then ()
+          else begin
+            let index =
+              if backwards then (after - step + (total * 2)) mod total
+              else (after + step + total) mod total
+            in
+            if matches index then search_land state index else scan (step + 1)
+          end
+        in
+        scan 1
       end
-    in
-    scan 1
-  end
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -1907,6 +2121,7 @@ let goto_surface state ~mailbox (destination : surface) =
    | Tools -> launch_tools_load state ~mailbox
    | Config -> launch_runtime_config_load state ~mailbox
    | Resources -> launch_resources_list state ~mailbox
+   | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -1929,7 +2144,7 @@ let cycle_surface state ~mailbox ~backwards =
   goto_surface state ~mailbox (fst (List.nth ring index))
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let generation = state.msg_history_load_generation in
   state.msg_older_loading <- true;
@@ -1956,19 +2171,27 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
 let launch_keeper_history_load state ~mailbox ~keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_older_loading <- false;
+  state.msg_memory_error <- None;
+  state.msg_memory_dropped <- 0;
   let generation = state.msg_history_load_generation in
   let run () =
-    let result =
+    let history_result =
       try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
+    let memory_result =
+      try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
     enqueue_async mailbox
-      (Keeper_chat_history_loaded (generation, keeper_name, result))
+      (Keeper_chat_history_loaded
+         (generation, keeper_name, history_result, memory_result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -1978,7 +2201,10 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_history_loaded
-           (generation, keeper_name, Error "Eio switch is unavailable"))
+           ( generation
+           , keeper_name
+           , Error "Eio switch is unavailable"
+           , Error "Eio switch is unavailable" ))
 
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
@@ -1991,6 +2217,8 @@ let switch_to_next_keeper_message state ~mailbox =
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
       state.msg_loaded_dropped <- 0;
+      state.msg_memory_error <- None;
+      state.msg_memory_dropped <- 0;
       state.msg_older_cursor <- None;
       state.msg_older_exist <- false;
       state.msg_older_loading <- false;
@@ -2023,8 +2251,11 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Delivery_failed { origin_request_id } ->
             origin_request_id
         | Keeper_chat_history.Addressed_to_keeper _
-        | Keeper_chat_history.Said_by_keeper | Keeper_chat_history.Tool_calls _
-        | Keeper_chat_history.Reasoning _ -> None)
+        | Keeper_chat_history.Said_by_keeper
+        | Keeper_chat_history.Autonomous_reply
+        | Keeper_chat_history.Tool_calls _
+        | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Memory_activity -> None)
       rows
   in
   state.msg_history <-
@@ -2040,7 +2271,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                  (List.exists
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
-        | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
+        | Message_user _ | Message_keeper | Message_autonomous | Message_tool
+        | Message_thinking | Message_memory ->
             false)
       state.msg_history
 
@@ -2051,15 +2283,25 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         ( Message_user (Keeper_chat_history.addressed_label speaker surface)
         , row.text )
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
+    | Keeper_chat_history.Autonomous_reply ->
+        (Message_autonomous, if String.trim row.text = "" then "\xc2\xb7" else row.text)
     | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls block ->
         (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, String.concat "\n" lines)
+    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text)
+  in
+  let timestamp =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Memory_activity
+      when Float.equal row.Keeper_chat_history.at 0.0 ->
+        "--:--:--"
+    | _ -> clock_text_of_unix row.Keeper_chat_history.at
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_timestamp = clock_text_of_unix row.Keeper_chat_history.at
+  ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* The transcript carries no request id: these rows predate this session, or
        came from another client. The pane shows the compacted id beside a row,
@@ -2069,7 +2311,7 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   }
 
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
   let run () =
@@ -2092,7 +2334,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
 let launch_runtime_catalog_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -2112,7 +2354,7 @@ let launch_runtime_catalog_load state ~mailbox =
         (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -2320,7 +2562,7 @@ let chat_status_text completed =
    is the one the observer feed keeps; without one, this call opens one and
    the observer reuses it. *)
 let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let session = state.mcp_session in
   (* A JSON-RPC id for this one call: the answer must name it back. Wall
@@ -2545,6 +2787,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_thinking_collapsed
          then "reasoning folded (/thinking to unfold)"
          else "reasoning unfolded (/thinking to fold)")
+  | Masc_tui_command.Toggle_memory ->
+      Buffer.clear state.msg_input;
+      state.msg_memory_visible <- not state.msg_memory_visible;
+      notice ~role:Message_status
+        (if state.msg_memory_visible
+         then "Librarian/Memory timeline shown (/memory to hide)"
+         else "Librarian/Memory timeline hidden (/memory to show)")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -2716,6 +2965,7 @@ let replace_board_posts state posts =
 
 let leave_board_detail state =
   state.board_mode <- Board_list;
+  state.board_focus <- Board_detail_pane;
   state.board_scroll <- 0;
   state.board_detail <- Board_detail.clear state.board_detail
 
@@ -3136,8 +3386,14 @@ let apply_board_post_load state request result =
     | Ok (post, comments) when String.equal post.bp_id post_id ->
         state.board_detail <-
           Board_detail.complete state.board_detail request (Ok (post, comments));
-        replace_board_posts state
-          (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
+        (* A detail response enriches one list row; it does not rank the list.
+           Moving the completed post to the front made rapid j/k navigation
+           snap back to row zero as asynchronous responses arrived. *)
+        state.board_posts <-
+          List.map
+            (fun current ->
+              if String.equal current.bp_id post_id then post else current)
+            state.board_posts
     | Ok (post, _) ->
         fail
           (Printf.sprintf
@@ -3177,6 +3433,23 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
         in
         apply_board_post_load state request result
 
+let open_board_post state ~mailbox ~focus (post : board_post) =
+  state.board_mode <- Board_read post.bp_id;
+  state.board_focus <- focus;
+  state.board_scroll <- 0;
+  start_board_post_refresh state ~host:server_peer_host
+    ~port:state.port ~post_id:post.bp_id ~mailbox
+
+let move_board_posts_pane state ~mailbox ~delta =
+  let count = List.length state.board_posts in
+  let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
+  if count > 0 && next <> state.board_cursor then begin
+    state.board_cursor <- next;
+    Option.iter
+      (open_board_post state ~mailbox ~focus:Board_posts_pane)
+      (List.nth_opt state.board_posts next)
+  end
+
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
    | Ok (Approval.Completed _) ->
@@ -3213,7 +3486,7 @@ let start_approval_decision state approval decision ~mailbox =
   | Ok (flow, generation) ->
     let () = state.approval_flow <- flow in
     let () = state.pending_approval_action <- None in
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     let run_action () =
       let result =
@@ -3355,7 +3628,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_pending <- None;
   add_event state "system"
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
     Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
@@ -3402,7 +3675,7 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   (* What this send answers for: the completion clears and lands against
      these, not against whatever the operator typed while it was out. *)
   let sent_draft = Buffer.contents state.board_draft in
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_post () =
     let result =
@@ -3426,7 +3699,7 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
   add_event state "system"
     (Printf.sprintf "goal %s: %s" goal_id
        (Goal_phase.Public_action.to_string action));
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_transition () =
     let result =
@@ -3489,7 +3762,7 @@ let start_board_comment state ~mailbox ~(post_id : string)
   state.board_post_inflight <- true;
   add_event state "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_comment () =
     let result =
@@ -3509,7 +3782,7 @@ let start_board_comment state ~mailbox ~(post_id : string)
 let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
   add_event state "system"
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_vote () =
     let result =
@@ -3554,7 +3827,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   state.schedule_cancel_error <- None;
   add_event state "system"
     (Printf.sprintf "cancelling schedule %s" schedule_id);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_cancel () =
     let result =
@@ -3578,7 +3851,15 @@ let handle_schedule_cancel_key state ~mailbox =
     | None -> []
     | Some snapshot -> snapshot.scs_rows
   in
-  match List.nth_opt rows state.schedule_cursor with
+  let selected =
+    match state.schedule_detail_id with
+    | Some schedule_id ->
+        List.find_opt
+          (fun row -> String.equal row.sch_schedule_id schedule_id)
+          rows
+    | None -> List.nth_opt rows state.schedule_cursor
+  in
+  match selected with
   | None -> ()
   | Some row -> (
       match state.schedule_cancel_armed with
@@ -3764,6 +4045,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
+       | Masc_tui_command.Toggle_memory
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -3857,7 +4139,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
-        ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
+        ~host:(server_peer_host) ~port:state.port ~mailbox
   | Observer_opened session_id ->
       state.mcp_session <- Some session_id;
       state.observer <-
@@ -3905,7 +4187,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.palette_open <- false;
       state.palette_query <- "";
       state.palette_cursor <- 0;
-      state.roster_search <- None;
+      state.search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
@@ -3949,7 +4231,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          and it is what decides which action the row offers next. Asking for it
          now means the row stops offering the action that just ran without
          waiting out the refresh interval. *)
-      start_http_refresh state ~host:(Env_config_core.masc_host ())
+      start_http_refresh state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
   | Board_new_post_done { reply_to; sent_draft; result } -> (
       (* The completion answers for the draft it carried, not for whatever
@@ -3975,12 +4257,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              yet; without this the operator returns to a list that does not
              contain what they just published. A comment refreshes the
              detail too, so the reply is visible the moment it lands. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox;
           (match reply_to with
            | Some post_id ->
                start_board_post_refresh state
-                 ~host:(Env_config_core.masc_host ())
+                 ~host:(server_peer_host)
                  ~port:state.port ~post_id ~mailbox
            | None -> ())
       | Error err ->
@@ -3995,7 +4277,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           add_event state "system" ("Board vote: " ^ message);
           (* The score is drawn from the list; refresh it rather than
              waiting out the interval to see the arrow land. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
       | Error err ->
           state.board_vote_armed <- None;
@@ -4009,7 +4291,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The phase shown is the half the periodic refresh has not fetched
              yet; without this the detail keeps the old phase after the
              operator already changed it. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
       | Error err ->
           state.goal_action_armed <- None;
@@ -4044,6 +4326,36 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.runtime_config_view <- Some view;
           state.runtime_config_view_error <- None
       | Error detail -> state.runtime_config_view_error <- Some detail)
+  | Code_entries_loaded (dir, result) ->
+      if String.equal dir state.code_dir then (
+        match result with
+        | Ok entries ->
+            state.code_entries <- entries;
+            state.code_entries_error <- None;
+            state.code_cursor <-
+              max 0 (min state.code_cursor (List.length entries - 1))
+        | Error detail -> state.code_entries_error <- Some detail)
+  | Code_file_loaded (path, result) -> (
+      match result with
+      | Ok content ->
+          (* Lex once at load: comment and string state crosses rows, so a
+             window could not answer. Past the budget the file draws plain
+             rather than slowly. *)
+          let language =
+            if String.length content > 500_000 then None
+            else Masc_tui_code_lexer.language_of_path path
+          in
+          let rows =
+            Masc_tui_code_lexer.rows_of_source ~language content
+            |> List.map
+                 (List.map (fun (text, kind) ->
+                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+          in
+          state.code_file <- Some (path, rows);
+          state.code_file_error <- None;
+          state.code_file_scroll <- 0;
+          state.code_focus_file <- true
+      | Error detail -> state.code_file_error <- Some detail)
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -4105,7 +4417,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              that exists. *)
           let count = List.length snapshot.scs_rows in
           if state.schedule_cursor >= count then
-            state.schedule_cursor <- max 0 (count - 1)
+            state.schedule_cursor <- max 0 (count - 1);
+          (match state.schedule_detail_id with
+           | Some schedule_id
+             when not
+                    (List.exists
+                       (fun row -> String.equal row.sch_schedule_id schedule_id)
+                       snapshot.scs_rows) ->
+               state.schedule_detail_id <- None;
+               state.schedule_scroll <- 0
+           | Some _ | None -> ())
       | Error err -> state.schedules_error <- Some err)
   | Schedule_cancel_done result -> (
       match result with
@@ -4305,7 +4626,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (generation, keeper_name, result) ->
+  | Keeper_chat_history_loaded
+      (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
          target or an older request for a target revisited since must not
@@ -4315,11 +4637,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         && Option.exists (String.equal keeper_name)
              state.msg_target_keeper_name
       then
-        (match result with
-         | Ok { Keeper_chat_history.rows; dropped } ->
-             state.msg_loaded <-
-               List.map (msg_entry_of_history_row keeper_name) rows;
-             state.msg_loaded_keeper <- Some keeper_name;
+        let prior_loaded =
+          match state.msg_loaded_keeper with
+          | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+              state.msg_loaded
+          | Some _ | None -> []
+        in
+        let prior_history, prior_memory =
+          List.partition
+            (fun entry -> entry.me_role <> Message_memory)
+            prior_loaded
+        in
+        let history_entries =
+          match history_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
              (* Where reading further back starts. The oldest row this load
@@ -4337,11 +4668,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                  None rows;
              state.msg_older_exist <- Option.is_some state.msg_older_cursor;
              state.msg_older_error <- None;
-             forget_session_rows_the_transcript_holds state keeper_name rows
-         | Error detail ->
+             forget_session_rows_the_transcript_holds state keeper_name rows;
+             List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
                 failed load must not be the reason the pane goes blank. *)
-             state.msg_loaded_error <- Some detail)
+             state.msg_loaded_error <- Some detail;
+             prior_history
+        in
+        let memory_entries =
+          match memory_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
+              state.msg_memory_error <- None;
+              state.msg_memory_dropped <- dropped;
+              List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
+              state.msg_memory_error <- Some detail;
+              prior_memory
+        in
+        state.msg_loaded <- history_entries @ memory_entries;
+        state.msg_loaded_keeper <- Some keeper_name
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -4573,6 +4919,7 @@ let toggle_roster_pane_key = "\002"
 
 let terminal_title_visible_keeper state =
   match state.view with
+  | Code -> None
   | Keepers Keeper_message -> state.msg_target_keeper_name
   | Keepers
       (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
@@ -4586,14 +4933,18 @@ let terminal_title_visible_keeper state =
 ;;
 
 let terminal_title_runtime state keeper_name =
+  (* Option.bind takes the option first, so it cannot sit after [|>] the way
+     Option.map does -- piping handed it the continuation in the option's
+     slot and the build stopped compiling. *)
   Option.bind keeper_name (fun name ->
-    List.find_opt
-      (fun (keeper : keeper) -> String.equal keeper.k_name name)
-      state.keepers
-    |> Option.bind (fun keeper ->
-      match (keeper_reading state keeper).Keeper_control.liveness with
-      | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-      | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+    Option.bind
+      (List.find_opt
+         (fun (keeper : keeper) -> String.equal keeper.k_name name)
+         state.keepers)
+      (fun keeper ->
+        match (keeper_reading state keeper).Keeper_control.liveness with
+        | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
+        | Keeper_control.Absent | Keeper_control.Unobserved -> None))
 ;;
 
 let terminal_title_snapshot state =
@@ -4638,11 +4989,45 @@ let toggle_mouse_tracking () =
 
    Written and cleared beside the mouse mode, for the reasons its comment
    gives about when a byte may be put on this stream. *)
-(* How long to wait for the graphics query's answer. A terminal that
-   implements the protocol replies as soon as it has parsed the escape; one
-   that does not never replies, and this is the whole cost of finding that
-   out, paid once at startup. *)
-let graphics_query_wait_seconds = 0.2
+(* How long to wait for the combined palette and graphics answers. A terminal
+   replies as soon as it has parsed a supported query; an unsupported query
+   says nothing, and this is the whole cost of finding that out, paid once at
+   startup. *)
+let terminal_probe_wait_seconds = 0.2
+
+let read_terminal_probe reader ~palette_requested =
+  Eio_guard.run_in_systhread (fun () ->
+      let decoder =
+        Masc_tui_terminal_probe.create ~palette_requested
+      in
+      let timeout_ns =
+        Int64.of_float
+          (terminal_probe_wait_seconds *. nanoseconds_per_second)
+      in
+      let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+      let bytes_read = ref 0 in
+      let finished = ref false in
+      while
+        (not !finished)
+        && !bytes_read < Masc_tui_terminal_probe.max_bytes
+        && not (Masc_tui_terminal_probe.complete decoder)
+      do
+        let remaining_ns =
+          Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+        in
+        if Int64.compare remaining_ns 0L <= 0 then finished := true
+        else
+          match
+            take_terminal_buffer_byte reader
+              ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
+          with
+          | None -> finished := true
+          | Some byte ->
+            incr bytes_read;
+            Masc_tui_terminal_probe.feed decoder byte
+      done;
+      decoder, Masc_tui_terminal_probe.snapshot decoder)
+;;
 
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
@@ -4803,7 +5188,7 @@ let main () =
 
   (* Initial load *)
   load_from_masc_dir state base_path;
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
@@ -4836,21 +5221,25 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
-  (* Ask once whether this terminal draws pictures, here rather than when one
-     is first asked for: the answer cannot change while the process runs, the
-     stream is quiet between session entry and the first frame, and a query
-     sent later would drop its reply into the middle of the operator's typing.
-     A terminal that does not implement the protocol says nothing at all, so
-     the deadline is the answer for those. *)
-  write_to_terminal Masc_tui_graphics.query;
+  (* Palette and graphics share one bounded startup probe because both replies
+     arrive on the key stream. The probe removes only replies to these exact
+     questions and puts every other consumed byte back into this same reader.
+     NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
+  let palette_requested = Masc_tui_theme.colors_enabled in
+  write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
+  let terminal_probe_decoder, terminal_probe =
+    read_terminal_probe input_reader ~palette_requested
+  in
+  (* Do not finish the decoder at the startup deadline. A terminal may have
+     split OSC 10/11 across that boundary; the same reader continues this
+     exact state before serving its replay or unread terminal-buffer tail. *)
+  input_reader.terminal_probe <- Some terminal_probe_decoder;
+  Masc_tui_terminal_palette.set_current terminal_probe.palette;
   terminal_draws_images :=
     Some
-      (match read_input ~timeout:graphics_query_wait_seconds input_reader () with
-       | Some (Graphics_reply body) -> (
-           match Masc_tui_graphics.parse_query_reply body with
-           | Some Masc_tui_graphics.Supported -> true
-           | Some (Masc_tui_graphics.Refused _) | None -> false)
-       | Some (Key _) | Some (Pasted _) | None -> false);
+      (match terminal_probe.graphics with
+       | Some Masc_tui_graphics.Supported -> true
+       | Some (Masc_tui_graphics.Refused _) | None -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
@@ -4908,7 +5297,7 @@ let main () =
             | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
   in
   let handle_connector_bind () =
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     handle_connector_form ~action:"bind"
       ~stem:
@@ -4919,7 +5308,7 @@ let main () =
       ()
   in
   let handle_connector_unbind () =
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     handle_connector_form ~action:"unbind"
       ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
@@ -4944,7 +5333,7 @@ let main () =
         with
         | None -> add_event state "system" "runtime.toml unchanged"
         | Some edited -> (
-          let host = Env_config_core.masc_host () in
+          let host = server_peer_host in
           let port = state.port in
           match
             Masc_tui_http.post_runtime_config_preview ~host ~port
@@ -5116,7 +5505,7 @@ let main () =
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      let terminal_rows, _terminal_columns = get_terminal_size () in
+      let terminal_rows, terminal_columns = get_terminal_size () in
       let compact_viewport =
         Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
       in
@@ -5149,7 +5538,7 @@ let main () =
         (not compact_viewport)
         && (not state.help_open)
         && (not state.palette_open)
-        && Option.is_none state.roster_search
+        && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -5163,7 +5552,7 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
-              && Option.is_none state.roster_search
+              && Option.is_none state.search
               && not
                    (state.view = Board
                    && state.board_mode = Board_compose) ->
@@ -5227,6 +5616,36 @@ let main () =
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
+                 | Some (_, Masc_tui_types.Palette_task task_id) ->
+                     (* The palette lands where Enter on the task list would:
+                        Overview with the task's detail open and the cursor
+                        on its row. *)
+                     goto_surface state ~mailbox:async_messages Overview;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     let rec index_of i = function
+                       | [] -> None
+                       | (t : Masc_tui_types.task) :: rest ->
+                           if String.equal t.id task_id then Some i
+                           else index_of (i + 1) rest
+                     in
+                     (match index_of 0 state.tasks with
+                      | Some index -> state.task_cursor <- index
+                      | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_post post_id) ->
+                     goto_surface state ~mailbox:async_messages Board;
+                     let rec find i = function
+                       | [] -> None
+                       | (p : Masc_tui_types.board_post) :: rest ->
+                           if String.equal p.bp_id post_id then Some (i, p)
+                           else find (i + 1) rest
+                     in
+                     (match find 0 state.board_posts with
+                      | Some (index, post) ->
+                          state.board_cursor <- index;
+                          open_board_post state ~mailbox:async_messages
+                            ~focus:Board_detail_pane post
+                      | None -> ())
                  | None -> ())
             | "down" -> state.palette_cursor <- state.palette_cursor + 1
             | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
@@ -5241,34 +5660,34 @@ let main () =
                 state.palette_query <- state.palette_query ^ s;
                 state.palette_cursor <- 0
             | _ -> ())
-       (* Roster search: typing moves the cursor live to the first match
-          from the top; Enter keeps the query for n/N, Esc keeps nothing.
-          The list itself never narrows -- see [roster_search] in types. *)
+       (* Row search: typing moves the surface's row cursor live to the
+          first match from the top; Enter keeps the query for n/N, Esc keeps
+          nothing. The list itself never narrows -- see [search] in types. *)
        | Some k
-         when state.view = Keepers Keeper_list
-              && Option.is_some state.roster_search
-              && not compact_viewport ->
-           let query = Option.value state.roster_search ~default:"" in
+         when Option.is_some state.search && not compact_viewport ->
+           let query = Option.value state.search ~default:"" in
            (match k with
-            | "esc" -> state.roster_search <- None
+            | "esc" -> state.search <- None
             | "\r" ->
-                state.roster_search <- None;
-                state.roster_search_last <- query
+                state.search <- None;
+                state.search_last <- query
             | "\127" | "\b" ->
                 let shorter =
                   Masc_tui_message_layout.drop_last_utf8_scalar query
                 in
-                state.roster_search <- Some shorter;
-                roster_search_jump state ~query:shorter ~after:(-1)
+                state.search <- Some shorter;
+                search_jump state ~query:shorter ~after:(-1)
             | s
               when (String.length s = 1 && Char.code s.[0] >= 32)
                    || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                 let longer = query ^ s in
-                state.roster_search <- Some longer;
-                roster_search_jump state ~query:longer ~after:(-1)
+                state.search <- Some longer;
+                search_jump state ~query:longer ~after:(-1)
             | _ -> ())
-       | Some "/" when state.view = Keepers Keeper_list && not compact_viewport ->
-           state.roster_search <- Some ""
+       | Some "/"
+         when Option.is_some (surface_row_texts state state.view)
+              && not compact_viewport ->
+           state.search <- Some ""
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail && not compact_viewport ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
@@ -5323,36 +5742,12 @@ let main () =
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources && not compact_viewport ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
-       | Some "n"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           roster_search_jump state ~query:state.roster_search_last
-             ~after:state.keeper_cursor
-       | Some "N"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           (* Backwards: the same wrap walked the other way. *)
-           let total = List.length state.keepers in
-           let query = String.lowercase_ascii state.roster_search_last in
-           if total > 0 then begin
-             let matches index =
-               match List.nth_opt state.keepers index with
-               | Some (k : keeper) ->
-                   Masc_tui_types.palette_contains ~needle:query k.k_name
-               | None -> false
-             in
-             let rec scan step =
-               if step > total then ()
-               else begin
-                 let index =
-                   (state.keeper_cursor - step + (total * 2)) mod total
-                 in
-                 if matches index then state.keeper_cursor <- index
-                 else scan (step + 1)
-               end
-             in
-             scan 1
-           end
+       | Some (("n" | "N") as direction)
+         when state.search_last <> ""
+              && Option.is_some (surface_row_texts state state.view) ->
+           let after = Option.value (search_row_cursor state) ~default:0 in
+           search_jump state ~query:state.search_last ~after
+             ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
@@ -5418,6 +5813,30 @@ let main () =
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
+       | Some "\023"
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ ->
+                state.board_focus <-
+                  (match state.board_focus with
+                   | Board_posts_pane -> Board_detail_pane
+                   | Board_detail_pane -> Board_posts_pane)
+            | Board_list | Board_compose -> ())
+       | Some "\023" when state.view = Resources ->
+           state.resource_focus <- not state.resource_focus
+       | Some ("h" | "H")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_posts_pane
+            | Board_list | Board_compose -> ())
+       | Some ("l" | "L")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_detail_pane
+            | Board_list | Board_compose -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -5451,16 +5870,69 @@ let main () =
                        ~tool_call_id:held.kta_tool_call_id ~allow:false
                  | None -> ())
             | _ -> ())
+       | Some ("pageup" | "pagedown") ->
+           let page = surface_page_rows () in
+           let direction = if key = Some "pagedown" then 1 else -1 in
+           (match state.view with
+            | Code -> ()
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     let count = List.length state.board_posts in
+                     state.board_cursor <-
+                       max 0
+                         (min (count - 1) (state.board_cursor + (direction * page)))
+                 | Board_read _ ->
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:(direction * page)
+                      | Board_detail_pane ->
+                          state.board_scroll <-
+                            max 0 (state.board_scroll + (direction * page)))
+                 | Board_compose -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let count =
+                       match state.fusion_runs with
+                       | None -> 0
+                       | Some snapshot -> List.length snapshot.fus_runs
+                     in
+                     state.fusion_cursor <-
+                       max 0
+                         (min (count - 1) (state.fusion_cursor + (direction * page)))
+                 | Fusion_detail _ ->
+                     state.fusion_scroll <-
+                       max 0 (state.fusion_scroll + (direction * page)))
+            | Schedules ->
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <-
+                    max 0 (state.schedule_scroll + (direction * page))
+                else
+                  let count =
+                    match state.schedules with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.scs_rows
+                  in
+                  state.schedule_cursor <-
+                    max 0
+                      (min (count - 1)
+                         (state.schedule_cursor + (direction * page)))
+            | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
+            | Verification | Harness | Repositories | Changes | Connectors
+            | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_from_masc_dir state base_path;
-           let host = Env_config_core.masc_host () in
+           let host = server_peer_host in
            let port = state.port in
            start_http_refresh state ~host ~port
              ~refresh_inflight:http_refresh_inflight
              ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
+            | Code -> launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 load_selected_keeper_logs state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -5522,6 +5994,19 @@ let main () =
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
+            | Code ->
+                if state.code_focus_file then state.code_focus_file <- false
+                else if not (String.equal state.code_dir "") then begin
+                  (* Up one directory; "." from Filename.dirname means the
+                     root, which this surface spells "". *)
+                  let parent = Filename.dirname state.code_dir in
+                  state.code_dir <-
+                    (if String.equal parent "." then "" else parent);
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
@@ -5590,9 +6075,11 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Resources ->
-                state.resource_focus <- false
+            | Schedules ->
+                state.schedule_detail_id <- None;
+                state.schedule_scroll <- 0
+            | Resources -> state.resource_focus <- false
+            | Acting | Keepers Keeper_list | Lanes | Approvals -> ()
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the
@@ -5607,6 +6094,20 @@ let main () =
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
+            | Code ->
+                if state.code_focus_file then (
+                  match state.code_file with
+                  | Some (_, rows) ->
+                      state.code_file_scroll <-
+                        min
+                          (max 0 (List.length rows - 1))
+                          (state.code_file_scroll + 1)
+                  | None -> ())
+                else
+                  state.code_cursor <-
+                    Masc_tui_scroll.cursor_down
+                      ~count:(List.length state.code_entries)
+                      state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
@@ -5636,7 +6137,12 @@ let main () =
                      if state.board_cursor < List.length state.board_posts - 1 then
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
-                     state.board_scroll <- state.board_scroll + 1
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:1
+                      | Board_detail_pane ->
+                          state.board_scroll <- state.board_scroll + 1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -5663,13 +6169,16 @@ let main () =
                  | Fusion_detail _ ->
                      state.fusion_scroll <- state.fusion_scroll + 1)
             | Schedules ->
-                let count =
-                  match state.schedules with
-                  | None -> 0
-                  | Some snapshot -> List.length snapshot.scs_rows
-                in
-                if state.schedule_cursor < count - 1 then
-                  state.schedule_cursor <- state.schedule_cursor + 1
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <- state.schedule_scroll + 1
+                else
+                  let count =
+                    match state.schedules with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.scs_rows
+                  in
+                  if state.schedule_cursor < count - 1 then
+                    state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- state.task_detail_scroll + 1
@@ -5688,20 +6197,32 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                state.verification_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.verification_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
+                 in
+                 state.verification_cursor <- cursor;
+                 state.verification_scroll <- scroll)
             | Lanes ->
-                state.lanes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.lanes_scroll
-            | Harness -> state.harness_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.harness_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
+                 in
+                 state.lanes_cursor <- cursor;
+                 state.lanes_scroll <- scroll)
+            | Harness -> (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                 in
+                 state.harness_cursor <- cursor;
+                 state.harness_scroll <- scroll)
             | Repositories ->
-                state.repositories_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.repositories_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
+                 in
+                 state.repositories_cursor <- cursor;
+                 state.repositories_scroll <- scroll)
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -5714,31 +6235,43 @@ let main () =
                       move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                         ~current:state.changes_scroll)
             | Connectors ->
-                state.connectors_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.connectors_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
+                 in
+                 state.connectors_cursor <- cursor;
+                 state.connectors_scroll <- scroll)
             | Runtime ->
-                state.runtime_surface_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.runtime_surface_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
+                 in
+                 state.runtime_cursor <- cursor;
+                 state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(1)
                     ~current:state.tools_scroll
             | Config -> state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.config_scroll
             | Resources ->
-                let total =
-                  match state.resources_list with
-                  | Some rows -> List.length rows
-                  | None -> 0
-                in
-                if state.resources_cursor < total - 1 then
-                  state.resources_cursor <- state.resources_cursor + 1
+                if state.resource_focus then
+                  state.resource_scroll <- state.resource_scroll + 1
+                else
+                  let total =
+                    match state.resources_list with
+                    | Some rows -> List.length rows
+                    | None -> 0
+                  in
+                  if state.resources_cursor < total - 1 then
+                    state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | System_logs -> state.system_logs_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.system_logs_scroll
+            | System_logs -> (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
+                 in
+                 state.system_logs_cursor <- cursor;
+                 state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 let dispatchable =
                   List.length
@@ -5752,6 +6285,14 @@ let main () =
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
+            | Code ->
+                if state.code_focus_file then
+                  state.code_file_scroll <- max 0 (state.code_file_scroll - 1)
+                else
+                  state.code_cursor <-
+                    Masc_tui_scroll.cursor_up
+                      ~count:(List.length state.code_entries)
+                      state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
@@ -5782,8 +6323,13 @@ let main () =
                      if state.board_cursor > 0 then
                        state.board_cursor <- state.board_cursor - 1
                  | Board_read _ ->
-                     if state.board_scroll > 0 then
-                       state.board_scroll <- state.board_scroll - 1
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:(-1)
+                      | Board_detail_pane ->
+                          if state.board_scroll > 0 then
+                            state.board_scroll <- state.board_scroll - 1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -5802,7 +6348,9 @@ let main () =
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
-                if state.schedule_cursor > 0 then
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
+                else if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
             | Overview ->
                 if Option.is_some state.task_detail_id then begin
@@ -5824,25 +6372,33 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                if state.verification_scroll > 0 then
-                  state.verification_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.verification_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
+                 in
+                 state.verification_cursor <- cursor;
+                 state.verification_scroll <- scroll)
             | Lanes ->
-                if state.lanes_scroll > 0 then
-                  state.lanes_scroll <-
-                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                      ~current:state.lanes_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
+                 in
+                 state.lanes_cursor <- cursor;
+                 state.lanes_scroll <- scroll)
             | Harness ->
-                if state.harness_scroll > 0 then
-                  state.harness_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.harness_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                 in
+                 state.harness_cursor <- cursor;
+                 state.harness_scroll <- scroll)
             | Repositories ->
-                if state.repositories_scroll > 0 then
-                  state.repositories_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.repositories_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
+                 in
+                 state.repositories_cursor <- cursor;
+                 state.repositories_scroll <- scroll)
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
@@ -5854,15 +6410,19 @@ let main () =
                         move_surface_scroll state ~rows:(surface_rows ())
                           ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
-                if state.connectors_scroll > 0 then
-                  state.connectors_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.connectors_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
+                 in
+                 state.connectors_cursor <- cursor;
+                 state.connectors_scroll <- scroll)
             | Runtime ->
-                if state.runtime_surface_scroll > 0 then
-                  state.runtime_surface_scroll <-
-                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                      ~current:state.runtime_surface_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
+                 in
+                 state.runtime_cursor <- cursor;
+                 state.runtime_surface_scroll <- scroll)
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
@@ -5874,7 +6434,9 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.config_scroll
             | Resources ->
-                if state.resources_cursor > 0 then
+                if state.resource_focus then
+                  state.resource_scroll <- max 0 (state.resource_scroll - 1)
+                else if state.resources_cursor > 0 then
                   state.resources_cursor <- state.resources_cursor - 1
             | Acting ->
                 if state.acting_scroll > 0 then begin
@@ -5882,10 +6444,12 @@ let main () =
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                if state.system_logs_scroll > 0 then
-                  state.system_logs_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.system_logs_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
+                 in
+                 state.system_logs_cursor <- cursor;
+                 state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 if state.runtime_pick_cursor > 0 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
@@ -5893,6 +6457,23 @@ let main () =
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Code -> (
+                if state.code_focus_file then ()
+                else
+                  match List.nth_opt state.code_entries state.code_cursor with
+                  | Some node ->
+                      if node.Masc.Tui_decode.wt_has_children then begin
+                        state.code_dir <- node.Masc.Tui_decode.wt_path;
+                        state.code_cursor <- 0;
+                        state.code_entries <- [];
+                        state.code_entries_error <- None;
+                        launch_code_entries_load state
+                          ~mailbox:async_messages
+                      end
+                      else
+                        launch_code_file_load state ~mailbox:async_messages
+                          ~path:node.Masc.Tui_decode.wt_path
+                  | None -> ())
             | Keepers Keeper_runtime_pick ->
                 (match state.runtime_pick_keeper with
                  | Some keeper_name ->
@@ -5952,15 +6533,19 @@ let main () =
                  | Board_list ->
                      (match List.nth_opt state.board_posts state.board_cursor with
                       | Some p ->
-                          let host = Env_config_core.masc_host () in
-                          let port = state.port in
-                          state.board_mode <- Board_read p.bp_id;
-                          state.board_scroll <- 0;
-                          start_board_post_refresh state ~host ~port
-                            ~post_id:p.bp_id
-                            ~mailbox:async_messages
+                          open_board_post state ~mailbox:async_messages
+                            ~focus:Board_detail_pane p
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
+            | Schedules ->
+                (match state.schedule_detail_id, state.schedules with
+                 | None, Some snapshot ->
+                     Option.iter
+                       (fun row ->
+                          state.schedule_detail_id <- Some row.sch_schedule_id;
+                          state.schedule_scroll <- 0)
+                       (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+                 | Some _, _ | None, None -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -6015,8 +6600,9 @@ let main () =
                         state.changes_tree_diff_path <- None))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Acting | Lanes | Approvals | Verification | Harness
+            | Repositories | Connectors | Runtime | Config | Resources | Tools
+            | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -6070,6 +6656,7 @@ let main () =
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
@@ -6208,6 +6795,7 @@ let main () =
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in
@@ -6230,6 +6818,7 @@ let main () =
               talk to is the one under the cursor. [c] is an alias for [m]
               because the footer names the action rather than the mnemonic. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
@@ -6260,6 +6849,7 @@ let main () =
               applies is a fact about the keeper, not a choice the operator
               should have to make. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> (
                 match
@@ -6279,6 +6869,7 @@ let main () =
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
@@ -6293,6 +6884,7 @@ let main () =
               live, and Board compose takes the key only from the list --
               inside the compose pane the letter is draft text. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Board ->
                 (match state.board_mode with
@@ -6315,6 +6907,7 @@ let main () =
               inside the keeper-action pipeline: the loop is inside the
               editor, and the POST happens only after the editor returns. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Config -> handle_runtime_config_edit ()
@@ -6328,6 +6921,7 @@ let main () =
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
@@ -6343,7 +6937,7 @@ let main () =
       let needed = Masc_tui_types.surface_needs state.view in
       if needed <> !drawn_needs && not !http_refresh_inflight then begin
         drawn_needs := needed;
-        start_http_refresh state ~host:(Env_config_core.masc_host ())
+        start_http_refresh state ~host:(server_peer_host)
           ~port:state.port ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages
       end;
@@ -6363,7 +6957,7 @@ let main () =
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
         load_from_masc_dir state base_path;
-        let host = Env_config_core.masc_host () in
+        let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
         open_observer_if_due state ~retry_closed:true ~host ~port
@@ -6373,6 +6967,7 @@ let main () =
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
+         | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200

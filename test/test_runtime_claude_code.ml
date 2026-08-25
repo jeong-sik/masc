@@ -1324,10 +1324,94 @@ let test_live_subscription () =
     | Error error -> fail (Runtime_claude_code.error_to_string error)
 ;;
 
+
+(* RFC-0390: the argv is the contract with the installed CLI. These pin how
+   [config.native] selects [--tools] and what [--allowedTools] pre-approves. *)
+let flag_value argv flag =
+  let rec walk = function
+    | name :: value :: _ when String.equal name flag -> Some value
+    | _ :: rest -> walk rest
+    | [] -> None
+  in
+  walk argv
+;;
+
+let native_argv ~native ~dynamic_tools =
+  let config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with native }
+  in
+  match
+    Runtime_claude_code.command
+      config
+      ~dynamic_tools
+      ~reasoning_effort:None
+      ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111"
+  with
+  | Ok argv -> argv
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+;;
+
+let stub_dynamic_tool =
+  { Runtime_claude_code.name = "masc_status"
+  ; description = "fixture"
+  ; input_schema = `Assoc []
+  ; call =
+      (fun ~call_id:_ _ ->
+        { Runtime_claude_code.success = true
+        ; content = "{}"
+        ; abort_turn = None
+        })
+  }
+;;
+
+let test_native_posture_selects_tools_flag () =
+  let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
+  check (option string) "none disables the built-in set" (Some "")
+    (flag_value (argv Runtime_native_tools.Native_none) "--tools");
+  check (option string) "read allowlists the read set" (Some "Read,Glob,Grep")
+    (flag_value (argv Runtime_native_tools.Native_read) "--tools");
+  check (option string) "full enables the default set" (Some "default")
+    (flag_value (argv Runtime_native_tools.Native_full) "--tools")
+;;
+
+let test_native_read_preapproves_read_tools () =
+  check (option string)
+    "read with no MCP tools still pre-approves its read set"
+    (Some "Read,Glob,Grep")
+    (flag_value
+       (native_argv ~native:Runtime_native_tools.Native_read ~dynamic_tools:[])
+       "--allowedTools");
+  check (option string)
+    "read merges native names ahead of MCP names"
+    (Some "Read,Glob,Grep,mcp__masc__masc_status")
+    (flag_value
+       (native_argv
+          ~native:Runtime_native_tools.Native_read
+          ~dynamic_tools:[ stub_dynamic_tool ])
+       "--allowedTools");
+  check (option string)
+    "none with no MCP tools passes no allowlist"
+    None
+    (flag_value
+       (native_argv ~native:Runtime_native_tools.Native_none ~dynamic_tools:[])
+       "--allowedTools")
+;;
+
 let () =
   run
     "runtime_claude_code"
-    [ ( "admission"
+    [ ( "native posture argv (RFC-0390)"
+      , [ test_case
+            "posture selects --tools"
+            `Quick
+            test_native_posture_selects_tools_flag
+        ; test_case
+            "read pre-approves its read set"
+            `Quick
+            test_native_read_preapproves_read_tools
+        ] )
+    ; ( "admission"
       , [ test_case "validation is process-free" `Quick test_validation_is_process_free
         ; test_case
             "subscription auth and env scrub"

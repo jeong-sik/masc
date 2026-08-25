@@ -184,7 +184,7 @@ let rec canonical_json = function
     value
 ;;
 
-let tool_surface_sha256 tools =
+let tool_surface_sha256 ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
     let parameters =
       List.sort
@@ -207,6 +207,8 @@ let tool_surface_sha256 tools =
   `Assoc
     [ ( "context_message_schema"
       , `String Keeper_official_client_context_codec.schema )
+    ; ( "native_posture"
+      , `String (Runtime_native_tools.to_string native_posture) )
     ; "tools", `List tools
     ]
   |> canonical_json

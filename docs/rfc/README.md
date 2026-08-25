@@ -130,7 +130,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | - |
 | 0198 | Execute typed redirection | Implemented | - |
 | 0200 | Time constants 를 leaf library 로 분리 | Draft | - |
-| 0201 | Activity Events Wait-Free Snapshot | Draft | - |
+| 0201 | Activity events wait-free snapshot (RFC-0138 extension, file-base preserved) | Draft | - |
 | 0203 | In-process Discord connector | Implemented (Phase 3 cutover landed 2026-05-29) | - |
 | 0204 | Dashboard Read Serving Isolation from Fleet Compute | Draft | - |
 | 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | - |

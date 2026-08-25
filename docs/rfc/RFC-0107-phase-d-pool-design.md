@@ -1,6 +1,5 @@
 ---
 rfc: "0107"
-phase: D
 status: Active
 created: 2026-05-17
 updated: 2026-05-18

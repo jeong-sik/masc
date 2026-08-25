@@ -1,10 +1,10 @@
 ---
-RFC: 0201
-Title: Activity events wait-free snapshot (RFC-0138 extension, file-base preserved)
-Status: Draft
-Author: Vincent (yousleepwhen)
-Created: 2026-05-27
-Depends on: RFC-0138
+rfc: "0201"
+title: Activity events wait-free snapshot (RFC-0138 extension, file-base preserved)
+status: Draft
+author: Vincent (yousleepwhen)
+created: 2026-05-27
+related: ["0138"]
 ---
 
 # RFC-0201 — Activity Events Wait-Free Snapshot

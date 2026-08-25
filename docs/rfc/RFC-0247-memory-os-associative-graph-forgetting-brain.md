@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0239", "0241", "0244"]
-revision: "2026-06-16 — decision-layer correction; see §-1 (READ FIRST)"
+
 ---
 
 # RFC-0247 — Memory OS as a brain

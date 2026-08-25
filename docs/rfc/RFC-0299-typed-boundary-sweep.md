@@ -1,4 +1,5 @@
 ---
+rfc: "0299"
 title: RFC-0299 — Typed-Boundary Sweep (string-classifier → closed-sum, dead SSOT reclamation)
 status: Draft
 updated: 2026-07-13

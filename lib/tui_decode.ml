@@ -2861,6 +2861,56 @@ let decode_server_identity json =
     }
 ;;
 
+type prompt_row = {
+  pr_key : string;
+  pr_category : string;
+  pr_description : string;
+  pr_effective : string;
+  pr_has_override : bool;
+  pr_file_exists : bool;
+  pr_file_path : string;
+}
+
+type prompts_snapshot = { ps_rows : prompt_row list }
+
+(* A prompt with no description, or none on disk, is still a prompt the
+   registry serves; only the key has to be there for a row to name itself. *)
+let decode_prompt_row json =
+  let* pr_key = required_string_field json "key" in
+  let string_or field =
+    match member field json with
+    | `String value -> value
+    | _ -> ""
+  in
+  let bool_or field =
+    match member field json with
+    | `Bool value -> value
+    | _ -> false
+  in
+  Ok
+    { pr_key
+    ; pr_category = string_or "category"
+    ; pr_description = string_or "description"
+    ; pr_effective = string_or "effective"
+    ; pr_has_override = bool_or "has_override"
+    ; pr_file_exists = bool_or "file_exists"
+    ; pr_file_path = string_or "file_path"
+    }
+;;
+
+let decode_prompts json =
+  let* rows_json = required_list_field json "prompts" in
+  let* reversed =
+    List.fold_left
+      (fun result row_json ->
+         let* acc = result in
+         let* row = decode_prompt_row row_json in
+         Ok (row :: acc))
+      (Ok []) rows_json
+  in
+  Ok { ps_rows = List.rev reversed }
+;;
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in

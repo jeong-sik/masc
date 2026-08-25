@@ -6287,6 +6287,76 @@ let binary_age_text = function
 (* The Config surface: runtime.toml exactly as the server reads it. The
    text is the truth an editor session starts from; editing itself hands
    the terminal to $EDITOR and posts back through the preview gate. *)
+(* The prompt registry, as a list the operator can walk and hand to $EDITOR.
+   Every prompt a keeper reads lives in config/prompts as markdown; before
+   this the only way to change one was to leave the TUI and find the file. *)
+let render_prompts (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let prompt_rows =
+    match state.prompts_snapshot with
+    | Some snapshot -> snapshot.Tui_decode.ps_rows
+    | None -> []
+  in
+  let total = List.length prompt_rows in
+  let cursor = max 0 (min state.prompts_cursor (total - 1)) in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s%d prompt(s)%s  %s"
+       (screen_title " MASC Prompts")
+       Ansi.dim total Ansi.reset
+       (connection_badge state.connection_status));
+  box_divider buf cols;
+  let content_height = max 1 (rows - 6) in
+  let first =
+    if cursor < content_height then 0 else cursor - content_height + 1
+  in
+  (match state.prompts_error with
+   | Some detail ->
+     box_line buf cols
+       (Theme.bad ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+        ^ Ansi.reset)
+   | None -> ());
+  if total = 0 && state.prompts_error = None then
+    box_line buf cols (Ansi.dim ^ "  (not loaded yet -- r to reload)" ^ Ansi.reset);
+  let drawn = ref 0 in
+  List.iteri
+    (fun index (row : Tui_decode.prompt_row) ->
+      if index >= first && index < first + content_height then begin
+        incr drawn;
+        (* An overridden prompt is not the file's words any more, and clearing
+           the override is a different action from editing it. The row says
+           which state it is in rather than leaving both to look alike. *)
+        let mark =
+          if row.Tui_decode.pr_has_override then Theme.warn ^ "*" ^ Ansi.reset
+          else if row.Tui_decode.pr_file_exists then " "
+          else Theme.bad ^ "!" ^ Ansi.reset
+        in
+        let label =
+          Printf.sprintf "%s %s  %s"
+            mark
+            (fit_width (Terminal_text.single_line row.Tui_decode.pr_key) 34)
+            (Ansi.dim
+             ^ fit_width
+                 (Terminal_text.single_line row.Tui_decode.pr_description)
+                 (max 4 (cols - 46))
+             ^ Ansi.reset)
+        in
+        if index = cursor then
+          box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
+        else box_line buf cols (" " ^ label)
+      end)
+    prompt_rows;
+  for _ = 1 to content_height - !drawn do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:move  e:edit  x:clear override  c:runtime.toml  r:reload  Tab:next");
+  finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -6409,7 +6479,7 @@ let render_surface (state : state) =
   | Changes -> render_changes state
   | Connectors -> render_connectors state
   | Runtime -> render_runtime state
-  | Config -> render_config state
+  | Config -> if state.config_prompts then render_prompts state else render_config state
   | Resources -> render_resources state
   | Code -> render_code state
   | Tools -> render_tools state

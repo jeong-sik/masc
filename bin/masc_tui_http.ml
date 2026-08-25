@@ -1003,6 +1003,31 @@ let post_runtime_config_raw ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
     ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
 
+(** GET /api/v1/prompts — every prompt the registry serves, with the file
+    value, any override, and what is currently effective. *)
+let fetch_prompts ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/prompts"
+
+(** POST /api/v1/prompts — body {key, action, value}. [action] is ["set"] or
+    ["clear"]; the server persists the override and answers what it did. *)
+let post_prompt_override ~(host : string) ~(port : int) ~(key : string)
+    ~(value : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/prompts"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ ("key", `String key)
+            ; ("action", `String "set")
+            ; ("value", `String value)
+            ]))
+
+let post_prompt_clear ~(host : string) ~(port : int) ~(key : string)
+    : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/prompts"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc [ ("key", `String key); ("action", `String "clear") ]))
+
 (** POST /api/v1/gate/connector/bind?name= — body {channel_id, keeper_name}. *)
 let post_connector_bind ~(host : string) ~(port : int) ~(connector : string)
     ~(body_json : string) : (Yojson.Safe.t, string) result =

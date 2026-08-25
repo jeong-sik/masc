@@ -890,6 +890,13 @@ let load_server_identity ~(host : string) ~(port : int) :
   | Error err -> Error ("server identity load failed: " ^ err)
   | Ok json -> Tui_decode.decode_server_identity json
 
+(** Load the prompt registry from /api/v1/prompts. *)
+let load_prompts ~(host : string) ~(port : int) :
+    (Tui_decode.prompts_snapshot, string) result =
+  match fetch_prompts ~host ~port with
+  | Error err -> Error ("prompts load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_prompts json
+
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)

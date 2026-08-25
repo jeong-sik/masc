@@ -129,6 +129,23 @@ let test_runtime_contract_sandbox_root_is_keeper_visible () =
        src)
 ;;
 
+(* [turn] is an AGENT_CORE provider round; [keeper_turn_id] is the TurnRecord
+   join identity. Persisting the former made /context see the exact prompt and
+   its component receipt as different turns. *)
+let test_prompt_facts_use_the_keeper_turn_id () =
+  let src = load_source run_tools_hooks_file in
+  check
+    int
+    "prompt capture and operator note use the keeper turn"
+    2
+    (count_occurrences ~needle:"~absolute_turn:keeper_turn_id" src);
+  check
+    int
+    "provider round is not persisted as a keeper turn"
+    0
+    (count_occurrences ~needle:"~absolute_turn:turn" src)
+;;
+
 let test_keeper_tools_cleanup_is_retained_and_invoked () =
   let agent_src = load_source target_file in
   let run_tools_setup_src = load_source run_tools_setup_file in
@@ -190,6 +207,12 @@ let () =
             "keeper tool bundle cleanup is retained and invoked"
             `Quick
             test_keeper_tools_cleanup_is_retained_and_invoked
+        ] )
+    ; ( "prompt_turn_identity"
+      , [ test_case
+            "prompt facts use the keeper turn"
+            `Quick
+            test_prompt_facts_use_the_keeper_turn_id
         ] )
     ]
 ;;

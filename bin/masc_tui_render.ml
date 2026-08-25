@@ -98,8 +98,8 @@ let chat_markdown_palette ~closing : Markdown.palette =
      inside a chat fence that would draw a green band across the pane for
      every added line. The hue is the same question either way: is this
      arriving or leaving. *)
-  ; code_diff_added = (Ansi.green, closing)
-  ; code_diff_removed = (Ansi.red, closing)
+  ; code_diff_added = (Theme.Syntax.diff_added, closing)
+  ; code_diff_removed = (Theme.Syntax.diff_removed, closing)
   }
 
 let markdown_with_closing ~closing ~width body =
@@ -5492,6 +5492,14 @@ let render_runtime (state : state) =
 (* Two deliberately separate readings: the selected Keeper's exact turn
    surface, then the process-wide registered catalog. A registered tool is not
    evidence that a Keeper can call it. *)
+(* The rule that closes a domain heading. Fixed length rather than filling
+   the row: box_line_styled pads, and a heading that shouted across the full
+   width would outrank the surface header above it. *)
+let tool_domain_rule_cells = 21
+
+let tool_domain_rule =
+  String.concat "" (List.init tool_domain_rule_cells (fun _ -> Ansi.box_h))
+
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -5623,8 +5631,8 @@ let render_tools (state : state) =
         (function
           | Tool_tree.Domain { name; count } ->
               ( Ansi.bold,
-                Printf.sprintf " %s (%d) ─────────────────────"
-                  (Terminal_text.single_line name) count )
+                Printf.sprintf " %s (%d) %s"
+                  (Terminal_text.single_line name) count tool_domain_rule )
           | Tool_tree.Family { name; count } ->
               Ansi.bold,
               Printf.sprintf "    %s (%d)" (Terminal_text.single_line name) count
@@ -5634,9 +5642,22 @@ let render_tools (state : state) =
                 | [] -> "none"
                 | names -> String.concat ", " names
               in
-              ( (if tool.tl_surfaces = [] then Theme.warn else Ansi.dim),
-                Printf.sprintf "      %-30s %-8s %s"
+              (* The name is what an operator scans a hundred rows for, so it
+                 keeps the terminal's own weight and the two columns that
+                 answer about it are dimmed behind it. Dimming the whole row --
+                 as this did -- left the headings above in bold and every tool
+                 name on the screen as the faintest thing on it.
+
+                 A tool on no surface is unreachable, and [Surfaces] is the
+                 column that says so, so the warning starts there instead of
+                 recolouring the name, which is not itself the problem. *)
+              let metadata =
+                if tool.tl_surfaces = [] then Theme.warn else Ansi.dim
+              in
+              ( Masc_tui_theme.tone Masc_tui_theme.Normal,
+                Printf.sprintf "      %-30s %s%-8s %s"
                   (Terminal_text.single_line tool.tl_name)
+                  metadata
                   (if tool.tl_direct_call then "yes" else "no")
                   (Terminal_text.single_line surfaces) ))
         registered_rows

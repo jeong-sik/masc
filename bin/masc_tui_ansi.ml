@@ -63,6 +63,8 @@ module Theme = struct
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_
+    let diff_added = Masc_tui_theme.Syntax.diff_added
+    let diff_removed = Masc_tui_theme.Syntax.diff_removed
     let diff_added_bg = Masc_tui_theme.Syntax.diff_added_bg
     let diff_removed_bg = Masc_tui_theme.Syntax.diff_removed_bg
   end

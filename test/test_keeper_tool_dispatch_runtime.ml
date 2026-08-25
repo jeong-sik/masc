@@ -6384,6 +6384,230 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
          fail "terminal composition accepted an ordinary outer invocation")
 ;;
 
+
+(* ── Composable output contract (#30594) ──────────────────────────────────
+
+   One place, and only one, checks a tool's output against the schema its own
+   descriptor declares: the composition executor, on the [Tool_result.data] of
+   a completed node (keeper_tool_plan_executor.ml). A direct tool call never
+   meets that schema. So a producer that grows a field the schema does not
+   name stays healthy everywhere a person would look, and breaks every
+   composition that touches it.
+
+   keeper_tasks_list sat in that state for six days. #29012 declared the
+   schema on 08-18; #29103 added matching_count / returned_count / truncated
+   to the producer on 08-19 and left the schema alone. The drift surfaced only
+   when a composition finally used the tool and failed on its own output.
+
+   The two tests below close it from both sides. The first derives the tool
+   list from the registry, so declaring [with_composable_output] on a new tool
+   fails here until it is probed. The second runs the real producer and
+   validates the exact value the executor validates, through a plan built the
+   way the executor builds one. *)
+
+module Plan = Masc.Keeper_tool_plan
+
+(* The masc_* tools route through the RFC-0182 3.1 workspace dispatch ref,
+   which Mcp_server_eio_execute fills from its own module initializer. Nothing
+   else in this executable names that module, so the linker drops it and those
+   tools fail before emitting anything. Naming one value links it. *)
+let _links_workspace_dispatch_registration =
+  Masc.Mcp_server_eio_execute.resolve_bind_state
+
+let composable_model_names () =
+  KTD.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    match descriptor.KTD.composable_output with
+    | KTD.Opaque_output -> []
+    | KTD.Json_output _ -> KTD.keeper_model_names descriptor)
+  |> List.sort_uniq String.compare
+
+(* Arguments a keeper would actually send, not the smallest shape that passes:
+   the probe exists to observe what the producer emits, so it has to reach the
+   producer. [prepare] returns the arguments so a tool that needs durable
+   state first — an artifact to read — can create it. *)
+type output_probe =
+  { tool_name : string
+  ; prepare :
+      config:Masc.Workspace.config
+      -> meta:Masc.Keeper_meta_contract.keeper_meta
+      -> Yojson.Safe.t
+  }
+
+let probe tool_name args =
+  { tool_name; prepare = (fun ~config:_ ~meta:_ -> args) }
+
+let composable_output_probes =
+  [ probe "Execute" (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
+  ; probe "keeper_time_now" (`Assoc [])
+  ; { tool_name = "keeper_tasks_list"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           (* A tool that reads durable state needs some, or it fails before
+              it can emit the shape under test. *)
+           ignore
+             (Workspace.add_task
+                config
+                ~created_by:"composable-output-probe"
+                ~title:"composable output probe"
+                ~priority:3
+                ~description:"");
+           `Assoc [])
+    }
+  ; probe "masc_board_stats" (`Assoc [])
+  ; probe "masc_board_list" (`Assoc [])
+  ; probe "masc_goal_list" (`Assoc [])
+  ; probe "masc_run_list" (`Assoc [])
+  ; { tool_name = "masc_get_metrics"
+    ; prepare =
+        (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
+    }
+  ; { tool_name = "masc_agent_fitness"
+    ; prepare =
+        (fun ~config:_ ~meta -> `Assoc [ "agent_name", `String meta.Masc.Keeper_meta_contract.name ])
+    }
+  ; { tool_name = "keeper_artifact_read"
+    ; prepare =
+        (fun ~config ~meta:_ ->
+           let store = Tool_blob_store.create ~base_path:config.Masc.Workspace.base_path in
+           let reference =
+             Tool_blob_store.put_durable
+               store
+               ~bytes:"composable output probe"
+               ~mime:"text/plain"
+           in
+           `Assoc [ "sha256", `String reference.Tool_output.sha256 ])
+    }
+  ]
+
+let test_every_composable_tool_has_an_output_probe () =
+  let declared = composable_model_names () in
+  let probed =
+    List.map (fun probe -> probe.tool_name) composable_output_probes
+    |> List.sort_uniq String.compare
+  in
+  let only_in left right =
+    List.filter (fun name -> not (List.mem name right)) left
+  in
+  (match only_in declared probed with
+   | [] -> ()
+   | missing ->
+     failf
+       "these tools declare a composable output and no probe runs their \
+        producer against it: %s"
+       (String.concat ", " missing));
+  match only_in probed declared with
+  | [] -> ()
+  | stale ->
+    failf
+      "these probes name tools that no longer declare a composable output: %s"
+      (String.concat ", " stale)
+
+let schema_value_error_to_string = function
+  | Plan.Unsupported_schema_type json ->
+    "unsupported schema type " ^ Yojson.Safe.to_string json
+  | Plan.Missing_required_field { path; field } ->
+    Printf.sprintf "missing required field %S under /%s" field (String.concat "/" path)
+  | Plan.Unexpected_field { path; field } ->
+    Printf.sprintf "undeclared field %S under /%s" field (String.concat "/" path)
+  | Plan.Duplicate_value_field { path; field } ->
+    Printf.sprintf "duplicate field %S under /%s" field (String.concat "/" path)
+  | Plan.Type_mismatch { path; _ } ->
+    Printf.sprintf "type mismatch under /%s" (String.concat "/" path)
+
+let validate_probe_output ~tool_name ~data =
+  let node_id =
+    match Plan.Node_id.make "probe" with
+    | Ok id -> id
+    | Error Plan.Node_id.Empty -> fail "probe node id was empty"
+  in
+  let node =
+    Plan.node
+      ~id:node_id
+      ~tool_name
+      ~input:(Plan.Json_template.literal (`Assoc []))
+      ()
+  in
+  match Plan.create ~descriptors:(KTD.all_descriptors ()) [ node ] with
+  | Error error ->
+    failf
+      "%s could not be a composition node at all: %s"
+      tool_name
+      (Plan.error_to_string error)
+  | Ok plan ->
+    (match
+       Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id data
+     with
+     | Ok _ -> ()
+     | Error (Plan.Output_validation_failed { error; _ }) ->
+       failf
+         "%s produced a value its own declared output schema rejects (%s): %s"
+         tool_name
+         (schema_value_error_to_string error)
+         (Yojson.Safe.to_string data)
+     | Error _ ->
+       failf "%s output validation failed before reaching the schema" tool_name)
+
+let test_composable_outputs_satisfy_declared_schema () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    ~bind_eio_context:true
+    "keeper_tool_dispatch_runtime_composable_output"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (* Every probe reads durable workspace state. An uninitialized base
+          path fails them before they reach the shape under test. *)
+       ignore (Workspace.init config ~agent_name:None);
+       ignore
+         (Workspace.bind_session
+            config
+            ~agent_name:meta.Masc.Keeper_meta_contract.name
+            ~capabilities:[]
+            ());
+       (* masc_get_metrics and masc_agent_fitness both read this store and
+          reject with not_found when it is empty, before emitting any shape. *)
+       let now = Unix.gettimeofday () in
+       Masc.Metrics_store_eio.record
+         config
+         { Masc.Metrics_store_eio.id = Masc.Metrics_store_eio.generate_id ()
+         ; agent_id = meta.Masc.Keeper_meta_contract.name
+         ; task_id = "composable-output-probe"
+         ; started_at = now
+         ; completed_at = Some now
+         ; success = true
+         ; error_message = None
+         ; collaborators = []
+         ; handoff_from = None
+         ; handoff_to = None
+         };
+       List.iter
+         (fun { tool_name; prepare } ->
+            let input = prepare ~config ~meta in
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_work
+                ~name:tool_name
+                ~input
+                ()
+            in
+            if not (String.equal "success" (outcome_label result.KTE.disposition))
+            then
+              failf
+                "%s did not complete, so its output went unobserved: %s"
+                tool_name
+                result.KTE.raw_output;
+            match result.KTE.data with
+            | Some data -> validate_probe_output ~tool_name ~data
+            | None ->
+              failf
+                "%s completed without typed data; a composition node would \
+                 have nothing to validate"
+                tool_name)
+         composable_output_probes)
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -6520,6 +6744,12 @@ let () =
         test_keeper_tools_list_json_uses_typed_groups;
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
+    ]);
+    ("composable_output_contract", [
+      test_case "every composable tool has an output probe" `Quick
+        test_every_composable_tool_has_an_output_probe;
+      test_case "real producer output satisfies its declared schema" `Quick
+        test_composable_outputs_satisfy_declared_schema;
     ]);
     ("agent_core_descriptor", [
       test_case "catalog flags do not infer Agent Core descriptors" `Quick

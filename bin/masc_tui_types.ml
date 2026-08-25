@@ -1923,6 +1923,13 @@ type palette_action =
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
 
+(* Prefix match: the lowercased label starts with the query. An empty query
+   is a prefix of everything. *)
+let palette_starts_with ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle in
+  String.length h >= n && String.equal (String.sub h 0 n) needle
+
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
   let n = String.length needle and hl = String.length h in
@@ -2001,8 +2008,8 @@ let palette_entries (state : state) =
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
   @ (* With a file focused on the Code surface, the cursor line's names are
-       askable: K/D pre-fill the matching prefix, so exactly these entries
-       remain in view. *)
+       askable: K/D pre-fill the matching prefix, and [palette_matches] ranks
+       a label that starts with the query first, so these lead the list. *)
   (if state.view = Code && state.code_focus_file = Right_pane then
      List.concat_map
        (fun name ->
@@ -2029,16 +2036,18 @@ let palette_matches (state : state) =
     String.lowercase_ascii (String.trim state.palette_query)
   in
   let entries = palette_entries state in
-  (* Substring hits rank above subsequence-only hits, both keep entry
-     order inside their rank. *)
-  let substring_hits =
-    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  (* Three ranks, entry order kept inside each: a label that starts with the
+     query, then one that contains it, then one that only has its characters
+     in order. A K/D pre-fill of "def " therefore lists the cursor line's
+     names before a post that merely mentions "deferred". *)
+  let rank (label, _) =
+    if palette_starts_with ~needle label then Some 0
+    else if palette_contains ~needle label then Some 1
+    else if palette_subsequence ~needle label then Some 2
+    else None
   in
-  let subsequence_hits =
-    List.filter
-      (fun (label, _) ->
-        (not (palette_contains ~needle label))
-        && palette_subsequence ~needle label)
-      entries
-  in
-  substring_hits @ subsequence_hits
+  entries
+  |> List.filter_map (fun entry ->
+         Option.map (fun r -> (r, entry)) (rank entry))
+  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
+  |> List.map snd

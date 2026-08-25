@@ -4853,7 +4853,7 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  o:editor  r:refresh  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* One tree-diff row. Same three layers as the tool-call reading, plus the
@@ -5959,6 +5959,13 @@ let render_code (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = not state.code_focus_file in
     let where = if String.equal state.code_dir "" then "/" else state.code_dir in
+    (* Whose tree this is: a keeper workspace reads differently from the
+       project's, and the same relative path exists in both. *)
+    let where =
+      match state.code_keeper with
+      | Some keeper -> keeper ^ " \xe2\x96\xb8 " ^ where
+      | None -> where
+    in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
        ^ " " ^ Terminal_text.single_line where

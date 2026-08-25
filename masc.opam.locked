@@ -196,6 +196,7 @@ depends: [
   "ws-direct-eio" {= "0.1.0"}
   "ws-direct-gluten" {= "0.1.0"}
   "x509" {= "1.0.6"}
+  "yaml" {= "3.2.0"}
   "yojson" {= "3.0.0"}
   "zarith" {= "1.14"}
   "zstd" {= "0.4"}

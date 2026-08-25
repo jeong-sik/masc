@@ -170,8 +170,8 @@ val with_contract : Contract.t -> t -> t
     turn.  For metadata-only registration (Agent Card export, A2A
     discovery, skill inventory) use {!with_skill_registry} instead. *)
 
-val with_skill : Skill.t -> t -> t
-val with_skills : Skill.t list -> t -> t
+val with_skill : Skill_document.t -> t -> t
+val with_skills : Skill_document.t list -> t -> t
 
 (** {2 Logging} *)
 

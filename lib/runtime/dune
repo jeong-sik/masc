@@ -32,6 +32,7 @@
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver
+  masc.skill_config
   masc.provider_tool_support
   masc.keeper_runtime
   masc.auth

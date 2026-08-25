@@ -25,7 +25,7 @@ type t =
   { runtime_awareness : string option
   ; trigger : trigger option
   ; instruction_layers : instruction_layer list
-  ; skills : Skill.t list
+  ; skills : Skill_document.t list
   }
 
 val context_key : string
@@ -51,11 +51,11 @@ val add_instruction_layer : ?label:string -> string -> t -> t
 
     This is distinct from {!Skill_registry.t}, which holds skills for
     discovery/metadata export only and never touches the system prompt. *)
-val with_skill : Skill.t -> t -> t
+val with_skill : Skill_document.t -> t -> t
 
 (** Batch variant of {!with_skill}.  All skills are appended (deduped by
     path or name) and rendered into the system prompt. *)
-val with_skills : Skill.t list -> t -> t
+val with_skills : Skill_document.t list -> t -> t
 
 (** {1 Operations} *)
 

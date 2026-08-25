@@ -24,6 +24,7 @@ depends: [
   "ptime" {>= "1.2"}
   "yojson" {>= "3.0" & < "4.0"}
   "otoml" {>= "1.0"}
+  "yaml" {= "3.2.0"}
   "graphql" {>= "0.14.0"}
   "graphql_parser" {>= "0.14.0"}
   "cmdliner" {>= "1.1"}
@@ -70,6 +71,7 @@ depends: [
   "mtime" {>= "2.0"}
   "markup" {>= "1.0.3"}
   "uucp" {>= "17.0.0"}
+  "uunf" {>= "17.0.0"}
   "uuseg" {>= "17.0.0"}
   "uuidm" {>= "0.9.10"}
   "atdgen" {build & >= "4.2.0"}

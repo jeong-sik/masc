@@ -150,9 +150,7 @@
   test_sessions_cov2
   test_sessions_types
   test_sessions_types_deep
-  test_skill
-  test_skill_coverage
-  test_skill_coverage2
+  test_skill_document
   test_skill_discovery
   test_skill_registry
   test_stream_accumulator
@@ -290,9 +288,7 @@
   test_sessions_cov2
   test_sessions_types
   test_sessions_types_deep
-  test_skill
-  test_skill_coverage
-  test_skill_coverage2
+  test_skill_document
   test_skill_discovery
   test_skill_registry
   test_stream_accumulator

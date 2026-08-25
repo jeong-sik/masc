@@ -20,6 +20,17 @@ let build_exn b =
   | Error e -> failwith (Error.to_string e)
 ;;
 
+let skill_exn ~name ~description body =
+  let source =
+    Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
+  in
+  match Skill_document.decode ~directory_name:name source with
+  | Loaded { document; _ } -> document
+  | Unloadable diagnostics ->
+    Alcotest.fail
+      (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
+;;
+
 (* Helper: extract card fields via JSON to avoid internal module path issues *)
 let card_name card =
   card
@@ -50,12 +61,10 @@ let test_builder_with_skill_registry () =
   let reg = Skill_registry.create () in
   Skill_registry.register
     reg
-    (Skill.of_markdown
-       "---\nname: summarize\ndescription: Summarize text\n---\nSummarize: $ARGUMENTS");
+    (skill_exn ~name:"summarize" ~description:"Summarize text" "Summarize input");
   Skill_registry.register
     reg
-    (Skill.of_markdown
-       "---\nname: translate\ndescription: Translate text\n---\nTranslate: $ARGUMENTS");
+    (skill_exn ~name:"translate" ~description:"Translate text" "Translate input");
   let agent =
     Builder.create ~net:env#net ~model:"claude-sonnet-4-6"
     |> Builder.with_name "polyglot"
@@ -158,31 +167,21 @@ let test_builder_with_elicitation () =
   | None -> Alcotest.fail "elicitation missing"
 ;;
 
-(* ── Scenario 4: Skill registry persistence ── *)
+(* ── Scenario 4: Skill registry JSON projection ── *)
 
-let test_registry_persist_and_restore () =
+let test_registry_json_projection () =
   let reg = Skill_registry.create () in
   Skill_registry.register
     reg
-    (Skill.of_markdown
-       "---\nname: deploy\ndescription: Deploy app\n---\ndeploy $ARGUMENTS");
+    (skill_exn ~name:"deploy" ~description:"Deploy app" "Deploy release");
   Skill_registry.register
     reg
-    (Skill.of_markdown
-       "---\nname: rollback\ndescription: Rollback\n---\nrollback $ARGUMENTS");
+    (skill_exn ~name:"rollback" ~description:"Rollback" "Rollback release");
   let json = Skill_registry.to_json reg in
-  let json_str = Yojson.Safe.to_string json in
-  let json2 = Yojson.Safe.from_string json_str in
-  match Skill_registry.of_json json2 with
-  | Ok reg2 ->
-    Alcotest.(check int) "count" 2 (Skill_registry.count reg2);
-    (match Skill_registry.find reg2 "deploy" with
-     | Some s ->
-       Alcotest.(check string) "body" "deploy $ARGUMENTS" s.body;
-       let rendered = Skill.render_prompt ~arguments:"v2.1" s in
-       Alcotest.(check string) "rendered" "deploy v2.1" rendered
-     | None -> Alcotest.fail "deploy not found after restore")
-  | Error e -> Alcotest.fail (Error.to_string e)
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "count" 2 (json |> member "count" |> to_int);
+  let skills = json |> member "skills" |> to_list in
+  Alcotest.(check int) "projected skills" 2 (List.length skills)
 ;;
 
 (* ── Scenario 5: description flows through ── *)
@@ -217,11 +216,11 @@ let () =
         ; test_case "card JSON export" `Quick test_card_json_export
         ; test_case "elicitation via builder" `Quick test_builder_with_elicitation
         ] )
-    ; ( "persistence"
+    ; ( "projection"
       , [ test_case
-            "registry persist and restore"
+            "registry JSON projection"
             `Quick
-            test_registry_persist_and_restore
+            test_registry_json_projection
         ] )
     ; ( "accessors"
       , [ test_case "description flows through" `Quick test_description_accessor ] )

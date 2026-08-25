@@ -105,6 +105,10 @@ val sandbox_keeper_label_key : string
 val sandbox_kind_label_key : string
 
 val turn_container_kind : string
+
+val current_owner_pid : unit -> int
+(** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
+    select those containers again. *)
 (** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
 
 val sandbox_owner_pid_label_key : string

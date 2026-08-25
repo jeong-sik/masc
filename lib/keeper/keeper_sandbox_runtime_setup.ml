@@ -155,6 +155,14 @@ let sandbox_turn_id_label_key = "masc.mcp.turn_id"
    is torn down with it; a oneshot container lives for one command. *)
 let turn_container_kind = "turn"
 
+(* The pid is stamped on a container as [masc.mcp.owner_pid] and supplied again
+   by any filter that selects those containers, so both sides must read it from
+   one place. A second reader would diverge the moment the two ran in different
+   processes, and would select nothing while looking like it had. *)
+
+(* DET-OK: the boundary itself. Callers take the pid as an argument. *)
+let current_owner_pid () = Unix.getpid ()
+
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let normalize_base_path_for_hash base_path =
@@ -194,7 +202,7 @@ let docker_label_args
   @ label sandbox_base_path_hash_label_key (base_path_hash base_path)
   @ label sandbox_keeper_label_key (sanitize_label_value keeper_name)
   @ label sandbox_kind_label_key (sanitize_label_value container_kind)
-  @ label sandbox_owner_pid_label_key (string_of_int (Unix.getpid ()))
+  @ label sandbox_owner_pid_label_key (string_of_int (current_owner_pid ()))
   @ label sandbox_started_at_label_key (Printf.sprintf "%.3f" (Unix.gettimeofday ()))
   @ label sandbox_network_label_key (sanitize_label_value network_label)
   @ (match turn_id with

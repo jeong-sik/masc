@@ -569,7 +569,7 @@ let list_container_ids
    containers are its own to collect, and removing one would cut a live turn
    elsewhere. *)
 let reap_prior_turn_containers ~base_path ~keeper_name ~turn_id ~timeout_sec () =
-  let owner_pid = Unix.getpid () in
+  let owner_pid = current_owner_pid () in
   let listing ?turn_id () =
     list_container_ids
       ~keeper_name

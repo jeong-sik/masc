@@ -941,6 +941,24 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Runtime_default_initialization_failed error)));
+  (match Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path with
+   | Error error ->
+     Log.Server.error
+       "Skill snapshot workspace rejected at boot: %s"
+       (Server_skill_snapshot_runtime.error_to_string error)
+   | Ok publication ->
+     (match Server_skill_snapshot_runtime.snapshot_of_publication publication with
+      | None ->
+        Log.Server.warn "Skill snapshot workspace retired during boot publication"
+      | Some skill_snapshot ->
+        Log.Server.info
+          "Skill snapshot published at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
+          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
+           |> Skill_catalog_snapshot.snapshot_revision_to_string)
+          (Skill_catalog_snapshot.catalog_revision skill_snapshot
+           |> Skill_catalog_snapshot.catalog_revision_to_string)
+          (List.length (Skill_catalog_snapshot.entries skill_snapshot))
+          (List.length (Skill_catalog_snapshot.rejections skill_snapshot))));
   (* masc#28404. Boot refuses only over runtimes something actually routes to,
      which is right — an unassigned runtime is not a reason to stay down. But
      the blocked ones then started silently, and the answer to "why can I not

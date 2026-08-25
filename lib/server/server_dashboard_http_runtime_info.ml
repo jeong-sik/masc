@@ -2179,8 +2179,10 @@ let runtime_resolution_json (config : Workspace.config) =
   in
   let source_mismatch =
     match runtime_commit, server_repo_commit, workspace_commit with
-    | Some runtime, Some server_repo, _ -> not (String.equal runtime server_repo)
-    | Some runtime, None, Some workspace -> not (String.equal runtime workspace)
+    | Some runtime, Some server_repo, _ ->
+      not (Server_dashboard_http_runtime_info_json.commit_equal runtime server_repo)
+    | Some runtime, None, Some workspace ->
+      not (Server_dashboard_http_runtime_info_json.commit_equal runtime workspace)
     | _ -> false
   in
   let server_workspace_mismatch =
@@ -2248,8 +2250,9 @@ let runtime_resolution_json (config : Workspace.config) =
     then acc
     else
       match build.repo_head_commit, server_repo_commit with
-      | Some runtime_head, Some server_head when not (String.equal runtime_head server_head)
-        ->
+      | Some runtime_head, Some server_head
+        when not
+          (Server_dashboard_http_runtime_info_json.commit_equal runtime_head server_head) ->
         Printf.sprintf
           "Runtime source snapshot (%s) differs from server repo HEAD (%s), \
            but the binary commit is unknown. Rebuild/restart before trusting \

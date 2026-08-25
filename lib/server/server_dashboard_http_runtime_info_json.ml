@@ -24,9 +24,39 @@ let opt_string_json = Json_util.string_opt_to_json
 
 let opt_bool_json = Json_util.bool_opt_to_json
 
+let is_hex_commit value =
+  let length = String.length value in
+  length >= 7
+  && length <= 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+         | _ -> false)
+       value
+;;
+
+let is_full_hex_commit value =
+  let length = String.length value in
+  (length = 40 || length = 64) && is_hex_commit value
+;;
+
+let commit_equal left right =
+  if String.equal left right
+  then true
+  else if not (is_hex_commit left && is_hex_commit right)
+  then false
+  else (
+    let left = String.lowercase_ascii left in
+    let right = String.lowercase_ascii right in
+    let short, long =
+      if String.length left <= String.length right then left, right else right, left
+    in
+    is_full_hex_commit long && String.starts_with ~prefix:short long)
+;;
+
 let opt_commit_equal left right =
   match left, right with
-  | Some left, Some right -> Some (String.equal left right)
+  | Some left, Some right -> Some (commit_equal left right)
   | _ -> None
 
 let opt_int_json = Json_util.int_opt_to_json

@@ -69,31 +69,14 @@ let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
       ~continue
 ;;
 
-let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
+let run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec ?timeout_sec
+    args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in
   let start_time = Time_compat.now () in
   let server_url = Json_util.get_string args "server_url" in
   let model = Json_util.get_string args "model" in
   let prompt = Json_util.get_string args "prompt" in
   let keep_alive = Json_util.get_string args "keep_alive" in
-  let probe_runs =
-    match Json_util.assoc_member_opt "probe_runs" args with
-    | Some (`Int value) -> value
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> parsed
-        | None -> 2)
-    | _ -> 2
-  in
-  let max_tokens =
-    match Json_util.assoc_member_opt "max_tokens" args with
-    | Some (`Int value) -> value
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> parsed
-        | None -> 16)
-    | _ -> 16
-  in
   let think_mode =
     match Json_util.assoc_member_opt "think_mode" args with
     | Some (`String value) -> (
@@ -133,7 +116,7 @@ let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
           ( "result",
             Tool_local_runtime_probe.runtime_ollama_probe_json
               ?server_url ?model ?prompt ?keep_alive
-              ~probe_runs ~max_tokens ~think_mode ?timeout_sec
+              ~probe_runs ~max_tokens ~think_mode ?timeout_sec ~ps_timeout_sec
               ~generate_when_unloaded ~run_generate () );
         ]
 
@@ -151,16 +134,56 @@ let runtime_ollama_probe_timeout_sec args =
            expected
            got)
 
+(* Absent means "use the default"; present-but-unusable does not. Reading a
+   string or a float back as the default answers with an ok response for a
+   probe the caller did not ask for. Out-of-range is the same story with a
+   different cause -- #24851 removed that rewrite for timeout_sec, and these
+   knobs are refused in the same place, before the Gate sees the call, so a
+   rejected probe never authorizes an external effect (#25006). *)
+let runtime_ollama_probe_bounded_field args ~name ~default ~validate =
+  match Json_field.int args name with
+  | Json_field.Field_absent -> Ok default
+  | Json_field.Found value -> validate value
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Printf.sprintf "%s must be an %s, got %s" name expected got)
+
+type ollama_probe_bounds =
+  { probe_runs : int
+  ; max_tokens : int
+  ; ps_timeout_sec : int
+  ; timeout_sec : int option
+  }
+
+let runtime_ollama_probe_bounds args : (ollama_probe_bounds, string) result =
+  let ( let* ) = Result.bind in
+  let* timeout_sec = runtime_ollama_probe_timeout_sec args in
+  let* probe_runs =
+    runtime_ollama_probe_bounded_field args ~name:"probe_runs" ~default:2
+      ~validate:Tool_local_runtime_probe.validate_probe_runs
+  in
+  let* max_tokens =
+    runtime_ollama_probe_bounded_field args ~name:"max_tokens" ~default:16
+      ~validate:Tool_local_runtime_probe.validate_max_tokens
+  in
+  let* ps_timeout_sec =
+    runtime_ollama_probe_bounded_field args ~name:"ps_timeout_sec" ~default:2
+      ~validate:Tool_local_runtime_probe.validate_ps_timeout_sec
+  in
+  Ok { probe_runs; max_tokens; ps_timeout_sec; timeout_sec }
+
 let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
-  match runtime_ollama_probe_timeout_sec args with
+  match runtime_ollama_probe_bounds args with
   | Error message ->
       err_response
         ~tool_name:"masc_runtime_ollama_probe"
         ~start_time:(Time_compat.now ())
         ~class_:Tool_result.Workflow_rejection
         message
-  | Ok timeout_sec ->
-      let continue () = run_runtime_ollama_probe ?timeout_sec args in
+  | Ok { probe_runs; max_tokens; ps_timeout_sec; timeout_sec } ->
+      let continue () =
+        run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec
+          ?timeout_sec args
+      in
       (match ctx.authorize_external_effect with
        | None -> continue ()
        | Some authorize ->

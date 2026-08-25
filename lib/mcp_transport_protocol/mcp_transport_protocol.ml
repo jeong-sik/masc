@@ -403,6 +403,36 @@ let protocol_version_from_params = function
 
 let protocol_version_meta_key = "io.modelcontextprotocol/protocolVersion"
 
+(* The other _meta field 2026-07-28 marks required on every client request.
+   Its value is a ClientCapabilities object; nothing here reads inside it,
+   because a server "MUST NOT rely on capabilities the client has not
+   declared" -- what matters at this layer is that the client declared
+   something. *)
+let client_capabilities_meta_key = "io.modelcontextprotocol/clientCapabilities"
+
+let request_meta_of_json = function
+  | `Assoc fields -> (
+    match List.assoc_opt "params" fields with
+    | Some (`Assoc params) -> (
+      match List.assoc_opt "_meta" params with
+      | Some (`Assoc meta) -> Some meta
+      | Some _ | None -> None)
+    | Some _ | None -> None)
+  | _ -> None
+
+(* Absent and present-but-null are the same answer to "did the client declare
+   its capabilities?": neither is a declaration. *)
+let request_meta_has_key body_str key =
+  match Yojson.Safe.from_string body_str with
+  | json -> (
+    match request_meta_of_json json with
+    | None -> false
+    | Some meta -> (
+      match List.assoc_opt key meta with
+      | Some `Null | None -> false
+      | Some _ -> true))
+  | exception Yojson.Json_error _ -> false
+
 let protocol_version_from_request_meta_json = function
   | `Assoc fields -> (
       match List.assoc_opt "params" fields with

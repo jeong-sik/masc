@@ -877,6 +877,52 @@ def fleet_safety_fixture() -> HttpResponse:
     return (200, {"keeper_fleet_safety": {"status": "ok"}})
 
 
+def with_workspace_identity(
+    fixtures: HttpFixtures | None, base_path: str
+) -> HttpFixtures:
+    """Answer /health?full=1 with the workspace the harness actually chose.
+
+    The TUI canonicalises its own base path against the one this reports and
+    refuses local Keeper/context/metrics reads when they differ. A fixture
+    that names no path leaves every scenario reading an unproven workspace,
+    which is not the state any of them mean to describe.
+
+    Scenario-owned health fixtures keep their fields; only the paths block is
+    filled in. A raw or callable response is left alone -- a scenario that
+    writes its own health body owns what it says.
+    """
+    # In place, not a copy: a scenario keeps the dict it handed over and swaps
+    # a response into it mid-run (a lane read that starts failing, a board list
+    # that arrives late). A copy leaves the server reading the original, and
+    # nine scenarios waited out their timeouts for a response that had already
+    # been written somewhere the server could not see.
+    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
+    paths = {
+        "cwd": base_path,
+        "effective_base_path": base_path,
+        "effective_masc_root": os.path.join(base_path, ".masc"),
+        "effective_has_masc_dir": True,
+    }
+    # The identity probe reads the compact /health; the fleet reading reads
+    # /health?full=1. Both carry the paths block, and a scenario may declare
+    # either, so both keys are filled.
+    for key in ("/health", "/health?full=1"):
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = (200, {"paths": paths})
+            continue
+        if isinstance(existing, tuple):
+            status, payload = existing
+            if isinstance(payload, dict):
+                body = dict(cast(dict[str, object], payload))
+                body["paths"] = {
+                    **cast(dict[str, object], body.get("paths", {})),
+                    **paths,
+                }
+                merged[key] = (status, body)
+    return merged
+
+
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),

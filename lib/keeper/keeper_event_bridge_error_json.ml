@@ -18,21 +18,14 @@ let agent_completed_usage_fields (response : Agent_core.Types.api_response) =
     ]
 ;;
 
-let agent_completed_result_fields = function
-  | Ok (response : Agent_core.Types.api_response) ->
-    [ "success", `Bool true
-    ; "result", `String "ok"
-    ; "response_id", `String response.id
-    ; "model", `String response.model
-    ; "stop_reason", `String (stop_reason_to_wire response.stop_reason)
-    ]
-    @ agent_completed_usage_fields response
-  | Error error ->
-    [ "success", `Bool false
-    ; "result", `String "error"
-    ; "error", `String (Agent_core.Error.to_string error)
-    ; "usage_reported", `Bool false
-    ]
+let agent_completed_response_fields (response : Agent_core.Types.api_response) =
+  [ "success", `Bool true
+  ; "result", `String "ok"
+  ; "response_id", `String response.id
+  ; "model", `String response.model
+  ; "stop_reason", `String (stop_reason_to_wire response.stop_reason)
+  ]
+  @ agent_completed_usage_fields response
 ;;
 
 let invalid_request_reason_to_wire = function

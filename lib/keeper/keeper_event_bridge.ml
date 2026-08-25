@@ -231,30 +231,22 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
       `Assoc [ "agent_name", `String agent_name; "task_id", `String task_id ]
     in
     Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
-  | Agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
-    (match result with
-     | Ok (response : Agent_core.Types.api_response) ->
-       let provider =
-         inference_provider_bucket ~provider:"" ~model:response.model
-       in
-       let model_bucket = inference_model_bucket ~provider:"" ~model:response.model in
-       let cost_usd =
-         match response.usage with
-         | Some usage -> usage.cost_usd
-         | None -> None
-       in
-       observe_inference_cost ~provider ~model_bucket cost_usd
-     | Error error ->
-       Log.Agent_core_event.routine
-         "agent completion has no inference cost observation because the run failed: %s"
-         (Agent_core.Error.to_string error));
+  | Agent_core.Event_bus.AgentCompleted { agent_name; task_id; elapsed; response } ->
+    let provider = inference_provider_bucket ~provider:"" ~model:response.model in
+    let model_bucket = inference_model_bucket ~provider:"" ~model:response.model in
+    let cost_usd =
+      match response.usage with
+      | Some usage -> usage.cost_usd
+      | None -> None
+    in
+    observe_inference_cost ~provider ~model_bucket cost_usd;
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name
          ; "task_id", `String task_id
          ; "elapsed_s", `Float elapsed
          ]
-         @ agent_completed_result_fields result)
+         @ agent_completed_response_fields response)
     in
     Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.AgentYielded { agent_name; task_id; turn; elapsed } ->

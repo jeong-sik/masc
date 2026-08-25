@@ -25,7 +25,11 @@ type outcome =
   | Input_required of Error.input_required
   | Failed of Error.t
 
-(** Wrap a run with [AgentStarted] and one typed invocation outcome.
+(** Wrap a run with [AgentStarted] and exactly one typed invocation outcome.
+
+    Successful runs publish [AgentCompleted]. Failed runs and synchronous
+    exceptions publish [AgentFailed]. A run never publishes both terminal
+    variants.
 
     [current_run_id] is queried lazily so the outcome event reflects the
     raw-trace run id active when the call returns. [classify] maps the concrete

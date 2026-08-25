@@ -82,8 +82,8 @@ Pattern-matchable OCaml sum type. **Stable across every provider.**
 | Variant | Emit site | Semantic |
 |---------|-----------|---------|
 | `AgentStarted` | `agent/agent.ml` (`run`, `run_stream` — incl. `run_with_handoffs`) | Run lifecycle start |
-| `AgentCompleted` | `agent/agent.ml` (`run`, `run_stream` — incl. `run_with_handoffs`) | Run lifecycle completion (carries the `result`) |
-| `AgentFailed` | `agent/agent.ml` (`run`, `run_stream` — incl. `run_with_handoffs`) | Run lifecycle failure (companion to `AgentCompleted` on `Error`) |
+| `AgentCompleted` | `agent/agent_lifecycle_events.ml` (wrapping `run`, `run_stream` — incl. `run_with_handoffs`) | Successful run lifecycle completion (carries the response) |
+| `AgentFailed` | `agent/agent_lifecycle_events.ml` (wrapping `run`, `run_stream` — incl. `run_with_handoffs`) | Failed run lifecycle terminal outcome; mutually exclusive with `AgentCompleted` |
 | `TurnStarted` | `pipeline/pipeline_stage_prepare.ml` | Start of a single agent turn |
 | `TurnReady` | `pipeline/pipeline_stage_prepare.ml` | Exact caller-supplied tool surface serialized for this turn |
 | `TurnCompleted` | `pipeline/pipeline.ml` | End of a single agent turn |

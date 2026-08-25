@@ -141,6 +141,28 @@ let toml_help_table =
 
 let toml_help name = Hashtbl.find_opt (Lazy.force toml_help_table) name
 
+(* The same scan that finds authored help also knows where it came from. A tool
+   whose behaviour surprises an operator is a tool whose definition they want to
+   open, and until now nothing said which file that is — not the catalog, not
+   the call record. Derived from the embedded file list rather than composed
+   from the name, so a tool with no shipped definition answers [None] instead of
+   naming a path that does not exist. *)
+let toml_source_table =
+  lazy
+    (let table = Hashtbl.create 32 in
+     List.iter
+       (fun rel ->
+          if
+            String.starts_with ~prefix:"tools/" rel
+            && String.equal (Filename.dirname rel) "tools"
+            && Filename.check_suffix rel ".toml"
+          then
+            Hashtbl.replace table (Filename.remove_extension (Filename.basename rel)) rel)
+       Embedded_config.file_list;
+     table)
+
+let definition_source name = Hashtbl.find_opt (Lazy.force toml_source_table) name
+
 let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name original =
   let seed =
     match first_sentence original with

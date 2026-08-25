@@ -4202,13 +4202,19 @@ def keeper_calls_interaction() -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         pane_start = len(output)
-        send_and_wait(process, master_fd, output, b"t", b"Keeper Calls: alpha")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"t",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls",
+        )
         wait_for_output(
             process, master_fd, output, b"tool_execute", start=pane_start, timeout=5.0
         )
         pane = bytes(output[pane_start:])
         for needle, what in (
-            (b"Keeper Calls: alpha (2)", "the count"),
+            (b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (2)", "the count"),
             ("ok \u00b7 latest 8s ago".encode(), "the freshness verdict"),
             ("\u2713 Read".encode(), "the returned call"),
             (b"28ms", "its duration"),
@@ -4331,8 +4337,8 @@ def keeper_lanes_interaction(
         unread_plain = CSI_RE.sub(b"", unread).decode("utf-8")
         for column in (
             "KEEPER",
-            "PHASE",
-            "TURN",
+            "LIFECYCLE",
+            "TURN STEP",
             "IDLE",
             "LAST OUTCOME",
             "DIAGNOSIS",

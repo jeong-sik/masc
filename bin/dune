@@ -426,7 +426,8 @@
 (library
  (name masc_tui_footer)
  (wrapped false)
- (modules masc_tui_footer))
+ (modules masc_tui_footer)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_board_selection)

@@ -305,8 +305,8 @@ let awaiting_approval_notice (state : state) =
 
 (* The server names itself in every footer, because "which masc is this"
    is a question every surface can raise and none of them answered: the tail
-   said [Port: 8935] and two checkouts on that port read identically. *)
-let footer_line ?(status = []) (state : state) ~hints =
+   named only its listening endpoint and two checkouts there read identically. *)
+let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* An armed "/" search shows its query where every surface already looks
      for its keys. One seam instead of a per-surface indicator. *)
   let hints =
@@ -325,7 +325,7 @@ let footer_line ?(status = []) (state : state) ~hints =
         ]
   in
   Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
-    ~port:state.port ~hints ()
+    ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = composer_of_state state in
@@ -817,7 +817,7 @@ let render_overview (state : state) =
   box_bottom buf cols;
 
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:state.task_focus));
 
@@ -970,9 +970,9 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
 
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  left/esc:back  r:refresh  | Task %s | Refresh: %.0fs%s\n"
-       Ansi.dim (Terminal_text.single_line task.id)
-       state.refresh_interval Ansi.reset);
+    (footer_line state ~max_cells:cols
+       ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
+       ~hints:"j/k:scroll  left/esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
@@ -1158,7 +1158,7 @@ let render_approvals (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
 
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next");
+    (footer_line state ~max_cells:cols ~hints:"j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
@@ -1324,7 +1324,7 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:move  right/Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -1506,7 +1506,7 @@ let render_board_read (state : state) (list_post : board_post) =
         "  h/l:pane  Ctrl-W:switch"
       else ""
     in
-    footer_line state
+    footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
            "j/k:%s  PgUp/PgDn:page%s  left/Esc:back  c:reply  r:refresh  Tab:next"
@@ -1724,7 +1724,7 @@ let render_planning_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:move  right/Enter:detail  r:refresh  Tab:next");
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:detail  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -1844,7 +1844,7 @@ let render_planning_detail (state : state)
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
@@ -2012,7 +2012,7 @@ let render_schedule_list (state : state) =
   box_bottom buf cols;
 
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          "j/k:move  PgUp/PgDn:page  right/Enter:details  x:cancel  r:refresh  Tab:next");
 
@@ -2108,7 +2108,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
             "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  x:cancel  r:refresh  Tab:next"
@@ -2810,7 +2810,7 @@ let render_lanes (state : state) =
       (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
@@ -3887,7 +3887,7 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -4004,7 +4004,7 @@ let render_verification (state : state) =
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 (* What the harness decided, most recent first.
@@ -4118,7 +4118,7 @@ let render_harness (state : state) =
       (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 let fusion_run_status_color = function
@@ -4215,7 +4215,7 @@ let render_fusion_list (state : state) =
     done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          "j/k:move  PgUp/PgDn:page  right/Enter:detail  r:refresh  Tab:next  q:quit");
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
@@ -4397,7 +4397,7 @@ let render_fusion_detail (state : state) run_id =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints_fusion_detail ~scroll ~max_scroll));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
@@ -4499,7 +4499,7 @@ let render_repositories (state : state) =
       (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
 
 (* The files a keeper wrote, read back out of the tool-call log.
@@ -4637,7 +4637,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   else box_line_styled buf cols ~style:Ansi.dim "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 let render_changes_list (state : state) =
@@ -4753,7 +4753,7 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  o:editor  r:refresh  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* One tree-diff row. Same three layers as the tool-call reading, plus the
@@ -4855,7 +4855,7 @@ let render_changes_tree_diff (state : state)
      else "  esc closes");
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* The surface has two readings: the list, and one change opened. The open row
@@ -4974,7 +4974,7 @@ let render_connectors (state : state) =
       (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:"j/k:scroll  b:bind  u:unbind  Tab:next  q:quit  r:refresh");
   finish_surface state ~surface_key:"connectors" ~rows:terminal_rows ~cols buf
 
@@ -5245,7 +5245,7 @@ let render_runtime (state : state) =
   in
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf "%sj/k:scroll  Tab:next  q:quit  r:live refresh"
             scroll_hint));
@@ -5379,7 +5379,7 @@ let render_tools (state : state) =
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
@@ -5566,7 +5566,7 @@ let render_keeper_calls (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  left/Esc:back  Tab:next  q:quit  r:refresh");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/Esc:back  Tab:next  q:quit  r:refresh");
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at
@@ -5728,7 +5728,7 @@ let render_acting (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit");
   finish_surface state ~clamped:(Acting scroll) ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
@@ -5976,7 +5976,7 @@ let render_code (state : state) =
    else if state.code_focus_file then content_pane buf cols
    else list_pane buf cols);
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
             "j/k:%s  Enter:open  Esc:%s  r:refresh  Tab:next  q:quit"
@@ -6109,7 +6109,7 @@ let render_resources (state : state) =
    else if state.resource_focus then content_pane buf cols
    else list_pane buf cols);
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
             "j/k:%s  Enter:read  Ctrl-W:switch pane  Esc:list  r:reload  Tab:next"
@@ -6188,7 +6188,7 @@ let render_config (state : state) =
        done);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:"j/k:scroll  e:edit (preview-checked)  r:reload  Tab:next");
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
@@ -6321,7 +6321,7 @@ let render_palette (state : state) =
     framed_line buf cols (Ansi.dim ^ "  (no match)" ^ Ansi.reset);
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state
+    (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf "%d/%d  Enter:jump  Esc:close"
             (if total = 0 then 0 else cursor + 1)
@@ -6348,7 +6348,7 @@ let render_help (state : state) =
   |> List.iter (fun line -> framed_line buf cols line);
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Esc:close");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 let render_terminal_too_small ~rows ~cols =

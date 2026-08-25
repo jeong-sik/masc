@@ -258,6 +258,41 @@ check_rule "R12-tui-theme-for-testing" 0 \
   'bin/masc_tui_theme\.mli?:' \
   bin lib
 
+# SSOT-R13 — shared footer facts are rendered only by Masc_tui_footer. A
+# surface supplies its local key hints and typed status items; spelling Port
+# or Refresh inside another production string recreates the per-screen drift
+# #30194 removed. The second arm catches the simplest split-literal bypass.
+r13_pattern='"[^"\n]*(Port:|Refresh:)|"(Port|Refresh)"[[:space:]]*\^[[:space:]]*":"'
+r13_self_test_failed=0
+for fixture in \
+  '"Port: %d"' \
+  '"Refresh: %.0fs"' \
+  '"keys | Port: 8935"' \
+  '"Port" ^ ":"'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r13_pattern"; then
+    echo "ERROR[R13-pattern-self-test]: did not match $fixture" >&2
+    r13_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_footer.Port port' \
+  'Masc_tui_footer.Refresh_interval seconds' \
+  'footer_line state ~status' \
+  | rg -q "$r13_pattern"; then
+  echo "ERROR[R13-pattern-self-test]: matched the typed footer API" >&2
+  r13_self_test_failed=1
+fi
+if [ "$r13_self_test_failed" -eq 0 ]; then
+  echo "OK[R13-pattern-self-test]: direct and split footer fact literals covered."
+else
+  fail=1
+fi
+check_rule "R13-tui-footer-fact-literal" 0 \
+  "Masc_tui_footer status_item projection" \
+  "$r13_pattern" \
+  'bin/masc_tui_footer\.mli?:' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch
@@ -266,6 +301,6 @@ check_rule "R12-tui-theme-for-testing" 0 \
 echo ""
 echo "SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):"
 echo "  Script: scripts/check-ssot.sh"
-echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30196 #30411"
+echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411"
 
 exit "$fail"

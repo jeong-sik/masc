@@ -4618,6 +4618,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              | Some line -> max 0 (line - 1)
              | None -> 0);
           state.code_target_line <- None;
+          state.code_file_hscroll <- 0;
+          (* The widest row is the horizontal clamp; measured here, once,
+             not on every l press over ten thousand rows. *)
+          state.code_file_max_width <-
+            List.fold_left
+              (fun widest segments ->
+                let row_width =
+                  List.fold_left
+                    (fun acc (text, _) ->
+                      acc + Message_layout.display_width text)
+                    0 segments
+                in
+                max widest row_width)
+              0 rows;
           state.code_focus_file <- true;
           (* A new file starts on its content; the old file's history would
              caption the wrong bytes. *)
@@ -6265,6 +6279,11 @@ let main () =
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
            state.resource_focus <- not state.resource_focus
+       | Some "h" when state.view = Code && state.code_focus_file
+                       && not state.code_history_open ->
+           (* One cell per press: precise, and holding the key repeats it.
+              The lowercase only -- H is the history toggle below. *)
+           state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
        | Some "H" when state.view = Code && state.code_focus_file ->
            (* History over the open file. The capital only: h stays free for
               the horizontal scroll the file pane is due. Same key closes it;
@@ -7432,7 +7451,18 @@ let main () =
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
            (match state.view with
-            | Code -> ()
+            | Code ->
+                (* The lowercase scrolls the open file right, one cell per
+                   press; the clamp is the widest row so the pane cannot
+                   scroll into blank space. *)
+                if
+                  key = Some "l" && state.code_focus_file
+                  && not state.code_history_open
+                then
+                  state.code_file_hscroll <-
+                    min
+                      (max 0 (state.code_file_max_width - 1))
+                      (state.code_file_hscroll + 1)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in

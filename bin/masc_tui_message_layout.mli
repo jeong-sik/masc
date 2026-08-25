@@ -75,6 +75,13 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val drop_cells : string -> int -> string
+(** Drop the first [cells] display cells, keeping every ANSI sequence crossed
+    so the remainder opens under the styles the cut passed through. A wide
+    grapheme straddling the boundary is padded with spaces so the columns to
+    its right stay aligned. The horizontal-scroll counterpart of
+    [fit_width]'s right-edge cut. *)
+
 val dress_bare_links :
   open_style:string -> close_style:string -> string -> string
 (** Style every bare [http://]/[https://] run in [text].

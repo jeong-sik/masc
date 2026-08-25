@@ -199,6 +199,8 @@ let for_surface = function
            drift as a listed key that does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
           ~help:"close the history, then the file, then climb one directory"
+      ; b Navigate "h/l" "pan"
+          ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Act "H" "history"
           ~help:"the commits that touched the open file (H or Esc closes)"
       ]

@@ -6047,6 +6047,14 @@ let render_code (state : state) =
       match state.code_file with
       | Some (path, _) ->
           let path = Terminal_text.single_line path in
+          let path =
+            (* Say the view is shifted; a pane that silently starts at
+               column 41 reads as a file whose lines begin mid-word. *)
+            if state.code_file_hscroll > 0 && not history_showing then
+              Printf.sprintf "%s  (col %d)" path
+                (state.code_file_hscroll + 1)
+            else path
+          in
           if history_showing then "history: " ^ path else path
       | None -> "(Enter opens the selected file)"
     in
@@ -6115,12 +6123,19 @@ let render_code (state : state) =
            let total_lines = List.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
+           let hscroll =
+             max 0
+               (min state.code_file_hscroll
+                  (max 0 (state.code_file_max_width - 1)))
+           in
            for i = 0 to content_height - 1 do
              match List.nth_opt file_rows (scroll + i) with
              | Some segments ->
                  let body =
                    String.concat "" (List.map span segments)
                  in
+                 (* The gutter stays put; only the code scrolls sideways. *)
+                 let body = Message_layout.drop_cells body hscroll in
                  box_line pane_buf pane_cols
                    (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
                       Ansi.reset body)
@@ -6155,8 +6170,11 @@ let render_code (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:%s  Enter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
+            "j/k:%s  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
             (if state.code_focus_file then "scroll" else "move")
+            (if state.code_focus_file && not state.code_history_open then
+               "h/l:pan  "
+             else "")
             (if state.code_focus_file then "H:history  " else "")
             (if state.code_history_open then "code"
              else if state.code_focus_file then "list"

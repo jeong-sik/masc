@@ -768,6 +768,9 @@ type state = {
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
+  mutable prompts_librarian_input: (string * string list) option;
+  mutable prompts_librarian_input_error: string option;
+  mutable prompts_librarian_input_loading: bool;
   mutable runtime_config_view: (string * string list) option;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
@@ -1253,6 +1256,9 @@ let create_state
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
+  prompts_librarian_input = None;
+  prompts_librarian_input_error = None;
+  prompts_librarian_input_loading = false;
   runtime_config_view = None;
   runtime_config_view_error = None;
   config_scroll = 0;

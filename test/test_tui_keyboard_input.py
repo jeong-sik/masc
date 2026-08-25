@@ -4032,15 +4032,22 @@ def memory_journal_timeline_interaction() -> Interaction:
             start=start,
             timeout=5.0,
         )
-        visible = bytes(output[start:])
+        # Waited for one at a time rather than searched once. The row draws
+        # over more than one frame -- the committed line, then the diff box
+        # under it -- and reading the buffer after only the first had landed
+        # passed on a quiet machine and failed inside a full run.
         for needle in (
             b"[fact] the Runtime probe shares one provider endpoint",
             b"[constraint] probe every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
-            if needle not in visible:
-                raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
+            wait_for_output(
+                process, master_fd, output, needle, start=start, timeout=5.0
+            )
+        # Read after the waits above, so the escape check below sees the same
+        # frames the facts arrived in.
+        visible = bytes(output[start:])
 
         # The changed facts ride a ```diff fence, which is what colours the two
         # directions and keeps a leading + out of markdown's list grammar. The

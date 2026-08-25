@@ -204,28 +204,32 @@ let json_member_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
-let media_type_for_request ~bytes args =
-  let sniff_media_type bytes =
-    let starts prefix =
-      let lp = String.length prefix in
-      String.length bytes >= lp && String.equal (String.sub bytes 0 lp) prefix
-    in
-    if starts "\x89PNG" then Ok "image/png"
-    else if starts "\xff\xd8\xff" then Ok "image/jpeg"
-    else if starts "GIF8" then Ok "image/gif"
-    else if
-      String.length bytes >= 12
-      && String.equal (String.sub bytes 0 4) "RIFF"
-      && String.equal (String.sub bytes 8 4) "WEBP"
-    then Ok "image/webp"
-    else
-      Error
-        (Printf.sprintf
-           "could not identify image media type; expected one of %s"
-           supported_image_media_types_csv)
+(* Magic-byte identification, shared so the TUI composer and this tool agree on
+   what counts as an image. Two copies of a byte-prefix table drift the moment
+   one side learns a format the other does not. *)
+let sniff_image_media_type bytes =
+  let starts prefix =
+    let lp = String.length prefix in
+    String.length bytes >= lp && String.equal (String.sub bytes 0 lp) prefix
   in
+  if starts "\x89PNG" then Ok "image/png"
+  else if starts "\xff\xd8\xff" then Ok "image/jpeg"
+  else if starts "GIF8" then Ok "image/gif"
+  else if
+    String.length bytes >= 12
+    && String.equal (String.sub bytes 0 4) "RIFF"
+    && String.equal (String.sub bytes 8 4) "WEBP"
+  then Ok "image/webp"
+  else
+    Error
+      (Printf.sprintf
+         "could not identify image media type; expected one of %s"
+         supported_image_media_types_csv)
+;;
+
+let media_type_for_request ~bytes args =
   match json_member_opt "media_type" args with
-  | None -> sniff_media_type bytes
+  | None -> sniff_image_media_type bytes
   | Some (`String raw) -> validate_media_type raw
   | Some _ -> Error "media_type must be a string"
 

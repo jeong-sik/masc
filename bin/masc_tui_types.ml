@@ -1066,6 +1066,11 @@ type state = {
   mutable system_logs_scroll: int;
   mutable system_logs_cursor: int;
   mutable msg_input: Buffer.t;
+  (* Images staged with :attach, sent with the next message and cleared by the
+     send. Held next to the draft because they are part of the same unsent
+     message: switching keepers or abandoning the draft must not leave an image
+     attached to whatever is typed later. *)
+  mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
@@ -1444,6 +1449,7 @@ let create_state
   system_logs_scroll = 0;
   system_logs_cursor = 0;
   msg_input = Buffer.create 256;
+  msg_attachments = [];
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];

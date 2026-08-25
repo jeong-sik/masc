@@ -61,7 +61,7 @@ let test_live_transcripts_are_kept_per_keeper () =
   in
   let entry keeper_name started_at =
     let sent_request =
-      Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name)
+      Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name) ()
     in
     let live =
       Keeper_chat_transcript.create

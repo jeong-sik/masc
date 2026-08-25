@@ -32,6 +32,8 @@ let describe = function
      totality is for. *)
   | Command.View_image path -> "image:" ^ path
   | Command.View_image_missing_path -> "image-missing-path"
+  | Command.Attach_image path -> "attach:" ^ path
+  | Command.Attach_image_missing_path -> "attach-missing-path"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_plain_text_is_a_message () =
@@ -331,9 +333,11 @@ let test_the_typed_run_is_what_was_pressed () =
   (* One candidate left, so the argument comes along with it. *)
   check string "a prefix highlights through the slash"
     "T[/ta]U[sk]D[ <title>]" (spans "/ta");
-  (* Three left, so names only -- and each carries the same typed run. *)
+  (* Three left, so names only -- and each carries the same typed run. The
+     separator is one space: at ten commands two spaces no longer fit the
+     80-column row the bare slash has to survive on. *)
   check string "one glyph, three candidates"
-    "T[/t]U[ask]D[  ]T[/t]U[hinking]D[  ]T[/t]U[ools]" (spans "/t");
+    "T[/t]U[ask]D[ ]T[/t]U[hinking]D[ ]T[/t]U[ools]" (spans "/t");
   check string "the bare slash highlights only itself"
     "T[/]U[task]" (spans "/" |> fun row ->
       match String.index_opt row 'D' with

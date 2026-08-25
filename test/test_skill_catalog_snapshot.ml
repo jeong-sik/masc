@@ -284,6 +284,77 @@ let test_package_id_is_one_path_segment () =
   check bool "separator rejected" true (Result.is_error (Snapshot.package_id_of_directory "a/b"))
 ;;
 
+(* The two config-failure constructors build a snapshot whose config never
+   parsed. Nothing asserted that such a snapshot serves no Skills, so a future
+   change could let a rejected config keep answering lookups. *)
+let test_config_failure_states_serve_no_skills () =
+  let source_text = "[skills]\nactivation-lifetime = \"sessoin\"\n" in
+  let diagnostics =
+    match Skill_source_config.parse_text source_text with
+    | Error diagnostics -> diagnostics
+    | Ok _ -> fail "the typo fixture was expected to be rejected"
+  in
+  let rejected = Snapshot.config_rejected ~source_text ~diagnostics in
+  (match Snapshot.config_state rejected with
+   | Config_rejected { source_revision; diagnostics = carried } ->
+     check bool "diagnostics are carried" true (carried <> []);
+     check bool
+       "the rejected source still has a printable revision"
+       true
+       (String.length (Snapshot.config_source_revision_to_string source_revision) > 0)
+   | Configured _ | Config_unreadable _ ->
+     fail "config_rejected did not produce the rejected state");
+  check int "a rejected config serves no Skills" 0 (List.length (Snapshot.entries rejected));
+  check int "and no effective Skills" 0 (List.length (Snapshot.effective_entries rejected));
+  check bool "and has no config revision" true (Option.is_none (Snapshot.config_revision rejected));
+  let unreadable = Snapshot.config_unreadable ~detail:"permission denied" in
+  (match Snapshot.config_state unreadable with
+   | Config_unreadable { detail } -> check string "detail is preserved" "permission denied" detail
+   | Configured _ | Config_rejected _ ->
+     fail "config_unreadable did not produce the unreadable state");
+  check int "an unreadable config serves no Skills" 0 (List.length (Snapshot.entries unreadable))
+;;
+
+(* [entries] keeps every exact identity, including one a shadow hides.
+   [effective_entries] is the name-addressed projection, so the two must differ
+   by exactly the shadow -- otherwise a shadowed Skill would be served twice. *)
+let test_effective_entries_drop_the_shadowed_duplicate () =
+  let config = parse_config (config_text two_sources) in
+  let first =
+    candidate ~directory:"review" (document ~name:"review" ~description:"First" ~body:"first body")
+  in
+  let second =
+    candidate ~directory:"review" (document ~name:"review" ~description:"Second" ~body:"second body")
+  in
+  let snapshot =
+    configured_snapshot ~config (scans ~base_path:"/workspace" config [ [ first ]; [ second ] ])
+  in
+  check int "both exact entries retained" 2 (List.length (Snapshot.entries snapshot));
+  check int "one shadow" 1 (List.length (Snapshot.shadows snapshot));
+  check
+    int
+    "the effective projection is entries minus shadows"
+    (List.length (Snapshot.entries snapshot) - List.length (Snapshot.shadows snapshot))
+    (List.length (Snapshot.effective_entries snapshot));
+  match Snapshot.effective_entries snapshot with
+  | [ winner ] ->
+    check string "the winner is the earlier source" "First" winner.document.description;
+    check
+      string
+      "package identity is the child directory"
+      "review"
+      (Snapshot.package_id_to_string winner.identity.package_id);
+    let revisions =
+      Snapshot.entries snapshot
+      |> List.map (fun entry -> Snapshot.content_revision_to_string entry.Snapshot.content_revision)
+    in
+    (match revisions with
+     | [ left; right ] ->
+       check bool "different bodies get different content revisions" false (String.equal left right)
+     | _ -> fail "expected two entry revisions")
+  | other -> failf "expected exactly one effective Skill, got %d" (List.length other)
+;;
+
 let () =
   run
     "skill_catalog_snapshot"
@@ -305,6 +376,10 @@ let () =
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment
+        ; test_case "config failure states serve nothing" `Quick
+            test_config_failure_states_serve_no_skills
+        ; test_case "effective entries drop the shadow" `Quick
+            test_effective_entries_drop_the_shadowed_duplicate
         ] )
     ]
 ;;

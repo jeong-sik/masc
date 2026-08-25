@@ -18,14 +18,37 @@ val verdict_for :
   tool_name:string -> input:Yojson.Safe.t -> verdict
 (** Decide about one call.
 
-    A tool with no descriptor is asked about. An unknown tool is not a safe
-    tool: it is one this build cannot classify, and running it unasked would
-    make "no descriptor" the quietest way past the gate.
+    A name this build cannot place is asked about: it is not a safe tool, and
+    running it unasked would make "no descriptor" the quietest way past the
+    gate.
+
+    A name with no descriptor is not automatically that. Composition tools are
+    materialised outside the descriptor registry and are judged by the tools
+    their plan runs — from the catalog for [keeper_compose_*], from the input
+    for [keeper_plan_execute]. A plan of reads runs; one node that would be
+    asked about makes the whole plan asked about, and the reason names that
+    node.
 
     A call whose descriptor says this input only reads runs without asking,
     whatever its group. Reading a file to answer a question is the bulk of
     what a keeper does, and an operator asked about every read would stop
     reading the questions. *)
+
+val classifies : tool_name:string -> bool
+(** Whether this build can place [tool_name] at all.
+
+    Not the same question as {!verdict_for}, and not answerable by calling it
+    with an empty input. [keeper_plan_execute] is a name this policy knows
+    while what it decides depends on nodes that arrive in the call — asking
+    {!verdict_for} with [{}] would read that as "cannot classify" and pin a
+    fabricated input's answer as the fact about the name.
+
+    Both this and {!verdict_for} read one closed variant, so an arm added to
+    one is an arm added to the other. The bundle gate
+    ([test_keeper_tool_bundle_classifiable]) walks every tool a keeper is
+    handed through this: a tool the policy cannot place asks its operator a
+    question with no reason they can act on, which is what four composition
+    tools did before they were classified. *)
 
 val question_for : tool_name:string -> input:Yojson.Safe.t -> string
 (** The prompt an operator sees: what the call would do, named by the one

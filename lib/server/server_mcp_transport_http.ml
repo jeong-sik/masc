@@ -170,6 +170,92 @@ let stream_post_sse_json info (json : Yojson.Safe.t) =
   then
     Log.Server.debug "SSE json send failed for session %s" info.session_id
 
+(* subscriptions/listen (2026-07-28) replaces the GET endpoint: one long-lived
+   POST whose response body is the notification stream. Unlike the tools/call
+   streaming path it does not end when a result is written -- the JSON-RPC
+   response is the graceful-closure signal, sent when the server ends the
+   subscription, and a stream that just drops carries none. *)
+let body_is_subscriptions_listen body_str =
+  match body_jsonrpc_method body_str with
+  | Some ("subscriptions/listen", true) -> true
+  | _ -> false
+
+let body_jsonrpc_params body_str =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc fields -> List.assoc_opt "params" fields
+  | _ | (exception Yojson.Json_error _) -> None
+
+(* masc emits neither prompts/list_changed nor resources/list_changed -- its
+   capabilities declare listChanged false for both -- and the acknowledgement
+   reports "the subset the server agreed to honor", with unsupported types
+   omitted rather than refused. *)
+let acknowledged_subscription_filter
+      (filter : Mcp_transport_protocol.subscription_filter) =
+  { filter with
+    Mcp_transport_protocol.prompts_list_changed = false
+  ; resources_list_changed = false
+  }
+
+let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
+      ~clock ~body_str reqd =
+  match body_jsonrpc_id body_str with
+  (* JSON-RPC 2.0 requires a request id and 2026-07-28 forbids a null one, so a
+     listen request without one has no subscription identity to give its
+     notifications. *)
+  | None | Some `Null ->
+    let body =
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request
+        ~message:"subscriptions/listen requires a non-null request id"
+    in
+    let headers =
+      Httpun.Headers.of_list
+        (("content-length", string_of_int (String.length body))
+         :: json_headers ~deps session_id protocol_version origin)
+    in
+    safe_respond_with_string reqd
+      (Httpun.Response.create ~headers `Bad_request)
+      body
+  | Some subscription_id ->
+    let info =
+      stream_post_sse_start ~deps ~origin ~session_id ~protocol_version reqd
+    in
+    spawn_post_sse_keepalive ~sw ~clock info;
+    let send json = send_raw info (Sse.format_event (Yojson.Safe.to_string json)) in
+    let filter =
+      acknowledged_subscription_filter
+        (Mcp_transport_protocol.subscription_filter_of_params
+           (body_jsonrpc_params body_str))
+    in
+    (* MUST be the first message on the subscription, and no notification may
+       precede it -- so it is sent before the entry is registered. *)
+    let acknowledged =
+      Mcp_transport_protocol.tag_notification_with_subscription ~subscription_id
+        (Mcp_transport_protocol.jsonrpc_notification
+           "notifications/subscriptions/acknowledged"
+           ~params:
+             (`Assoc
+               [ ( "notifications"
+                 , Mcp_transport_protocol.subscription_filter_to_json filter )
+               ]))
+    in
+    if send acknowledged then (
+      let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
+      (* [close_sse_conn] is the one chokepoint every stop path resolves --
+         peer disconnect, eviction, shutdown -- so awaiting it here is how this
+         request stays open for the life of the subscription. *)
+      Eio.Promise.await info.stop_promise;
+      Mcp_subscriptions.unregister token;
+      ignore
+        (send
+           (Mcp_transport_protocol.make_response ~id:subscription_id
+              (`Assoc
+                [ ( "_meta"
+                  , `Assoc
+                      [ ( Mcp_transport_protocol.subscription_id_meta_key
+                        , subscription_id )
+                      ] )
+                ]))))
+
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode
   && not force_json_response
@@ -393,6 +479,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               should_stream_post_tools_call request body_str
                                 accept_mode
                             in
+                            if body_is_subscriptions_listen body_str then
+                              serve_subscriptions_listen ~deps ~origin
+                                ~session_id
+                                ~protocol_version:response_protocol_version ~sw
+                                ~clock ~body_str reqd
+                            else
                             let response_id = body_jsonrpc_id body_str in
                             let inline_sse : sse_conn_info option ref = ref None in
                             try

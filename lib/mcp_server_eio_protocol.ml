@@ -149,16 +149,23 @@ let clear_resource_subscriptions_for_session session_id =
 
 let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
+let resource_updated_notification uri =
+  jsonrpc_notification
+    "notifications/resources/updated"
+    ~params:(`Assoc [ "uri", `String uri ])
+;;
+
 let send_resource_updated_notification ~session_id ~uri =
-  Sse.send_to
-    session_id
-    (jsonrpc_notification
-       "notifications/resources/updated"
-       ~params:(`Assoc [ "uri", `String uri ]))
+  Sse.send_to session_id (resource_updated_notification uri)
 ;;
 
 let broadcast_tools_list_changed () =
-  Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
+  let notification = jsonrpc_notification "notifications/tools/list_changed" in
+  Sse.broadcast notification;
+  (* 2026-07-28 clients receive this on a subscriptions/listen stream instead
+     of the GET endpoint, and only if they asked for toolsListChanged. Both go
+     out: the older revisions this server still speaks read the SSE broadcast. *)
+  Mcp_subscriptions.notify_tools_list_changed notification
 ;;
 
 let dedup_strings items = items |> List.sort_uniq String.compare
@@ -207,7 +214,18 @@ let maybe_emit_resource_notifications ~success ~tool_name =
                   && List.mem (resource_id_of_uri uri) affected_ids
                 then send_resource_updated_notification ~session_id ~uri)
              uris)
-        resource_subscriptions))
+        resource_subscriptions);
+    (* The session table above is how revisions through 2025-11-25 subscribe.
+       A 2026-07-28 client named its URIs on a subscriptions/listen request
+       instead, and that registry keeps its own filter. *)
+    List.iter
+      (fun uri ->
+         if resource_is_dynamic uri
+            && List.mem (resource_id_of_uri uri) affected_ids
+         then
+           Mcp_subscriptions.notify_resource_updated ~uri
+             (resource_updated_notification uri))
+      (Mcp_subscriptions.subscribed_resource_uris ()))
 ;;
 
 (** {1 Protocol Handlers} *)
@@ -818,6 +836,28 @@ let handle_request
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                      | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
+              | "subscriptions/listen" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     (* The graceful-closure result. The transport answers with
+                        the open stream when it can; reaching here means it
+                        could not, and the specification has a server end a
+                        subscription with a completion result rather than a
+                        silent drop. *)
+                     make_response
+                       ~id
+                       (`Assoc
+                         [ ( "_meta"
+                           , `Assoc
+                               [ ( Mcp_transport_protocol
+                                   .subscription_id_meta_key
+                                 , id )
+                               ] )
+                         ]))
               | "resources/subscribe" ->
                 with_required_auth
                   ~base_path

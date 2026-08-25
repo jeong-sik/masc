@@ -213,6 +213,108 @@ let make_error ?data ~id code message =
     ("error", `Assoc error_fields);
   ]
 
+(* ── subscriptions/listen (2026-07-28) ───────────────────── *)
+
+(* Replaces resources/subscribe and the HTTP GET endpoint. A client names the
+   notification types it wants; the server "MUST NOT send notification types
+   the client has not explicitly requested".
+
+   Modelled as a record rather than a string list so the four types are the
+   four the specification defines: an unknown key in the request cannot become
+   a subscription, and adding a type later is a compile error at every match
+   instead of a silent no-op. *)
+type subscription_filter =
+  { tools_list_changed : bool
+  ; prompts_list_changed : bool
+  ; resources_list_changed : bool
+  ; resource_subscriptions : string list
+  }
+
+let empty_subscription_filter =
+  { tools_list_changed = false
+  ; prompts_list_changed = false
+  ; resources_list_changed = false
+  ; resource_subscriptions = []
+  }
+
+let subscription_id_meta_key = "io.modelcontextprotocol/subscriptionId"
+
+(* Every notification on the stream carries the id of the listen request that
+   opened it, "so clients can demultiplex them". On stdio a client MUST use it,
+   because one channel carries every subscription. *)
+let tag_notification_with_subscription ~subscription_id notification =
+  let add_meta params =
+    let meta_entry = (subscription_id_meta_key, subscription_id) in
+    match params with
+    | `Assoc fields -> (
+      match List.assoc_opt "_meta" fields with
+      | Some (`Assoc meta) when List.mem_assoc subscription_id_meta_key meta ->
+        `Assoc fields
+      | Some (`Assoc meta) ->
+        `Assoc (("_meta", `Assoc (meta_entry :: meta))
+                :: List.remove_assoc "_meta" fields)
+      | Some _ | None ->
+        `Assoc (("_meta", `Assoc [ meta_entry ])
+                :: List.remove_assoc "_meta" fields))
+    | other -> other
+  in
+  match notification with
+  | `Assoc fields ->
+    let params =
+      match List.assoc_opt "params" fields with
+      | Some params -> add_meta params
+      | None -> add_meta (`Assoc [])
+    in
+    `Assoc (("params", params) :: List.remove_assoc "params" fields)
+  | other -> other
+
+let bool_field fields name =
+  match List.assoc_opt name fields with Some (`Bool b) -> b | _ -> false
+
+let string_list_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`List items) ->
+    List.filter_map (function `String s -> Some s | _ -> None) items
+  | _ -> []
+
+(* "All fields are optional. Omitting a field is equivalent to not subscribing
+   to that notification type." An absent [notifications] object is therefore a
+   subscription to nothing, not an error. *)
+let subscription_filter_of_params params =
+  match params with
+  | Some (`Assoc fields) -> (
+    match List.assoc_opt "notifications" fields with
+    | Some (`Assoc n) ->
+      { tools_list_changed = bool_field n "toolsListChanged"
+      ; prompts_list_changed = bool_field n "promptsListChanged"
+      ; resources_list_changed = bool_field n "resourcesListChanged"
+      ; resource_subscriptions = string_list_field n "resourceSubscriptions"
+      }
+    | Some _ | None -> empty_subscription_filter)
+  | Some _ | None -> empty_subscription_filter
+
+(* The acknowledgement reports the subset the server agreed to honour, and
+   "notification types the server does not support are omitted" -- so a field
+   the caller did not ask for, or that this server cannot serve, is absent
+   rather than false. *)
+let subscription_filter_to_json filter =
+  let fields =
+    List.concat
+      [ (if filter.tools_list_changed then [ ("toolsListChanged", `Bool true) ] else [])
+      ; (if filter.prompts_list_changed then
+           [ ("promptsListChanged", `Bool true) ]
+         else [])
+      ; (if filter.resources_list_changed then
+           [ ("resourcesListChanged", `Bool true) ]
+         else [])
+      ; (match filter.resource_subscriptions with
+         | [] -> []
+         | uris ->
+           [ ("resourceSubscriptions", `List (List.map (fun u -> `String u) uris)) ])
+      ]
+  in
+  `Assoc fields
+
 let jsonrpc_notification ?params method_name =
   let base =
     [

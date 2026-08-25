@@ -980,6 +980,14 @@ let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
   | Native_none, true | Native_read, _ -> Ok ()
 ;;
 
+(* RFC-0390 admission review (P0): an admission refusal must not kill the
+   runtime call — the keeper would lose every turn until an operator flips
+   an in-memory approval mode after each restart. [admit_native_posture]
+   stays a pure typed predicate (tests pin its refusals); the resolver
+   below is the policy point: a posture admission cannot honor degrades
+   to the safest weaker posture and the downgrade is recorded as a typed
+   event, never silent. Profile load failures remain fail-closed — that
+   is a declaration-time error, not an admission-time one. *)
 let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
     ~none_supported =
   match
@@ -993,18 +1001,29 @@ let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
          ~field:"keeper.tools.native"
          (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
   | Ok defaults ->
-    let posture =
-      Option.value defaults.native_tool_posture ~default
-    in
+    let declared = Option.value defaults.native_tool_posture ~default in
     let approval_mode =
       Keeper_tool_approval_mode.resolve
         (Keeper_tool_approval_mode.shared ())
         ~keeper_name
     in
     (match
-       admit_native_posture ~posture ~approval_mode ~none_supported
+       admit_native_posture ~posture:declared ~approval_mode ~none_supported
          ~client_label
      with
-     | Ok () -> Ok posture
-     | Error detail -> Error (config_error ~field:"keeper.tools.native" detail))
+     | Ok () -> Ok declared
+     | Error detail ->
+       let effective =
+         Runtime_native_tools.degrade_on_admission
+           ~posture:declared
+           ~none_supported
+           ()
+       in
+       Keeper_event_publisher.publish_native_posture_degraded
+         ~keeper_name
+         ~client_label
+         ~declared:(Runtime_native_tools.to_string declared)
+         ~effective:(Runtime_native_tools.to_string effective)
+         ~reason:detail;
+       Ok effective)
 ;;

@@ -1036,6 +1036,59 @@ let test_native_read_is_effect_free_and_admitted () =
        ~client_label:"Codex")
 ;;
 
+(* RFC-0390 admission review (P0): an admission refusal must not kill the
+   turn. resolve_native_posture degrades to the safest weaker posture and
+   records the downgrade as a typed event. The pure predicate above still
+   refuses — the policy below keeps the runtime call alive. *)
+let test_resolve_degrades_instead_of_failing_the_turn () =
+  let run = Host.resolve_native_posture in
+  let posture_of = function
+    | Ok p -> Runtime_native_tools.to_string p
+    | Error detail ->
+      failf "runtime call must not die: %s"
+        (Agent_core.Error.to_string detail)
+  in
+  (* No profile declared: the runtime default posture stands, admission is
+     trivially satisfied, no degradation, no event. *)
+  check string "undeclared default stays" "none"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-undeclared"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.claude_code_default
+          ~none_supported:true));
+  (* full under the shared Auto default degrades to read, turn lives. *)
+  check string "full under Auto degrades to read" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  (* none on a client without a disable switch degrades to read. *)
+  check string "none on Codex degrades to read" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-none-codex"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_none
+          ~none_supported:false));
+  (* Yolo + full is admitted as declared — but the shared registry resolves
+     Auto for unknown keepers, so drive the honored path through read,
+     which needs no approval stance. *)
+  check string "read is admitted untouched" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-read-codex"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_read
+          ~none_supported:false))
+;;
+
 let () = Random.self_init ()
 
 let reject_detail = "Your call to \"effect\": errors (fix these and call again)"
@@ -1305,6 +1358,10 @@ let () =
             "read is admitted under Auto"
             `Quick
             test_native_read_is_effect_free_and_admitted
+        ; test_case
+            "resolve degrades instead of failing the turn"
+            `Quick
+            test_resolve_degrades_instead_of_failing_the_turn
         ] )
     ; ( "reasoning effort"
       , [ test_case

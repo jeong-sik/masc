@@ -3442,6 +3442,46 @@ let decode_ide_region json =
   in
   Ok { ir_line_start; ir_line_end; ir_keeper; ir_source; ir_at_ms }
 
+(* ── the /api/v1/lsp/question answer ───────────────────────────────── *)
+
+type lsp_location = {
+  ll_path : string;
+  ll_inside : bool;
+  ll_line : int;  (** 1-based, as the route answers *)
+}
+
+type lsp_answer =
+  | Lsp_locations of lsp_location list
+  | Lsp_hover of string option
+
+let decode_lsp_location json =
+  let* ll_path = required_string_field json "path" in
+  let* ll_inside = required_bool_field json "inside_workspace" in
+  let* ll_line = required_int_field json "line" in
+  Ok { ll_path; ll_inside; ll_line }
+
+let decode_lsp_answer json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "lsp question answered ok=false"
+  else
+    let* data =
+      match member "data" json with
+      | `Assoc _ as data -> Ok data
+      | bad -> field_type_error "data" "an object" bad
+    in
+    let* kind = required_string_field data "kind" in
+    match kind with
+    | "locations" ->
+        let* rows = required_list_field data "locations" in
+        let* locations = decode_list "locations" decode_lsp_location rows in
+        Ok (Lsp_locations locations)
+    | "hover" -> (
+        match member "text" data with
+        | `String t -> Ok (Lsp_hover (Some t))
+        | `Null -> Ok (Lsp_hover None)
+        | bad -> field_type_error "text" "a string or null" bad)
+    | other -> Error (Printf.sprintf "unknown lsp answer kind: %s" other)
+
 let decode_ide_regions json =
   let* ok = required_bool_field json "ok" in
   if not ok then Error "regions answered ok=false"

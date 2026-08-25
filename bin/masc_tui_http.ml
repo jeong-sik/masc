@@ -408,6 +408,43 @@ let fetch_ide_regions ~(host : string) ~(port : int) ~(codebase : string)
           Error ("regions were not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_ide_regions json)
 
+(** Ask the language server about a name on a line
+    ([GET /api/v1/lsp/question]). [question] is the route's own word
+    (definition / hover); positions are 1-based both ways. *)
+let fetch_lsp_question ?keeper ?repo ~(host : string) ~(port : int)
+    ~(path : string) ~(line : int) ~(symbol : string) ~(question : string) ()
+    : (Masc.Tui_decode.lsp_answer, string) result =
+  let route =
+    Printf.sprintf "/api/v1/lsp/question?question=%s&path=%s&line=%d&symbol=%s%s%s"
+      (percent_encode_query_value question)
+      (percent_encode_query_value path)
+      line
+      (percent_encode_query_value symbol)
+      (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    -> (
+      (* The route's refusals are JSON with the reason in "error"; hand the
+         reason itself to the pane rather than a status line. *)
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error _ ->
+          Error (Printf.sprintf "lsp question returned %d: %s" status body)
+      | `Assoc fields -> (
+          match List.assoc_opt "error" fields with
+          | Some (`String e) -> Error e
+          | Some _ | None ->
+              Error (Printf.sprintf "lsp question returned %d: %s" status body))
+      | _ ->
+          Error (Printf.sprintf "lsp question returned %d: %s" status body))
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("lsp question was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_lsp_answer json)
+
 (** Add a note to [file_path] in [codebase]
     ([POST /api/v1/ide/annotations]). The route wants a write-tier bearer;
     the admin token this process mints carries it. The server answers the

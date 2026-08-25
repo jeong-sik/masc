@@ -5323,6 +5323,21 @@ def code_lane_fixtures() -> HttpFixtures:
         "/api/v1/git/diff?path=lib%2Fa.ml&base_ref=HEAD",
     ):
         fixtures[diff_path] = diff_response
+    hover_response = (200, {"ok": True, "data": {"kind": "hover", "text": "int"}})
+    definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 2,
+             "character": 1},
+        ]}},
+    )
+    for enc in ("lib/a.ml", "lib%2Fa.ml"):
+        fixtures[
+            f"/api/v1/lsp/question?question=hover&path={enc}&line=1&symbol=x"
+        ] = hover_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=1&symbol=x"
+        ] = definition_response
     return fixtures
 
 
@@ -5345,8 +5360,10 @@ def code_lane_interaction(
     opened = send_and_wait(
         process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
     )
-    if re.search(rb"\x1b\[2m\s+1\x1b\[0m", opened) is None:
-        raise AssertionError(f"no line-number gutter: {opened!r}")
+    if re.search(rb"\x1b\[7m\s+1\x1b\[0m", opened) is None:
+        raise AssertionError(
+            f"the cursor line's gutter is not highlighted: {opened!r}"
+        )
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
     # l pans the open file sideways by one cell: the keyword span is cut
@@ -5382,6 +5399,21 @@ def code_lane_interaction(
             f"history footer does not offer the way back: {history_plain!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    # K pre-fills the palette with the hover command; the argument is the
+    # symbol, and the answer lands beside the title.
+    prefilled = send_and_wait(process, master_fd, output, b"K", b"hover ")
+    if b"MASC Palette" not in CSI_RE.sub(b"", prefilled) and \
+            b"hover " not in CSI_RE.sub(b"", prefilled):
+        raise AssertionError(f"K did not open the palette: {prefilled!r}")
+    send_and_wait(process, master_fd, output, b"x\r", b"x: int")
+    # D asks for the definition; the answer is inside the same file, so the
+    # cursor (the reverse gutter) moves to its line.
+    send_and_wait(process, master_fd, output, b"D", b"def ")
+    landed = send_and_wait(process, master_fd, output, b"x\r", b"x: lib/a.ml:2")
+    if re.search(rb"\x1b\[7m\s+2\x1b\[0m", landed) is None:
+        raise AssertionError(
+            f"the definition jump did not move the cursor gutter: {landed!r}"
+        )
     os.write(master_fd, b"q")
 
 

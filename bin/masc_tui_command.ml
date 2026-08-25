@@ -122,9 +122,21 @@ let parse text =
 
 type hint =
   | No_command
-  | Candidates of command_help list
+  | Candidates of {
+      typed : string;
+      entries : command_help list;
+    }
   | Chosen of command_help
   | Unknown_command of string
+
+(* One piece of a hint row, split where the colour changes. The module draws
+   nothing itself -- it says which glyphs are the ones already typed and
+   which are still ahead, and the renderer decides what that looks like. *)
+type hint_span =
+  | Typed of string  (** Glyphs the operator has already entered. *)
+  | Untyped of string  (** What the word would still need. *)
+  | Detail of string  (** Arguments, summaries, separators. *)
+  | Wrong of string  (** A word that names no command. *)
 
 (* What to show an operator who is part way through typing a command.
 
@@ -151,23 +163,54 @@ let hint text =
             catalog
         with
         | [] -> Unknown_command word
-        | candidates -> Candidates candidates)
+        | entries -> Candidates { typed = word; entries })
 
-let hint_line = function
-  | No_command -> None
-  | Chosen entry -> Some (usage entry ^ " \xe2\x80\x94 " ^ entry.summary)
-  | Candidates [ entry ] ->
-      (* Down to one word, so there is room to say how it ends even though
-         the word itself is not typed out yet. *)
-      Some (usage entry)
-  | Candidates entries ->
+let em_dash = " \xe2\x80\x94 "
+
+(* The typed run always starts with the slash, so the highlight covers what
+   the operator pressed rather than the word minus its first key. *)
+let word_spans ~typed entry =
+  let remaining =
+    String.sub entry.word (String.length typed)
+      (String.length entry.word - String.length typed)
+  in
+  [ Typed ("/" ^ typed); Untyped remaining ]
+
+let hint_spans = function
+  | No_command -> []
+  | Chosen entry ->
+      Typed ("/" ^ entry.word)
+      :: (if String.equal entry.args "" then []
+          else [ Detail (" " ^ entry.args) ])
+      @ [ Detail (em_dash ^ entry.summary) ]
+  | Candidates { typed; entries = [ entry ] } ->
+      (* Down to one word, so there is room to say how it ends even though the
+         word itself is not typed out yet. *)
+      word_spans ~typed entry
+      @ (if String.equal entry.args "" then []
+         else [ Detail (" " ^ entry.args) ])
+  | Candidates { typed; entries } ->
       (* Names only. Every usage spelled out runs past a 120-column pane on
          the bare slash, and the commands that fell off the end were the ones
          an operator who typed [/] had not thought of yet. *)
-      Some (String.concat "  " (List.map (fun entry -> "/" ^ entry.word) entries))
+      List.concat
+        (List.mapi
+           (fun index entry ->
+              (if index = 0 then [] else [ Detail "  " ])
+              @ word_spans ~typed entry)
+           entries)
   | Unknown_command word ->
-      Some
-        (Printf.sprintf "/%s is not a command \xe2\x80\x94 /help lists them" word)
+      [ Wrong ("/" ^ word)
+      ; Detail (" is not a command" ^ em_dash ^ "/help lists them")
+      ]
+
+let hint_span_text = function
+  | Typed text | Untyped text | Detail text | Wrong text -> text
+
+let hint_line hint =
+  match hint_spans hint with
+  | [] -> None
+  | spans -> Some (String.concat "" (List.map hint_span_text spans))
 
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,

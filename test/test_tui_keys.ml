@@ -83,6 +83,14 @@ let test_verification_footer_carries_the_verdict_keys () =
     "j/k:scroll  a:approve  x:reject  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
+let test_fusion_footer_matches_the_list_dispatch () =
+  (* The Fusion PTY scenario drives j, r, Enter, PgDn, and Esc through the
+     list/detail dispatch. Pin the complete list footer here so the shared
+     projection cannot silently add or drop a key from that contract. *)
+  check str "fusion names its list and detail keys"
+    "j/k:move  PgUp / PgDn:page  Right / Enter:detail  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Fusion)
+
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
      Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
@@ -155,6 +163,8 @@ let () =
             test_repositories_footer_offers_the_code_tree
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
+        ; Alcotest.test_case "Fusion matches the list dispatch" `Quick
+            test_fusion_footer_matches_the_list_dispatch
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick

@@ -37,6 +37,9 @@ let keeper_toml_fields =
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
+    (* RFC-0390. Declared here so any other [keeper.tools] key is an unknown
+       key that fails the load, not a silently ignored sibling. *)
+  ; "tools.native", Field_string
   ]
 
 let keeper_toml_field_names = List.map fst keeper_toml_fields
@@ -185,6 +188,22 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      (String.concat ", " valid_multimodal_policy_strings)))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "tools.native" with
+        | Some raw -> (
+            match Runtime_native_tools.of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid keeper.tools.native '%s' (allowed: %s)"
+                     raw
+                     (String.concat
+                        ", "
+                        Runtime_native_tools.valid_posture_strings)))
+        | None -> Ok ())
+  in
   let max_context_override_result =
     match int_ "max_context_override" with
     | None -> Ok None
@@ -234,6 +253,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
+        native_tool_posture =
+          Option.bind (str "tools.native") Runtime_native_tools.of_string;
         agent_core_env;
       })
       max_context_override_result)
@@ -284,6 +305,8 @@ let merge_keeper_profile_defaults
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
     always_allow = prefer overlay.always_allow base.always_allow;
+    native_tool_posture =
+      prefer overlay.native_tool_posture base.native_tool_posture;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

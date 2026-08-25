@@ -127,6 +127,7 @@ type header_rejection =
   | Mirrored_header_mismatch of string
   | Unreadable_body of string
   | Unsupported_version of { requested : string }
+  | Missing_required_meta of { key : string }
 
 let header_mismatch msg = Error (Mirrored_header_mismatch msg)
 
@@ -149,10 +150,13 @@ let validate_2026_request_headers request body_str =
           (Unreadable_body
              "MCP-Protocol-Version names a stateless revision but the body is \
               not a JSON object")
+    (* A required _meta field being absent is not a header disagreement: the
+       request is malformed, and 2026-07-28 answers that with -32602. It left
+       as a mismatch until now. *)
     | Some _, None ->
-        header_mismatch
-          ("missing params._meta."
-         ^ Mcp_transport_protocol.protocol_version_meta_key)
+        Error
+          (Missing_required_meta
+             { key = Mcp_transport_protocol.protocol_version_meta_key })
     | Some header_version, Some body_version
       when not (String.equal header_version body_version) ->
         header_mismatch
@@ -163,6 +167,13 @@ let validate_2026_request_headers request body_str =
     | Some version, Some _
       when not (Mcp_transport_protocol.is_supported_protocol_version version) ->
         Error (Unsupported_version { requested = version })
+    | Some _version, Some _
+      when not
+             (Mcp_transport_protocol.request_meta_has_key body_str
+                Mcp_transport_protocol.client_capabilities_meta_key) ->
+        Error
+          (Missing_required_meta
+             { key = Mcp_transport_protocol.client_capabilities_meta_key })
     | Some _version, Some _ -> (
         match body_jsonrpc_method_only body_str with
         | None -> Ok ()
@@ -222,6 +233,9 @@ let header_rejection_body body_str = function
   | Unsupported_version { requested } ->
     Mcp_error_code.unsupported_protocol_version_body ~requested
       ~supported:Mcp_transport_protocol.supported_protocol_versions
+  | Missing_required_meta { key } ->
+    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_params
+      ~message:(Printf.sprintf "missing required params._meta.%s" key)
 
 let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
   match body_jsonrpc_method body_str with

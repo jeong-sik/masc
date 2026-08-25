@@ -53,6 +53,10 @@ type header_rejection =
   | Unsupported_version of { requested : string }
       (** Not a header disagreement: this server does not speak that
           revision. Answered with [-32022] and the supported list. *)
+  | Missing_required_meta of { key : string }
+      (** A [_meta] field 2026-07-28 marks required on every request is
+          absent. The request is malformed rather than inconsistent, so it is
+          answered with [-32602]. *)
 
 val header_rejection_body : string -> header_rejection -> string
 (** [header_rejection_body body_str rejection] is the complete JSON-RPC error

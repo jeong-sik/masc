@@ -184,6 +184,17 @@ val protocol_version_from_params : Yojson.Safe.t option -> string
 (** Extract [protocolVersion] from a JSON-RPC [params] object,
     falling back to {!default_protocol_version}. *)
 
+val client_capabilities_meta_key : string
+(** ["io.modelcontextprotocol/clientCapabilities"] — the second [_meta] field
+    2026-07-28 marks required on every client request. A request missing a
+    required field is malformed and answered with [-32602]. *)
+
+val request_meta_has_key : string -> string -> bool
+(** [request_meta_has_key body_str key] is whether [params._meta] in [body_str]
+    carries [key] with a non-null value. An unparseable body, an absent
+    [_meta], and an explicit [null] all answer [false] — none of them is a
+    declaration. *)
+
 val protocol_version_meta_key : string
 (** Fully qualified per-request [_meta] key used by the 2026-07-28
     stateless protocol: ["io.modelcontextprotocol/protocolVersion"]. *)

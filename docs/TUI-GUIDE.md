@@ -715,9 +715,14 @@ than slowly. The pane then answers three more questions in place:
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
 
-One overlay at a time — opening the diff closes the history and the other
-way round, so `j`/`k` always has one owner. `Esc` closes the overlay first,
-then the file, then climbs directories.
+- `m` swaps it for the notes anchored to the file — who left each one, its
+  kind, the line span, and the task it rides with. Notes are keyed by the
+  server-minted codebase slug, which only a Repositories row carries, so
+  `m` answers in repository scope and says why not in the others.
+
+One overlay at a time — opening any of the three closes the other two, so
+`j`/`k` always has one owner. `Esc` closes the overlay first, then the
+file, then climbs directories.
 
 ### Runtime
 
@@ -820,6 +825,7 @@ Per surface:
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
 | `H` | Code, file open | The commits that touched the file |
 | `d` | Code, file open | The working tree's diff against HEAD |
+| `m` | Code, file open, repository scope | The notes anchored to the file |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |

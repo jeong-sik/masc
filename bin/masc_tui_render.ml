@@ -6069,6 +6069,7 @@ let render_code (state : state) =
   let content_pane pane_buf pane_cols =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
+    let notes_showing = state.code_notes_open in
     let title =
       match state.code_file with
       | Some (path, _) ->
@@ -6078,13 +6079,14 @@ let render_code (state : state) =
                column 41 reads as a file whose lines begin mid-word. *)
             if
               state.code_file_hscroll > 0 && not history_showing
-              && not diff_showing
+              && not diff_showing && not notes_showing
             then
               Printf.sprintf "%s  (col %d)" path
                 (state.code_file_hscroll + 1)
             else path
           in
-          if diff_showing then "diff vs HEAD: " ^ path
+          if notes_showing then "notes: " ^ path
+          else if diff_showing then "diff vs HEAD: " ^ path
           else if history_showing then "history: " ^ path
           else path
       | None -> "(Enter opens the selected file)"
@@ -6099,7 +6101,58 @@ let render_code (state : state) =
     (* Five chrome rows: top gap, title, divider, bottom gap, and the
        footer this pane must leave room for. *)
     let content_height = max 1 (rows - 5) in
-    (if diff_showing then
+    (if notes_showing then
+       match state.code_notes_error, state.code_notes with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (loading notes)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, []) ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (no note anchors to this file)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, notes) ->
+           let total = List.length notes in
+           let max_scroll = max 0 (total - content_height) in
+           let scroll = max 0 (min state.code_notes_scroll max_scroll) in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt notes (scroll + i) with
+             | Some note ->
+                 let open Masc.Tui_decode in
+                 let anchor =
+                   if note.ia_line_start = note.ia_line_end then
+                     Printf.sprintf "L%d" note.ia_line_start
+                   else
+                     Printf.sprintf "L%d-%d" note.ia_line_start
+                       note.ia_line_end
+                 in
+                 let task =
+                   match note.ia_task with
+                   | Some t -> "  [" ^ t ^ "]"
+                   | None -> ""
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%-9s%s %s%s (%s)%s%s  %s" Ansi.dim
+                      anchor Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      (Terminal_text.single_line note.ia_keeper)
+                      note.ia_kind Ansi.reset
+                      (Ansi.dim ^ task ^ Ansi.reset)
+                      (Terminal_text.single_line note.ia_content))
+             | None -> box_empty pane_buf pane_cols
+           done
+     else if diff_showing then
        match state.code_diff_error, state.code_diff with
        | Some detail, _ ->
            box_line pane_buf pane_cols
@@ -6245,11 +6298,15 @@ let render_code (state : state) =
             (if state.code_focus_file then "scroll" else "move")
             (if
                state.code_focus_file && not state.code_history_open
-               && not state.code_diff_open
+               && not state.code_diff_open && not state.code_notes_open
              then "h/l:pan  "
              else "")
-            (if state.code_focus_file then "d:diff  H:history  " else "")
-            (if state.code_history_open || state.code_diff_open then "code"
+            (if state.code_focus_file then "d:diff  H:history  m:notes  "
+             else "")
+            (if
+               state.code_history_open || state.code_diff_open
+               || state.code_notes_open
+             then "code"
              else if state.code_focus_file then "list"
              else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf

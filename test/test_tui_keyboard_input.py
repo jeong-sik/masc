@@ -4520,6 +4520,7 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
         {
             "repositories": [
                 {"id": "masc", "name": "masc",
+                 "codebase": "github.com_jeong-sik_masc",
                  "local_path": "workspace/masc", "default_branch": "main",
                  "status": "ready", "keepers": ["alpha"], "auto_sync": True},
             ],
@@ -4546,6 +4547,19 @@ def repositories_enter_interaction(
         raise AssertionError(
             f"the Code header does not name the repository: {code_plain!r}"
         )
+    # Open a file in the repository scope, then m: the notes anchored to it
+    # arrive through the codebase slug the repositories row carries.
+    send_and_wait(process, master_fd, output, b"j\r", b"let")
+    notes = send_and_wait(
+        process, master_fd, output, b"m", b"keep n at three"
+    )
+    notes_plain = CSI_RE.sub(b"", notes).decode("utf-8")
+    for needle in ("notes: note.ml", "L1", "alpha", "decision", "task-77"):
+        if needle not in notes_plain:
+            raise AssertionError(
+                f"the notes view missed {needle!r}: {notes_plain!r}"
+            )
+    send_and_wait(process, master_fd, output, b"\x1b", b"let")
     os.write(master_fd, b"q")
 
 
@@ -6377,8 +6391,32 @@ def run_keyboard_regression(executable: str) -> None:
             {"path": "src", "label": "src", "depth": 0, "parent": "",
              "hasChildren": True, "diff": None, "keeperId": None,
              "hueIndex": None},
+            {"path": "note.ml", "label": "note.ml", "depth": 0, "parent": "",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
         ],
     )
+    repo_file = (200, {"ok": True, "content": "let n = 3\n"})
+    for file_path in (
+        "/api/v1/workspace/file?path=note.ml&repo_id=masc",
+    ):
+        repositories_fixtures[file_path] = repo_file
+    notes_response = (
+        200,
+        {
+            "ok": True,
+            "data": [
+                {"id": "an-1", "file_path": "note.ml", "line_start": 1,
+                 "line_end": 1, "keeper_id": "alpha", "kind": "decision",
+                 "content": "keep n at three until the probe lands",
+                 "goal_id": None, "task_id": "task-77", "references": [],
+                 "created_at_ms": 1, "updated_at_ms": 1},
+            ],
+        },
+    )
+    repositories_fixtures[
+        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
+    ] = notes_response
     run_terminal_scenario(
         executable,
         description="Repositories Enter opens the Code tree",

@@ -366,6 +366,28 @@ let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
           Error ("git log was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_git_log json)
 
+(** The notes anchored to [file_path] in [codebase]
+    ([/api/v1/ide/annotations]). The slug is the server's own mint, carried
+    from the repositories listing -- never re-derived here (RFC-0378). *)
+let fetch_ide_annotations ~(host : string) ~(port : int) ~(codebase : string)
+    ~(file_path : string) : (Masc.Tui_decode.ide_annotation list, string) result
+    =
+  let route =
+    Printf.sprintf "/api/v1/ide/annotations?codebase=%s&file_path=%s"
+      (percent_encode_query_value codebase)
+      (percent_encode_query_value file_path)
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "annotations returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("annotations were not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_ide_annotations json)
+
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =

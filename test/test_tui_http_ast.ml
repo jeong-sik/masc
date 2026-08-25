@@ -1010,11 +1010,34 @@ let test_planning_refresh_reconciles_navigation_identity () =
        ~fields:[ "view" ]);
   check int "HTTP surface application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
-  check int "refresh loop no longer checks the stale planning snapshot" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"List.find_opt")
+       ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load")
 ;;
+
+(* A fifth check used to stand here, reading
+
+     count_calls_in_value_binding ~binding_name:"main" ~callee:"List.find_opt" = 0
+
+   under the name "refresh loop no longer checks the stale planning snapshot".
+   It counted every [List.find_opt] in [main], which is a 2,700-line binding
+   holding the whole key loop, so any feature that looks something up by id
+   fails it. #30603 added one to answer a pull request for the commit under the
+   cursor and took main red, and the message sent the reader looking for a
+   planning snapshot that binding never touched.
+
+   It is removed rather than narrowed because narrowing it does not work: the
+   lookup it guarded lived inside [main]'s [while true], so scoping to the loop
+   counts the same call, and the stale read went through [pl_goals], which
+   [main] also reads legitimately to bound the cursor. Ast_grep has no way to
+   say "this find_opt, over the planning snapshot".
+
+   What that check was defending is held by the four above: reconciliation
+   happens exactly once in the module, that one call is inside
+   [apply_planning_load], the apply reads nothing from the visible surface, and
+   the HTTP surface drives it once. A second owner of the identity has to show
+   up in one of those numbers. A hand-rolled lookup that avoids
+   [Planning_selection.reconcile] entirely would still slip past, and did
+   before -- pinning that needs a check that can name the snapshot, not one
+   that names a list function. *)
 
 let test_overview_events_use_scroll_projection () =
   check int "overview renders one bounded event window" 1

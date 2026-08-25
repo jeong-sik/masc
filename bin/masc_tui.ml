@@ -5937,9 +5937,6 @@ let main () =
                             ~mailbox:async_messages ~run_id:run.fur_run_id
                       | None -> ())
                  | Fusion_detail _ -> ())
-            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message
-            | Acting | Lanes | Approvals | Schedules | Verification | Harness
             | Changes -> (
                 (* The row under the cursor, read as the lines it removed and
                    added. Held as an index rather than a copy: a refresh
@@ -5960,6 +5957,9 @@ let main () =
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
+            | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
+            | Keepers Keeper_message
+            | Acting | Lanes | Approvals | Schedules | Verification | Harness
             | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter

@@ -1332,6 +1332,70 @@ let render_approvals (state : state) =
   in
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
 
+  (* Questions Keepers put to a human sit under the approval queue rather than
+     in it. Nothing is held waiting on them -- the Keeper that asked kept
+     working -- so they are not a queue of blocked calls, but an operator
+     deciding things belongs in one place either way. *)
+  (match state.asks_snapshot with
+   | None -> ()
+   | Some snapshot ->
+       let open_rows =
+         List.filter
+           (fun (row : Masc.Tui_decode.ask_row) ->
+             match row.Masc.Tui_decode.ar_resolution with
+             | Masc.Tui_decode.Ask_open -> true
+             | Masc.Tui_decode.Ask_answered _ | Masc.Tui_decode.Ask_withdrawn _ -> false)
+           snapshot.Masc.Tui_decode.asn_rows
+       in
+       box_divider buf cols;
+       box_line buf cols
+         (Printf.sprintf "%sQuestions waiting on you (%d)%s" Ansi.bold
+            (List.length open_rows) Ansi.reset);
+       (match open_rows with
+        | [] ->
+            box_line buf cols
+              (Printf.sprintf "  %snone -- no Keeper is waiting on a decision%s" Ansi.dim
+                 Ansi.reset)
+        | rows ->
+            List.iter
+              (fun (row : Masc.Tui_decode.ask_row) ->
+                List.iter
+                  (fun (question : Masc.Tui_decode.ask_question) ->
+                    box_line buf cols
+                      (Printf.sprintf "  %s%s%s  %s"
+                         Ansi.bold
+                         (fit_width
+                            (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper)
+                            16)
+                         Ansi.reset
+                         (fit_width
+                            (Terminal_text.single_line question.Masc.Tui_decode.aq_prompt)
+                            (max 8 (cols - 24))));
+                    List.iter
+                      (fun (choice : Masc.Tui_decode.ask_choice) ->
+                        box_line buf cols
+                          (Printf.sprintf "    %s%s%s  %s" Ansi.dim
+                             (fit_width
+                                (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
+                                12)
+                             Ansi.reset
+                             (fit_width
+                                (Terminal_text.single_line choice.Masc.Tui_decode.ac_label)
+                                (max 8 (cols - 22)))))
+                      question.Masc.Tui_decode.aq_choices)
+                  row.Masc.Tui_decode.ar_questions;
+                (* The reason is what separates a decision that matters from
+                   one that does not, so it is drawn, not hidden behind a
+                   detail view. *)
+                match row.Masc.Tui_decode.ar_context with
+                | None -> ()
+                | Some context ->
+                    box_line buf cols
+                      (Printf.sprintf "    %swhy: %s%s" Ansi.dim
+                         (fit_width (Terminal_text.single_line context) (max 8 (cols - 12)))
+                         Ansi.reset))
+              rows));
+
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next");
 

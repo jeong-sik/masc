@@ -5997,12 +5997,14 @@ let render_code (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = not state.code_focus_file in
     let where = if String.equal state.code_dir "" then "/" else state.code_dir in
-    (* Whose tree this is: a keeper workspace reads differently from the
-       project's, and the same relative path exists in both. *)
+    (* Whose tree this is: a keeper workspace or a repository reads
+       differently from the project's, and the same relative path exists in
+       more than one of them. *)
     let where =
-      match state.code_keeper with
-      | Some keeper -> keeper ^ " \xe2\x96\xb8 " ^ where
-      | None -> where
+      match state.code_scope with
+      | Code_scope_project -> where
+      | Code_scope_keeper keeper -> keeper ^ " \xe2\x96\xb8 " ^ where
+      | Code_scope_repo repo -> repo ^ " \xe2\x96\xb8 " ^ where
     in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)

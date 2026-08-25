@@ -4511,6 +4511,44 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
     return interact
 
 
+REPOSITORIES_PATH = "/api/v1/repositories"
+
+
+def repositories_fixture() -> tuple[int, dict[str, object]]:
+    return (
+        200,
+        {
+            "repositories": [
+                {"id": "masc", "name": "masc",
+                 "local_path": "workspace/masc", "default_branch": "main",
+                 "status": "ready", "keepers": ["alpha"], "auto_sync": True},
+            ],
+            "total": 1,
+        },
+    )
+
+
+def repositories_enter_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Enter on a Repositories row opens that repository's own tree on the
+    Code surface, through the ?repo_id= axis; the header names whose tree
+    it is."""
+    tab_until(process, master_fd, output, b"MASC Repositories")
+    wait_for_output(process, master_fd, output, b"ready", start=0, timeout=3.0)
+    code = send_and_wait(process, master_fd, output, b"\r", b"src")
+    code_plain = CSI_RE.sub(b"", code).decode("utf-8")
+    if "masc ▸ /" not in code_plain:
+        raise AssertionError(
+            f"the Code header does not name the repository: {code_plain!r}"
+        )
+    os.write(master_fd, b"q")
+
+
 VERIFICATION_VERDICT_PATH = "/api/v1/verification/verdict"
 
 
@@ -6303,6 +6341,22 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/verification/requests?limit=200": verification_gate,
         },
+    )
+    repositories_fixtures = keeper_runtime_http_fixtures()
+    repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
+    repositories_fixtures["/api/v1/workspace/tree?depth=0&limit=200&repo_id=masc"] = (
+        200,
+        [
+            {"path": "src", "label": "src", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    run_terminal_scenario(
+        executable,
+        description="Repositories Enter opens the Code tree",
+        interact=repositories_enter_interaction,
+        http_fixtures=repositories_fixtures,
     )
     verdict_requests: HttpRequests = []
     with reject_editor_script() as reject_editor:

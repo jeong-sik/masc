@@ -689,6 +689,15 @@ type inflight =
   ; live : Masc_tui_keeper_chat_transcript.t
   }
 
+(* Which workspace the Code surface reads. The workspace routes resolve each
+   through its own query axis: a keeper's playground via [?keeper=] (where a
+   Changes row's clone-relative path lives), a registered repository via
+   [?repo_id=] (what a Repositories row names). *)
+type code_workspace_scope =
+  | Code_scope_project
+  | Code_scope_keeper of string
+  | Code_scope_repo of string
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -930,10 +939,10 @@ type state = {
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
-  (* Whose workspace the surface reads: [None] is the project tree, [Some k]
-     is keeper k's playground (the ?keeper= axis the git-diff read already
-     uses), which is where a Changes row's clone-relative path resolves. *)
-  mutable code_keeper: string option;
+  (* Whose workspace the surface reads. One field, one value: a keeper's
+     playground and a project repository at the same time is not a
+     representable state. *)
+  mutable code_scope: code_workspace_scope;
   (* Set by the jump that opens a file at a line; consumed (once) when the
      file arrives, because the load handler owns the scroll reset. *)
   mutable code_target_line: int option;
@@ -1317,7 +1326,7 @@ let create_state
   code_history_error = None;
   code_history_open = false;
   code_history_scroll = 0;
-  code_keeper = None;
+  code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
   changes = None;

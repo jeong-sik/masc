@@ -341,6 +341,7 @@ val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
 type repository = {
+  rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   rp_local_path : string;
   rp_default_branch : string;

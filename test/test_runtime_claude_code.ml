@@ -950,6 +950,7 @@ let test_stream_events_preserve_native_tool_origin () =
     (fun path ->
       match
         run_fixture
+          ~timeout_s:window_outlasting_process_start_s
           ~on_stream_event:(fun event -> events := event :: !events)
           path
       with

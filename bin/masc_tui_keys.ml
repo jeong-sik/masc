@@ -214,9 +214,11 @@ let for_surface = function
       ; b Search "n / N" "next / previous match"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
-                 (the palette collects the name)"
+                 (one name asks at once; several open the palette as \
+                 choices)"
       ; b Act "D" "definition"
-          ~help:"jump to where a name on the cursor line is defined"
+          ~help:"jump to where a name on the cursor line is defined (one \
+                 name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
       ; b Act "m" "notes"

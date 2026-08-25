@@ -5134,9 +5134,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              match state.code_file with
              | Some (open_path, rows)
                when String.equal open_path location.ll_path ->
-                 state.code_file_cursor <-
+                 let cursor =
                    max 0
                      (min (location.ll_line - 1) (List.length rows - 1))
+                 in
+                 state.code_file_cursor <- cursor;
+                 (* Follow the jump: a definition past the fold is a cursor
+                    the operator cannot see otherwise. *)
+                 state.code_file_scroll <-
+                   Masc_tui_scroll.ensure_visible ~cursor
+                     ~height:(Masc_tui_render.code_pane_content_height ())
+                     state.code_file_scroll
              | Some _ | None ->
                  state.code_target_line <- Some location.ll_line;
                  launch_code_file_load state ~mailbox
@@ -6768,17 +6776,38 @@ let main () =
                   if String.equal question "def" then "definition"
                   else question
                 in
-                close ();
-                if String.equal symbol "" then
-                  add_event state "error"
-                    (question ^ " needs a symbol: :" ^ question ^ " <name>")
-                else if state.view <> Code || Option.is_none state.code_file
-                then
-                  add_event state "error"
-                    "hover/def ask about the file open on the Code surface"
-                else
-                  start_code_lsp_question state ~mailbox:async_messages
-                    ~question ~symbol
+                if String.equal symbol "" then begin
+                  (* Bare "def " or "hover ": run the highlighted candidate
+                     entry -- the cursor line's names ride the palette list,
+                     so Enter alone picks the one in view. *)
+                  let matches = Masc_tui_types.palette_matches state in
+                  let chosen =
+                    List.nth_opt matches
+                      (max 0
+                         (min state.palette_cursor
+                            (List.length matches - 1)))
+                  in
+                  close ();
+                  match chosen with
+                  | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                    ->
+                      start_code_lsp_question state
+                        ~mailbox:async_messages ~question ~symbol
+                  | Some _ | None ->
+                      add_event state "error"
+                        (question ^ " needs a symbol: :" ^ question
+                       ^ " <name>")
+                end
+                else begin
+                  close ();
+                  if state.view <> Code || Option.is_none state.code_file
+                  then
+                    add_event state "error"
+                      "hover/def ask about the file open on the Code surface"
+                  else
+                    start_code_lsp_question state ~mailbox:async_messages
+                      ~question ~symbol
+                end
             | "\r" ->
                 let matches = Masc_tui_types.palette_matches state in
                 let chosen =
@@ -6825,6 +6854,10 @@ let main () =
                           open_board_post state ~mailbox:async_messages
                             ~focus:Board_detail_pane post
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                   ->
+                     start_code_lsp_question state ~mailbox:async_messages
+                       ~question ~symbol
                  | None -> ())
             | "down" -> state.palette_cursor <- state.palette_cursor + 1
             | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
@@ -7059,25 +7092,32 @@ let main () =
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some "K" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file
-                       && not state.code_history_open
-                       && not state.code_diff_open
-                       && not state.code_notes_open ->
-           (* Ask the language server what a name on the cursor line is. The
-              palette collects the name: the pane has no character cursor,
-              and the route's address arithmetic wants the literal symbol. *)
-           state.palette_open <- true;
-           state.palette_query <- "hover ";
-           state.palette_cursor <- 0
-       | Some "D" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file
-                       && not state.code_history_open
-                       && not state.code_diff_open
-                       && not state.code_notes_open ->
-           state.palette_open <- true;
-           state.palette_query <- "def ";
-           state.palette_cursor <- 0
+       | Some (("K" | "D") as key_name)
+         when state.view = Code && state.code_focus_file
+              && Option.is_some state.code_file
+              && not state.code_history_open
+              && not state.code_diff_open
+              && not state.code_notes_open ->
+           (* Ask the language server about a name on the cursor line. The
+              pane has no character cursor, so the line's own names are the
+              candidates: one name is asked about at once, several open the
+              palette with each as an entry (typing still narrows, and a
+              typed "def <name>" keeps working), and none says so. *)
+           let question, prefix =
+             if String.equal key_name "K" then ("hover", "hover ")
+             else ("definition", "def ")
+           in
+           (match Masc_tui_types.code_cursor_line_symbols state with
+            | [] ->
+                state.code_lsp_note <-
+                  Some "the cursor line has no name to ask about"
+            | [ symbol ] ->
+                start_code_lsp_question state ~mailbox:async_messages
+                  ~question ~symbol
+            | _ :: _ :: _ ->
+                state.palette_open <- true;
+                state.palette_query <- prefix;
+                state.palette_cursor <- 0)
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)

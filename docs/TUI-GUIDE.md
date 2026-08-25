@@ -737,8 +737,11 @@ than slowly. The pane then answers three more questions in place:
   a recorded keeper edit. The pane decorates only what is already loaded;
   it does not fetch to decorate.
 - `K` asks the language server what a name on the cursor line is, and `D`
-  where it is defined. The palette collects the name (the pane has no
-  character cursor); the answer lands beside the title, and a definition
+  where it is defined. The line's own names are the candidates (the pane
+  has no character cursor): one name is asked about at once, several open
+  the palette with each as an entry — typing narrows them, `Enter` runs
+  the highlighted one, and a typed `def <name>` still works — and a line
+  with none says so. The answer lands beside the title, and a definition
   inside the workspace moves the cursor there — another file opens at the
   answered line, and a location outside the workspace (stdlib, a package)
   is named rather than opened. The reverse-video gutter is the cursor

@@ -1864,6 +1864,10 @@ type palette_action =
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
+  (* (question, symbol): a language-server question about a name on the
+     Code pane's cursor line — the K/D candidates ride the palette as
+     entries so one keypress can also be a choice among several names. *)
+  | Palette_lsp of string * string
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1877,6 +1881,55 @@ let palette_contains ~needle haystack =
     done;
     !found
   end
+
+(* The identifier names on the file pane's cursor line, in reading order,
+   first occurrence only. The open file already carries its lexed segments,
+   so the scan skips what the lexer called a keyword, a string, a comment,
+   or a number -- those offer no name a language server answers about --
+   rather than keeping a second keyword list that could drift. *)
+let code_cursor_line_symbols (state : state) =
+  match state.code_file with
+  | None -> []
+  | Some (_, rows) -> (
+      match List.nth_opt rows state.code_file_cursor with
+      | None -> []
+      | Some segments ->
+          let name_kind kind =
+            not
+              (List.exists (String.equal kind)
+                 [ Masc_tui_code_lexer.kind_keyword;
+                   Masc_tui_code_lexer.kind_string;
+                   Masc_tui_code_lexer.kind_comment;
+                   Masc_tui_code_lexer.kind_number ])
+          in
+          let starts c =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+          in
+          let continues c =
+            starts c || (c >= '0' && c <= '9') || c = '\''
+          in
+          let names = ref [] in
+          List.iter
+            (fun (text, kind) ->
+              if name_kind kind then begin
+                let n = String.length text in
+                let i = ref 0 in
+                while !i < n do
+                  if starts text.[!i] then begin
+                    let j = ref (!i + 1) in
+                    while !j < n && continues text.[!j] do
+                      incr j
+                    done;
+                    let name = String.sub text !i (!j - !i) in
+                    if not (List.exists (String.equal name) !names) then
+                      names := name :: !names;
+                    i := !j
+                  end
+                  else incr i
+                done
+              end)
+            segments;
+          List.rev !names)
 
 let palette_entries (state : state) =
   List.map
@@ -1893,6 +1946,16 @@ let palette_entries (state : state) =
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
+  @ (* With a file focused on the Code surface, the cursor line's names are
+       askable: K/D pre-fill the matching prefix, so exactly these entries
+       remain in view. *)
+  (if state.view = Code && state.code_focus_file then
+     List.concat_map
+       (fun name ->
+         [ ("def " ^ name, Palette_lsp ("definition", name));
+           ("hover " ^ name, Palette_lsp ("hover", name)) ])
+       (code_cursor_line_symbols state)
+   else [])
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)

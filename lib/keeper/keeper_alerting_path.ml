@@ -818,7 +818,12 @@ let ensure_sandbox_bundle_for_profile
     {!effective_write_allowed_paths}: a skill is a file the operator placed,
     and a keeper that could rewrite one could take the whole catalog down —
     [Keeper_skill_catalog.of_documents] fails the catalog on the first
-    unparsable document, which blocks every keeper's turn. *)
+    unparsable document, which blocks every keeper's turn. That exclusion
+    states the typed surface's intent; it is not containment.
+    [Keeper_tool_execute_path] gates only a command's [cwd], so an [Execute]
+    argv already names this path today — that is why keepers reached the tree
+    through [Execute] while [Read] refused it. Narrowing [Execute] is separate
+    work. *)
 let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   (Common.skills_rel :: sandbox_paths) @ meta.allowed_paths

@@ -166,8 +166,14 @@ let test_append_turn_roundtrip () =
       Alcotest.(check (option string)) "tool name persisted"
         (Some "Read") tool1.tool_call_name;
       Alcotest.(check string) "tool args persisted" {|{"path":"x"}|} tool1.content;
-      Alcotest.(check (option string)) "empty tool id gets positional fallback"
-        (Some "tc-1") tool2.tool_call_id;
+      (* Was [Some "tc-1"]. The positional fallback made this writer disagree
+         with the log writer, which answers the same absence by omitting the
+         field, so the dashboard join — matching on that id alone — could
+         never pair the two rows and the step stayed pending (#21894). A call
+         the provider did not name has no id to record. The delivery slot
+         still resolves positionally; only the recorded field changed. *)
+      Alcotest.(check (option string)) "an unnamed tool call records no id"
+        None tool2.tool_call_id;
       Alcotest.(check string) "empty args normalised" "{}" tool2.content;
       Alcotest.(check (option string)) "surface label derives on every line"
         (Some "dashboard")

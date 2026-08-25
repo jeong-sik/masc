@@ -1,0 +1,5 @@
+{
+  "_comment": "Direct Sys.getenv reads in local libraries that could use Env_config_core. Regenerate by reading the PASS line of scripts/ci/check_env_reads_below_config.py.",
+  "_issue": "#29353",
+  "direct_env_reads_above_config_floor": 415
+}

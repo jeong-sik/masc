@@ -8,7 +8,6 @@ author: vincent
 supersedes: ["0275"]
 superseded_by: "KEEPER-STATE-OWNERSHIP"
 related: []
-implementation_prs: []
 ---
 
 # RFC-0282: Keeper authored content is ordinary instructions

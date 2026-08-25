@@ -6,7 +6,6 @@ created: 2026-07-20
 authors: [yousleepwhen, claude]
 issues: [25461, 25462, 25463]
 relates: [RFC-0000 Goal 3, RFC-0233, RFC-0244, RFC-0247, RFC-0259, RFC-0332]
-implementation_prs: []
 evidence: knowledge/research/2026-07-20-memory-first-context-management-adversarial-design.md, knowledge/research/2026-07-20-memory-first-context-experiment-log.md (~/me worktree feature/memory-first-context-design)
 ---
 

@@ -3,7 +3,6 @@ title: Persistence read-drop root fix (recovery story for RFC-0044)
 rfc: 0134
 status: Active
 created: 2026-05-19
-implementation_prs: []
 ---
 
 # RFC-0134 — Persistence read-drop root fix (recovery story for RFC-0044)

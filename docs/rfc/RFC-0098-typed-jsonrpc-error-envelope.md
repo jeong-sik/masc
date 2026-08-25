@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0077", "0088", "0089", "0090"]
-implementation_prs: [15759, 15776, 15784, 15789, 15793, 15826]
 ---
 
 # RFC-0098 — Typed JSON-RPC error envelope & production-code silent-failure lint

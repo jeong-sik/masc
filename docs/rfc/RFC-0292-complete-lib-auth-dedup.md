@@ -8,7 +8,6 @@ author: jeong-sik (vincent)
 supersedes: []
 superseded_by: null
 related: ["0099"]
-implementation_prs: []
 ---
 
 # RFC-0292 — Complete `lib/auth` de-duplication

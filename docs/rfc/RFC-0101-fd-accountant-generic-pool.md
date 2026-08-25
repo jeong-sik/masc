@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099", "0100", "0137"]
-implementation_prs: [15727, 15816]
 ---
 
 # RFC-0101 — FD accountant: observation across process resource classes

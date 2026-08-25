@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0089"]
-implementation_prs: []
 ---
 
 # RFC-0174 — Dashboard substring classifier to typed variant

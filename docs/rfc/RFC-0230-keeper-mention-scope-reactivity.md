@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223", "0228"]
-implementation_prs: []
 ---
 
 # RFC-0230: Keeper mention/scope reactivity — cursor-free salience

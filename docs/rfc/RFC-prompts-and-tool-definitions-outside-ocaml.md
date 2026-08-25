@@ -8,7 +8,6 @@ author: claude
 supersedes: ["0057", "0182"]
 superseded_by: null
 related: ["0080", "0233", "0386", "0389"]
-implementation_prs: []
 ---
 
 # RFC: 프롬프트와 도구 정의를 OCaml 밖으로 (prompts-and-tool-definitions-outside-ocaml)

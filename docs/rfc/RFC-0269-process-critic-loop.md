@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0233", "0266", "0267"]
-implementation_prs: []
 ---
 
 ## 1. Problem

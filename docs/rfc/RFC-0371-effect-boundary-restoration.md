@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0042"]
-implementation_prs: [28227, 28231, 28233, 28235, 28238, 28240, 28236, 28234, 28246, 28237, 28248, 28239, 28247, 28249]
 ---
 
 # RFC-0371: Effect 경계 회복 — 이펙트는 경계로, 코어는 순수 로직으로

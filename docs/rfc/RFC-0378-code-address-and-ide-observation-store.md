@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0343", "keeper-workspace-root-only", "0233"]
-implementation_prs: ["28649", "28664", "28671", "28676", "28682", "28684", "28688", "28715"]
 ---
 
 # RFC-0378: Code fact 는 태어날 때 주소를 받는다

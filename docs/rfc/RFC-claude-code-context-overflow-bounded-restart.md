@@ -8,7 +8,6 @@ author: codex
 supersedes: []
 superseded_by: null
 related: ["0351", "0353", "0368", "0371"]
-implementation_prs: [28284]
 ---
 
 # RFC: Claude Code bootstrap admission and rejected-episode fence

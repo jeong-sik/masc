@@ -8,14 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042"]
-implementation_prs:
-  - 15520  # G1 tool_help_registry tool_family
-  - 15523  # G4 keeper_checkpoint_store ENOENT
-  - 15524  # G2 board author_kind + voter_kind
-  - 15684  # keeper_path_check_error closed sum + emit-site routing
-  - 15699  # shadow-gate parse_outcome_kind
-  - 15703  # eval gate destructive-pattern SSOT
-  - 15704  # eval_gate evasion_kind
 ---
 
 # RFC-0089 — String Classifier 박멸: typed variant 직접 교체

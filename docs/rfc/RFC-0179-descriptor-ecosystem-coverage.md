@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0064"]
-implementation_prs: []
 ---
 
 # RFC-0179 — ToolDescriptor Ecosystem Coverage Extension to Workspace Tools

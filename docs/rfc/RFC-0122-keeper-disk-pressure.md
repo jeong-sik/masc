@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0097", "0101", "0103", "0148", "0154"]
-implementation_prs: [15975]
 ---
 
 ## Progress audit (2026-05-21)

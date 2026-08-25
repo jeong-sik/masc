@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0294", "0303", "0310", "0313"]
-implementation_prs: []
 ---
 
 # RFC-0315: Typed wake-turn context and self-directed work lane

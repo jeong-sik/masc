@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0091"]
-implementation_prs: []
 ---
 
 # Execute subset dispositions: resolve it, spawn it, or name the replacement

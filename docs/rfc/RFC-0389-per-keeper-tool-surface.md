@@ -8,7 +8,6 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0080", "0084", "0182"]
-implementation_prs: []
 ---
 
 # RFC-0389: Keeper 별 도구 표면

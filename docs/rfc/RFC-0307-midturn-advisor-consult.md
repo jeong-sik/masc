@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: []
 ---
 
 # RFC-0307 — Mid-turn advisor consult for keepers

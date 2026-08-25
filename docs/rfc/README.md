@@ -23,7 +23,6 @@ created: 2026-05-12                # ISO date
 updated: 2026-05-12                # 본문 의미 변경 시 갱신, typo 수정은 생략 가능
 author: <github-handle 또는 vincent>
 related: []                        # 직접 참조하는 현재 RFC slug. 없으면 빈 배열
-implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body 머지 PR 은 제외, spec 구현 PR 만
 ---
 ```
 

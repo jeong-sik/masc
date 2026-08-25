@@ -8,8 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0009", "0022", "0024", "0027", "0038", "0041", "0058", "0088", "0126"]
-implementation_prs:
-  - "#16189"  # PR-1 — provenance threading (Gap B carrier widen)
 ---
 
 ## Status

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099"]
-implementation_prs: ["15798", "15865"]
 ---
 
 # RFC-0100 — Streamable HTTP as default transport (MCP 2025-03-26)

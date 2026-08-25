@@ -5,7 +5,6 @@ status: Implemented
 created: 2026-05-15
 updated: 2026-07-13
 author: vincent
-implementation_prs: [15399, 15400, 15403, 15404, 15406, 15407, 15410, 15411, 15412, 15415, 15416, 15417]
 ---
 
 # RFC-0084 — Tool dispatch handler and observation unification

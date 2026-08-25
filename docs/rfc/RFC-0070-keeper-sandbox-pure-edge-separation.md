@@ -8,7 +8,6 @@ author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0006", "0036"]
-implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989, 16666]
 ---
 
 ## Executor-track removal (2026-06-02)

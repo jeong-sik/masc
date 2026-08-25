@@ -6,7 +6,6 @@ created: 2026-08-19
 updated: 2026-08-20
 author: vincent
 related: ["0376", "0315"]
-implementation_prs: [29176]
 ---
 
 # RFC-0385 — 자율턴은 대화가 아니다

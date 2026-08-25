@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0377", "0373", "27349"]
-implementation_prs: []
 ---
 
 # RFC-0380: 대기 나이는 홀더의 사이클을 알아야 한다

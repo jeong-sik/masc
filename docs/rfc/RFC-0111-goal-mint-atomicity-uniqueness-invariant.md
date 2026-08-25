@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0110"]
-implementation_prs: [15927]
 ---
 
 # RFC-0111: Goal mint atomicity — auto-goal uniqueness invariant at write boundary

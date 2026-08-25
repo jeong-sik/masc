@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0110"]
-implementation_prs: [15976]
 ---
 
 # RFC-0123: Briefing last_event fabrication — option-typed write boundary

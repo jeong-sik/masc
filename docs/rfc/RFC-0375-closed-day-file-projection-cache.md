@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0372", "0162", "0204"]
-implementation_prs: []
 ---
 
 # RFC-0375 — Closed day-file projection cache

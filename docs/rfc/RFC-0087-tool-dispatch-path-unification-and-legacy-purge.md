@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0084", "0056"]
-implementation_prs: [15458, 15460, 15461, 15462, 15465, 15466, 15468, 15470, 15471, 15475, 15477, 15480, 15481, 15482, 15483, 15484, 15485, 15486]
 ---
 
 # RFC-0087 — Tool Dispatch Path Unification + Legacy Purge

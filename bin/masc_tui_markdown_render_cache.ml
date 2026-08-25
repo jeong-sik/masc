@@ -5,60 +5,58 @@ type 'identity source =
     }
   | Streaming_source of string
 
-type 'identity key = {
-  identity : 'identity;
-  text : string;
-  width : int;
-  theme_revision : int;
-  palette_generation : int;
-}
+module Completed = struct
+  type 'identity key = {
+    identity : 'identity;
+    text : string;
+    width : int;
+    theme_revision : int;
+    palette_generation : int;
+  }
 
-type 'identity visual_key = {
-  identity : 'identity;
-  width : int;
-  theme_revision : int;
-  palette_generation : int;
-}
+  type 'identity rendered = {
+    key : 'identity key;
+    rows : string list;
+  }
+end
 
-type 'identity rendered = {
-  key : 'identity key;
-  rows : string list;
-}
+module Streaming = struct
+  type 'identity key = {
+    identity : 'identity;
+    width : int;
+    theme_revision : int;
+    palette_generation : int;
+  }
 
-type 'identity growing = {
-  key : 'identity visual_key;
-  text : string;
-  stable_source_len : int;
-  stable_rows : string list;
-  rows : string list;
-}
+  type 'identity growing = {
+    key : 'identity key;
+    text : string;
+    stable_source_len : int;
+    stable_rows : string list;
+    rows : string list;
+  }
+end
 
 type 'identity t = {
   capacity : int;
   equal : 'identity -> 'identity -> bool;
-  mutable recent : 'identity rendered list;
-  mutable growing_recent : 'identity growing list;
+  mutable recent : 'identity Completed.rendered list;
+  mutable growing_recent : 'identity Streaming.growing list;
 }
 
 let create ~capacity ~equal =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
   { capacity; equal; recent = []; growing_recent = [] }
 
-(* Annotated because [visual_key] is defined after [key] and repeats four of
-   its five fields. Without the annotation [left.identity] resolves to the
-   later type and [left.text] then names a field it does not have. *)
-let same_key cache (left : _ key) (right : _ key) =
+let same_key cache (left : _ Completed.key) (right : _ Completed.key) =
   cache.equal left.identity right.identity
   && String.equal left.text right.text
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
 
-(* Annotated for the same reason [same_key] is: [growing] is defined after
-   [rendered] and also carries a [key] field, so an unannotated [entry.key]
-   resolves to the later type. *)
-let take_matching cache key (entries : _ rendered list) =
-  let rec loop before (remaining : _ rendered list) =
+let take_matching cache key (entries : _ Completed.rendered list) =
+  let rec loop before (remaining : _ Completed.rendered list) =
     match remaining with
     | [] -> None
     | entry :: rest when same_key cache key entry.key ->
@@ -83,12 +81,12 @@ let drop count entries =
   in
   loop count entries
 
-let remember cache (rendered : _ rendered) =
+let remember cache (rendered : _ Completed.rendered) =
   (* One width/source/revision tuple per completed entry. A resize or visual
      revision replaces that entry's old rows instead of accumulating variants. *)
   let other_identities =
     List.filter
-      (fun (entry : _ rendered) ->
+      (fun (entry : _ Completed.rendered) ->
         not (cache.equal rendered.key.identity entry.key.identity))
       cache.recent
   in
@@ -98,7 +96,7 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~source =
   match source with
   | Streaming_source text -> renderer ~width text
   | Stable_source { identity; text } ->
-      let key =
+      let key : _ Completed.key =
         { identity; text; width; theme_revision; palette_generation }
       in
       (match take_matching cache key cache.recent with
@@ -112,14 +110,15 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~source =
            remember cache { key; rows };
            rows)
 
-let same_visual_key cache left right =
+let same_visual_key cache (left : _ Streaming.key) (right : _ Streaming.key) =
   cache.equal left.identity right.identity
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
 
-let take_matching_growing cache key entries =
-  let rec loop before = function
+let take_matching_growing cache key (entries : _ Streaming.growing list) =
+  let rec loop before (remaining : _ Streaming.growing list) =
+    match remaining with
     | [] -> None
     | entry :: rest when same_visual_key cache key entry.key ->
         Some (entry, List.rev_append before rest)
@@ -127,10 +126,11 @@ let take_matching_growing cache key entries =
   in
   loop [] entries
 
-let remember_growing cache growing =
+let remember_growing cache (growing : _ Streaming.growing) =
   let other_identities =
     List.filter
-      (fun entry -> not (cache.equal growing.key.identity entry.key.identity))
+      (fun (entry : _ Streaming.growing) ->
+        not (cache.equal growing.key.identity entry.key.identity))
       cache.growing_recent
   in
   cache.growing_recent <-
@@ -145,10 +145,10 @@ let validate_streaming_render ~source_length
     || rendered.mutable_row_start > List.length rendered.rows
   then invalid_arg "Markdown streaming renderer returned an invalid boundary"
 
-let reset_growing cache ~key ~text ~renderer =
+let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
   let rendered = renderer ~width:key.width text in
   validate_streaming_render ~source_length:(String.length text) rendered;
-  let growing =
+  let growing : _ Streaming.growing =
     { key;
       text;
       stable_source_len = rendered.mutable_source_start;
@@ -161,7 +161,9 @@ let reset_growing cache ~key ~text ~renderer =
 
 let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
     ~identity ~text =
-  let key = { identity; width; theme_revision; palette_generation } in
+  let key : _ Streaming.key =
+    { identity; width; theme_revision; palette_generation }
+  in
   match take_matching_growing cache key cache.growing_recent with
   | Some (growing, others) when String.equal growing.text text ->
       cache.growing_recent <- growing :: others;
@@ -178,7 +180,7 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       in
       let stable_rows = growing.stable_rows @ newly_stable_rows in
       let rows = stable_rows @ drop rendered.mutable_row_start rendered.rows in
-      let updated =
+      let updated : _ Streaming.growing =
         { key;
           text;
           stable_source_len =

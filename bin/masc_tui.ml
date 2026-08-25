@@ -2018,6 +2018,7 @@ let search_row_cursor state =
   | Connectors -> Some state.connectors_cursor
   | Runtime -> Some state.runtime_cursor
   | System_logs -> Some state.system_logs_cursor
+  | Code -> Some state.code_cursor
   | _ -> None
 
 let search_land state index =
@@ -2052,6 +2053,9 @@ let search_land state index =
   | System_logs ->
       state.system_logs_cursor <- index;
       follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
+  | Code ->
+      (* The tree pane windows itself around the cursor; no scroll follows. *)
+      state.code_cursor <- index
   | _ -> ()
 
 let search_jump ?(backwards = false) state ~query ~after =

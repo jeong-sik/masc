@@ -396,6 +396,32 @@ let composer_cursor state ~rows ~cols =
         ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
         }
 
+(* What a tool block's row says about state.
+
+   A chat body is sanitized before it is drawn, so no marker inside the text
+   can carry a colour; the row's own style is the only channel left. That only
+   matters once a block folds: expanded, every call keeps a row and a glyph of
+   its own, but folded, six calls sit behind one line where "1 failed" reads
+   in the same colour as "5 returned". Live data says how much that hides --
+   5,862 of 176,780 recorded calls failed, and three tools fail more often
+   than they succeed.
+
+   The projection decides which outcome the fold stands for, on the same
+   precedence that picks its glyph, so the mark and the colour agree. A block
+   holding a failure is a failure; one still waiting is attention; one that
+   returned is the ordinary tool row it was before. *)
+let tool_block_style (projection : Keeper_chat_transcript.tool_projection) =
+  match projection.Keeper_chat_transcript.summary_outcome with
+  | None | Some Keeper_chat_transcript.Returned -> Message_layout.Tool
+  | Some Keeper_chat_transcript.Failed -> Message_layout.Error
+  | Some
+      ( Keeper_chat_transcript.Awaiting_result
+      | Keeper_chat_transcript.Started
+      | Keeper_chat_transcript.Never_returned
+      | Keeper_chat_transcript.Outcome_unrecorded ) ->
+    Message_layout.Status
+;;
+
 (* The strip above every surface: the Tab ring with the active family
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
@@ -3519,13 +3545,33 @@ let render_keeper_message (state : state) =
          another cache-key field, so an index never authorizes stale rows. *)
       List.map
         (fun (entry_index, message, grouped_role_label) ->
+          (* Projected once: the style is read off it and the body is built
+             from it, and projecting twice would let a fold decide the colour
+             from one reading and the text from another. *)
+          let tool_projection =
+            match message.me_role with
+            | Message_tool -> (
+                match message.me_tool_block with
+                | None -> None
+                | Some block ->
+                    Some
+                      (Keeper_chat_transcript.project_tool_block
+                         (tool_projection_mode state) block))
+            | Message_user _ | Message_keeper | Message_autonomous
+            | Message_status | Message_memory | Message_error
+            | Message_thinking ->
+                None
+          in
           let style =
             match message.me_role with
             | Message_user _ -> Message_layout.User
             | Message_keeper | Message_autonomous -> Message_layout.Keeper
             | Message_status | Message_memory -> Message_layout.Status
             | Message_error -> Message_layout.Error
-            | Message_tool -> Message_layout.Tool
+            | Message_tool -> (
+                match tool_projection with
+                | None -> Message_layout.Tool
+                | Some projection -> tool_block_style projection)
             | Message_thinking -> Message_layout.Thinking
           in
           let role_label = grouped_role_label in
@@ -3545,15 +3591,10 @@ let render_keeper_message (state : state) =
                marker and needs no escaping. The escape that used to be here
                was never consumed by the renderer, so what reached the pane
                was a literal backslash in front of every changed fact. *)
-            | Message_tool ->
-                (match message.me_tool_block with
-                 | None -> message.me_text
-                 | Some block ->
-                     let projection =
-                       Keeper_chat_transcript.project_tool_block
-                         (tool_projection_mode state) block
-                     in
-                     String.concat "\n" projection.rows)
+            | Message_tool -> (
+                match tool_projection with
+                | None -> message.me_text
+                | Some projection -> String.concat "\n" projection.rows)
             | Message_thinking | Message_user _ | Message_keeper
             | Message_autonomous
             | Message_status | Message_error | Message_memory ->
@@ -3642,7 +3683,7 @@ let render_keeper_message (state : state) =
                       (tool_projection_mode state) block
                   in
                   Some
-                    (entry Message_layout.Tool "TOOLS"
+                    (entry (tool_block_style projection) "TOOLS"
                        (String.concat "\n" projection.rows))
               | Keeper_chat_transcript.Trail_text text ->
                   Some

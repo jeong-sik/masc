@@ -156,12 +156,10 @@ let test_directory_name_mismatch_rejected () =
 ;;
 
 let test_missing_required_frontmatter_rejected () =
+  (* [name] is optional in the standard: the directory supplies it. *)
   let no_name = "---\ndescription: something\n---\nbody\n" in
-  (match rejected ~directory:"anything" no_name with
-   | Skill_catalog.Definition_rejected
-       { directory; error = Masc.Skill_definition.Missing_name } ->
-     check string "directory" "anything" directory
-   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error));
+  let named_by_directory = parsed ~directory:"anything" no_name in
+  check string "name comes from the directory" "anything" named_by_directory.Skill_catalog.name;
   let no_description = "---\nname: quiet\n---\nbody\n" in
   match rejected ~directory:"quiet" no_description with
   | Skill_catalog.Definition_rejected
@@ -326,9 +324,11 @@ let test_loader_scans_the_skills_directory () =
              fail
                (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
         | Error _ -> fail "valid skills directory failed to load");
+       (* A missing description, not a missing name: the directory supplies a
+          name, so that is no longer the defect a broken install shows. *)
        write_file
          (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
-         "---\ndescription: no name\n---\n";
+         "---\nname: half-installed\n---\n";
        match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
        | Error
            (Agent_core.Error.Config

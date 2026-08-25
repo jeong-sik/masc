@@ -57,6 +57,24 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+let test_unproven_workspace_only_allows_retry () =
+  let allows identity key =
+    Masc_tui_types.workspace_identity_allows_surface_key identity key
+  in
+  Alcotest.(check bool) "unread blocks action" false
+    (allows Masc_tui_types.Workspace_identity_unread "p");
+  Alcotest.(check bool) "mismatch blocks mutation" false
+    (allows
+       (Masc_tui_types.Workspace_identity_mismatch
+          { local_base_path = "/a"; server_base_path = "/b" })
+       "s");
+  Alcotest.(check bool) "lowercase retry remains" true
+    (allows Masc_tui_types.Workspace_identity_unread "r");
+  Alcotest.(check bool) "uppercase retry remains" true
+    (allows Masc_tui_types.Workspace_identity_unread "R");
+  Alcotest.(check bool) "matched workspace keeps surface keys" true
+    (allows Masc_tui_types.Workspace_identity_match "p")
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -68,5 +86,7 @@ let () =
             test_workspace_identity_matches_canonical_paths
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
+        ; Alcotest.test_case "unproven workspace only allows retry" `Quick
+            test_unproven_workspace_only_allows_retry
         ] )
     ]

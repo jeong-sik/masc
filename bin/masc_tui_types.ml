@@ -69,6 +69,13 @@ let workspace_identity_of_refresh ~local_base_path reading =
     else Workspace_identity_mismatch { local_base_path; server_base_path }
 ;;
 
+let workspace_identity_allows_surface_key identity key =
+  match identity with
+  | Workspace_identity_match -> true
+  | Workspace_identity_unread | Workspace_identity_mismatch _ ->
+    String.equal key "r" || String.equal key "R"
+;;
+
 type event = {
   timestamp: string;
   event_type: string;

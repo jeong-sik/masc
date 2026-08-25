@@ -120,6 +120,28 @@ include Tool_task_contract_gate
 
 (* Handlers *)
 
+let parse_task_skills args =
+  match Json_util.assoc_member_opt "skills" args with
+  | None -> Ok []
+  | Some (`List values) ->
+    let rec collect acc index = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> collect (value :: acc) (index + 1) rest
+      | value :: _ ->
+        Error
+          (Printf.sprintf
+             "skills[%d] must be a string (received %s)"
+             index
+             (Json_util.kind_name value))
+    in
+    collect [] 0 values
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "skills must be an array of strings (received %s)"
+         (Json_util.kind_name value))
+;;
+
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
     [ "title"
@@ -162,9 +184,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   (* Skill directory names under <base-path>/.masc/skills/. The authoring
      contract below rejects blank or non-segment values; silently dropping one
      would make a malformed declaration look as if it had been accepted. *)
-  let skills =
-    Safe_ops.json_string_list "skills" args
-  in
+  let skills_result = parse_task_skills args in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
@@ -196,12 +216,12 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
-    match contract_result with
-    | Error error ->
+    match contract_result, skills_result with
+    | Error error, _ | _, Error error ->
         Tool_result.error
           ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
-    | Ok contract ->
+    | Ok contract, Ok skills ->
         (match
            Task_skill_reference.validate_all
              ~base_path:ctx.config.base_path

@@ -2,12 +2,14 @@ open Alcotest
 open Masc
 
 let rec remove_tree path =
-  if Sys.is_directory path
-  then (
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
     Sys.readdir path
     |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-    Unix.rmdir path)
-  else Sys.remove path
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+  | Unix.S_SOCK ->
+    Unix.unlink path
 ;;
 
 let with_base f =
@@ -44,6 +46,17 @@ let test_path_missing_mismatch_and_valid () =
   expect_error "missing skill" base [ "missing" ] "does not exist";
   write_skill base ~directory:"guide" ~declared_name:"other";
   expect_error "frontmatter mismatch" base [ "guide" ] "does not match directory";
+  let linked_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat base ".masc") "skills")
+      "linked"
+  in
+  Fs_compat.mkdir_p linked_dir;
+  let outside = Filename.concat base "outside-skill.md" in
+  Fs_compat.save_file outside
+    "---\nname: linked\ndescription: fixture\n---\n\nexternal\n";
+  Unix.symlink outside (Filename.concat linked_dir "SKILL.md");
+  expect_error "symlinked SKILL.md" base [ "linked" ] "must not be a symlink";
   write_skill base ~directory:"valid" ~declared_name:"valid";
   match
     Masc_task_handlers.Task_skill_reference.validate_all

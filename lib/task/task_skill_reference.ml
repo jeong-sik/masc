@@ -1,9 +1,11 @@
-let skill_path ~base_path name =
+let skill_dir ~base_path name =
   Filename.concat
-    (Filename.concat
-       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills")
-       name)
-    "SKILL.md"
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills")
+    name
+;;
+
+let skill_path ~base_path name =
+  Filename.concat (skill_dir ~base_path name) "SKILL.md"
 ;;
 
 let validate_name name =
@@ -44,17 +46,41 @@ let validate_definition ~name contents =
 let validate_one ~base_path name =
   let ( let* ) = Result.bind in
   let* () = validate_name name in
+  let directory = skill_dir ~base_path name in
   let path = skill_path ~base_path name in
-  match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_kind Unix.S_REG ->
-    (match Safe_ops.read_file_safe path with
-     | Error detail ->
-       Error (Printf.sprintf "task skill %S is unreadable: %s" name detail)
-     | Ok contents -> validate_definition ~name contents)
+  match Fs_compat.exact_path_kind ~follow:false directory with
+  | Fs_compat.Exact_kind Unix.S_DIR ->
+    (match Fs_compat.exact_path_kind ~follow:false path with
+     | Fs_compat.Exact_kind Unix.S_REG ->
+       (match Safe_ops.read_file_safe path with
+        | Error detail ->
+          Error (Printf.sprintf "task skill %S is unreadable: %s" name detail)
+        | Ok contents -> validate_definition ~name contents)
+     | Fs_compat.Exact_missing ->
+       Error (Printf.sprintf "task skill %S does not exist at %s" name path)
+     | Fs_compat.Exact_kind Unix.S_LNK ->
+       Error
+         (Printf.sprintf
+            "task skill %S SKILL.md must not be a symlink: %s"
+            name
+            path)
+     | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+       Error
+         (Printf.sprintf "task skill %S is not a regular SKILL.md: %s" name path))
+  | Fs_compat.Exact_kind Unix.S_LNK ->
+    Error
+      (Printf.sprintf
+         "task skill %S directory must not be a symlink: %s"
+         name
+         directory)
   | Fs_compat.Exact_missing ->
     Error (Printf.sprintf "task skill %S does not exist at %s" name path)
   | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-    Error (Printf.sprintf "task skill %S is not a regular SKILL.md: %s" name path)
+    Error
+      (Printf.sprintf
+         "task skill %S directory is not a regular directory: %s"
+         name
+         directory)
 ;;
 
 let validate_all ~base_path names =

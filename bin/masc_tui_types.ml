@@ -528,14 +528,15 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let runtime_listing_chrome ~error = listing_chrome ~error + 2
 
 (** Dashboard state *)
-(* A request that has been POSTed and has not settled, with when it went out.
-   The instant rides with the request rather than in a second structure keyed
-   by id: a turn taking minutes is normal here and an operator watching one
-   needs to see it advancing, but two structures for one fact drift the moment
-   somebody adds a third place that removes a request. *)
+(* A request that has been POSTed and has not settled, with when it went out
+   and the live transcript decoded from its stream. Both ride with the request
+   rather than in structures keyed by id: Keepers can stream concurrently, and
+   a single live slot lets the later stream replace the earlier one's tool
+   rows. *)
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; sent_at : float
+  ; live : Masc_tui_keeper_chat_transcript.t
   }
 
 type state = {
@@ -803,10 +804,10 @@ type state = {
      operator's own text, so pressing down has nothing to give back. *)
   mutable msg_recall_at: int option;
   mutable msg_recall_draft: string;
-  (* The turn currently streaming, if any. Drawn below the history and
-     discarded when the turn settles; its tool rows are committed to the
-     history first. Never authoritative -- the recorded reply comes from the
-     strict whole-body decode. *)
+  (* The selected Keeper's turn currently streaming, if any. The request-owned
+     copy lives in [msg_inflight]; this slot only chooses what the pane draws.
+     Never authoritative -- the recorded reply comes from the strict
+     whole-body decode. *)
   mutable msg_live: Masc_tui_keeper_chat_transcript.t option;
   (* The keeper's durable transcript as last loaded, for the keeper the pane is
      showing. Replaced wholesale by a load rather than merged: the server holds
@@ -874,6 +875,10 @@ let inflight_for_keeper state keeper_name =
   List.find_opt
     (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
     state.msg_inflight
+;;
+
+let live_for_keeper state keeper_name =
+  Option.map (fun entry -> entry.live) (inflight_for_keeper state keeper_name)
 ;;
 
 let send_disposition state ~keeper_name : send_disposition =

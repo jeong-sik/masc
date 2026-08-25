@@ -232,8 +232,8 @@ let env_opt name =
 
    A name that is already a safe, short, lowercase segment maps to itself --
    which is every name in this workspace, so paths do not move. Anything else
-   carries a digest of the exact name, which is what makes the mapping
-   injective: the digest distinguishes what the character folding cannot. *)
+   carries a 64-bit digest prefix of the exact name. This distinguishes the
+   known folding collisions while keeping accidental collisions unlikely. *)
 let namespace_segment_max_length = 96
 
 let namespace_segment_is_canonical name =
@@ -260,7 +260,7 @@ let sanitize_namespace_segment name =
         in
         Buffer.add_char buf (if is_safe then c else '-'))
       name;
-    let folded = String.trim (Buffer.contents buf) in
+    let folded = Buffer.contents buf in
     let head =
       if String.length folded > namespace_segment_max_length
       then String.sub folded 0 namespace_segment_max_length

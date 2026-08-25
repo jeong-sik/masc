@@ -1,7 +1,7 @@
 ---
-description: Keeper current-task skill names and instruction to read their files
+description: Keeper current-task skill names and the tool that serves their bodies
 category: keeper
 template_variables: [skill_names]
 ---
 
-- Skills named by this task: {{skill_names}}. Each one is at .masc/skills/<name>/SKILL.md — read it before you use it.
+- Skills named by this task: {{skill_names}}. Call `keeper_skill` with a name to read one whole, before you act on it.

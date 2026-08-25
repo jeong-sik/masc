@@ -163,6 +163,9 @@ val plan_execute_tool_name : string
 val status_tool_name : string
 val cancel_tool_name : string
 
+val skill_tool_name : string
+(** The tool that serves one instruction skill body by name. *)
+
 val error_to_string : error -> string
 
 val param_type_to_string : param_type -> string

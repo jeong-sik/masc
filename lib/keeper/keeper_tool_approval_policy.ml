@@ -136,7 +136,31 @@ and node_asks_for_approval node =
                (Descriptor.keeper_tool_group_to_string group) )
        else None)
 
+(* The two control tools that ride beside an async composition.
+
+   They have no descriptor for the same reason a composition has none — they
+   are materialised as Agent-Core tools — but they are not compositions
+   either, so there is no plan to fold and the arm below would ask about them.
+   Reading the status of a request this keeper already made, and cancelling
+   one, are both smaller than the composition they are about, and neither
+   reaches outside masc. Board tools run unasked on that same reasoning.
+
+   Named through the catalog rather than as literals here: the catalog is what
+   the surface builds them from, so one spelling cannot drift from the other.
+   They only exist on a turn that has an async composition
+   (keeper_tool_composition_surface.ml gates them on [has_async]); naming them
+   on a turn that does not costs nothing, because nothing can call them. *)
+and control_tool_verdict tool_name =
+  if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
+  then Some (Run { because = "reads a composition request this keeper made" })
+  else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
+  then Some (Run { because = "cancels a request inside masc" })
+  else None
+
 and verdict_for_undescribed ~tool_name ~input =
+  match control_tool_verdict tool_name with
+  | Some verdict -> verdict
+  | None ->
   match plan_node_tools ~tool_name ~input with
   | None ->
     (* Not a safe tool -- one this build cannot classify. Running it unasked

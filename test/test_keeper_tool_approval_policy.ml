@@ -185,6 +185,34 @@ let test_no_direct_call_became_asked () =
       [ "Edit"; "Execute"; "Write" ] asked_now)
 ;;
 
+
+(* The two control tools that ride beside an async composition. They are
+   Agent-Core tools like a composition, so no descriptor owns them, but they
+   carry no plan either -- the fold has nothing to read and would ask. *)
+module Catalog = Masc.Keeper_tool_composition_catalog
+
+let test_reading_a_request_status_runs_unasked () =
+  with_index [] (fun () ->
+    check bool "reading the status of a request this keeper made is not asked about"
+      false (asks ~tool_name:Catalog.status_tool_name ~input:no_input))
+;;
+
+let test_cancelling_a_request_runs_unasked () =
+  with_index [] (fun () ->
+    check bool "cancelling a request inside masc is not asked about" false
+      (asks ~tool_name:Catalog.cancel_tool_name ~input:no_input))
+;;
+
+(* The names come from the catalog the surface builds these tools from, so a
+   rename cannot leave the policy answering about a name nobody calls. *)
+let test_the_control_names_are_the_catalogue_s () =
+  check bool "status and cancel are distinct names" true
+    (not (String.equal Catalog.status_tool_name Catalog.cancel_tool_name));
+  check bool "neither is a composition tool name" true
+    (not (mentions Catalog.status_tool_name "keeper_compose_")
+     && not (mentions Catalog.cancel_tool_name "keeper_compose_"))
+;;
+
 let () =
   run "keeper_tool_approval_policy"
     [ ( "the split"
@@ -216,6 +244,14 @@ let () =
             test_a_malformed_plan_is_asked_about
         ; test_case "no direct call became asked" `Quick
             test_no_direct_call_became_asked
+        ] )
+    ; ( "composition control tools"
+      , [ test_case "reading a request status runs unasked" `Quick
+            test_reading_a_request_status_runs_unasked
+        ; test_case "cancelling a request runs unasked" `Quick
+            test_cancelling_a_request_runs_unasked
+        ; test_case "the control names are the catalogue's" `Quick
+            test_the_control_names_are_the_catalogue_s
         ] )
     ; ( "the question"
       , [ test_case "names the call" `Quick test_the_question_names_the_call ] )

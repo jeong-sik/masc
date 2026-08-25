@@ -1044,6 +1044,24 @@ let enqueue_dispatch_start mailbox request was_replay =
     (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
   Eio.Promise.await acknowledged
 
+(* The server this screen reads. It runs on this machine, so the address is
+   loopback and there is nothing to configure.
+
+   It used to read MASC_HOST, which is the *server's* bind address
+   ([main_eio.ml] spells it "Host/IP to bind", [Server_auth] calls it
+   [configured_bind_host]). That answers a different question -- which
+   interfaces to accept on -- and its documented non-default values are the
+   wildcards 0.0.0.0 and ::, which [Masc_network_defaults.is_unspecified_host]
+   exists to name as "every interface" rather than a reachable peer. Setting
+   it the way the server's own help recommends therefore pointed this screen
+   at an address that is not a destination.
+
+   Reading it also made a second setting: the roster, the task backlog, the
+   keeper metrics and the context occupancy are read from [base_path] on
+   local disk, and nothing checked that the two named the same machine. With
+   one of them gone there is nothing left to disagree. *)
+let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
+
 (* Send the turn and read it as it arrives.
 
    Bounding the silence needs a clock. Without one the buffered send is used
@@ -1052,7 +1070,7 @@ let enqueue_dispatch_start mailbox request was_replay =
    passed over: a pane that quietly stops drawing looks like a keeper that
    stopped working. *)
 let post_keeper_chat_watching ~mailbox ~port request =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   match Eio_context.get_clock_opt () with
   | None ->
       enqueue_async mailbox
@@ -1131,7 +1149,7 @@ let settle_live_turn state (request : Keeper_chat.request) =
    a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1159,7 +1177,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
 let launch_keeper_tool_approvals_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1179,7 +1197,7 @@ let launch_keeper_tool_approvals_load state ~mailbox =
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1199,7 +1217,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
         (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1224,7 +1242,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
   let run () =
@@ -1256,7 +1274,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
    the pane stays responsive and a slow server costs the list rather than the
    keypress that asked for it. *)
 let launch_tools_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1274,7 +1292,7 @@ let launch_tools_load state ~mailbox =
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
 let launch_schedules_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1296,7 +1314,7 @@ let launch_schedules_load state ~mailbox =
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
 let launch_keeper_calls_load state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1323,7 +1341,7 @@ let launch_keeper_calls_load state ~mailbox keeper_name =
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
 let launch_resources_list state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -1357,7 +1375,7 @@ let launch_resources_list state ~mailbox =
       enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
 
 let launch_resource_read state ~mailbox ~uri =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -1404,7 +1422,7 @@ let launch_resource_read state ~mailbox ~uri =
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
 let launch_github_login state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     match Eio_context.get_clock_opt () with
@@ -1477,7 +1495,7 @@ let launch_github_login state ~mailbox keeper_name =
         (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_runtime_config_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1497,7 +1515,7 @@ let launch_runtime_config_load state ~mailbox =
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_config_view state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1518,7 +1536,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1542,7 +1560,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1567,7 +1585,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_generation <- state.runtime_surface_generation + 1;
       let generation = state.runtime_surface_generation in
       state.runtime_surface_inflight <- Some generation;
-      let host = Env_config_core.masc_host () in
+      let host = server_peer_host in
       let port = state.port in
       let run () =
         let result =
@@ -1588,7 +1606,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
                 (generation, Error "Eio switch is unavailable")))
 
 let launch_repositories_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1689,7 +1707,7 @@ let change_line ~path (change : Masc.Tui_decode.file_change) =
 let changes_window_hours = 24.0
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1717,7 +1735,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
 let tree_diff_base_ref = "HEAD"
 
 let launch_git_diff_load state ~mailbox ~keeper ~path =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1740,7 +1758,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
         (Git_diff_loaded (path, Error "Eio switch is unavailable"))
 
 let launch_harness_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1764,7 +1782,7 @@ let launch_fusion_runs_load state ~mailbox =
       state.fusion_runs_generation <- state.fusion_runs_generation + 1;
       let generation = state.fusion_runs_generation in
       state.fusion_runs_inflight <- Some generation;
-      let host = Env_config_core.masc_host () in
+      let host = server_peer_host in
       let port = state.port in
       let run () =
         let result =
@@ -1796,7 +1814,7 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
     state.fusion_detail_generation <- state.fusion_detail_generation + 1;
     let generation = state.fusion_detail_generation in
     state.fusion_detail_inflight <- Some (generation, run_id);
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     let run () =
       let result =
@@ -1818,7 +1836,7 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
   end
 
 let launch_lanes_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1836,7 +1854,7 @@ let launch_lanes_load state ~mailbox =
   | None -> enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
 
 let launch_verification_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -1940,7 +1958,7 @@ let cycle_surface state ~mailbox ~backwards =
   goto_surface state ~mailbox (fst (List.nth ring index))
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let generation = state.msg_history_load_generation in
   state.msg_older_loading <- true;
@@ -1967,7 +1985,7 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
 let launch_keeper_history_load state ~mailbox ~keeper_name =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_older_loading <- false;
@@ -2085,7 +2103,7 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   }
 
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
   let run () =
@@ -2108,7 +2126,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
 let launch_runtime_catalog_load state ~mailbox =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -2128,7 +2146,7 @@ let launch_runtime_catalog_load state ~mailbox =
         (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
 
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
@@ -2336,7 +2354,7 @@ let chat_status_text completed =
    is the one the observer feed keeps; without one, this call opens one and
    the observer reuses it. *)
 let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let session = state.mcp_session in
   (* A JSON-RPC id for this one call: the answer must name it back. Wall
@@ -3198,7 +3216,7 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
   state.board_focus <- focus;
   state.board_scroll <- 0;
-  start_board_post_refresh state ~host:(Env_config_core.masc_host ())
+  start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~mailbox
 
 let move_board_posts_pane state ~mailbox ~delta =
@@ -3247,7 +3265,7 @@ let start_approval_decision state approval decision ~mailbox =
   | Ok (flow, generation) ->
     let () = state.approval_flow <- flow in
     let () = state.pending_approval_action <- None in
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     let run_action () =
       let result =
@@ -3389,7 +3407,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_pending <- None;
   add_event state "system"
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
     Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
@@ -3436,7 +3454,7 @@ let start_board_post state ~mailbox ~(title : string) ~(body : string) =
   (* What this send answers for: the completion clears and lands against
      these, not against whatever the operator typed while it was out. *)
   let sent_draft = Buffer.contents state.board_draft in
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_post () =
     let result =
@@ -3460,7 +3478,7 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
   add_event state "system"
     (Printf.sprintf "goal %s: %s" goal_id
        (Goal_phase.Public_action.to_string action));
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_transition () =
     let result =
@@ -3523,7 +3541,7 @@ let start_board_comment state ~mailbox ~(post_id : string)
   state.board_post_inflight <- true;
   add_event state "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_comment () =
     let result =
@@ -3543,7 +3561,7 @@ let start_board_comment state ~mailbox ~(post_id : string)
 let start_board_vote state ~mailbox ~(post_id : string) ~(up : bool) =
   add_event state "system"
     (Printf.sprintf "voting %s on %s" (if up then "up" else "down") post_id);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_vote () =
     let result =
@@ -3588,7 +3606,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   state.schedule_cancel_error <- None;
   add_event state "system"
     (Printf.sprintf "cancelling schedule %s" schedule_id);
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let run_cancel () =
     let result =
@@ -3899,7 +3917,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
        | _ -> ());
       open_observer_if_due state ~retry_closed:false
-        ~host:(Env_config_core.masc_host ()) ~port:state.port ~mailbox
+        ~host:(server_peer_host) ~port:state.port ~mailbox
   | Observer_opened session_id ->
       state.mcp_session <- Some session_id;
       state.observer <-
@@ -3991,7 +4009,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          and it is what decides which action the row offers next. Asking for it
          now means the row stops offering the action that just ran without
          waiting out the refresh interval. *)
-      start_http_refresh state ~host:(Env_config_core.masc_host ())
+      start_http_refresh state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
   | Board_new_post_done { reply_to; sent_draft; result } -> (
       (* The completion answers for the draft it carried, not for whatever
@@ -4017,12 +4035,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              yet; without this the operator returns to a list that does not
              contain what they just published. A comment refreshes the
              detail too, so the reply is visible the moment it lands. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox;
           (match reply_to with
            | Some post_id ->
                start_board_post_refresh state
-                 ~host:(Env_config_core.masc_host ())
+                 ~host:(server_peer_host)
                  ~port:state.port ~post_id ~mailbox
            | None -> ())
       | Error err ->
@@ -4037,7 +4055,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           add_event state "system" ("Board vote: " ^ message);
           (* The score is drawn from the list; refresh it rather than
              waiting out the interval to see the arrow land. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
       | Error err ->
           state.board_vote_armed <- None;
@@ -4051,7 +4069,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (* The phase shown is the half the periodic refresh has not fetched
              yet; without this the detail keeps the old phase after the
              operator already changed it. *)
-          start_http_refresh state ~host:(Env_config_core.masc_host ())
+          start_http_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_refresh_inflight ~mailbox
       | Error err ->
           state.goal_action_armed <- None;
@@ -4858,7 +4876,7 @@ let main () =
 
   (* Initial load *)
   load_from_masc_dir state base_path;
-  let host = Env_config_core.masc_host () in
+  let host = server_peer_host in
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
@@ -4963,7 +4981,7 @@ let main () =
             | Error detail -> add_event state "error" (action ^ ": " ^ detail)))))
   in
   let handle_connector_bind () =
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     handle_connector_form ~action:"bind"
       ~stem:
@@ -4974,7 +4992,7 @@ let main () =
       ()
   in
   let handle_connector_unbind () =
-    let host = Env_config_core.masc_host () in
+    let host = server_peer_host in
     let port = state.port in
     handle_connector_form ~action:"unbind"
       ~stem:"{\n  \"name\": \"discord\",\n  \"channel_id\": \"\"\n}\n"
@@ -4999,7 +5017,7 @@ let main () =
         with
         | None -> add_event state "system" "runtime.toml unchanged"
         | Some edited -> (
-          let host = Env_config_core.masc_host () in
+          let host = server_peer_host in
           let port = state.port in
           match
             Masc_tui_http.post_runtime_config_preview ~host ~port
@@ -5521,7 +5539,7 @@ let main () =
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_from_masc_dir state base_path;
-           let host = Env_config_core.masc_host () in
+           let host = server_peer_host in
            let port = state.port in
            start_http_refresh state ~host ~port
              ~refresh_inflight:http_refresh_inflight
@@ -6437,7 +6455,7 @@ let main () =
       let needed = Masc_tui_types.surface_needs state.view in
       if needed <> !drawn_needs && not !http_refresh_inflight then begin
         drawn_needs := needed;
-        start_http_refresh state ~host:(Env_config_core.masc_host ())
+        start_http_refresh state ~host:(server_peer_host)
           ~port:state.port ~refresh_inflight:http_refresh_inflight
           ~mailbox:async_messages
       end;
@@ -6457,7 +6475,7 @@ let main () =
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
         load_from_masc_dir state base_path;
-        let host = Env_config_core.masc_host () in
+        let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
         open_observer_if_due state ~retry_closed:true ~host ~port

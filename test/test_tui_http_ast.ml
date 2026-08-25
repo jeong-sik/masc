@@ -600,6 +600,29 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+(* The screen dials one address and it is not a setting.
+
+   MASC_HOST is the *server's* bind address -- [main_eio.ml] spells it
+   "Host/IP to bind" and [Server_auth] calls it [configured_bind_host]. Its
+   documented non-default values are the wildcards 0.0.0.0 and ::, which
+   [Masc_network_defaults.is_unspecified_host] exists to name as "every
+   interface" rather than a reachable peer. Reading it here pointed the screen
+   at an address that is not a destination, and made a second setting: the
+   roster, the backlog, the metrics and the context occupancy come off local
+   disk under [base_path], and nothing checked the two named one machine.
+
+   Pinned at zero rather than described, because the way back is one
+   plausible-looking line. *)
+let test_the_screen_does_not_read_the_servers_bind_address () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "no bind-address reader" 0
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Env_config_core.masc_host");
+  check int "the peer is named once" 1
+    (Ast_grep.count_value_bindings ~module_path:main_path
+       ~name:"server_peer_host")
+;;
+
 let test_planning_refresh_reconciles_navigation_identity () =
   let main_path = "bin/masc_tui.ml" in
   check int "planning apply owns one identity reconciliation" 1
@@ -1360,6 +1383,10 @@ let () =
           "planning refresh reconciles navigation identity"
           `Quick
           test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "the screen does not read the server's bind address"
+          `Quick
+          test_the_screen_does_not_read_the_servers_bind_address;
         test_case
           "overview events use bounded scroll projection"
           `Quick

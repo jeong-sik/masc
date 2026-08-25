@@ -378,11 +378,6 @@ type observer_status =
     }
 
 (** One event off the feed, kept for the Acting surface. *)
-type acting_entry = {
-  ae_at : float;  (** when the TUI received it *)
-  ae_event : Masc_tui_observer.event;
-}
-
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
    about four events a second, so this is a few minutes of scrollback; what
    falls off the end is counted in [acting_dropped], not lost in silence.
@@ -689,6 +684,15 @@ type inflight =
   ; live : Masc_tui_keeper_chat_transcript.t
   }
 
+(* Which workspace the Code surface reads. The workspace routes resolve each
+   through its own query axis: a keeper's playground via [?keeper=] (where a
+   Changes row's clone-relative path lives), a registered repository via
+   [?repo_id=] (what a Repositories row names). *)
+type code_workspace_scope =
+  | Code_scope_project
+  | Code_scope_keeper of string
+  | Code_scope_repo of string
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -700,6 +704,21 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* [/context] opens the last observed provider-input inspector. It is an
+     overlay rather than another surface because it answers "what is in this
+     Keeper's current head" from whichever Keeper surface raised the question.
+     The reading is stamped with the requested Keeper and generation so a late
+     response cannot replace a newer inspection. *)
+  mutable context_inspector_open: bool;
+  mutable context_inspector_keeper: string option;
+  mutable context_inspector_loading: bool;
+  mutable context_inspector_generation: int;
+  mutable context_inspector_reading:
+    (string * Masc_tui_context_inspector.reading) option;
+  mutable context_inspector_tab: Masc_tui_context_inspector.tab;
+  mutable context_inspector_cursor: int;
+  mutable context_inspector_scroll: int;
+  mutable context_inspector_exact: int option;
   (* The roster beside a keeper surface costs the chat 30 columns for a
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
@@ -917,6 +936,13 @@ type state = {
   mutable code_file: (string * (string * string) list list) option;
   mutable code_file_error: string option;
   mutable code_file_scroll: int;
+  (* The line the pane's cursor is on (0-based), the anchor a language-server
+     question is asked at. j/k move it; the scroll follows to keep it
+     visible. *)
+  mutable code_file_cursor: int;
+  (* The last language-server answer (or refusal), shown beside the title
+     until the next question or file replaces it. *)
+  mutable code_lsp_note: string option;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -930,10 +956,32 @@ type state = {
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
-  (* Whose workspace the surface reads: [None] is the project tree, [Some k]
-     is keeper k's playground (the ?keeper= axis the git-diff read already
-     uses), which is where a Changes row's clone-relative path resolves. *)
-  mutable code_keeper: string option;
+  (* The file pane's diff view: d on an open file swaps the content for what
+     the working tree holds against HEAD, keyed the same way. One overlay at
+     a time -- opening this closes the history and vice versa. *)
+  mutable code_diff: (string * Tui_decode.git_diff) option;
+  mutable code_diff_error: string option;
+  mutable code_diff_open: bool;
+  mutable code_diff_scroll: int;
+  (* The file pane's notes view: m on an open file (repository scope only --
+     the annotation routes are scoped by the server-minted codebase slug,
+     which only a Repositories row carries) swaps the content for the notes
+     anchored to the file. *)
+  mutable code_notes: (string * Tui_decode.ide_annotation list) option;
+  mutable code_notes_error: string option;
+  mutable code_notes_open: bool;
+  mutable code_notes_scroll: int;
+  (* The file pane's activity view: c on an open file (repository scope,
+     like the notes) swaps the content for which keeper wrote which lines,
+     through what, and when. *)
+  mutable code_activity: (string * Tui_decode.ide_region list) option;
+  mutable code_activity_error: string option;
+  mutable code_activity_open: bool;
+  mutable code_activity_scroll: int;
+  (* Whose workspace the surface reads. One field, one value: a keeper's
+     playground and a project repository at the same time is not a
+     representable state. *)
+  mutable code_scope: code_workspace_scope;
   (* Set by the jump that opens a file at a line; consumed (once) when the
      file arrives, because the load handler owns the scroll reset. *)
   mutable code_target_line: int option;
@@ -988,7 +1036,7 @@ type state = {
           holds it after a stream closes, so reopening the feed and calling
           tools reuse it rather than minting one per attempt. Cleared when
           the server refuses it. *)
-  mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
   mutable acting_undecodable_last: string option;  (** why, for the most recent one *)
@@ -1176,6 +1224,15 @@ let create_state
   tasks_domain = [];
   task_focus = false;
   help_open = false;
+  context_inspector_open = false;
+  context_inspector_keeper = None;
+  context_inspector_loading = false;
+  context_inspector_generation = 0;
+  context_inspector_reading = None;
+  context_inspector_tab = Masc_tui_context_inspector.Composition;
+  context_inspector_cursor = 0;
+  context_inspector_scroll = 0;
+  context_inspector_exact = None;
   roster_pane_hidden = false;
   server_identity = None;
   help_scroll = 0;
@@ -1310,6 +1367,8 @@ let create_state
   code_file = None;
   code_file_error = None;
   code_file_scroll = 0;
+  code_file_cursor = 0;
+  code_lsp_note = None;
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_focus_file = false;
@@ -1317,7 +1376,19 @@ let create_state
   code_history_error = None;
   code_history_open = false;
   code_history_scroll = 0;
-  code_keeper = None;
+  code_diff = None;
+  code_diff_error = None;
+  code_diff_open = false;
+  code_diff_scroll = 0;
+  code_notes = None;
+  code_notes_error = None;
+  code_notes_open = false;
+  code_notes_scroll = 0;
+  code_activity = None;
+  code_activity_error = None;
+  code_activity_open = false;
+  code_activity_scroll = 0;
+  code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
   changes = None;

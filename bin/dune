@@ -378,6 +378,11 @@
  (modules masc_tui_frame_presenter))
 
 (library
+ (name masc_tui_terminal_profile)
+ (wrapped false)
+ (modules masc_tui_terminal_profile))
+
+(library
  (name masc_tui_keeper_activity)
  (wrapped false)
  (modules masc_tui_keeper_activity)
@@ -394,6 +399,12 @@
  (wrapped false)
  (modules masc_tui_context_state)
  (libraries masc masc.masc_workspace yojson))
+
+(library
+ (name masc_tui_context_inspector)
+ (wrapped false)
+ (modules masc_tui_context_inspector)
+ (libraries masc masc.masc_types yojson))
 
 (library
  (name masc_tui_observation_layout)
@@ -537,6 +548,7 @@
   masc_tui_keeper_selection
   masc_tui_message_layout
   masc_tui_metrics_tail
+  masc_tui_context_inspector
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_paste
@@ -577,6 +589,7 @@
   terminal_size
   masc_tui_credential
   masc_tui_types
+  masc_tui_terminal_profile
   masc_tui_terminal_title
   masc.runtime
   ;; masc_tui_render names Fusion_types directly to label a run's topology.
@@ -589,6 +602,7 @@
   masc_tui_keeper_mark
   masc_tui_help
   masc_tui_context_state
+  masc_tui_context_inspector
   masc_tui_frame_presenter
   masc_tui_keeper_activity
   masc_tui_keeper_chat_history

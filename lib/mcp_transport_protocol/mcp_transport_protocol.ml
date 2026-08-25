@@ -147,6 +147,43 @@ let validate_initialize_params params =
    their own value.  Adding the field unconditionally is safe for earlier
    revisions: they treat an unknown result member as ignorable, and the
    negotiated version is not threaded down to this builder. *)
+(* Every result identifies the server (2026-07-28 basic/index, per-response
+   protocol fields). Built here from [Build_version], the leaf every layer can
+   reach, rather than restated: [Runtime_build_version] exists because a
+   connector that could not reach the version carried a literal and it drifted.
+
+   Injected in [make_response] for the same reason [resultType] is -- 22 call
+   sites cannot each remember it. A handler that sets its own [_meta] keeps it;
+   this only adds the key when absent.
+
+   The spec marks this self-reported and not verified: for display, logging,
+   and debugging, never for a behavioural or security decision. *)
+let server_info_meta_key = "io.modelcontextprotocol/serverInfo"
+
+let server_info_meta_value =
+  `Assoc
+    [ ("name", `String "masc")
+    ; ("title", `String "MASC MCP Server")
+    ; ("version", `String Build_version.current)
+    ]
+
+let with_server_info = function
+  | `Assoc fields ->
+    let meta =
+      match List.assoc_opt "_meta" fields with
+      | Some (`Assoc meta) when List.mem_assoc server_info_meta_key meta ->
+        None
+      | Some (`Assoc meta) ->
+        Some (`Assoc ((server_info_meta_key, server_info_meta_value) :: meta))
+      | Some _ -> None
+      | None -> Some (`Assoc [ (server_info_meta_key, server_info_meta_value) ])
+    in
+    (match meta with
+     | None -> `Assoc fields
+     | Some meta ->
+       `Assoc (("_meta", meta) :: List.remove_assoc "_meta" fields))
+  | other -> other
+
 let make_response ~id result =
   let result =
     match result with
@@ -154,6 +191,7 @@ let make_response ~id result =
       `Assoc (("resultType", `String "complete") :: fields)
     | other -> other
   in
+  let result = with_server_info result in
   `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", id);
@@ -364,6 +402,36 @@ let protocol_version_from_params = function
   | _ -> default_protocol_version
 
 let protocol_version_meta_key = "io.modelcontextprotocol/protocolVersion"
+
+(* The other _meta field 2026-07-28 marks required on every client request.
+   Its value is a ClientCapabilities object; nothing here reads inside it,
+   because a server "MUST NOT rely on capabilities the client has not
+   declared" -- what matters at this layer is that the client declared
+   something. *)
+let client_capabilities_meta_key = "io.modelcontextprotocol/clientCapabilities"
+
+let request_meta_of_json = function
+  | `Assoc fields -> (
+    match List.assoc_opt "params" fields with
+    | Some (`Assoc params) -> (
+      match List.assoc_opt "_meta" params with
+      | Some (`Assoc meta) -> Some meta
+      | Some _ | None -> None)
+    | Some _ | None -> None)
+  | _ -> None
+
+(* Absent and present-but-null are the same answer to "did the client declare
+   its capabilities?": neither is a declaration. *)
+let request_meta_has_key body_str key =
+  match Yojson.Safe.from_string body_str with
+  | json -> (
+    match request_meta_of_json json with
+    | None -> false
+    | Some meta -> (
+      match List.assoc_opt key meta with
+      | Some `Null | None -> false
+      | Some _ -> true))
+  | exception Yojson.Json_error _ -> false
 
 let protocol_version_from_request_meta_json = function
   | `Assoc fields -> (

@@ -695,6 +695,7 @@ detect_asset() {
 
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
+TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 log "platform: $ASSET"
@@ -767,6 +768,7 @@ fetch_release_checksums() {
 # --- 3. download binary -------------------------------------------------------
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
+TUI_DEST="$PREFIX/masc-tui"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
@@ -862,8 +864,15 @@ install_release_companion() {
   log "installed: $dest"
 }
 
-# Install and verify the deployment preflight companions before replacing the main binary.
+# Install and verify the companions before replacing the main binary.
 # A failed companion download must leave the currently installed runtime intact.
+#
+# A missing asset stops the install rather than skipping the companion. That is
+# the same rule the two preflight companions already follow, and it is why the
+# README tells you to take the installer and the assets from one tag: an
+# installer that quietly delivers less than it was built to deliver is worse
+# than one that stops and says which asset was absent.
+install_release_companion "$TUI_ASSET" "$TUI_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 
@@ -1064,6 +1073,9 @@ Next:
 
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
+
+  ${c_dim}# watch and steer Keepers from a terminal (needs an interactive TTY)${c_off}
+  $TUI_DEST --base-path "$BASE_PATH" --port "$MASC_PORT"
 
   ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup

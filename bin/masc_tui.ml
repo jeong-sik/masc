@@ -17,6 +17,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
@@ -32,14 +33,6 @@ let wheel_notch_rows = 3
 
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
-
-let synchronized_output_enabled () =
-  match Sys.getenv_opt "MASC_TUI_SYNC" with
-  | Some value ->
-      (match String.lowercase_ascii (String.trim value) with
-       | "0" | "false" | "no" | "off" -> false
-       | "" | "1" | "true" | "yes" | "on" | _ -> true)
-  | None -> true
 
 (* Point fd 2 at a file under the base path, so writing to stderr cannot land
    in the frame. Best effort by construction: a surface that cannot open its
@@ -1079,6 +1072,8 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Context_inspector_loaded of
+      int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -1118,8 +1113,15 @@ type async_msg =
       (Tui_decode.keeper_tool_approval list, string) result
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
-  | Keeper_tool_modes_loaded of ((string * string) list, string) result
-  | Keeper_tool_mode_set of string * string * (unit, string) result
+  | Keeper_tool_modes_loaded of
+      ((string * string) list, string) result * Approval.Flow.generation
+      (** The stance listing replaces the whole yolo set, so a fetch that
+          started before an operator armed a gate would put the pre-press
+          answer back. The generation says which flow the answer belongs to
+          and a stale one is dropped, the same guard the held-call listing
+          already rides. *)
+  | Keeper_tool_mode_set of
+      string * string * (unit, string) result * Approval.Flow.generation
       (** keeper, tool call id, allow, and whether a wait was released — the
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
@@ -1150,6 +1152,17 @@ type async_msg =
   | Code_file_loaded of string * (string, string) result
   | Code_history_loaded of
       string * (Masc.Tui_decode.git_log_row list, string) result
+  | Code_diff_loaded of
+      string * (Masc.Tui_decode.git_diff, string) result
+  | Code_notes_loaded of
+      string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the note anchored to; success re-reads the listing. *)
+  | Code_note_written of string * (unit, string) result
+  | Code_activity_loaded of
+      string * (Masc.Tui_decode.ide_region list, string) result
+  (* (question, symbol, answer) — the note the pane shows names both. *)
+  | Code_lsp_answered of
+      string * string * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1376,48 +1389,70 @@ let launch_keeper_tool_approvals_load state ~mailbox =
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_modes_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
+  (* [reserve_refresh] declines while the operator's own press is still in
+     flight: the answer on the way back would be the stance from before it. *)
+  let flow, reserved = Approval.Flow.reserve_refresh state.approval_flow in
+  state.approval_flow <- flow;
+  match reserved with
+  | None -> ()
+  | Some generation -> (
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Keeper_tool_modes_loaded
+               (Error "Eio switch is unavailable", generation)))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_keeper_tool_approval_mode ~host ~port ~keeper_name
-          ~mode
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_mode_set (keeper_name, mode, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_mode_set
-           (keeper_name, mode, Error "Eio switch is unavailable"))
+  (* [begin_action] takes the newest generation, so a stance listing already
+     on the wire stops being current and cannot put the old answer back on
+     top of this press. It also refuses a second press while one is open. *)
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      add_event state "system"
+        (Printf.sprintf "%s's gate is already changing; wait for the answer"
+           keeper_name)
+  | Ok (flow, generation) -> (
+      state.approval_flow <- flow;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
+              ~keeper_name ~mode
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox
+          (Keeper_tool_mode_set (keeper_name, mode, result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Keeper_tool_mode_set
+               ( keeper_name,
+                 mode,
+                 Error "Eio switch is unavailable",
+                 generation )))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
@@ -1599,6 +1634,14 @@ let launch_resource_read state ~mailbox ~uri =
    HTTP GETs forked off the render loop, answered on the async mailbox and
    stamped with what they answer for, so a slow reply cannot dress a newer
    selection. *)
+(* The scope, as the two optional query axes the fetchers take. The match
+   is exhaustive: a fourth scope must decide its axis here. *)
+let code_scope_axes state =
+  match state.code_scope with
+  | Code_scope_project -> (None, None)
+  | Code_scope_keeper keeper -> (Some keeper, None)
+  | Code_scope_repo repo -> (None, Some repo)
+
 let launch_code_entries_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -1606,8 +1649,9 @@ let launch_code_entries_load state ~mailbox =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_workspace_entries ?keeper:state.code_keeper ~host
-          ~port ~path:dir ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+          ~path:dir ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1629,8 +1673,8 @@ let launch_code_file_load state ~mailbox ~path =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_workspace_file ?keeper:state.code_keeper ~host
-          ~port ~path ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1649,14 +1693,19 @@ let launch_code_file_load state ~mailbox ~path =
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
 let code_history_limit = 50
 
+(* What the working tree is compared against, everywhere a tree diff is
+   read. *)
+let tree_diff_base_ref = "HEAD"
+
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_git_log ?keeper:state.code_keeper ~host ~port
-          ~path ~limit:code_history_limit ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+          ~limit:code_history_limit ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1671,6 +1720,161 @@ let launch_code_history_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_history_loaded (path, Error "Eio switch is unavailable"))
+
+let launch_code_diff_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
+          ~base_ref:tree_diff_base_ref ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_diff_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_diff_loaded (path, Error "Eio switch is unavailable"))
+
+(* The codebase slug for the surface's scope, when it has one. Only a
+   repository row carries the server-minted slug (RFC-0378: the client
+   never re-derives it); the other scopes honestly have none. *)
+let code_scope_codebase state =
+  match state.code_scope with
+  | Code_scope_repo repo_id -> (
+      match state.repositories with
+      | None -> Error "the repositories listing is not loaded yet"
+      | Some snapshot -> (
+          match
+            List.find_opt
+              (fun (r : Masc.Tui_decode.repository) ->
+                String.equal r.Masc.Tui_decode.rp_id repo_id)
+              snapshot.Masc.Tui_decode.rs_repositories
+          with
+          | None ->
+              Error ("repository " ^ repo_id ^ " is not in the listing")
+          | Some r -> (
+              match r.Masc.Tui_decode.rp_codebase with
+              | Some slug -> Ok slug
+              | None ->
+                  Error
+                    "this repository's remote has no canonical slug, so \
+                     it has no notes")))
+  | Code_scope_keeper _ ->
+      Error "notes are scoped by repository; open the file from Repos"
+  | Code_scope_project ->
+      Error "the project tree is not a registered repository; no notes here"
+
+let launch_code_notes_load state ~mailbox ~codebase ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_ide_annotations ~host ~port ~codebase
+          ~file_path:path
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_notes_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_notes_loaded (path, Error "Eio switch is unavailable"))
+
+(* Same fiber-and-mailbox shape as the other writes. *)
+let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
+    ~kind ~content =
+  add_event state "system" ("adding a note to " ^ path);
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_ide_annotation ~host ~port ~codebase
+          ~file_path:path ~line_start ~line_end ~kind ~content
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_note_written (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run
+  | None -> run ()
+
+let launch_code_activity_load state ~mailbox ~codebase ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
+          ~file_path:path
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_activity_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_activity_loaded (path, Error "Eio switch is unavailable"))
+
+(* Ask the language server about [symbol] on the pane's cursor line. The
+   question rides the surface's workspace axes, so a keeper checkout and a
+   repository ask about their own bytes. *)
+let start_code_lsp_question state ~mailbox ~(question : string)
+    ~(symbol : string) =
+  match state.code_file with
+  | None -> add_event state "error" "no file is open on the Code surface"
+  | Some (path, _) ->
+      state.code_lsp_note <-
+        Some (Printf.sprintf "asking %s about %S" question symbol);
+      let host = server_peer_host in
+      let port = state.port in
+      let line = state.code_file_cursor + 1 in
+      let keeper, repo = code_scope_axes state in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.fetch_lsp_question ?keeper ?repo ~host ~port ~path
+              ~line ~symbol ~question ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Code_lsp_answered (question, symbol, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Code_lsp_answered
+                (question, symbol, Error "Eio switch is unavailable")))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -2044,8 +2248,6 @@ let cycle_changes_keeper state ~mailbox ~delta =
 (* What the tree holds for one file, against its last commit. HEAD rather
    than a branch point: the question the surface answers is "did this survive
    into the tree", and a merge base would answer a different one. *)
-let tree_diff_base_ref = "HEAD"
-
 let launch_git_diff_load state ~mailbox ~keeper ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -2053,7 +2255,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
     let result =
       try
         Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref
+          ~base_ref:tree_diff_base_ref ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -2391,6 +2593,52 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
            , keeper_name
            , Error "Eio switch is unavailable"
            , Error "Eio switch is unavailable" ))
+
+let launch_context_inspector_load state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  state.context_inspector_generation <- state.context_inspector_generation + 1;
+  state.context_inspector_loading <- true;
+  let generation = state.context_inspector_generation in
+  let run () =
+    let reading =
+      try
+        Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          let error = Error (Printexc.to_string exn) in
+          { Masc_tui_context_inspector.turn = error; prompt = error }
+    in
+    enqueue_async mailbox
+      (Context_inspector_loaded (generation, keeper_name, reading))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      let error = Error "Eio switch is unavailable" in
+      enqueue_async mailbox
+        (Context_inspector_loaded
+           ( generation
+           , keeper_name
+           , { Masc_tui_context_inspector.turn = error; prompt = error } ))
+
+let open_context_inspector state ~mailbox ~keeper_name =
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some keeper_name;
+  (* A fresh Keeper target starts unread. Showing the previous Keeper's
+     already-loaded composition under this name while the GET is in flight
+     would be a more dangerous lie than a loading row. Refreshing the same
+     target keeps its reading; opening a target does not. *)
+  state.context_inspector_reading <- None;
+  state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
+  state.context_inspector_cursor <- 0;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_exact <- None;
+  launch_context_inspector_load state ~mailbox ~keeper_name
 
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
@@ -3000,6 +3248,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_memory_visible
          then "Librarian/Memory timeline shown (/memory to hide)"
          else "Librarian/Memory timeline hidden (/memory to show)")
+  | Masc_tui_command.Inspect_context ->
+      (match target with
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           open_context_inspector state ~mailbox ~keeper_name
+       | None ->
+           notice ~role:Message_error
+             "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -4298,6 +4554,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -4409,7 +4666,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                      Observer_live { live with events = live.events + 1 }
                | Observer_off | Observer_opening | Observer_closed _ -> ());
               state.acting <-
-                { ae_at = received; ae_event = event } :: state.acting;
+                { Masc_tui_acting.ae_at = received; ae_event = event }
+                :: state.acting;
               (* A row arriving at the top pushes every row down one. An
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
@@ -4430,7 +4688,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           Masc_tui_acting.retain
             ~actions:Masc_tui_types.acting_retained_entries
             ~quiet:Masc_tui_types.acting_retained_quiet
-            ~event_of:(fun entry -> entry.Masc_tui_types.ae_event)
+            ~event_of:(fun entry -> entry.Masc_tui_acting.ae_event)
             state.acting
         in
         state.acting <- kept;
@@ -4625,6 +4883,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             (match state.code_target_line with
              | Some line -> max 0 (line - 1)
              | None -> 0);
+          state.code_file_cursor <- state.code_file_scroll;
+          state.code_lsp_note <- None;
           state.code_target_line <- None;
           state.code_file_hscroll <- 0;
           (* The widest row is the horizontal clamp; measured here, once,
@@ -4641,13 +4901,124 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 max widest row_width)
               0 rows;
           state.code_focus_file <- true;
-          (* A new file starts on its content; the old file's history would
-             caption the wrong bytes. *)
+          (* A new file starts on its content; the old file's history or
+             diff would caption the wrong bytes. *)
           state.code_history <- None;
           state.code_history_error <- None;
           state.code_history_open <- false;
-          state.code_history_scroll <- 0
+          state.code_history_scroll <- 0;
+          state.code_diff <- None;
+          state.code_diff_error <- None;
+          state.code_diff_open <- false;
+          state.code_diff_scroll <- 0;
+          state.code_notes <- None;
+          state.code_notes_error <- None;
+          state.code_notes_open <- false;
+          state.code_notes_scroll <- 0;
+          state.code_activity <- None;
+          state.code_activity_error <- None;
+          state.code_activity_open <- false;
+          state.code_activity_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_notes_loaded (path, result) ->
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok notes ->
+            state.code_notes <- Some (path, notes);
+            state.code_notes_error <- None;
+            state.code_notes_scroll <- 0
+        | Error detail -> state.code_notes_error <- Some detail)
+  | Code_note_written (path, result) -> (
+      match result with
+      | Ok () ->
+          add_event state "system" ("note added to " ^ path);
+          (* Re-read rather than splice: the server owns ids and order. *)
+          let still_current =
+            match state.code_file with
+            | Some (open_path, _) -> String.equal open_path path
+            | None -> false
+          in
+          if still_current then (
+            match code_scope_codebase state with
+            | Ok codebase ->
+                state.code_notes <- None;
+                state.code_notes_error <- None;
+                launch_code_notes_load state ~mailbox ~codebase ~path
+            | Error _ -> ())
+      | Error detail -> state.code_notes_error <- Some detail)
+  | Code_activity_loaded (path, result) ->
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok regions ->
+            state.code_activity <- Some (path, regions);
+            state.code_activity_error <- None;
+            state.code_activity_scroll <- 0
+        | Error detail -> state.code_activity_error <- Some detail)
+  | Code_lsp_answered (question, symbol, result) ->
+      (match result with
+       | Error detail ->
+           state.code_lsp_note <- Some (symbol ^ ": " ^ detail)
+       | Ok (Masc.Tui_decode.Lsp_hover text) ->
+           state.code_lsp_note <-
+             Some
+               (match text with
+                | Some t ->
+                    symbol ^ ": " ^ Masc.Tui_decode.sanitize_terminal_text t
+                | None -> symbol ^ ": the server has nothing to say here")
+       | Ok (Masc.Tui_decode.Lsp_locations []) ->
+           state.code_lsp_note <-
+             Some (Printf.sprintf "no %s found for %S" question symbol)
+       | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
+           let open Masc.Tui_decode in
+           if location.ll_inside then begin
+             (* Jump there: same file just moves the cursor, another file
+                opens with the line as its target. *)
+             state.code_lsp_note <-
+               Some
+                 (Printf.sprintf "%s: %s:%d" symbol location.ll_path
+                    location.ll_line);
+             match state.code_file with
+             | Some (open_path, rows)
+               when String.equal open_path location.ll_path ->
+                 state.code_file_cursor <-
+                   max 0
+                     (min (location.ll_line - 1) (List.length rows - 1))
+             | Some _ | None ->
+                 state.code_target_line <- Some location.ll_line;
+                 launch_code_file_load state ~mailbox
+                   ~path:location.ll_path
+           end
+           else
+             (* Outside the workspace (stdlib, a package): say where rather
+                than open a path the surface cannot serve. *)
+             state.code_lsp_note <-
+               Some
+                 (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
+                    location.ll_path location.ll_line))
+  | Code_diff_loaded (path, result) ->
+      (* Keyed to the file still open, as the history is. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok diff ->
+            state.code_diff <- Some (path, diff);
+            state.code_diff_error <- None;
+            state.code_diff_scroll <- 0
+        | Error detail -> state.code_diff_error <- Some detail)
   | Code_history_loaded (path, result) ->
       (* Keyed to the file still open: a listing that raced a file switch
          describes bytes no longer on screen. *)
@@ -4853,19 +5224,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
-  | Keeper_tool_modes_loaded result ->
-      (match result with
-       | Ok overrides ->
-           state.keeper_yolo_names <-
-             List.filter_map
-               (fun (keeper, mode) ->
-                 if String.equal mode "yolo" then Some keeper else None)
-               overrides
-       | Error _ ->
-           (* The stance listing is advisory colouring; a failed fetch keeps
-              the last known set rather than flashing every name back. *)
-           ())
-  | Keeper_tool_mode_set (keeper_name, mode, result) ->
+  | Keeper_tool_modes_loaded (result, generation) ->
+      (* A listing from an older flow describes the stance before the press
+         that superseded it. Dropping it is what keeps an armed gate armed
+         on screen. *)
+      if Approval.Flow.is_current state.approval_flow generation then
+        (match result with
+         | Ok overrides ->
+             state.keeper_yolo_names <-
+               List.filter_map
+                 (fun (keeper, mode) ->
+                   if String.equal mode "yolo" then Some keeper else None)
+                 overrides
+         | Error _ ->
+             (* The stance listing is advisory colouring; a failed fetch keeps
+                the last known set rather than flashing every name back. *)
+             ())
+  | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
+      let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
+      state.approval_flow <- flow;
+      if not owned then ()
+      else
       (match result with
        | Ok () ->
            state.keeper_yolo_names <-
@@ -4948,6 +5327,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
+  | Context_inspector_loaded (generation, keeper_name, reading) ->
+      if
+        generation = state.context_inspector_generation
+        && Option.exists (String.equal keeper_name)
+             state.context_inspector_keeper
+      then begin
+        state.context_inspector_loading <- false;
+        state.context_inspector_reading <- Some (keeper_name, reading)
+      end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
@@ -5076,7 +5464,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
-                  state.runtime_surface_error <- None
+                  state.runtime_surface_error <- probe_error
               | Error detail -> state.runtime_surface_error <- Some detail)
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
@@ -5421,9 +5809,12 @@ let main () =
     { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
   in
 
+  let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
   let frame_presenter =
     Frame_presenter.create
-      ~synchronized_output:(synchronized_output_enabled ()) ()
+      ~synchronized_output:
+        (Terminal_profile.synchronized_output terminal_profile)
+      ()
   in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
@@ -5434,8 +5825,9 @@ let main () =
        off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
-    Terminal_title.clear terminal_title ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout);
+    if Terminal_profile.dynamic_title terminal_profile then
+      Terminal_title.clear terminal_title ~write:(output_string stdout)
+        ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
   in
 
@@ -5454,7 +5846,8 @@ let main () =
       output_string stdout bracketed_paste_disable;
       (* The mode belongs to this program's screen. A shell that inherited it
          would see its own keys reported in a form it does not read. *)
-      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+      if Terminal_profile.kitty_keyboard terminal_profile then
+        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
       flush stdout
     end
   in
@@ -5511,11 +5904,11 @@ let main () =
     ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
-  (* Asks the terminal to report which modifiers were held. A terminal that
-     does not know the request ignores it and keeps sending the legacy forms,
-     which the same vocabulary already reads -- so this is written without a
-     capability query, the way the two modes above are. *)
-  output_string stdout Masc_tui_csi.enable_kitty_keyboard;
+  (* Only terminals with an extended profile receive this opt-in. Apple
+     Terminal does not implement the protocol; keeping an unsupported control
+     sequence off its parser also keeps its crash-sensitive render path small. *)
+  if Terminal_profile.kitty_keyboard terminal_profile then
+    output_string stdout Masc_tui_csi.enable_kitty_keyboard;
   flush stdout;
 
   (* Initial load *)
@@ -5652,6 +6045,72 @@ let main () =
         Masc_tui_http.post_connector_unbind ~host ~port ~connector
           ~body_json:(Yojson.Safe.to_string json))
       ()
+  in
+  (* A new note over the open file: $EDITOR is the form, and the editor is
+     the confirmation step -- a non-zero exit or an empty content leaves the
+     file unannotated. Reachable only from the notes view, which already
+     proved the scope has a codebase slug. *)
+  let handle_code_note_write () =
+    match state.code_file with
+    | None -> ()
+    | Some (path, _) -> (
+        match code_scope_codebase state with
+        | Error why -> add_event state "system" ("notes: " ^ why)
+        | Ok codebase -> (
+            match Masc_tui_editor.editor_command () with
+            | None ->
+                add_event state "error"
+                  "no $EDITOR set; export EDITOR to add a note here"
+            | Some _ -> (
+                let stem =
+                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                in
+                match
+                  Masc_tui_editor.roundtrip ~restore:restore_terminal
+                    ~reenter:reenter_terminal stem
+                with
+                | None -> add_event state "system" "note cancelled"
+                | Some body -> (
+                    match Yojson.Safe.from_string body with
+                    | exception Yojson.Json_error e ->
+                        add_event state "error"
+                          ("note: body is not JSON: " ^ e)
+                    | json ->
+                        let field key =
+                          match json with
+                          | `Assoc fields -> List.assoc_opt key fields
+                          | _ -> None
+                        in
+                        let int_field key =
+                          match field key with
+                          | Some (`Int n) -> Some n
+                          | Some _ | None -> None
+                        in
+                        let content =
+                          match field "content" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> ""
+                        in
+                        let kind =
+                          match field "kind" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "Comment"
+                        in
+                        if String.equal content "" then
+                          add_event state "system"
+                            "note cancelled (empty content)"
+                        else (
+                          match
+                            (int_field "line_start", int_field "line_end")
+                          with
+                          | Some line_start, Some line_end ->
+                              start_code_note_write state
+                                ~mailbox:async_messages ~codebase ~path
+                                ~line_start ~line_end ~kind ~content
+                          | _ ->
+                              add_event state "error"
+                                "note: line_start and line_end must be \
+                                 integers")))))
   in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or
@@ -5986,6 +6445,7 @@ let main () =
       let composer_claimed =
         (not compact_viewport)
         && (not state.help_open)
+        && (not state.context_inspector_open)
         && (not state.palette_open)
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
@@ -6023,6 +6483,87 @@ let main () =
        | Some k when String.equal k toggle_roster_pane_key ->
            state.roster_pane_hidden <- not state.roster_pane_hidden;
            Render_schedule.request render_schedule Render_schedule.Force
+       (* [/context] is modal: the summary and exact prompt text must not leak
+          keys into the composer underneath. The quit confirmation and chrome
+          toggles remain global above it, matching Help and Palette. *)
+       | Some k when state.context_inspector_open && not compact_viewport ->
+           let prompt_blocks () =
+             match state.context_inspector_reading with
+             | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
+                 capture.Masc.Keeper_prompt_capture.blocks
+             | Some _ | None -> []
+           in
+           let close () =
+             state.context_inspector_open <- false;
+             state.context_inspector_exact <- None;
+             state.context_inspector_scroll <- 0
+           in
+           (match k with
+            | "esc" ->
+                (match state.context_inspector_exact with
+                 | Some _ ->
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0
+                 | None -> close ())
+            | "r" ->
+                Option.iter
+                  (fun keeper_name ->
+                     launch_context_inspector_load state
+                       ~mailbox:async_messages ~keeper_name)
+                  state.context_inspector_keeper
+            | "1" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Composition;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "2" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Prompt_blocks;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
+                state.context_inspector_tab <-
+                  (match state.context_inspector_tab with
+                   | Masc_tui_context_inspector.Composition ->
+                       Masc_tui_context_inspector.Prompt_blocks
+                   | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Composition);
+                state.context_inspector_cursor <- 0;
+                state.context_inspector_scroll <- 0
+            | ("j" | "down" | "k" | "up")
+              when Option.is_some state.context_inspector_exact
+                   || state.context_inspector_tab
+                      = Masc_tui_context_inspector.Composition ->
+                let count, height =
+                  Masc_tui_render.context_inspector_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_scroll <-
+                  move ~count ~height state.context_inspector_scroll
+            | "j" | "down" ->
+                let last = max 0 (List.length (prompt_blocks ()) - 1) in
+                state.context_inspector_cursor <-
+                  min last (state.context_inspector_cursor + 1)
+            | "k" | "up" ->
+                state.context_inspector_cursor <-
+                  max 0 (state.context_inspector_cursor - 1)
+            | "\r" ->
+                if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Prompt_blocks
+                then begin
+                  match List.nth_opt (prompt_blocks ()) state.context_inspector_cursor with
+                  | Some _ ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | None -> ()
+                end
+            | _ -> ())
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
@@ -6054,6 +6595,37 @@ let main () =
            in
            (match k with
             | "esc" -> close ()
+            | "\r" when
+                (let q = String.trim state.palette_query in
+                 String.starts_with ~prefix:"hover " q
+                 || String.starts_with ~prefix:"def " q) ->
+                (* A typed command, not an entry: the argument is the symbol
+                   the language-server question is asked about, on the Code
+                   pane's cursor line. *)
+                let q = String.trim state.palette_query in
+                let question, symbol =
+                  match String.index_opt q ' ' with
+                  | Some i ->
+                      ( String.sub q 0 i,
+                        String.trim
+                          (String.sub q (i + 1) (String.length q - i - 1)) )
+                  | None -> (q, "")
+                in
+                let question =
+                  if String.equal question "def" then "definition"
+                  else question
+                in
+                close ();
+                if String.equal symbol "" then
+                  add_event state "error"
+                    (question ^ " needs a symbol: :" ^ question ^ " <name>")
+                else if state.view <> Code || Option.is_none state.code_file
+                then
+                  add_event state "error"
+                    "hover/def ask about the file open on the Code surface"
+                else
+                  start_code_lsp_question state ~mailbox:async_messages
+                    ~question ~symbol
             | "\r" ->
                 let matches = Masc_tui_types.palette_matches state in
                 let chosen =
@@ -6207,6 +6779,14 @@ let main () =
            search_jump state ~query:state.search_last ~after
              ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
+       (* In chat, printable keys normally belong to the draft. Keep [?] as
+          the documented global Help key when the draft is empty; once a
+          sentence has started it remains an ordinary question mark. This
+          makes shortcuts and slash commands discoverable without discarding
+          text the operator is already writing. *)
+       | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
+           state.help_open <- true;
+           state.help_scroll <- 0
        | Some k when message_mode ->
            let reasoning_key =
              String.length k = 1 && Char.code k.[0] = 18
@@ -6292,6 +6872,111 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "K" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file
+                       && not state.code_history_open
+                       && not state.code_diff_open
+                       && not state.code_notes_open
+                       && not state.code_activity_open ->
+           (* Ask the language server what a name on the cursor line is. The
+              palette collects the name: the pane has no character cursor,
+              and the route's address arithmetic wants the literal symbol. *)
+           state.palette_open <- true;
+           state.palette_query <- "hover ";
+           state.palette_cursor <- 0
+       | Some "D" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file
+                       && not state.code_history_open
+                       && not state.code_diff_open
+                       && not state.code_notes_open
+                       && not state.code_activity_open ->
+           state.palette_open <- true;
+           state.palette_query <- "def ";
+           state.palette_cursor <- 0
+       | Some "c" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* Which keeper wrote which lines of the open file, through what,
+              and when. Repository scope, like the notes: the regions are
+              keyed by the same server-minted codebase slug. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else
+                  match code_scope_codebase state with
+                  | Error why ->
+                      add_event state "system" ("activity: " ^ why)
+                  | Ok codebase ->
+                      state.code_activity_open <- true;
+                      state.code_notes_open <- false;
+                      state.code_diff_open <- false;
+                      state.code_history_open <- false;
+                      (match state.code_activity with
+                       | Some (loaded_path, _)
+                         when String.equal loaded_path path ->
+                           ()
+                       | Some _ | None ->
+                           state.code_activity <- None;
+                           state.code_activity_error <- None;
+                           launch_code_activity_load state
+                             ~mailbox:async_messages ~codebase ~path))
+       | Some "w" when state.view = Code && state.code_notes_open ->
+           (* Adding a note lives inside the notes view: the view proves the
+              scope, and the fresh listing lands where the writer looks. *)
+           handle_code_note_write ()
+       | Some "m" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* The notes anchored to the open file. Repository scope only:
+              the annotation routes are scoped by the server-minted codebase
+              slug, and only a Repositories row carries one -- the other
+              scopes say so instead of guessing a slug. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_notes_open then state.code_notes_open <- false
+                else
+                  match code_scope_codebase state with
+                  | Error why -> add_event state "system" ("notes: " ^ why)
+                  | Ok codebase ->
+                      state.code_notes_open <- true;
+                      state.code_diff_open <- false;
+                      state.code_history_open <- false;
+                      state.code_activity_open <- false;
+                      (match state.code_notes with
+                       | Some (loaded_path, _)
+                         when String.equal loaded_path path ->
+                           ()
+                       | Some _ | None ->
+                           state.code_notes <- None;
+                           state.code_notes_error <- None;
+                           launch_code_notes_load state
+                             ~mailbox:async_messages ~codebase ~path))
+       | Some "d" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* The working tree against HEAD, over the open file. One overlay
+              at a time: opening this closes the history, and H the reverse.
+              Same key closes it; a diff already fetched for this path is
+              shown as it stands. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_diff_open then state.code_diff_open <- false
+                else begin
+                  state.code_diff_open <- true;
+                  state.code_history_open <- false;
+                  state.code_notes_open <- false;
+                  state.code_activity_open <- false;
+                  (match state.code_diff with
+                   | Some (loaded_path, _)
+                     when String.equal loaded_path path ->
+                       ()
+                   | Some _ | None ->
+                       state.code_diff <- None;
+                       state.code_diff_error <- None;
+                       launch_code_diff_load state ~mailbox:async_messages
+                         ~path)
+                end)
        | Some "H" when state.view = Code && state.code_focus_file ->
            (* History over the open file. The capital only: h stays free for
               the horizontal scroll the file pane is due. Same key closes it;
@@ -6303,6 +6988,9 @@ let main () =
                   state.code_history_open <- false
                 else begin
                   state.code_history_open <- true;
+                  state.code_diff_open <- false;
+                  state.code_notes_open <- false;
+                  state.code_activity_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6483,7 +7171,11 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_history_open then
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
+                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
@@ -6497,10 +7189,10 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
-                else if Option.is_some state.code_keeper then begin
-                  (* Above a keeper workspace's root sits the project tree
-                     the surface started on. *)
-                  state.code_keeper <- None;
+                else if state.code_scope <> Code_scope_project then begin
+                  (* Above a keeper's or a repository's root sits the
+                     project tree the surface started on. *)
+                  state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_entries <- [];
                   state.code_entries_error <- None;
@@ -6602,7 +7294,11 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_history_open then
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
+                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
@@ -6614,8 +7310,8 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
-                else if Option.is_some state.code_keeper then begin
-                  state.code_keeper <- None;
+                else if state.code_scope <> Code_scope_project then begin
+                  state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_entries <- [];
                   state.code_entries_error <- None;
@@ -6673,7 +7369,32 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_history_open then (
+                  if state.code_activity_open then (
+                    match state.code_activity with
+                    | Some (_, regions) ->
+                        state.code_activity_scroll <-
+                          min
+                            (max 0 (List.length regions - 1))
+                            (state.code_activity_scroll + 1)
+                    | None -> ())
+                  else if state.code_notes_open then (
+                    match state.code_notes with
+                    | Some (_, notes) ->
+                        state.code_notes_scroll <-
+                          min
+                            (max 0 (List.length notes - 1))
+                            (state.code_notes_scroll + 1)
+                    | None -> ())
+                  else if state.code_diff_open then (
+                    match state.code_diff with
+                    | Some (_, diff) ->
+                        state.code_diff_scroll <-
+                          min
+                            (max 0
+                               (List.length diff.Masc.Tui_decode.gd_rows - 1))
+                            (state.code_diff_scroll + 1)
+                    | None -> ())
+                  else if state.code_history_open then (
                     match state.code_history with
                     | Some (_, rows) ->
                         state.code_history_scroll <-
@@ -6684,10 +7405,16 @@ let main () =
                   else
                     match state.code_file with
                     | Some (_, rows) ->
+                        let cursor =
+                          Masc_tui_scroll.cursor_down
+                            ~count:(List.length rows)
+                            state.code_file_cursor
+                        in
+                        state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
-                          min
-                            (max 0 (List.length rows - 1))
-                            (state.code_file_scroll + 1)
+                          Masc_tui_scroll.ensure_visible ~cursor
+                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            state.code_file_scroll
                     | None -> ())
                 else
                   state.code_cursor <-
@@ -6784,7 +7511,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_older
@@ -6883,12 +7610,32 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_history_open then
+                  if state.code_activity_open then
+                    state.code_activity_scroll <-
+                      max 0 (state.code_activity_scroll - 1)
+                  else if state.code_notes_open then
+                    state.code_notes_scroll <-
+                      max 0 (state.code_notes_scroll - 1)
+                  else if state.code_diff_open then
+                    state.code_diff_scroll <-
+                      max 0 (state.code_diff_scroll - 1)
+                  else if state.code_history_open then
                     state.code_history_scroll <-
                       max 0 (state.code_history_scroll - 1)
                   else
-                    state.code_file_scroll <-
-                      max 0 (state.code_file_scroll - 1))
+                    match state.code_file with
+                    | Some (_, rows) ->
+                        let cursor =
+                          Masc_tui_scroll.cursor_up
+                            ~count:(List.length rows)
+                            state.code_file_cursor
+                        in
+                        state.code_file_cursor <- cursor;
+                        state.code_file_scroll <-
+                          Masc_tui_scroll.ensure_visible ~cursor
+                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            state.code_file_scroll
+                    | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
@@ -6969,7 +7716,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_newer
@@ -7212,10 +7959,35 @@ let main () =
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
+            | Repositories -> (
+                (* Enter opens the repository's own tree on the Code surface,
+                   through the ?repo_id= axis its row already names. *)
+                match state.repositories with
+                | None -> ()
+                | Some snapshot -> (
+                    match
+                      List.nth_opt
+                        snapshot.Masc.Tui_decode.rs_repositories
+                        state.repositories_cursor
+                    with
+                    | None -> ()
+                    | Some repo ->
+                        state.code_scope <-
+                          Code_scope_repo repo.Masc.Tui_decode.rp_id;
+                        state.code_dir <- "";
+                        state.code_cursor <- 0;
+                        state.code_entries <- [];
+                        state.code_entries_error <- None;
+                        state.code_file <- None;
+                        state.code_file_error <- None;
+                        state.code_focus_file <- false;
+                        state.view <- Code;
+                        launch_code_entries_load state
+                          ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Verification | Harness
-            | Repositories | Connectors | Runtime | Config | Resources | Tools
+            | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -7340,7 +8112,7 @@ let main () =
                            keeper's workspace; o opens it in $EDITOR"
                     | Some path ->
                         let keeper = change.Masc.Tui_decode.fc_keeper in
-                        state.code_keeper <- Some keeper;
+                        state.code_scope <- Code_scope_keeper keeper;
                         let parent = Filename.dirname path in
                         state.code_dir <-
                           (if String.equal parent "." then "" else parent);
@@ -7745,9 +8517,10 @@ let main () =
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
            Option.iter (apply_clamped_scroll state) clamped;
-           Terminal_title.present terminal_title ~write:(output_string stdout)
-             ~flush:(fun () -> flush stdout)
-             (terminal_title_snapshot state);
+           if Terminal_profile.dynamic_title terminal_profile then
+             Terminal_title.present terminal_title ~write:(output_string stdout)
+               ~flush:(fun () -> flush stdout)
+               (terminal_title_snapshot state);
            Frame_presenter.present frame_presenter
              ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)

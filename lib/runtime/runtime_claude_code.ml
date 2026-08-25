@@ -42,6 +42,11 @@ let timeout_s_for_phase config ~turn_admitted =
   else Some config.admission_timeout_s
 ;;
 
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
 type session_mode =
   | Start
   | Resume of { session_id : string }
@@ -611,10 +616,30 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id
       (Printf.sprintf "unexpected message type %S before control response" other)
 ;;
 
-let user_message prompt =
+(* The stream-json user message always carries a content-block array, never the
+   bare-string form. Both are valid on the wire, but one shape means one code
+   path: an image turn and a text turn differ only in how many blocks precede
+   the text. Images come first — the same order the vision docs use, and the
+   order a reader needs to make sense of the text that refers to them. *)
+let image_block (image : image_input) =
+  `Assoc
+    [ "type", `String "image"
+    ; ( "source"
+      , `Assoc
+          [ "type", `String "base64"
+          ; "media_type", `String image.media_type
+          ; "data", `String image.base64_data
+          ] )
+    ]
+;;
+
+let user_message ~images prompt =
+  let blocks =
+    List.map image_block images @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]
+  in
   `Assoc
     [ "type", `String "user"
-    ; "message", `Assoc [ "role", `String "user"; "content", `String prompt ]
+    ; "message", `Assoc [ "role", `String "user"; "content", `List blocks ]
     ; "parent_tool_use_id", `Null
     ; "session_id", `String "default"
     ]
@@ -1067,7 +1092,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 ;;
 
 let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
-    ~prompt ~on_session_ready ~on_turn_starting ~on_turn_started
+    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started
     ~on_stream_event ~turn_admitted =
   let tool_call_count = ref 0 in
   let mcp_session = Runtime_official_client_mcp.create_session () in
@@ -1093,7 +1118,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
   in
   let* () =
     try
-      io.send (user_message prompt);
+      io.send (user_message ~images prompt);
       turn_admitted := true;
       Ok ()
     with
@@ -1130,7 +1155,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
 ;;
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
-    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt
+    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
     ~on_session_ready ~on_turn_starting ~on_turn_started ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
@@ -1199,6 +1224,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~session_mode
           ~session_id
           ~prompt
+          ~images
           ~on_session_ready:(fun ~session_id ->
             with_admission_timeout (fun () -> on_session_ready ~session_id))
           ~on_turn_starting:(fun ~session_id ->
@@ -1240,6 +1266,42 @@ let validate_config config ~session_mode ~prompt =
     | Start | Resume _ -> Ok ()
 ;;
 
+(* Media types the stream-json image block accepts. Same closed set as the
+   analyze_image tool schema and the dashboard composer, so a file the operator
+   can attach is a file this transport can carry. *)
+let supported_image_media_types =
+  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+;;
+
+(* Fail closed before spawning the CLI. A malformed image reaches the provider
+   as a 400 several seconds later, with the turn already started and the error
+   attributed to the model rather than to the caller that built the block. *)
+let validate_images images =
+  let rec loop index = function
+    | [] -> Ok ()
+    | image :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      if not (List.mem image.media_type supported_image_media_types)
+      then
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "%s.media_type %S is not one of %s"
+                where
+                image.media_type
+                (String.concat ", " supported_image_media_types)))
+      else if String.trim image.base64_data = ""
+      then Error (Invalid_config (where ^ ".base64_data must not be empty"))
+      else if String.exists (fun c -> c = '\n' || c = '\r') image.base64_data
+      then
+        Error
+          (Invalid_config
+             (where ^ ".base64_data must not contain newlines"))
+      else loop (index + 1) rest
+  in
+  loop 0 images
+;;
+
 let validate_dynamic_tools tools =
   let valid_tool_character = function
     | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
@@ -1267,8 +1329,9 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
+let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt ~images =
   let* () = validate_config config ~session_mode ~prompt in
+  let* () = validate_images images in
   validate_dynamic_tools dynamic_tools
 ;;
 
@@ -1298,9 +1361,9 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
-    ~prompt =
+    ~prompt ~images =
   let result =
-    let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt in
+    let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
     let* _ = reasoning_args reasoning_effort in
     let* subscription =
       match admitted_subscription with
@@ -1334,6 +1397,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~session_id
         ~subscription
         ~prompt
+        ~images
         ~on_session_ready
         ~on_turn_starting
         ~on_turn_started

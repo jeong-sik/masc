@@ -42,11 +42,12 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   },
   imessage: {
     title: 'iMessage 권한 (macOS only)',
-    intro: '인증 토큰이 없습니다 — 대신 OS 권한으로 chat.db에 접근합니다.',
+    intro: '인증 토큰이 없습니다 — 대신 macOS 권한으로 서버가 직접 chat.db를 읽습니다.',
     steps: [
-      { text: '시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한 → 사용 중인 터미널/iTerm 추가.' },
+      { text: '시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한 → masc 서버를 띄우는 터미널 추가. 권한이 없으면 게이트웨이가 이유를 남기고 시작하지 않습니다.' },
       { text: 'Messages.app 로그인 후 열어두기 (chat.db에 최근 메시지가 쌓이도록).' },
-      { text: '(옵션) self-chat 모드를 쓸 거면 Messages에서 자기 자신과의 대화를 만든 뒤 chat GUID를 IMESSAGE_SELF_CHAT_GUID에 넣기.' },
+      { text: '대화를 keeper에 연결(bind)하기. 연결되지 않은 대화는 keeper에게 전달되지 않습니다 — Messages.app에는 개인 대화가 전부 들어 있어서, 연결이 곧 전달 범위입니다.' },
+      { text: '답장은 기본적으로 자기 자신과의 대화로 갑니다. 그 대화는 자동으로 찾지만, 직접 지정하려면 MASC_IMESSAGE_SELF_CHAT_GUID에 chat GUID를 넣으세요. 받은 대화에 그대로 답하려면 MASC_IMESSAGE_REPLY_MODE=source-chat.' },
     ],
     references: [
       { href: 'https://support.apple.com/en-us/guide/mac-help/mh11479/mac', label: 'macOS Privacy guide' },

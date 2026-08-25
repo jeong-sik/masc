@@ -13,6 +13,7 @@
  (flags
   (:standard -w +33))
  (libraries
+  masc.masc_eio_context
   masc.fs_compat
   masc.masc_core
   masc.masc_log

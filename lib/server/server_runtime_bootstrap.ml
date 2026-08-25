@@ -1520,6 +1520,11 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
          Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
       Server_slack_in_process_gateway.start ~sw ~env ~state;
+      (* In-process iMessage connector, replacing the deleted
+         sidecars/imessage-bot/ Python connector. Off unless Messages.app's
+         chat.db is readable — on Linux it never is, and the start function
+         records the reason and skips, leaving the server unaffected. *)
+      Server_imessage_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
       (* Auxiliary transports start after owner readiness and report their own

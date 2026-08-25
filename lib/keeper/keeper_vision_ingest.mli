@@ -13,9 +13,13 @@
       with a handle-only placeholder (no provider call on the turn fiber); also
       migrates images already persisted in pre-existing checkpoints.
 
-    Gated by {!Keeper_types_profile.multimodal_policy}: only [Mm_delegate]
-    evicts; [Mm_reroute]/[Mm_inherit] are a no-op (safe-by-default). Idempotent:
-    a [Text] placeholder is not an [Image], so re-running is a no-op. *)
+    Gated by {!delegates_media} on the assigned lane, not by a stored setting:
+    a lane with a candidate that takes provider content blocks and declares
+    image input keeps its images (RFC-0265 reroutes there, and seeing the pixels
+    beats any reading); a lane with no such candidate evicts instead of letting
+    RFC-0265 drop the image. The three CLI executions take a prompt string, so an
+    image cannot reach them and they always evict. Idempotent: a [Text]
+    placeholder is not an [Image], so re-running is a no-op. *)
 
 type mode =
   | Eager  (** site 1: run the vision sub-call now, embed the reading *)
@@ -29,21 +33,32 @@ val eager_read_eviction_reason_of_outcome
     provider failures, timeouts, invalid requests, and invalid structured
     responses do not collapse into one counter bucket. *)
 
+val delegates_media : runtime_id:string -> bool
+(** Whether the lane [runtime_id] resolves to needs its images read for it.
+    [false] as soon as one candidate takes an [Image] itself — RFC-0265 then
+    reroutes the turn to that candidate and the answering model sees the pixels.
+    A candidate takes one when its transport carries images (Agent Core content
+    blocks, or the Claude Code stream-json array) AND its model declares image
+    input; Codex and Antigravity send prompt text only, so an [Image] cannot
+    reach them whatever the model declares. [true] when no candidate qualifies,
+    and for an id that resolves to no lane — evicting keeps the image, and the
+    alternative (RFC-0265 [No_capable_runtime]) drops it. *)
+
 val evict_blocks
   :  mode:mode
-  -> policy:Keeper_types_profile.multimodal_policy
+  -> delegate:bool
   -> keeper_name:string
   -> Agent_core.Types.content_block list
   -> Agent_core.Types.content_block list
-(** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
-    the list unchanged otherwise. Images are fail-closed before store on
+(** Site 1. Evict every [Image] in the list when [delegate]; return the list
+    unchanged otherwise. Images are fail-closed before store on
     base64 payload, size, and media type. [Eager] consults the
     fiber-local Eio context for one bounded sub-call; with none present (tests)
     it falls back to an unread placeholder, so eviction still holds. *)
 
 val evict_message
   :  mode:mode
-  -> policy:Keeper_types_profile.multimodal_policy
+  -> delegate:bool
   -> keeper_name:string
   -> Agent_core.Types.message
   -> Agent_core.Types.message

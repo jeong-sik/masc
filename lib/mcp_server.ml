@@ -56,18 +56,25 @@ let icons_for_mime mime_type =
 
 let server_icons = [ themed_icon ~label:"MM" ~bg:"#7C3AED" ~fg:"#F5F3FF" ]
 
+(* Name, title, and version come from
+   [Mcp_transport_protocol.server_info_meta_value], which every result already
+   carries in [_meta]. Restating them here would let the handshake and the
+   per-result identity drift apart. *)
 let server_info =
+  let identity =
+    match Mcp_transport_protocol.server_info_meta_value with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
   `Assoc
-    [
-      ("name", `String "masc");
-      ("title", `String "MASC MCP Server");
-      ("version", `String Runtime_build_version.current);
+    (identity
+    @ [
       ( "description",
         `String
           "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
       ("websiteUrl", `String "https://github.com/yousleepwhen/masc");
       ("icons", `List (List.map icon_to_json server_icons));
-    ]
+    ])
 
 let capabilities =
   `Assoc

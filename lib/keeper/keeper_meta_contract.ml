@@ -293,7 +293,6 @@ type keeper_meta =
   ; allowed_paths : string list
   ; mention_targets : string list
   ; proactive : proactive_policy
-  ; multimodal_policy : Keeper_types_profile.multimodal_policy
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -415,8 +414,6 @@ let effective_meta_of_profile_defaults
           network_mode;
           (* RFC vision-delegation §2.4: TOML profile overrides the carried
              value; absent -> keep [meta]'s (defaults to Inherit). *)
-          multimodal_policy =
-            apply_profile_default defaults.multimodal_policy meta.multimodal_policy;
           allowed_paths =
             apply_profile_default defaults.allowed_paths
               (if has_profile_source then [] else meta.allowed_paths);

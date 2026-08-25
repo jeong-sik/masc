@@ -10,10 +10,10 @@ include Keeper_meta_json_current_schema
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Most policy fields are TOML-only. Identity/instruction fields plus
-     multimodal_policy are persisted as the effective runtime snapshot so
-     dashboards, checkpoint writers, and meta readers do not see a blank or
-     downgraded keeper between TOML load and prompt render. *)
+  (* Most policy fields are TOML-only. Identity/instruction fields are
+     persisted as the effective runtime snapshot so dashboards, checkpoint
+     writers, and meta readers do not see a blank or downgraded keeper between
+     TOML load and prompt render. *)
   object_of_field_values
     [ Schema, `String "masc.keeper_meta.v1"
     ; Name, `String m.name
@@ -24,7 +24,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some s -> `String s
         | None -> `Null )
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
     ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
     ; Last_handoff_ts, `Float rt.last_handoff_ts
     ; Created_at, `String m.created_at

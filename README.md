@@ -5,25 +5,42 @@
 
 [한국어](README.ko.md)
 
-MASC (Multi-Agent Shared Context) is a repo-local MCP server for agents that
-work in the same project. It keeps goals, tasks, ownership, board messages, and
-execution evidence in one workspace and exposes that state through MCP and a
-web dashboard.
+MASC (Multi-Agent Shared Context) is a workspace that several coding agents can
+share. It runs on your own machine, holds the goals, tasks, ownership, board
+posts, and execution evidence for one project in a `.masc/` directory, and
+serves that state over MCP so any MCP client can join it.
 
-A **Keeper** is an optional long-running agent managed by MASC. Keepers add
-autonomous and event-driven work to the shared workspace. They are an advanced
-path, not a requirement for using MASC as an MCP collaboration server.
+The problem it addresses is that two agents in the same repository each keep
+their own memory. They re-decide the same question, claim the same file, and
+neither can see what the other already tried. MASC moves that state out of the
+agents and into one place both of them read and write.
+
+A **Keeper** is an optional long-running agent that MASC starts and supervises.
+Keepers pick up tasks, run shell commands, edit files, and post what they did
+back to the workspace. They are an advanced path; MASC works as a plain MCP
+collaboration server without any of them.
 
 > **Status:** MASC is a pre-1.0 project for local, trusted environments. It is
 > not a production service or a security boundary. Gate, HITL, and Docker
 > execution can constrain specific operations, but they do not protect an
-> unattended agent from every unsafe action. The IDE and TUI are experimental.
-> `main` can be ahead of the latest published binary release.
+> unattended agent from every unsafe action. `main` moves fast and can be well
+> ahead of the latest published binary release.
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-21/01-overview.png)
+## Three ways in
+
+The same workspace answers on three surfaces. Pick the one that fits what you
+are doing; they read and write the same `.masc/` state.
+
+| Surface | Use it for | How you get it |
+|---|---|---|
+| **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
+| **Dashboard** | Reading the whole workspace in a browser and taking operator actions | Served at `/dashboard/` by the same process |
+| **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | `masc-tui`, installed beside `masc` or built from source |
+
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-25/01-overview.png)
 
 This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-25/README.md)
 contains 24 screens and the exact capture metadata.
 
 ## Start here
@@ -91,6 +108,10 @@ the login and start commands printed by the installer. The login command mints
 a worker bearer for the MCP client; the endpoint does not accept an
 unauthenticated client by default.
 
+A release carries the server binary, the terminal UI, and the deployment
+preflight helpers. The installer puts `masc-tui` next to `masc` and prints the
+command that starts it.
+
 ## MCP client setup
 
 HTTP is the public MCP path. First load the worker bearer created by
@@ -119,13 +140,67 @@ masc_status()
 
 `masc_start` selects the project, joins the workspace, and optionally creates
 and claims a task. Goals, tasks, board posts, and status changes are then shared
-through the MASC tool set.
+through the MASC tool set. The public MCP surface currently exposes 39 tools,
+grouped as workspace lifecycle, messaging, tasks, goals, plans, Keeper control,
+and the board; `masc_tool_help` describes any one of them from inside a client.
 
 URL-only configuration fails with `401 Unauthorized` under the default local
 auth policy. For other client formats, a direct initialize probe, and manual
 bearer creation, see [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md). Admin-only
 dashboard operations are covered by
 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+
+## Terminal UI
+
+`masc-tui` is a terminal client for the same workspace. It reads `.masc/`
+from disk directly, and adds the surfaces that only exist over HTTP when a
+server answers on the configured port. A release install puts it on `PATH`;
+from a source checkout it is one Dune target.
+
+```bash
+dune build --root . bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path /path/to/project
+```
+
+`.masc` must sit directly below the path you pass. `--base-path` falls back to
+`MASC_BASE_PATH` and then the current directory. `dune install` or an opam
+install puts the same program on `PATH` as `masc-tui`.
+
+![MASC terminal UI](docs/screenshots/tui/2026-08-25/surfaces/01-overview.png)
+
+Keeper names and the base path in this frame were replaced with stand-ins of the
+same width; the [surface inventory](docs/screenshots/tui/2026-08-25/surfaces/README.md)
+holds four more and the capture metadata.
+
+`Tab` rotates through 20 surfaces, and the active one is highlighted in a strip
+on the top row:
+
+| Surface | Shows |
+|---|---|
+| Overview | Workspace summary, the task backlog, and what needs attention |
+| Acting | Every Keeper's tool calls, turn boundaries, and settlements as they land |
+| Keepers | The roster, plus per-Keeper chat, logs, tool calls, and runtime |
+| Lanes, Runtime | Runtime lanes, their ordered candidates, and provider reachability |
+| Approvals | The Gate queue, approved or denied from the terminal |
+| Board | Posts from people, agents, automation, and the system |
+| Planning, Schedules, Verify | Plans and goals, scheduled work, and verification verdicts |
+| Repositories, Code, Changes | Registered repositories, a file browser over them, and recent Keeper edits |
+| Harness, Fusion, Tools, Resources, Config, Connectors, Logs | Harness runs, panel and judge runs, the tool tree, MCP resources, `runtime.toml`, external channels, and the runtime log |
+
+Two things make it more than a viewer. The input row at the bottom sends a
+message to the Keeper it names, and `/task <title>` creates a task through
+`masc_add_task` and hands the Keeper its id in the same breath. On the Code
+surface, `Enter` opens a file, `d` shows its working-tree diff against HEAD,
+`H` shows the commits that touched it, and `m` shows the notes anchored to it.
+
+Without a server the Keeper roster, per-Keeper detail, and the task backlog
+still read from disk. Approvals, Board, Planning, Fusion, Runtime, the logs,
+and messaging need the server, and say so rather than showing an empty list —
+a count of `0` next to `data unreliable` means the read failed.
+
+The TUI needs an interactive TTY and a terminal other than `dumb`. Full key
+tables, per-surface behavior, and troubleshooting are in
+[`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md).
 
 ## Current scope
 
@@ -134,12 +209,13 @@ dashboard operations are covered by
 | Workspace collaboration | Share Goals, Tasks, claims, transitions, board posts, and verification evidence through MCP | Coordination data does not provide transactional protection for concurrent source edits |
 | Keepers | Run configured agents that react to workspace events and write execution records | Advanced path; behavior depends on the selected runtime and Keeper configuration |
 | Dashboard | Read workspace and runtime state and perform operator actions | Availability and write access depend on the built SPA and auth mode |
+| Terminal UI | Watch Keepers, answer the Gate queue, message a Keeper, and browse repository files and diffs | Needs an interactive TTY; the surface set changes often on `main` |
 | Gate and HITL | Apply Always Allow, model judgment, or human approval to supported external effects | Authorization workflow, not a sandbox or credential boundary |
 | Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
 | Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |
 | Connectors | Connect workspace activity to supported external channels, including Discord and Slack | Tokens and channel-to-Keeper bindings are explicit operator configuration |
 | Local or Docker execution | Select `local` or `docker` for Keeper shell work | `local` runs on the host; Docker profiles are not a complete security boundary |
-| IDE and TUI | Inspect experimental interfaces | Not the supported front door for normal work |
+| IDE | Inspect the experimental in-dashboard collaboration shell | Not the supported front door for normal work |
 
 The product front door is repo workspace collaboration. Keeper supervision and
 operator controls are secondary. Remote-safe operation, cluster deployment,
@@ -196,8 +272,9 @@ reviewer = "<provider>.<model>"
 ```
 
 Use [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) for the complete
-file contract. Use the `masc_config` tool or `/api/v1/dashboard/config` to
-inspect the resolved configuration.
+file contract, and [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) for the
+environment variables the runtime reads. Use the `masc_config` tool or
+`/api/v1/dashboard/config` to inspect the resolved configuration.
 
 ## Run modes
 
@@ -207,6 +284,10 @@ inspect the resolved configuration.
 | `./start-masc.sh --http --base-path <path>` | Start the full source-checkout runtime |
 | `scripts/start-loopback.sh` | Start on `127.0.0.1:8935` with Keeper bootstrap disabled unless explicitly enabled |
 | `scripts/run-local.sh --target-dir <path>` | Start an isolated development runtime with a path-derived port |
+
+`masc` also carries `init`, `login`, `runtime-default-set`,
+`runtime-wizard-catalog`, `schedule-prune`, and `keeper-github` for the setup
+and identity steps those names describe.
 
 Always inspect the effective runtime root before editing state:
 
@@ -261,14 +342,14 @@ Route examples required by the current dashboard contract:
 `dashboard#connectors?section=connector-status`, and
 `dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-See the [24-screen inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+See the [24-screen inventory](docs/screenshots/dashboard/2026-08-25/README.md)
 for the captured primary, Monitor, Work, and Lab views.
 
 ## Repository layout
 
 ```text
 masc/
-├── bin/          server and CLI entry points
+├── bin/          server, CLI, and terminal UI entry points
 ├── lib/          workspace, Keeper, runtime, Gate, and server code
 ├── packages/     embedded Agent Core package
 ├── dashboard/    TypeScript and Preact dashboard source
@@ -284,7 +365,10 @@ masc/
 | Document | Use |
 |---|---|
 | [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP client configuration |
+| [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | Terminal UI surfaces, keys, and troubleshooting |
+| [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Configuring, starting, and watching Keepers |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Current Keeper file and runtime assignment contract |
+| [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |

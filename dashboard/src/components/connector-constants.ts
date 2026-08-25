@@ -24,20 +24,24 @@ export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
 // Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server process. For
 // these the sidecar Start/Stop/tail affordances are suppressed (no sidecar
 // process — the operator sets an env var and restarts). RFC-0203 §Phase 3.
-export const IN_PROCESS_CONNECTOR_IDS = ['discord', 'slack'] as const
+export const IN_PROCESS_CONNECTOR_IDS = ['discord', 'imessage', 'slack'] as const
 export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
 
 export function isInProcessConnector(connectorId: string): boolean {
   return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
 }
 
-// The env var the operator must set to activate an in-process connector. For
-// Slack this is the app-level token (Socket Mode credential): absent, the
+// What an operator has to put in place for an in-process connector to start.
+// For Slack this is the app-level token (Socket Mode credential): absent, the
 // in-process gateway does not start. The bot token (SLACK_BOT_TOKEN) is a
 // second, outbound-only credential surfaced by the config form / setup guide.
-export const IN_PROCESS_CONNECTOR_ENV: Record<InProcessConnectorId, string> = {
-  discord: 'DISCORD_BOT_TOKEN',
-  slack: 'SLACK_APP_TOKEN',
+// iMessage has no credential at all — macOS authorizes the process itself —
+// so what it needs is a permission grant, which is why this is not named
+// after an env var.
+export const IN_PROCESS_CONNECTOR_ACTIVATION: Record<InProcessConnectorId, string> = {
+  discord: 'DISCORD_BOT_TOKEN 환경변수',
+  imessage: 'Messages.app 전체 디스크 접근 권한',
+  slack: 'SLACK_APP_TOKEN 환경변수',
 }
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
@@ -55,10 +59,9 @@ export interface SidecarCommands {
 }
 
 // Sidecar directories — only for connectors that run as external sidecar
-// processes. Discord (RFC-0203 §Phase 3) and Slack (RFC-0317) run in-process
-// and have no directory here.
+// processes. Discord (RFC-0203 §Phase 3), Slack (RFC-0317) and iMessage run
+// in-process and have no directory here.
 const SIDECAR_DIRS: Record<string, string> = {
-  imessage: 'sidecars/imessage-bot',
   telegram: 'sidecars/telegram-bot',
 }
 

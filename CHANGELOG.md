@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **iMessage runs inside the server** (#24497): the Python sidecar under
+  `sidecars/imessage-bot/` is deleted. The server now reads Messages.app's
+  SQLite store and replies through `osascript` on its own poll fiber, the
+  third connector to move in-process after Discord (RFC-0203) and Slack
+  (RFC-0317). Liveness is a value the poll fiber publishes rather than a file
+  a second process wrote, which is the class the connector's four defects on
+  2026-08-16 all belonged to (#28848, #28855, #28869, #28882). Replies from a
+  resumed keeper now return to the conversation that asked: iMessage has a
+  continuation-channel variant, so it no longer resolves to `Unrouted` and
+  drops the answer. An unbound conversation is no longer forwarded to a
+  default keeper — Messages.app holds personal correspondence, so binding is
+  what decides delivery. The env vars are `MASC_IMESSAGE_REPLY_MODE`,
+  `MASC_IMESSAGE_SELF_CHAT_GUID`, `MASC_IMESSAGE_POLL_INTERVAL_SEC`,
+  `MASC_IMESSAGE_CURSOR_PATH` and `MASC_IMESSAGE_CHAT_DB_PATH`; the sidecar's
+  `IMESSAGE_*` spellings and its `status.json` are gone, and
+  `/api/v1/sidecar/*?name=imessage` now 404s.
+
 ## [0.24.0] - 2026-08-22
 
 - **Goal completion passes through verification** (RFC-0387, #29152 → #29258):

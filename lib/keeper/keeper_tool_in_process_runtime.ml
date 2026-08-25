@@ -1294,6 +1294,7 @@ let handle_surface_post_with_outcome
          | Keeper_continuation_channel.Discord _
          | Keeper_continuation_channel.Dashboard _
          | Keeper_continuation_channel.Slack _
+         | Keeper_continuation_channel.Imessage _
          | Keeper_continuation_channel.Keeper _
          | Keeper_continuation_channel.Unrouted _ -> channel)
       continuation_channel
@@ -1600,6 +1601,11 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
    call that finds one finds the other. Outside a turn there is nowhere for a
    process to live that the caller could reach again, and saying that beats
    creating a registry no later call can find. *)
+let handle_keeper_code_query_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  Keeper_tool_code_query.dispatch ~config ~meta ~name ~args
+  |> dispatch_option_to_execution ~name
+;;
+
 let handle_keeper_spawn_with_outcome ~name ~args =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->

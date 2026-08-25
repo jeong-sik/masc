@@ -2370,6 +2370,51 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 settles as a delivery failure, which is what marks the
                 operation [Delivery_failed] instead of acknowledging an answer
                 the asker never got. *)
+             (* Messages.app cannot edit a message once it is sent, so there
+                is no partial delivery to project and nothing for a streaming
+                adapter to do: the reply goes out once, whole, when the run
+                ends. That is the Keeper arm's shape rather than the Discord
+                and Slack ones, which is why iMessage has no
+                [Keeper_chat_*] adapter module beside theirs. *)
+             | Keeper_continuation_channel.Imessage { chat_guid; _ } ->
+               (match Channel_gate_imessage_state.reply_target ~chat_guid with
+                | Error detail ->
+                  settle_delivery (Error detail);
+                  fork_adapter drain_events
+                | Ok target_chat_guid ->
+                  fork_adapter (fun () ->
+                    let rec loop reply =
+                      match Keeper_chat_events.subscribe events with
+                      | Keeper_chat_events.Reply_details details ->
+                        loop
+                          (match details.turn_outcome with
+                           | Keeper_turn_outcome.Visible_reply
+                             when String.trim details.reply <> "" ->
+                             Some details.reply
+                           (* The turn spoke somewhere else or said nothing;
+                              either way there is no text to send. *)
+                           | Keeper_turn_outcome.Visible_reply
+                           | Keeper_turn_outcome.Continuation_checkpoint
+                           | Keeper_turn_outcome.External_effect_completed
+                           | Keeper_turn_outcome.External_effect_pending
+                           | Keeper_turn_outcome.No_visible_reply -> None)
+                      | Keeper_chat_events.Run_finished _ ->
+                        settle_delivery
+                          (match reply with
+                           (* A run that produced no visible reply has been
+                              delivered in full; sending an empty iMessage
+                              would be worse than sending none. *)
+                           | None -> Ok ()
+                           | Some reply ->
+                             Channel_gate_imessage_state.send_message
+                               ~chat_guid:target_chat_guid ~content:reply ()
+                             |> Result.map_error
+                                  Imessage_applescript.error_to_string)
+                      | Keeper_chat_events.Event_error { message } ->
+                        settle_delivery (Error message)
+                      | _ -> loop reply
+                    in
+                    loop None))
              | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
                fork_adapter (fun () ->
                  let commit terminal =

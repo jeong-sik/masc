@@ -124,6 +124,22 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
         || thread_ts <> surface_thread
       then Error "Slack Keeper chat operation surface does not match continuation"
       else Ok ()
+    (* iMessage rides the generic gate surface ({!Surface_ref.Gate}), which
+       carries its coordinates in an address assoc rather than in typed fields.
+       So the pair check here is the connector label and the speaker; the
+       conversation coordinate is checked where it is typed — the connector
+       resolves the reply target against its own binding store at send time.
+       Claiming a stronger check by reading strings out of the address would
+       look like the Discord and Slack arms above without being one. *)
+    | ( Keeper_continuation_channel.Imessage { user_id; _ }
+      , Surface_ref.Gate { label = surface_label; _ } ) ->
+      if not (String.equal (String.lowercase_ascii channel) "imessage")
+      then Error "iMessage Keeper chat operation channel must be imessage"
+      else if not (String.equal surface_label "imessage")
+      then Error "iMessage Keeper chat operation surface does not match continuation"
+      else if not (String.equal channel_user_id user_id)
+      then Error "iMessage Keeper chat operation speaker does not match continuation"
+      else Ok ()
     (* A Keeper reply route is internal by construction: it is created only
        when one Keeper asks another to run a turn, which is the Agent
        surface. There is no external speaker to attribute, so one carried
@@ -137,6 +153,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
     | (Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _
       | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Imessage _
       | Keeper_continuation_channel.Keeper _), _ ->
       Error "Keeper chat operation surface kind does not match continuation"
 ;;

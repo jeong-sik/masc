@@ -33,6 +33,9 @@ type t =
       (** [/tools [compact|full]] — set or toggle tool-call detail. *)
   | Toggle_memory
       (** [/memory] — show or hide Librarian/Memory journal rows. *)
+  | Inspect_context
+      (** [/context] — inspect the last provider input observed for this
+          Keeper, including exact prompt-block text where it was captured. *)
   | View_image of string
       (** [/image <path>] — draw an image file on the terminal, if it can
           hold one. The path is the rest of the first line, untrimmed of
@@ -40,6 +43,55 @@ type t =
           and quoting it would be a second grammar. *)
   | View_image_missing_path  (** [/image] with no path on the line. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
+
+type command_help = {
+  word : string;  (** The slash word itself, without the slash. *)
+  args : string;  (** How the rest of the line reads, or [""] for none. *)
+  summary : string;  (** One line on what it does. *)
+}
+
+val catalog : command_help list
+(** Every command this build knows. {!help_lines} and {!hint} are both drawn
+    from it, so a command cannot be described one way in the help and another
+    in the composer. *)
+
+val usage : command_help -> string
+(** [/word args], or [/word] where there are none. *)
+
+type hint =
+  | No_command  (** The composer holds a message, not a command. *)
+  | Candidates of {
+      typed : string;  (** The word so far, without its slash. *)
+      entries : command_help list;
+          (** What that word could still become, in catalog order. *)
+    }
+  | Chosen of command_help  (** The word names this command exactly. *)
+  | Unknown_command of string  (** The word begins nothing the parser knows. *)
+
+type hint_span =
+  | Typed of string  (** Glyphs the operator has already entered. *)
+  | Untyped of string  (** What the word would still need. *)
+  | Detail of string  (** Arguments, summaries, separators. *)
+  | Wrong of string  (** A word that names no command. *)
+(** One piece of a hint row, split where its colour changes. This module
+    draws nothing: it says which glyphs were typed and which are still ahead,
+    and the renderer decides what each looks like. *)
+
+val hint_spans : hint -> hint_span list
+(** The hint as coloured pieces, in reading order. Empty for
+    {!No_command}. *)
+
+val hint_span_text : hint_span -> string
+(** The glyphs a span carries, whatever kind it is. *)
+
+val hint : string -> hint
+(** What to show while the operator is typing. A half-typed word lists its
+    candidates rather than describing one, because {!parse} does no prefix
+    matching and the line is not sendable yet. *)
+
+val hint_line : hint -> string option
+(** {!hint} as one row for the composer's footer, or [None] where there is
+    nothing to say. *)
 
 val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a

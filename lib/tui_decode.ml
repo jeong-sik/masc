@@ -1499,7 +1499,12 @@ type runtime_surface_snapshot = {
 }
 
 type repository = {
+  rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
+  (* The server-minted codebase slug the IDE annotation routes scope by
+     (RFC-0378: clients carry this value, they do not re-derive it from the
+     url). [None] when the remote cannot canonicalize. *)
+  rp_codebase : string option;
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -2193,7 +2198,9 @@ let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
            join_runtime_surface ~probe:(Some probe) ~probe_error:None ~resolved)
 
 let decode_repository json =
+  let* rp_id = required_string_field json "id" in
   let* rp_name = required_string_field json "name" in
+  let* rp_codebase = optional_string_field json "codebase" in
   let* rp_local_path = required_string_field json "local_path" in
   let* rp_default_branch = required_string_field json "default_branch" in
   let* rp_status = required_string_field json "status" in
@@ -2205,8 +2212,8 @@ let decode_repository json =
     | bad -> field_type_error "auto_sync" "a bool or null" bad
   in
   Ok
-    { rp_name; rp_local_path; rp_default_branch; rp_status; rp_keepers
-    ; rp_auto_sync
+    { rp_id; rp_name; rp_codebase; rp_local_path; rp_default_branch
+    ; rp_status; rp_keepers; rp_auto_sync
     }
 
 let decode_repository_snapshot json =
@@ -3361,3 +3368,123 @@ let decode_git_log json =
   else
     let* rows_json = required_list_field json "commits" in
     decode_list "commits" decode_git_log_row rows_json
+
+(* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
+
+type ide_annotation = {
+  ia_line_start : int;
+  ia_line_end : int;
+  ia_keeper : string;
+  (* The server's kind vocabulary (comment / decision / question /
+     bookmark), carried as its own word: the TUI only prints it, so an
+     added kind shows itself instead of killing the listing. *)
+  ia_kind : string;
+  ia_content : string;
+  ia_task : string option;
+}
+
+let decode_ide_annotation json =
+  let* ia_line_start = required_int_field json "line_start" in
+  let* ia_line_end = required_int_field json "line_end" in
+  let* ia_keeper = required_string_field json "keeper_id" in
+  let* ia_kind = required_string_field json "kind" in
+  let* ia_content = required_string_field json "content" in
+  let* ia_task = optional_string_field json "task_id" in
+  Ok { ia_line_start; ia_line_end; ia_keeper; ia_kind; ia_content; ia_task }
+
+let decode_ide_annotations json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "annotations answered ok=false"
+  else
+    let* rows_json = required_list_field json "data" in
+    decode_list "data" decode_ide_annotation rows_json
+
+(* ── IDE regions: which keeper wrote which lines, and through what ──── *)
+
+type ide_region = {
+  ir_line_start : int;
+  ir_line_end : int;
+  ir_keeper : string;
+  (* The write's provenance, flattened to the words the row prints: the
+     tool and turn for a tool-call write, the note for a manual one. An
+     unknown source type shows its own word rather than killing the list. *)
+  ir_source : string;
+  ir_at_ms : float;
+}
+
+let decode_ide_region json =
+  let* ir_line_start = required_int_field json "line_start" in
+  let* ir_line_end = required_int_field json "line_end" in
+  let* ir_keeper = required_string_field json "keeper_id" in
+  let* ir_at_ms =
+    match member "timestamp_ms" json with
+    | `Intlit s -> (
+        match Float.of_string_opt s with
+        | Some f -> Ok f
+        | None -> Error "timestamp_ms is not a number")
+    | `Int n -> Ok (float_of_int n)
+    | bad -> field_type_error "timestamp_ms" "an integer" bad
+  in
+  let* ir_source =
+    match member "source" json with
+    | `Assoc _ as source -> (
+        let* source_type = required_string_field source "type" in
+        match source_type with
+        | "tool_call" ->
+            let* tool = required_string_field source "tool_name" in
+            let* turn = required_int_field source "turn" in
+            Ok (Printf.sprintf "%s (turn %d)" tool turn)
+        | "manual" ->
+            let* note = required_string_field source "note" in
+            Ok ("manual: " ^ note)
+        | other -> Ok other)
+    | bad -> field_type_error "source" "an object" bad
+  in
+  Ok { ir_line_start; ir_line_end; ir_keeper; ir_source; ir_at_ms }
+
+(* ── the /api/v1/lsp/question answer ───────────────────────────────── *)
+
+type lsp_location = {
+  ll_path : string;
+  ll_inside : bool;
+  ll_line : int;  (** 1-based, as the route answers *)
+}
+
+type lsp_answer =
+  | Lsp_locations of lsp_location list
+  | Lsp_hover of string option
+
+let decode_lsp_location json =
+  let* ll_path = required_string_field json "path" in
+  let* ll_inside = required_bool_field json "inside_workspace" in
+  let* ll_line = required_int_field json "line" in
+  Ok { ll_path; ll_inside; ll_line }
+
+let decode_lsp_answer json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "lsp question answered ok=false"
+  else
+    let* data =
+      match member "data" json with
+      | `Assoc _ as data -> Ok data
+      | bad -> field_type_error "data" "an object" bad
+    in
+    let* kind = required_string_field data "kind" in
+    match kind with
+    | "locations" ->
+        let* rows = required_list_field data "locations" in
+        let* locations = decode_list "locations" decode_lsp_location rows in
+        Ok (Lsp_locations locations)
+    | "hover" -> (
+        match member "text" data with
+        | `String t -> Ok (Lsp_hover (Some t))
+        | `Null -> Ok (Lsp_hover None)
+        | bad -> field_type_error "text" "a string or null" bad)
+    | other -> Error (Printf.sprintf "unknown lsp answer kind: %s" other)
+
+let decode_ide_regions json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "regions answered ok=false"
+  else
+    let* rows_json = required_list_field json "data" in
+    decode_list "data" decode_ide_region rows_json

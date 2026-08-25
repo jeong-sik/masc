@@ -343,7 +343,7 @@ let test_checkpoint_save_load_preserves_exact_messages () =
       in
       (match
          C.save_agent_core_checkpoint
-           ~multimodal_policy:Masc.Keeper_types_profile.Mm_inherit
+           ~runtime_id:"test-runtime"
            ~keeper_name:"checkpoint-exact"
            ~session
            ~agent_name:"checkpoint-exact"
@@ -423,7 +423,7 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
       in
       match
         C.save_agent_core_checkpoint
-          ~multimodal_policy:Masc.Keeper_types_profile.Mm_inherit
+          ~runtime_id:"test-runtime"
           ~keeper_name:"checkpoint-open-cycle"
           ~session
           ~agent_name:"checkpoint-open-cycle"
@@ -468,7 +468,7 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
       in
       (match
          C.save_agent_core_checkpoint
-           ~multimodal_policy:Masc.Keeper_types_profile.Mm_inherit
+           ~runtime_id:"test-runtime"
            ~keeper_name:session_id
            ~session
            ~agent_name:session_id

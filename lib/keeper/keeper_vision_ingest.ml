@@ -188,13 +188,47 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.conte
   | other -> other
 ;;
 
-let delegating = function
-  | Keeper_types_profile.Mm_delegate -> true
-  | Keeper_types_profile.Mm_reroute | Keeper_types_profile.Mm_inherit -> false
+(* A runtime takes an image itself only when its transport can carry one AND its
+   model declares image input. Both halves are required and neither implies the
+   other: Claude Code carries images over the stream-json content-block array it
+   already speaks, but a model that does not declare image input is still
+   rejected before dispatch. Codex and Antigravity send prompt text only, so an
+   image cannot reach them whatever the model declares. *)
+let transport_carries_images = function
+  | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _ -> true
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ -> false
 ;;
 
-let evict_blocks ~mode ~policy ~keeper_name blocks =
-  if delegating policy
+let runtime_takes_images_itself id =
+  match Runtime.get_runtime_by_id id with
+  | None -> false
+  | Some (rt : Runtime.t) ->
+    transport_carries_images rt.Runtime.execution
+    && Runtime_agent.caps_admit_required_modalities
+         (Runtime_agent.input_capabilities_of_runtime rt)
+         [ "image" ]
+;;
+
+(* The whole lane is asked, not just the head. When any candidate takes the
+   image, RFC-0265 reroutes the turn there and the answering model sees the
+   pixels — better than any reading, and the reason RFC-keeper-vision-delegation
+   §2.4 did not want delegation to swallow the reroute case. Delegation is for
+   the case where no candidate takes it, which is where RFC-0265 reaches
+   [No_capable_runtime] and drops the image instead. An id that resolves to no
+   lane delegates for the same reason: reading the image keeps it, dropping it
+   does not. *)
+let delegates_media ~runtime_id =
+  match Runtime.resolve_assignment runtime_id with
+  | `Missing -> true
+  | `Lane lane ->
+    not
+      (List.exists
+         runtime_takes_images_itself
+         (Runtime_lane.ordered_candidates lane))
+;;
+
+let evict_blocks ~mode ~delegate ~keeper_name blocks =
+  if delegate
   then (
     let eager_budget =
       ref
@@ -206,12 +240,12 @@ let evict_blocks ~mode ~policy ~keeper_name blocks =
   else blocks
 ;;
 
-let evict_message ~mode ~policy ~keeper_name (message : Agent_core.Types.message) =
-  if delegating policy
+let evict_message ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
+  if delegate
   then
     { message with
       Agent_core.Types.content =
-        evict_blocks ~mode ~policy ~keeper_name message.Agent_core.Types.content
+        evict_blocks ~mode ~delegate ~keeper_name message.Agent_core.Types.content
     }
   else message
 ;;

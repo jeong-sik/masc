@@ -531,7 +531,7 @@ let commit_prepared_compaction_with
       in
       (match
          save_agent_core_checkpoint_if_source
-           ~multimodal_policy:retry_meta.multimodal_policy
+           ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta retry_meta)
            ~keeper_name:retry_meta.name
            ~session
            ~agent_name:retry_meta.agent_name

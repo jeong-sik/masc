@@ -237,7 +237,6 @@ type keeper_meta = {
   allowed_paths : string list;
   mention_targets : string list;
   proactive : proactive_policy;
-  multimodal_policy : Keeper_types_profile.multimodal_policy;
   (* Lifecycle *)
   created_at : string;
   updated_at : string;

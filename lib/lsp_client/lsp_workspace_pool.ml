@@ -94,6 +94,10 @@ let initialize_params ~workspace_root =
   `Assoc
     [ "rootUri", `String ("file://" ^ workspace_root)
     ; "rootPath", `String workspace_root
+      (* NDT-OK: the pid is what it is for — LSP has the server watch this
+         process and exit when it goes, which is the only teardown left if
+         masc dies before [close] or the switch runs. Nothing branches on the
+         value; it leaves for the server and never comes back. *)
     ; "processId", `Int (Unix.getpid ())
     ; "capabilities", `Assoc []
     ]

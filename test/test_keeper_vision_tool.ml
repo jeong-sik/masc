@@ -885,7 +885,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
     match
       Vi.evict_blocks
         ~mode:Vi.Eager
-        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~delegate:true
         ~keeper_name
         blocks
     with
@@ -923,7 +923,7 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
     match
       Vi.evict_blocks
         ~mode:Vi.Store_only
-        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~delegate:true
         ~keeper_name
         [ Agent_core.Types.Image
             { media_type = "text/plain"
@@ -948,7 +948,7 @@ let test_delegate_eviction_rejects_oversize_before_store () =
       match
         Vi.evict_blocks
           ~mode:Vi.Store_only
-          ~policy:Masc.Keeper_types_profile.Mm_delegate
+          ~delegate:true
           ~keeper_name
           [ Agent_core.Types.Image
               { media_type = "image/png"
@@ -965,7 +965,7 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
   match
     Vi.evict_blocks
       ~mode:Vi.Store_only
-      ~policy:Masc.Keeper_types_profile.Mm_delegate
+      ~delegate:true
       ~keeper_name:"vision-ingest-bad-base64"
       [ Agent_core.Types.Image
           { media_type = "image/png"
@@ -993,7 +993,7 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
       match
         Vi.evict_blocks
           ~mode:Vi.Store_only
-          ~policy:Masc.Keeper_types_profile.Mm_delegate
+          ~delegate:true
           ~keeper_name:("vision-ingest-source-" ^ source_name)
           [ Agent_core.Types.Image
               { media_type = "image/png"
@@ -1025,13 +1025,26 @@ let test_non_delegate_eviction_preserves_inline_image () =
   match
     Vi.evict_blocks
       ~mode:Vi.Eager
-      ~policy:Masc.Keeper_types_profile.Mm_inherit
-      ~keeper_name:"vision-ingest-inherit"
+      ~delegate:false
+      ~keeper_name:"vision-ingest-native"
       blocks
   with
   | [ Agent_core.Types.Image img ] ->
     assert (String.equal img.data (Base64.encode_string bytes))
-  | _ -> failwith "non-delegate policy should preserve image blocks"
+  | _ -> failwith "a runtime that takes images itself should keep the inline block"
+
+let test_delegates_media_follows_lane_capability () =
+  with_temp_runtime_toml no_image_runtime_toml (fun () ->
+    if not (Vi.delegates_media ~runtime_id:"p0.text")
+    then failwith "a lane whose every candidate is text-only must delegate";
+    if not (Vi.delegates_media ~runtime_id:"p9.absent")
+    then failwith "an id naming no lane must delegate rather than drop");
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    if Vi.delegates_media ~runtime_id:"p3.vision-c"
+    then
+      failwith
+        "a candidate that takes images itself must keep them for the RFC-0265 \
+         reroute")
 
 let test_evicted_history_has_no_image_modality () =
   with_temp_base (fun _ ->
@@ -1055,7 +1068,7 @@ let test_evicted_history_has_no_image_modality () =
     let evicted =
       Vi.evict_message
         ~mode:Vi.Store_only
-        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~delegate:true
         ~keeper_name
         msg
     in
@@ -1063,7 +1076,7 @@ let test_evicted_history_has_no_image_modality () =
     let evicted2 =
       Vi.evict_message
         ~mode:Vi.Store_only
-        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~delegate:true
         ~keeper_name
         evicted
     in
@@ -1100,4 +1113,5 @@ let () =
   test_delegate_eviction_rejects_non_base64_source_before_store ();
   test_non_delegate_eviction_preserves_inline_image ();
   test_evicted_history_has_no_image_modality ();
+  test_delegates_media_follows_lane_capability ();
   print_endline "test_keeper_vision_tool: all assertions passed"

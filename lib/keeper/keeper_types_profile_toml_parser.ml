@@ -32,7 +32,6 @@ let keeper_toml_fields =
   ; "sandbox_profile", Field_string
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
-  ; "multimodal_policy", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
@@ -219,22 +218,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-        match str "multimodal_policy" with
-        | Some raw -> (
-            (* RFC vision-delegation §2.4. Fail loud on an unrecognised value
-               rather than silently defaulting (no silent failure). *)
-            match multimodal_policy_of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid multimodal_policy '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_multimodal_policy_strings)))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
         match str "tools.native" with
         | Some raw -> (
             match Runtime_native_tools.of_string raw with
@@ -291,8 +274,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        multimodal_policy =
-          Option.bind (str "multimodal_policy") multimodal_policy_of_string;
         autonomous_wake_prompt;
         max_context_override;
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
@@ -342,7 +323,6 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
     max_context_override =
       prefer overlay.max_context_override base.max_context_override;
     telemetry_feedback_enabled =

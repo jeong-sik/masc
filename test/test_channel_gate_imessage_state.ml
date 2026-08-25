@@ -40,104 +40,13 @@ let with_temp_dir f =
       rm_rf base)
     (fun () -> f base)
 
-let with_imessage_paths dir f =
-  let status_path = Filename.concat dir "status.json" in
-  let binding_path = Filename.concat dir "bindings.json" in
-  let audit_path = Filename.concat dir "audit.jsonl" in
-  with_env "MASC_IMESSAGE_STATUS_PATH" (Some status_path) (fun () ->
-    with_env "MASC_IMESSAGE_BINDING_STORE_PATH" (Some binding_path) (fun () ->
-      with_env "MASC_IMESSAGE_BINDING_AUDIT_PATH" (Some audit_path) f))
+(* Substring search over the composed [error] field, which concatenates every
+   independent reason. *)
+let contains haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.equal (String.sub haystack i n) needle || at (i + 1)) in
+  n = 0 || at 0
 
-let sample_status_json =
-  `Assoc
-    [
-      ("updated_at", `String "2026-04-11T00:00:00Z");
-      ("connected", `Bool true);
-      ("gate_base_url", `String "http://127.0.0.1:8935");
-      ("gate_healthy", `Bool true);
-      ("gate_health_checked_at", `String "2026-04-11T00:00:00Z");
-      ("reply_mode", `String "self-chat");
-      ("self_chat_guid", `String "any;-;user@example.com");
-      ("last_message_at", `String "2026-04-11T00:00:00Z");
-      ("messages_processed", `Int 3);
-      ("messages_failed", `Int 1);
-      ("cursor_rowid", `Int 42);
-      ("poll_interval_sec", `Float 2.0);
-      ("pid", `Int 4242);
-    ]
-
-let test_status_json_redacts_self_chat_guid () =
-  with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
-    let json = IMessage_state.status_json () in
-    check string "reply mode surfaced" "self-chat"
-      (json |> U.member "reply_mode" |> U.to_string);
-    check string "self-chat guid redacted" "any;-;[redacted]"
-      (json |> U.member "self_chat_guid" |> U.to_string))
-
-let test_connector_json_keeps_redacted_guid () =
-  with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
-    let json = IMessage_state.connector_json () in
-    check string "connector id" "imessage"
-      (json |> U.member "connector_id" |> U.to_string);
-    check string "reply mode surfaced" "self-chat"
-      (json |> U.member "reply_mode" |> U.to_string);
-    check string "self-chat guid redacted" "any;-;[redacted]"
-      (json |> U.member "self_chat_guid" |> U.to_string))
-
-(* The connector-specific fields ride on Config.extra_status_fields, so they
-   are the ones that would silently disappear if the shared functor stopped
-   carrying them into both views. *)
-let test_cursor_rowid_surfaces_in_both_views () =
-  with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
-    check int "status json carries the cursor" 42
-      (IMessage_state.status_json () |> U.member "cursor_rowid" |> U.to_int);
-    check int "connector json carries the cursor" 42
-      (IMessage_state.connector_json () |> U.member "cursor_rowid" |> U.to_int))
-
-(* iMessage polls chat.db on a timer, so a status file that predates the field
-   must still report the interval the sidecar actually runs at, not 0. *)
-let test_poll_interval_defaults_to_the_imessage_rate () =
-  with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file
-      (Filename.concat dir "status.json")
-      (`Assoc
-        [
-          ("updated_at", `String "2026-04-11T00:00:00Z"); ("connected", `Bool true);
-        ]);
-    check (float 0.001) "falls back to the polling rate" 2.0
-      (IMessage_state.status_json () |> U.member "poll_interval_sec" |> U.to_float))
-
-(* Only Discord has guilds. An empty guild_id on an iMessage audit entry would
-   be a field that means nothing, written to the audit log on every bind. *)
-let test_audit_entries_omit_guild_id () =
-  with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
-    match
-      IMessage_state.bind ~channel_id:"any;-;user@example.com"
-        ~keeper_name:"claude" ~actor_name:"tester"
-    with
-    | Error message -> failf "bind failed: %s" message
-    | Ok _ ->
-      let audit =
-        IMessage_state.status_json () |> U.member "recent_audit" |> U.to_list
-      in
-      check int "one audit entry" 1 (List.length audit);
-      check bool "no guild_id on the entry" true
-        (List.for_all (fun entry -> U.member "guild_id" entry = `Null) audit))
-
-(* Two OCaml readers go looking for this one file: the gate state below, and
-   Server_routes_http_sidecar_paths, which the dashboard's start/stop route
-   uses to decide whether the sidecar is running. They have to agree on which
-   env var relocates it, or an operator who sets one moves half the readers.
-   iMessage shared no name with the server until now; Telegram always did. *)
 let with_binding_paths dir f =
   with_env "MASC_IMESSAGE_BINDING_STORE_PATH"
     (Some (Filename.concat dir "bindings.json"))
@@ -146,65 +55,166 @@ let with_binding_paths dir f =
         (Some (Filename.concat dir "audit.jsonl"))
         f)
 
-let test_unprefixed_env_moves_both_readers () =
-  with_temp_dir @@ fun dir ->
-  with_binding_paths dir (fun () ->
-    let status_path = Filename.concat dir "relocated-status.json" in
-    with_env "MASC_IMESSAGE_STATUS_PATH" None (fun () ->
-      with_env "IMESSAGE_STATUS_PATH" (Some status_path) (fun () ->
-        Yojson.Safe.to_file status_path sample_status_json;
-        check string "gate state follows IMESSAGE_STATUS_PATH" status_path
-          (IMessage_state.status_json () |> U.member "status_path" |> U.to_string);
-        check string "the sidecar route resolves the same file" status_path
-          (Server_routes_http_sidecar_paths.status_file ~base_path:dir "imessage"))))
+(* The sidecar this module replaced published liveness, the cursor and the
+   self-chat handle through a status.json that a separate process wrote. All
+   of it is now a value this module owns, so these tests set the value the
+   gateway would set and read the projection — no file in between. *)
 
-let test_prefixed_env_still_moves_the_gate_state () =
+let test_status_redacts_the_self_chat_guid () =
   with_temp_dir @@ fun dir ->
   with_binding_paths dir (fun () ->
-    let status_path = Filename.concat dir "prefixed-status.json" in
-    with_env "IMESSAGE_STATUS_PATH" None (fun () ->
-      with_env "MASC_IMESSAGE_STATUS_PATH" (Some status_path) (fun () ->
-        Yojson.Safe.to_file status_path sample_status_json;
-        check string "MASC_-prefixed spelling keeps working" status_path
-          (IMessage_state.status_json () |> U.member "status_path" |> U.to_string))))
+    IMessage_state.record_self_chat_guid "iMessage;-;user@example.com";
+    let status = IMessage_state.status_json () in
+    check string "routing prefix kept, address removed"
+      "iMessage;-;[redacted]"
+      (status |> U.member "self_chat_guid" |> U.to_string);
+    check string "connector json carries the same redaction"
+      "iMessage;-;[redacted]"
+      (IMessage_state.connector_json () |> U.member "self_chat_guid"
+       |> U.to_string))
+
+let test_poll_publishes_liveness_and_cursor () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    IMessage_state.record_poll_ok ~cursor_rowid:1701;
+    check bool "a poll that read chat.db is connected" true
+      (IMessage_state.connected ());
+    let status = IMessage_state.status_json () in
+    check int "cursor surfaces" 1701 (status |> U.member "cursor_rowid" |> U.to_int);
+    check string "poll state surfaces" "polling"
+      (status |> U.member "poll_state" |> U.to_string);
+    check bool "connected agrees with the registry export" true
+      (status |> U.member "connected" |> U.to_bool);
+    (* The connector never reports "stale": there is no heartbeat file to age
+       out, which is the point of moving liveness in-process. *)
+    check bool "never stale" true
+      (not (String.equal (status |> U.member "status" |> U.to_string) "stale")))
+
+let test_failed_poll_disconnects_with_its_reason () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    IMessage_state.record_poll_ok ~cursor_rowid:5;
+    IMessage_state.record_poll_error "chat.db read failed: disk I/O error";
+    check bool "a failed poll is not connected" false (IMessage_state.connected ());
+    let status = IMessage_state.status_json () in
+    check string "degraded" "degraded"
+      (status |> U.member "poll_state" |> U.to_string);
+    check bool "the reason is reported, not swallowed" true
+      (contains
+         (status |> U.member "error" |> U.to_string)
+         "chat.db read failed: disk I/O error");
+    (* Put the module back so ordering between tests cannot matter. *)
+    IMessage_state.record_poll_ok ~cursor_rowid:5)
+
+let test_reply_mode_rejects_a_typo () =
+  check bool "self-chat parses" true
+    (IMessage_state.parse_reply_mode "self-chat" = Ok IMessage_state.Self_chat);
+  check bool "source-chat parses" true
+    (IMessage_state.parse_reply_mode "source-chat" = Ok IMessage_state.Source_chat);
+  check bool "case and padding are tolerated" true
+    (IMessage_state.parse_reply_mode "  Self-Chat " = Ok IMessage_state.Self_chat);
+  (* A typo must not silently route replies somewhere the operator did not
+     choose — the only person who would notice is whoever wrongly received
+     them. *)
+  check bool "a near miss is an error, not a fallback" true
+    (Result.is_error (IMessage_state.parse_reply_mode "selfchat"));
+  check bool "an empty value is an error too" true
+    (Result.is_error (IMessage_state.parse_reply_mode ""))
+
+let test_reply_target_fails_closed () =
+  with_env "MASC_IMESSAGE_REPLY_MODE" (Some "self-chat") (fun () ->
+    IMessage_state.record_self_chat_guid "";
+    check bool "self-chat with nothing resolved refuses to send" true
+      (Result.is_error (IMessage_state.reply_target ~chat_guid:(Some "iMessage;-;x")));
+    IMessage_state.record_self_chat_guid "iMessage;-;me@example.com";
+    check bool "self-chat answers in the note-to-self conversation" true
+      (IMessage_state.reply_target ~chat_guid:(Some "iMessage;-;someone-else")
+       = Ok "iMessage;-;me@example.com"));
+  with_env "MASC_IMESSAGE_REPLY_MODE" (Some "source-chat") (fun () ->
+    check bool "source-chat answers where the message came from" true
+      (IMessage_state.reply_target ~chat_guid:(Some "iMessage;-;someone-else")
+       = Ok "iMessage;-;someone-else");
+    check bool "source-chat with no source handle refuses to send" true
+      (Result.is_error (IMessage_state.reply_target ~chat_guid:None)))
+
+let test_audit_entries_omit_guild_id () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    match
+      IMessage_state.bind ~channel_id:"user@example.com" ~keeper_name:"claude"
+        ~actor_name:"tester"
+    with
+    | Error message -> failf "bind failed: %s" message
+    | Ok _ ->
+      let audit =
+        IMessage_state.status_json () |> U.member "recent_audit" |> U.to_list
+      in
+      check int "one audit entry" 1 (List.length audit);
+      (* iMessage has no guild, so the field is absent rather than empty. *)
+      check bool "no guild_id on the entry" true
+        (List.for_all (fun entry -> U.member "guild_id" entry = `Null) audit))
+
+let test_binding_resolution_is_exact () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    match
+      IMessage_state.bind ~channel_id:"user@example.com" ~keeper_name:"claude"
+        ~actor_name:"tester"
+    with
+    | Error message -> failf "bind failed: %s" message
+    | Ok _ ->
+      (match
+         IMessage_state.resolve_keeper_for_channel_result
+           ~channel_id:"user@example.com"
+       with
+       | Ok (Some resolution) ->
+         check string "bound conversation resolves" "claude"
+           resolution.IMessage_state.keeper_name
+       | Ok None -> fail "bound conversation did not resolve"
+       | Error _ -> fail "binding store unreadable");
+      (* An unbound conversation is not this connector's traffic. Messages.app
+         holds the operator's personal correspondence, so "no binding" has to
+         stay distinct from "store unreadable". *)
+      check bool "an unbound conversation resolves to nothing" true
+        (IMessage_state.resolve_keeper_for_channel_result
+           ~channel_id:"stranger@example.com"
+         = Ok None))
 
 let test_malformed_binding_store_is_explicit () =
   with_temp_dir @@ fun dir ->
-  with_imessage_paths dir (fun () ->
-    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
-    let oc = open_out_bin (Filename.concat dir "bindings.json") in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc "{not-json");
-    let json = IMessage_state.connector_json () in
-    check bool "binding read failed" false
-      (json |> U.member "binding_store_read_ok" |> U.to_bool);
-    check bool "connector unavailable" false
-      (json |> U.member "available" |> U.to_bool);
-    check bool "binding error retained" true
-      (json |> U.member "binding_store_error" |> U.to_string
-       |> String.length |> ( < ) 0))
+  with_binding_paths dir (fun () ->
+    let path = Filename.concat dir "bindings.json" in
+    let oc = open_out path in
+    output_string oc "{ this is not json";
+    close_out oc;
+    let status = IMessage_state.status_json () in
+    check bool "the store read is reported as failed" false
+      (status |> U.member "binding_store_read_ok" |> U.to_bool);
+    check bool "and the connector is not available" false
+      (status |> U.member "available" |> U.to_bool);
+    check bool "an unreadable store is not an unbound keeper" true
+      (Result.is_error
+         (IMessage_state.resolve_keeper_for_channel_result
+            ~channel_id:"user@example.com")))
 
 let () =
   run "channel_gate_imessage_state"
-    [
-      ( "status",
-        [
-          test_case "status json redacts self-chat guid" `Quick
-            test_status_json_redacts_self_chat_guid;
-          test_case "connector json keeps redacted self-chat guid" `Quick
-            test_connector_json_keeps_redacted_guid;
-          test_case "cursor rowid surfaces in both views" `Quick
-            test_cursor_rowid_surfaces_in_both_views;
-          test_case "poll interval defaults to the iMessage rate" `Quick
-            test_poll_interval_defaults_to_the_imessage_rate;
-          test_case "audit entries omit guild_id" `Quick
-            test_audit_entries_omit_guild_id;
-          test_case "unprefixed env moves both readers" `Quick
-            test_unprefixed_env_moves_both_readers;
-          test_case "prefixed env still moves the gate state" `Quick
-            test_prefixed_env_still_moves_the_gate_state;
-          test_case "malformed binding store is explicit" `Quick
-            test_malformed_binding_store_is_explicit;
-        ] );
+    [ ( "in-process state"
+      , [ test_case "status json redacts the self-chat guid" `Quick
+            test_status_redacts_the_self_chat_guid
+        ; test_case "a poll publishes liveness and the cursor" `Quick
+            test_poll_publishes_liveness_and_cursor
+        ; test_case "a failed poll disconnects with its reason" `Quick
+            test_failed_poll_disconnects_with_its_reason
+        ; test_case "reply mode rejects a typo" `Quick
+            test_reply_mode_rejects_a_typo
+        ; test_case "reply target fails closed" `Quick
+            test_reply_target_fails_closed
+        ; test_case "audit entries omit guild_id" `Quick
+            test_audit_entries_omit_guild_id
+        ; test_case "binding resolution is exact" `Quick
+            test_binding_resolution_is_exact
+        ; test_case "malformed binding store is explicit" `Quick
+            test_malformed_binding_store_is_explicit
+        ] )
     ]

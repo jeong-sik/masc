@@ -59,7 +59,12 @@ let test_listing_footers_share_one_shape () =
     (fun surface ->
       check str "the plain listings share one footer" canonical
         (Masc_tui_keys.footer_hints surface))
-    [ Lanes; Harness; Repositories; Tools; System_logs ]
+    [ Lanes; Harness; Tools; System_logs ]
+
+let test_repositories_footer_offers_the_code_tree () =
+  check str "repositories names the Enter jump"
+    "j/k:scroll  Enter:browse  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Repositories)
 
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification left the plain listings when the verdict keys landed: the
@@ -133,6 +138,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "plain listings share one footer" `Quick
             test_listing_footers_share_one_shape
+        ; Alcotest.test_case "Repositories offers the Code tree" `Quick
+            test_repositories_footer_offers_the_code_tree
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Overview footer projects by focus" `Quick

@@ -12,22 +12,75 @@ type t =
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Toggle_memory
+  | Inspect_context
   | View_image of string
   | View_image_missing_path
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
    cannot ship without its line. *)
-let help_lines =
-  [ "/task <title>   create a task for this keeper (lines below become the body)"
-  ; "/keeper <name>  switch this pane to another keeper"
-  ; "/interrupt      signal the streaming turn to stop"
-  ; "/thinking [hidden|folded|full]  set or cycle reasoning visibility"
-  ; "/tools [compact|full]           set or toggle tool-call detail"
-  ; "/memory         show or hide Librarian/Memory journal rows"
-  ; "/image <path>   draw an image file on the terminal"
-  ; "/help           this list"
+type command_help = {
+  word : string;
+  args : string;
+  summary : string;
+}
+
+(* Every slash word this build knows, said once. [help_lines] and the
+   composer hint are both drawn from here: a command described in two places
+   is a command that will be described two ways, and the one an operator
+   reads first is whichever list nobody updated. *)
+let catalog =
+  [ { word = "task"
+    ; args = "<title>"
+    ; summary = "create a task for this keeper (lines below become the body)"
+    }
+  ; { word = "keeper"
+    ; args = "<name>"
+    ; summary = "switch this pane to another keeper"
+    }
+  ; { word = "interrupt"
+    ; args = ""
+    ; summary = "signal the streaming turn to stop"
+    }
+  ; { word = "thinking"
+    ; args = "[hidden|folded|full]"
+    ; summary = "set or cycle reasoning visibility"
+    }
+  ; { word = "tools"
+    ; args = "[compact|full]"
+    ; summary = "set or toggle tool-call detail"
+    }
+  ; { word = "memory"
+    ; args = ""
+    ; summary = "show or hide Librarian/Memory journal rows"
+    }
+  ; { word = "context"
+    ; args = ""
+    ; summary = "inspect the last observed provider input"
+    }
+  ; { word = "image"; args = "<path>"; summary = "draw an image file on the terminal" }
+  ; { word = "help"; args = ""; summary = "this list" }
   ]
+
+let usage entry =
+  if String.equal entry.args "" then "/" ^ entry.word
+  else "/" ^ entry.word ^ " " ^ entry.args
+
+(* Where a help line's summary starts. Usages wider than this keep their two
+   spaces rather than pushing every other summary right: one long argument
+   list would otherwise indent the whole page past what a narrow pane holds.
+   The value is the column the hand-written list already used. *)
+let help_summary_column = 16
+
+let help_lines =
+  List.map
+    (fun entry ->
+       let text = usage entry in
+       let padding =
+         String.make (max 2 (help_summary_column - String.length text)) ' '
+       in
+       text ^ padding ^ entry.summary)
+    catalog
 
 let slash = '/'
 
@@ -68,9 +121,102 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Toggle_memory
+    | "context", _ -> Inspect_context
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path
     | word, _ -> Unknown word
+
+type hint =
+  | No_command
+  | Candidates of {
+      typed : string;
+      entries : command_help list;
+    }
+  | Chosen of command_help
+  | Unknown_command of string
+
+(* One piece of a hint row, split where the colour changes. The module draws
+   nothing itself -- it says which glyphs are the ones already typed and
+   which are still ahead, and the renderer decides what that looks like. *)
+type hint_span =
+  | Typed of string  (** Glyphs the operator has already entered. *)
+  | Untyped of string  (** What the word would still need. *)
+  | Detail of string  (** Arguments, summaries, separators. *)
+  | Wrong of string  (** A word that names no command. *)
+
+(* What to show an operator who is part way through typing a command.
+
+   The grammar has no prefix matching, so a half-typed word is not a command
+   yet and is never reported as one: [/ta] lists what it could become,
+   [/task] describes what it is. Showing the summary any earlier would say a
+   line was ready to send when the parser would refuse it.
+
+   A word that begins nothing is named as unknown while the operator can
+   still fix it. Before this it took an Enter and a rejected line to find out
+   the command did not exist. *)
+let hint text =
+  if String.length text = 0 || text.[0] <> slash then No_command
+  else
+    let first, _ = split_first_line text in
+    let line = String.sub first 1 (String.length first - 1) in
+    let word, _ = split_word line in
+    match List.find_opt (fun entry -> String.equal entry.word word) catalog with
+    | Some entry -> Chosen entry
+    | None -> (
+        match
+          List.filter
+            (fun entry -> String.starts_with ~prefix:word entry.word)
+            catalog
+        with
+        | [] -> Unknown_command word
+        | entries -> Candidates { typed = word; entries })
+
+let em_dash = " \xe2\x80\x94 "
+
+(* The typed run always starts with the slash, so the highlight covers what
+   the operator pressed rather than the word minus its first key. *)
+let word_spans ~typed entry =
+  let remaining =
+    String.sub entry.word (String.length typed)
+      (String.length entry.word - String.length typed)
+  in
+  [ Typed ("/" ^ typed); Untyped remaining ]
+
+let hint_spans = function
+  | No_command -> []
+  | Chosen entry ->
+      Typed ("/" ^ entry.word)
+      :: (if String.equal entry.args "" then []
+          else [ Detail (" " ^ entry.args) ])
+      @ [ Detail (em_dash ^ entry.summary) ]
+  | Candidates { typed; entries = [ entry ] } ->
+      (* Down to one word, so there is room to say how it ends even though the
+         word itself is not typed out yet. *)
+      word_spans ~typed entry
+      @ (if String.equal entry.args "" then []
+         else [ Detail (" " ^ entry.args) ])
+  | Candidates { typed; entries } ->
+      (* Names only. Every usage spelled out runs past a 120-column pane on
+         the bare slash, and the commands that fell off the end were the ones
+         an operator who typed [/] had not thought of yet. *)
+      List.concat
+        (List.mapi
+           (fun index entry ->
+              (if index = 0 then [] else [ Detail "  " ])
+              @ word_spans ~typed entry)
+           entries)
+  | Unknown_command word ->
+      [ Wrong ("/" ^ word)
+      ; Detail (" is not a command" ^ em_dash ^ "/help lists them")
+      ]
+
+let hint_span_text = function
+  | Typed text | Untyped text | Detail text | Wrong text -> text
+
+let hint_line hint =
+  match hint_spans hint with
+  | [] -> None
+  | spans -> Some (String.concat "" (List.map hint_span_text spans))
 
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,

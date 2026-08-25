@@ -11,6 +11,7 @@
   tool_schemas_run_toml
   tool_schemas_local_runtime_toml
   tool_schemas_schedule_toml
+  tool_schemas_code_query
   tool_schemas_spawn_toml
   tool_schemas_spawn
   tool_schemas_workspace

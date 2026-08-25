@@ -1,4 +1,5 @@
 open Alcotest
+module Transport_headers = Server_mcp_transport_http_headers
 
 let test_accepts_sse_header () =
   let open Mcp_transport_protocol.Http_negotiation in
@@ -247,6 +248,64 @@ let stateless_body ?(method_ = "tools/list") ?name () =
     ]
   |> Yojson.Safe.to_string
 
+(* 2026-07-28 marks protocolVersion and clientCapabilities required on every
+   request and answers a missing one with -32602, not with the header-mismatch
+   code: the request is malformed rather than inconsistent with itself. *)
+let stateless_body_without meta_key =
+  let full = Yojson.Safe.from_string (stateless_body ()) in
+  let strip_meta = function
+    | `Assoc meta -> `Assoc (List.remove_assoc meta_key meta)
+    | other -> other
+  in
+  let strip_params = function
+    | `Assoc params ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> if String.equal k "_meta" then (k, strip_meta v) else (k, v))
+           params)
+    | other -> other
+  in
+  match full with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+        (List.map
+           (fun (k, v) ->
+             if String.equal k "params" then (k, strip_params v) else (k, v))
+           fields))
+  | other -> Yojson.Safe.to_string other
+
+let test_a_required_meta_field_is_rejected_as_invalid_params () =
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [
+             ("accept", "application/json, text/event-stream");
+             ("mcp-protocol-version", "2026-07-28");
+             ("mcp-method", "tools/list");
+           ])
+      `POST "/mcp"
+  in
+  List.iter
+    (fun key ->
+      let body = stateless_body_without key in
+      match Transport_headers.validate_2026_request_headers request body with
+      | Ok () -> failf "a request without %s must be rejected" key
+      | Error (Transport_headers.Missing_required_meta { key = reported }) ->
+        check string "names the field that was missing" key reported;
+        let wire = Transport_headers.header_rejection_body body
+                     (Transport_headers.Missing_required_meta { key }) in
+        check int "answered with Invalid params" (-32602)
+          Yojson.Safe.Util.(
+            Yojson.Safe.from_string wire |> member "error" |> member "code"
+            |> to_int)
+      | Error _ ->
+        failf "%s is absent, not inconsistent -- that is -32602, not a mismatch"
+          key)
+    [ Mcp_transport_protocol.protocol_version_meta_key;
+      Mcp_transport_protocol.client_capabilities_meta_key ]
+
 let test_validate_2026_request_headers () =
   let module Transport = Server_mcp_transport_http in
   let ok_request =
@@ -262,7 +321,7 @@ let test_validate_2026_request_headers () =
   in
   (match Transport.validate_2026_request_headers ok_request (stateless_body ()) with
   | Ok () -> ()
-  | Error msg -> failf "expected valid 2026 headers, got %s" msg);
+  | Error _ -> fail "these headers mirror the body and must be accepted");
   let tool_call_request =
     Httpun.Request.create
       ~headers:
@@ -280,7 +339,7 @@ let test_validate_2026_request_headers () =
        (stateless_body ~method_:"tools/call" ~name:"masc_status" ())
    with
   | Ok () -> ()
-  | Error msg -> failf "expected valid Mcp-Name headers, got %s" msg);
+  | Error _ -> fail "Mcp-Name mirrors params.name and must be accepted");
   let mismatch_request =
     Httpun.Request.create
       ~headers:
@@ -294,9 +353,13 @@ let test_validate_2026_request_headers () =
   in
   match Transport.validate_2026_request_headers mismatch_request (stateless_body ()) with
   | Ok () -> fail "expected mismatched Mcp-Method to reject"
-  | Error msg ->
-      check bool "mentions header mismatch" true
-        (String_util.contains_substring msg "HeaderMismatch")
+  (* The constructor, not a substring of the message. The kind is what decides
+     the wire code, and a message reworded for a human used to be able to
+     change what this test proved. *)
+  | Error (Transport_headers.Mirrored_header_mismatch msg) ->
+      check bool "names the header that disagreed" true
+        (String_util.contains_substring msg "Mcp-Method")
+  | Error _ -> fail "a readable body disagreeing with a header is a mirrored mismatch"
 
 let test_stateless_headers_do_not_emit_session_id () =
   let module Transport = Server_mcp_transport_http in
@@ -477,6 +540,8 @@ let () =
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
         test_case "2026 headers are validated" `Quick
           test_validate_2026_request_headers;
+          test_case "a missing required _meta field is invalid params" `Quick
+            test_a_required_meta_field_is_rejected_as_invalid_params;
         test_case "2026 headers omit session id" `Quick
           test_stateless_headers_do_not_emit_session_id;
         test_case "sse guard registry is shared" `Quick

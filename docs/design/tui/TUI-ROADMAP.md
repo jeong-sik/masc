@@ -64,10 +64,12 @@ Harness, Repositories, Connectors, Tools, Autonomy, System Logs.
   위치를 task 가 고정한다(같은 줄 충돌 방지). 빈 본문은 `empty_page_of` 세
   구분.
 - 모든 PR: Alcotest(디코더) + PTY 프레임 테스트(`test/test_tui_keyboard_input.py`)
-  + CI 스위트 등록(`scripts/ci-run-focused-tests.sh`) + `docs/TUI-GUIDE.md` 절
-  + 라이브 `:8935` tmux 캡처를 PR 에.
-- 대시보드 불변식 `INV-DASH-001~006` (`docs/spec/10-dashboard.md`) 을 TUI 도
-  그대로 진다: 표시는 typed source fact, 실패는 명시, 스트림 순서 보존.
+  + `docs/TUI-GUIDE.md` 절 + 라이브 `:8935` tmux 캡처를 PR 에. 테스트를 어딘가에
+  따로 등록할 필요는 없다. `test/dune` 에 스탠자를 추가하면 CI 가 `@test/runtest`
+  로 같이 돈다 — 894개를 손으로 나열하던 목록 파일은 #30010 이 걷어냈다.
+- 대시보드 불변식 `INV-DASH-001~007` (`docs/spec/10-dashboard.md`) 을 TUI 도
+  그대로 진다: 표시는 typed source fact, 실패는 명시, 스트림 순서 보존, 대기 중인
+  HITL 을 키퍼나 작업 공간이 멈춘 것으로 그리지 않는다.
 - 렌더 기반(현 ANSI 직접 vs Notty)은 위 화면들이 붙은 뒤 `masc_tui.ml` 줄
   수와 프레임 시간을 재서 결정한다. 지금은 결정하지 않는다.
 

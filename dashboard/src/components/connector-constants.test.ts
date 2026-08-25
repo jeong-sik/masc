@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CONNECTOR_DISPLAY_NAMES,
-  IN_PROCESS_CONNECTOR_ENV,
+  IN_PROCESS_CONNECTOR_ACTIVATION,
   IN_PROCESS_CONNECTOR_IDS,
   KNOWN_CONNECTOR_IDS,
   channelIcon,
@@ -21,21 +21,21 @@ describe('connector vocabulary constants', () => {
     }
   })
 
-  it('in-process connectors are a subset of known connectors with an env var', () => {
+  it('in-process connectors are a subset of known connectors with an activation requirement', () => {
     for (const id of IN_PROCESS_CONNECTOR_IDS) {
       expect((KNOWN_CONNECTOR_IDS as readonly string[]).includes(id)).toBe(true)
-      expect(IN_PROCESS_CONNECTOR_ENV[id]).toBeTruthy()
+      expect(IN_PROCESS_CONNECTOR_ACTIVATION[id]).toBeTruthy()
       expect(isInProcessConnector(id)).toBe(true)
     }
   })
 })
 
 describe('isInProcessConnector', () => {
-  it('discord and slack are in-process, external sidecars are not', () => {
+  it('discord, imessage and slack are in-process, external sidecars are not', () => {
     expect(isInProcessConnector('discord')).toBe(true)
     expect(isInProcessConnector('slack')).toBe(true)
+    expect(isInProcessConnector('imessage')).toBe(true)
     expect(isInProcessConnector('telegram')).toBe(false)
-    expect(isInProcessConnector('imessage')).toBe(false)
     expect(isInProcessConnector('unknown')).toBe(false)
   })
 })

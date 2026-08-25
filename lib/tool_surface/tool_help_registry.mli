@@ -52,6 +52,12 @@ type help_entry = {
 
 (** {1 Lookup} *)
 
+val definition_source : string -> string option
+(** The shipped definition a tool's name resolves to, as the embedded-config
+    relative path (["tools/<name>.toml"]), or [None] when no such asset ships.
+    Read from the embedded file list, not composed from the name, so it never
+    names a file that is not there. *)
+
 val entry_of_schema : Masc_domain.tool_schema -> help_entry
 (** [entry_of_schema schema] returns the help entry for [schema].
     Resolution priority:

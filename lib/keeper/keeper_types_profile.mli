@@ -4,7 +4,6 @@ include module type of Keeper_config
 include module type of Keeper_types_profile_sandbox
   with type sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile
    and type network_mode = Keeper_types_profile_sandbox.network_mode
-   and type multimodal_policy = Keeper_types_profile_sandbox.multimodal_policy
 
 val keeper_debug : bool
 

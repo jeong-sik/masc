@@ -202,6 +202,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
             ~cwd
             config
             ~prompt
+            ~images:[]
         with
         | Ok (result : Runtime_claude_code.turn_result) -> Ok result.text
         | Error error ->

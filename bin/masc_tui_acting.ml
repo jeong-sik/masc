@@ -7,6 +7,16 @@ type filter =
 let next_filter = function Actions -> Everything | Everything -> Actions
 let filter_label = function Actions -> "actions" | Everything -> "everything"
 
+(* One feed event as the screen holds it. The arrival time is here rather than
+   read back off the event because the screen is a feed: rows are held and
+   drawn in the order they arrived, and two event kinds carry no clock at all
+   ([Snapshot], [Other]) -- those rows used to draw --:--:--, on 925 of the
+   927 rows on the screen that prompted this. *)
+type entry = {
+  ae_at : float;  (** when the TUI received it *)
+  ae_event : Observer.event;
+}
+
 let visible filter (event : Observer.event) =
   match filter with
   | Everything -> true
@@ -93,7 +103,7 @@ let batch_text = function
   | Some (index, size) -> Printf.sprintf " [%d/%d]" (index + 1) size
   | None -> ""
 
-let agent_core_row ~duration_ms (e : Observer.agent_core) =
+let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:"?" e.Observer.tool in
   let glyph, label, detail =
     match e.Observer.kind with
@@ -128,7 +138,7 @@ let agent_core_row ~duration_ms (e : Observer.agent_core) =
     | Some task -> detail ^ " \xc2\xb7 " ^ task
     | None -> detail
   in
-  { at = e.Observer.at
+  { at
   ; keeper = Option.value ~default:"-" e.Observer.agent
   ; glyph
   ; label
@@ -159,11 +169,11 @@ let keeper_of_event ~traces (event : Observer.event) =
       keeper
   | Observer.Snapshot _ | Observer.Other _ -> "server"
 
-let row_of_event ~duration_ms (event : Observer.event) =
+let row_of_event ~at ~duration_ms (event : Observer.event) =
   match event with
-  | Observer.Agent_core e -> agent_core_row ~duration_ms e
+  | Observer.Agent_core e -> agent_core_row ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
-      { at = h.Observer.hb_at
+      { at
       ; keeper = h.Observer.hb_keeper
       ; glyph = Quiet
       ; label = "heartbeat"
@@ -175,7 +185,7 @@ let row_of_event ~duration_ms (event : Observer.event) =
            | (Some true | Some false | None), (Some _ | None) -> phase)
       }
   | Observer.Keeper_tool_call c ->
-      { at = c.Observer.kt_at
+      { at
       ; keeper = c.Observer.kt_keeper
       ; glyph = Call_returned
       ; label =
@@ -205,29 +215,29 @@ let row_of_event ~duration_ms (event : Observer.event) =
         | Some n -> Printf.sprintf " \xc2\xb7 %d call%s" n (if n = 1 then "" else "s")
         | None -> ""
       in
-      { at = t.Observer.tc_at
+      { at
       ; keeper = t.Observer.tc_keeper
       ; glyph = Turn_settled
       ; label = "turn settled"
       ; detail = turn_text t.Observer.tc_turn ^ tokens ^ cost ^ calls
       }
-  | Observer.Keeper_composite_changed { keeper; at } ->
+  | Observer.Keeper_composite_changed { keeper; _ } ->
       { at; keeper; glyph = Quiet; label = "composite"; detail = "" }
-  | Observer.Keeper_chat_appended { keeper; connector; at } ->
+  | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
       ; keeper
       ; glyph = Turn_boundary
       ; label = "chat"
       ; detail = Option.value ~default:"" connector
       }
-  | Observer.Keeper_chat_stream_frame { keeper; frame; at } ->
+  | Observer.Keeper_chat_stream_frame { keeper; frame; _ } ->
       { at
       ; keeper
       ; glyph = Quiet
       ; label = "chat stream"
       ; detail = Option.value ~default:"" frame
       }
-  | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; at } ->
+  | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
       ; keeper
       ; glyph = Quiet
@@ -235,22 +245,14 @@ let row_of_event ~duration_ms (event : Observer.event) =
       ; detail = Option.value ~default:"" queue_kind
       }
   | Observer.Snapshot name ->
-      { at = 0.; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
+      { at; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
   | Observer.Other name ->
-      { at = 0.; keeper = "server"; glyph = Attention; label = name; detail = "" }
+      { at; keeper = "server"; glyph = Attention; label = name; detail = "" }
 
-(* Rows are held and drawn in the order they arrived, and that arrival time is
-   what the screen scrolls through -- but the Time column shows the clock the
-   event carried, and [Snapshot] and [Other] carry none. So the column was
-   blank on exactly the rows an operator would use to check the order, and the
-   order itself was never shown at all.
-
-   Arrival is already recorded next to the event. A row with no clock of its
-   own says when the TUI received it, which is both true and the key the list
-   is sorted by. A row that does carry one keeps it: an operator wants to know
-   when the turn settled, not when this process heard about it. *)
-let with_received_clock ~received row =
-  if row.at > 0. then row else { row with at = received }
+(* The screen draws entries, not bare events. Taking the entry means there is
+   no clock argument at the call site to hand in the wrong value. *)
+let row_of_entry ~duration_ms entry =
+  row_of_event ~at:entry.ae_at ~duration_ms entry.ae_event
 
 let duration_of_completion ~before (completed : Observer.agent_core) =
   match completed.Observer.tool_use_id with

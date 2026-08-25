@@ -109,6 +109,7 @@
     "masc_schedule_create.toml",
     "masc_schedule_get.toml",
     "masc_schedule_list.toml",
+    "keeper_code_query.toml",
     "keeper_spawn.toml",
     "keeper_spawn_read.toml",
     "keeper_spawn_stop.toml",

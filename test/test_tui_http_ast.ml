@@ -1,5 +1,197 @@
 open Alcotest
 
+let is_reserved_status_color_segment = function
+  | "red" | "yellow" | "green" | "Sgr" -> true
+  | _ -> false
+;;
+
+let reserved_status_color_path_violations structure =
+  let violations = ref [] in
+  let inspect_path ({ txt; loc } : Longident.t Location.loc) =
+    let path = Ast_grep.longident_to_string txt in
+    let rec inspect = function
+      | Longident.Lident segment ->
+        if is_reserved_status_color_segment segment then
+          violations := (loc, path, segment) :: !violations
+      | Longident.Ldot (prefix, segment) ->
+        inspect prefix.txt;
+        if is_reserved_status_color_segment segment.txt then
+          violations := (loc, path, segment.txt) :: !violations
+      | Longident.Lapply (left, right) ->
+        inspect left.txt;
+        inspect right.txt
+    in
+    inspect txt
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          (match expression.Parsetree.pexp_desc with
+           | Parsetree.Pexp_ident path
+           | Parsetree.Pexp_construct (path, _)
+           | Parsetree.Pexp_new path -> inspect_path path
+           | Parsetree.Pexp_record (fields, _) ->
+             List.iter (fun (path, _) -> inspect_path path) fields
+           | Parsetree.Pexp_field (_, path)
+           | Parsetree.Pexp_setfield (_, path, _) -> inspect_path path
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+    ; pat =
+        (fun self pattern ->
+          (match pattern.Parsetree.ppat_desc with
+           | Parsetree.Ppat_construct (path, _)
+           | Parsetree.Ppat_type path
+           | Parsetree.Ppat_open (path, _) -> inspect_path path
+           | Parsetree.Ppat_record (fields, _) ->
+             List.iter (fun (path, _) -> inspect_path path) fields
+           | _ -> ());
+          Ast_iterator.default_iterator.pat self pattern)
+    ; module_expr =
+        (fun self module_expr ->
+          (match module_expr.Parsetree.pmod_desc with
+           | Parsetree.Pmod_ident path -> inspect_path path
+           | _ -> ());
+          Ast_iterator.default_iterator.module_expr self module_expr)
+    ; module_type =
+        (fun self module_type ->
+          (match module_type.Parsetree.pmty_desc with
+           | Parsetree.Pmty_ident path | Parsetree.Pmty_alias path ->
+             inspect_path path
+           | _ -> ());
+          Ast_iterator.default_iterator.module_type self module_type)
+    ; typ =
+        (fun self core_type ->
+          (match core_type.Parsetree.ptyp_desc with
+           | Parsetree.Ptyp_constr (path, _)
+           | Parsetree.Ptyp_class (path, _)
+           | Parsetree.Ptyp_open (path, _) -> inspect_path path
+           | _ -> ());
+          Ast_iterator.default_iterator.typ self core_type)
+    ; package_type =
+        (fun self package_type ->
+          inspect_path package_type.Parsetree.ppt_path;
+          List.iter
+            (fun (path, _) -> inspect_path path)
+            package_type.Parsetree.ppt_constraints;
+          Ast_iterator.default_iterator.package_type self package_type)
+    }
+  in
+  iter.structure iter structure;
+  List.rev !violations
+;;
+
+let parse_status_color_fixture source =
+  let lexbuf = Lexing.from_string source in
+  Lexing.set_filename lexbuf "r8-status-color-fixture.ml";
+  Parse.implementation lexbuf
+;;
+
+let status_color_violation_to_string (location, path, segment) =
+  Printf.sprintf "%s:%d:%d: reserved %s in %s"
+    location.Location.loc_start.pos_fname
+    location.Location.loc_start.pos_lnum
+    (location.Location.loc_start.pos_cnum
+     - location.Location.loc_start.pos_bol
+     + 1)
+    segment path
+;;
+
+let test_tui_status_colors_use_theme_tokens () =
+  let violations =
+    Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
+    |> reserved_status_color_path_violations
+  in
+  match violations with
+  | [] -> ()
+  | _ ->
+    failf
+      "bin/masc_tui_render.ml bypasses semantic Theme status tokens:\n%s"
+      (violations
+       |> List.map status_color_violation_to_string
+       |> String.concat "\n")
+;;
+
+let test_tui_status_color_ast_guard_fixtures () =
+  let expect_violation source =
+    let violations =
+      source
+      |> parse_status_color_fixture
+      |> reserved_status_color_path_violations
+    in
+    if violations = [] then
+      failf "R8 AST guard did not reject fixture:\n%s" source
+  in
+  let expect_no_violation source =
+    let violations =
+      source
+      |> parse_status_color_fixture
+      |> reserved_status_color_path_violations
+    in
+    if violations <> [] then
+      failf
+        "R8 AST guard rejected semantic or literal fixture:\n%s\n%s"
+        source
+        (violations
+         |> List.map status_color_violation_to_string
+         |> String.concat "\n")
+  in
+  List.iter expect_violation
+    [ "let _ = Ansi.red"
+    ; "let _ = Ansi.yellow"
+    ; "let _ = Ansi.green"
+    ; "let _ = Masc_tui_theme.Sgr.red"
+    ; "let _ = Ansi.(if failed then red else green)"
+    ; "let _ = Ansi.((red))"
+    ; "let _ = Theme.(* raw *)Sgr.(* raw *)red"
+    ; "module Raw = (* raw *) Theme.Sgr"
+    ; "module type Raw = Theme.Sgr"
+    ; "open (* raw *) Theme.Sgr"
+    ; "include (* raw *) Theme.Sgr"
+    ; "module Raw = Ansi\nlet _ = Raw.red"
+    ; "open Ansi\nlet _ = red"
+    ; "let _ = value.Theme.red"
+    ; "let _ = { Theme.red = value }"
+    ; "let read = function { Theme.red = value } -> value"
+    ; "let read = function Sgr.Constructor -> ()"
+    ; "type raw = Theme.Sgr.t"
+    ; "type raw = Theme.Sgr.(t)"
+    ; "type raw = #Theme.Sgr.c"
+    ; "type packed = (module Theme.Sgr)"
+    ; "type packed = (module S with type Theme.Sgr.t = int)"
+    ];
+  List.iter expect_no_violation
+    [ "let _ = Theme.ok"
+    ; "let _ = Theme.warn"
+    ; "let _ = Theme.bad"
+    ; "let _ = Theme.Syntax.keyword"
+    ; "let _ = Theme.Syntax.string"
+    ; "let _ = Theme.Syntax.diff_added_bg"
+    ; "let _ = Ansi.bold ^ Ansi.blue ^ Ansi.reset"
+    ; "module Raw = Ansi"
+    ; "open Ansi"
+    ; "include Ansi"
+    ; "let greenish = redacted + yellow_status"
+    ; "type 'red marker = Marker"
+    ; "type 'green marker = Marker"
+    ; "type 'yellow marker = Marker"
+    ; "let _ = \"Theme.Sgr.red; open Ansi\""
+    ; "let _ = 'r'"
+    ; "let _ = {| Theme.Sgr.green; include Ansi |}"
+    ; "let _ = {tag_name| Ansi.yellow |tag_name}"
+    ; "let _ = {%foo| Theme.Sgr.red |}"
+    ; "let _ = {%foo.bar tag_name| Ansi.yellow |tag_name}"
+    ; "{%%foo| Theme.Sgr.red |}"
+    ; "{%%foo.bar tag_name| Ansi.green |tag_name}"
+    ; "(* Theme.Sgr.red (* nested open Ansi *) *) let _ = Theme.ok"
+    ; "(* \"(*\" *) let _ = Theme.ok"
+    ; "(* {| *) |} *) let _ = Theme.ok"
+    ; "let éred = 1\nlet _ = éred"
+    ; "type 'éred marker = Marker"
+    ; "let _ = {é| Theme.Sgr.red |é}"
+    ]
+;;
+
 let test_is_success_http_status_called () =
   let n =
     Ast_grep.count_calls
@@ -163,31 +355,9 @@ let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   let render_path = "bin/masc_tui_render.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
-  let count_field_clears_to_none ~binding_name ~field_name =
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr =
-          (fun self expression ->
-            (match expression.Parsetree.pexp_desc with
-             | Parsetree.Pexp_setfield (_, { txt; _ }, value)
-               when String.equal (Ast_grep.longident_leaf txt) field_name ->
-               (match value.Parsetree.pexp_desc with
-                | Parsetree.Pexp_construct ({ txt; _ }, None)
-                  when String.equal (Ast_grep.longident_leaf txt) "None" ->
-                  incr count
-                | _ -> ())
-             | _ -> ());
-            Ast_iterator.default_iterator.expr self expression)
-      }
-    in
-    List.iter (iter.expr iter)
-      (Ast_grep.expressions_of_value_binding ~module_path:main_path
-         ~binding_name);
-    !count
-  in
   check int "late palette publication clears its callback before use" 1
-    (count_field_clears_to_none ~binding_name:"take_late_palette_publisher"
+    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+       ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
   check int "late palette helper gates on its one-shot publisher" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
@@ -253,7 +423,11 @@ let test_user_message_background_has_one_render_snapshot () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
-  check int "bare links and the gutter restore the captured row" 2
+  (* Three sites close back onto the row's own style rather than resetting:
+     a bare link, the folded-origin margin, and the origin drawn left of the
+     rule. A reset at any of them would strip the ambient background from
+     everything after it on the row. *)
+  check int "link, margin, and rule each restore the captured row" 3
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);
@@ -761,10 +935,39 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"Masc_tui_types.server_identity_of_refresh");
+  (* The clearing is [state.server_identity <- None], a write. Counting
+     reads of the field found none and called a working path broken. *)
   check int "a failed refresh clears current identity" 1
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"apply_async_message" ~callees:[]
-       ~fields:[ "server_identity" ])
+    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+       ~binding_name:"apply_async_message" ~field_name:"server_identity")
+;;
+
+let test_gate_stance_listing_rides_the_flow_generation () =
+  let main_path = "bin/masc_tui.ml" in
+  (* The stance listing replaces the whole yolo set. Two daemon fibers reach
+     it -- a periodic GET and the operator's own POST -- and the network
+     decides which lands first, so a GET that started before the press can
+     put the pre-press answer back and the armed gate reads as auto again.
+     The next press then computes yolo a second time instead of toggling
+     back, which is what makes it visible rather than a flicker. The held
+     call listing already rides [Approval.Flow]; these four pin the stance
+     listing onto the same guard. *)
+  check int "the stance fetch takes a generation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_modes_load"
+       ~callee:"Approval.Flow.reserve_refresh");
+  check int "arming a gate opens an action" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_mode_set"
+       ~callee:"Approval.Flow.begin_action");
+  check int "a stale stance listing is dropped" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.is_current");
+  check int "the press closes its own action" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.finish_action")
 ;;
 
 let test_planning_refresh_reconciles_navigation_identity () =
@@ -1518,6 +1721,14 @@ let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
       [
+        test_case
+          "TUI status colors use semantic Theme tokens"
+          `Quick
+          test_tui_status_colors_use_theme_tokens;
+        test_case
+          "TUI status color AST guard fixtures"
+          `Quick
+          test_tui_status_color_ast_guard_fixtures;
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;
@@ -1558,6 +1769,10 @@ let () =
           "planning refresh reconciles navigation identity"
           `Quick
           test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "gate stance listing rides the flow generation"
+          `Quick
+          test_gate_stance_listing_rides_the_flow_generation;
         test_case
           "the screen does not read the server's bind address"
           `Quick

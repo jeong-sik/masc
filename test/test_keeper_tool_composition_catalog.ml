@@ -491,6 +491,28 @@ name = "query"
        ^ Catalog.error_to_string error)
 ;;
 
+(* A composition tool ships no TOML, so "which file defines this" has to
+   resolve to the SKILL.md the catalog read. Composed from the name, which is
+   sound only because the tool exists as a consequence of that file. *)
+let test_skill_source_names_the_skill_file () =
+  match Catalog.skill_source_of_tool_name "keeper_compose_mission-snapshot" with
+  | Some rel ->
+    Alcotest.(check string)
+      "skill definition path"
+      "skills/mission-snapshot/SKILL.md"
+      rel
+  | None -> Alcotest.fail "a composition tool must name its skill file"
+;;
+
+let test_skill_source_ignores_other_tools () =
+  List.iter
+    (fun name ->
+      match Catalog.skill_source_of_tool_name name with
+      | None -> ()
+      | Some rel -> Alcotest.failf "%s is not a composition tool, got %s" name rel)
+    [ "keeper_spawn"; "Execute"; Catalog.status_tool_name; "keeper_compose_" ]
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
@@ -544,6 +566,14 @@ let () =
             "param declaration mismatches are rejected"
             `Quick
             test_catalog_rejects_param_declaration_mismatches
+        ; test_case
+            "a composition tool names its skill file"
+            `Quick
+            test_skill_source_names_the_skill_file
+        ; test_case
+            "other tool names resolve to none"
+            `Quick
+            test_skill_source_ignores_other_tools
         ] )
     ]
 ;;

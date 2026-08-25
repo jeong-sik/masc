@@ -31,7 +31,9 @@
   gate_rest_json
   gate_protocol
   gate_surface
-  gate_time_util)
+  gate_time_util
+  imessage_applescript
+  imessage_chat_db)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
@@ -72,4 +74,9 @@
   masc.http_client
   masc.masc_log
   otel_metric_store
-  fs_compat))
+  fs_compat
+  ; iMessage is in-process like Discord and Slack, but its transport is a
+  ; local SQLite file plus osascript rather than a socket, so this library
+  ; reads chat.db and spawns a child directly.
+  sqlite3
+  masc_process))

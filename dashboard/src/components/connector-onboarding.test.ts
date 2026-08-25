@@ -31,27 +31,28 @@ describe('ConnectorOnboardingGrid', () => {
     // Discord (RFC-0203) and Slack (RFC-0317) are in-process — no onboarding card.
     expect(text).not.toContain('Discord')
     expect(text).not.toContain('Slack')
-    expect(text).toContain('iMessage')
+    expect(text).not.toContain('iMessage')
     expect(text).toContain('Telegram')
 
-    // 2 brand-coloured cards now (discord + slack filtered out).
+    // 1 brand-coloured card now (discord, slack and imessage filtered out).
     const cards = container.querySelectorAll('[style*="linear-gradient"]')
-    expect(cards.length).toBe(2)
+    expect(cards.length).toBe(1)
   })
 
   it('exposes the start command for each external sidecar (run.sh per bridge)', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const text = container.textContent ?? ''
-    // Discord + Slack cards are omitted from onboarding (in-process) — no run.sh.
-    expect(text).toContain('cd sidecars/imessage-bot && ./run.sh')
+    // Discord, Slack and iMessage are omitted from onboarding (in-process) —
+    // no run.sh. Telegram is the last external sidecar.
+    expect(text).not.toContain('sidecars/imessage-bot')
     expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
   })
 
   // Pin the sidecarCommands() shape so a future refactor can't re-introduce
-  // the per-bridge pkill fork we just deleted. Iterate the 2 remaining external
-  // sidecars only — discord (RFC-0203) and slack (RFC-0317) are in-process.
+  // the per-bridge pkill fork we just deleted. One external sidecar is left —
+  // discord (RFC-0203), slack (RFC-0317) and imessage are in-process.
   it('uses ./run.sh stop for every external bridge (no pkill)', () => {
-    for (const id of ['imessage', 'telegram']) {
+    for (const id of ['telegram']) {
       const { stop } = sidecarCommands(id)
       expect(stop).toBe(`cd sidecars/${id}-bot && ./run.sh stop`)
       expect(stop).not.toContain('pkill')
@@ -60,10 +61,10 @@ describe('ConnectorOnboardingGrid', () => {
 
   it('embeds a collapsed SetupGuideCard per external onboarding card', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    // 2 setup-guide toggle buttons (one per remaining onboarding card),
-    // all collapsed.
+    // 1 setup-guide toggle button (one per remaining onboarding card),
+    // collapsed.
     const toggles = container.querySelectorAll('button[aria-expanded]')
-    expect(toggles.length).toBe(2)
+    expect(toggles.length).toBe(1)
     toggles.forEach(btn => {
       expect(btn.getAttribute('aria-expanded')).toBe('false')
     })
@@ -76,8 +77,9 @@ describe('ConnectorOnboardingGrid', () => {
     // The count used to say 4 and this comment used to explain why it
     // disagreed with the grid beside it: ConnectorBulkActions counted every
     // known connector, and discord and slack have no sidecar to spawn. The
-    // two now agree, and the number is the number of cards.
-    expect(startAll.textContent).toContain('(2)')
+    // two now agree, and the number is the number of cards — one, now that
+    // iMessage runs in-process too.
+    expect(startAll.textContent).toContain('(1)')
   })
 
   it('shows the cold-start heading explaining the empty state', () => {
@@ -88,11 +90,12 @@ describe('ConnectorOnboardingGrid', () => {
   it('renders a per-card Start button with testId for each external sidecar', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const buttons = container.querySelectorAll('[data-testid^="onboarding-start-"]')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(1)
     const ids = Array.from(buttons)
       .map(b => b.getAttribute('data-testid')!.replace('onboarding-start-', ''))
-    // Discord + Slack omitted — KNOWN_CONNECTOR_IDS order with in-process filtered out.
-    expect(ids).toEqual(['imessage', 'telegram'])
+    // Discord, Slack and iMessage omitted — KNOWN_CONNECTOR_IDS order with
+    // in-process filtered out.
+    expect(ids).toEqual(['telegram'])
   })
 
   it('per-card Start button starts in the idle "Start" label, not inflight', () => {

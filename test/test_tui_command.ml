@@ -25,6 +25,7 @@ let describe = function
          | `Compact -> "compact"
          | `Full -> "full")
   | Command.Toggle_memory -> "toggle-memory"
+  | Command.Inspect_context -> "inspect-context"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
      these two and the match was not swept, which is exactly the miss the
@@ -53,7 +54,7 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt, visibility, memory and image"
+  check (list string) "help, keeper, interrupt, visibility, memory, context and image"
     [ "help"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
@@ -66,6 +67,7 @@ let test_pane_commands_parse_by_word () =
     ; "tools:compact"
     ; "tools:full"
     ; "toggle-memory"
+    ; "inspect-context"
     ; "image:shots/frame.png"
     ; "image-missing-path"
     ]
@@ -83,6 +85,7 @@ let test_pane_commands_parse_by_word () =
        ; "/tools compact"
        ; "/tools full"
        ; "/memory"
+       ; "/context"
        ; "/image shots/frame.png"
        ; "/image   "
        ])
@@ -96,7 +99,8 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"; "help" ]
+    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"
+    ; "context"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in
@@ -205,6 +209,193 @@ let test_the_request_names_the_tool_and_its_arguments () =
        | _ -> fail "params missing")
   | _ -> fail "request is not an object"
 
+let describe_hint = function
+  | Command.No_command -> "none"
+  | Command.Chosen entry -> "chosen:" ^ entry.Command.word
+  | Command.Unknown_command word -> "unknown:" ^ word
+  | Command.Candidates { entries; _ } ->
+      "candidates:"
+      ^ String.concat "," (List.map (fun e -> e.Command.word) entries)
+
+let hint text = describe_hint (Command.hint text)
+
+let test_plain_text_has_no_hint () =
+  check string "a message" "none" (hint "please look at the log");
+  check string "empty" "none" (hint "");
+  check string "a slash mid-sentence" "none" (hint "look at a/b")
+
+let test_a_lone_slash_lists_everything () =
+  check int "one candidate per command" (List.length Command.catalog)
+    (match Command.hint "/" with
+     | Command.Candidates { entries; _ } -> List.length entries
+     | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
+
+let test_a_prefix_narrows_the_list () =
+  check string "t narrows to three" "candidates:task,thinking,tools" (hint "/t");
+  check string "th narrows to one" "candidates:thinking" (hint "/th")
+
+(* [parse] does no prefix matching, so a half-typed word is not a command yet.
+   A hint that described it would say the line was ready when sending it would
+   be refused. *)
+let test_a_half_typed_word_is_not_chosen () =
+  check string "not chosen" "candidates:task" (hint "/ta");
+  check bool "and the parser agrees" true
+    (match Command.parse "/ta" with
+     | Command.Unknown "ta" -> true
+     | _ -> false)
+
+let test_a_complete_word_is_described () =
+  check string "bare" "chosen:task" (hint "/task");
+  check string "with an argument" "chosen:task" (hint "/task write the runbook");
+  check string "with a body below" "chosen:task" (hint "/task title\nbody");
+  check string "an argument it knows" "chosen:thinking" (hint "/thinking folded")
+
+let test_a_word_that_begins_nothing_is_named () =
+  check string "named while it can be fixed" "unknown:zork" (hint "/zork");
+  check string "and with an argument" "unknown:zork" (hint "/zork a b")
+
+let test_the_hint_line_says_what_the_hint_holds () =
+  check (option string) "no command" None (Command.hint_line Command.No_command);
+  check bool "a chosen command carries its summary" true
+    (match Command.hint_line (Command.hint "/memory") with
+     | Some line ->
+         String.length line > String.length "/memory"
+         && String.starts_with ~prefix:"/memory" line
+     | None -> false);
+  check bool "candidates carry every usage" true
+    (match Command.hint_line (Command.hint "/t") with
+     | Some line ->
+         List.for_all
+           (fun word ->
+              let needle = "/" ^ word in
+              let rec appears at =
+                at + String.length needle <= String.length line
+                && (String.equal
+                      (String.sub line at (String.length needle))
+                      needle
+                    || appears (at + 1))
+              in
+              appears 0)
+           [ "task"; "thinking"; "tools" ]
+     | None -> false);
+  check bool "an unknown word names itself" true
+    (match Command.hint_line (Command.hint "/zork") with
+     | Some line -> String.starts_with ~prefix:"/zork is not a command" line
+     | None -> false);
+  check (option string) "one candidate still shows its argument"
+    (Some "/thinking [hidden|folded|full]")
+    (Command.hint_line (Command.hint "/th"));
+  (* The bare slash is the one an operator types knowing nothing, so it is
+     the row that must not run off the pane. *)
+  check bool "the bare slash fits a narrow pane" true
+    (match Command.hint_line (Command.hint "/") with
+     | Some line -> String.length line <= 80
+     | None -> false)
+
+(* The catalog is what the help and the composer both read. A command listed
+   there that the parser does not know would be documented and then refused. *)
+let test_every_catalogued_command_parses () =
+  List.iter
+    (fun (entry : Command.command_help) ->
+      check bool
+        (Printf.sprintf "/%s parses" entry.Command.word)
+        true
+        (match Command.parse ("/" ^ entry.Command.word) with
+         | Command.Unknown _ -> false
+         | _ -> true))
+    Command.catalog
+
+let test_help_lines_come_from_the_catalog () =
+  check int "one line per command" (List.length Command.catalog)
+    (List.length Command.help_lines);
+  List.iter2
+    (fun (entry : Command.command_help) line ->
+      check bool
+        (Printf.sprintf "/%s keeps its summary" entry.Command.word)
+        true
+        (String.starts_with ~prefix:(Command.usage entry) line
+         && String.length line > String.length (Command.usage entry)))
+    Command.catalog Command.help_lines
+
+let describe_span = function
+  | Command.Typed text -> "T[" ^ text ^ "]"
+  | Command.Untyped text -> "U[" ^ text ^ "]"
+  | Command.Detail text -> "D[" ^ text ^ "]"
+  | Command.Wrong text -> "W[" ^ text ^ "]"
+
+let spans text =
+  String.concat ""
+    (List.map describe_span (Command.hint_spans (Command.hint text)))
+
+let test_the_typed_run_is_what_was_pressed () =
+  (* One candidate left, so the argument comes along with it. *)
+  check string "a prefix highlights through the slash"
+    "T[/ta]U[sk]D[ <title>]" (spans "/ta");
+  (* Three left, so names only -- and each carries the same typed run. *)
+  check string "one glyph, three candidates"
+    "T[/t]U[ask]D[  ]T[/t]U[hinking]D[  ]T[/t]U[ools]" (spans "/t");
+  check string "the bare slash highlights only itself"
+    "T[/]U[task]" (spans "/" |> fun row ->
+      match String.index_opt row 'D' with
+      | Some at -> String.sub row 0 at
+      | None -> row)
+
+(* Splitting the word for colour must not lose or duplicate a glyph. *)
+let test_colour_boundaries_keep_every_glyph () =
+  List.iter
+    (fun (typed, word) ->
+      match Command.hint_spans (Command.hint typed) with
+      | Command.Typed head :: Command.Untyped tail :: _ ->
+          check string
+            (Printf.sprintf "%s spells /%s" typed word)
+            ("/" ^ word) (head ^ tail)
+      | _ -> failf "%s did not open with a typed run" typed)
+    (* [/i] is left out on purpose: it opens both [interrupt] and [image], and
+       the first span then spells whichever the catalog lists first. Each pair
+       here names a prefix only one command answers. *)
+    [ ("/ta", "task")
+    ; ("/th", "thinking")
+    ; ("/im", "image")
+    ; ("/k", "keeper")
+    ; ("/interrup", "interrupt")
+    ]
+
+let test_a_complete_word_needs_no_untyped_run () =
+  check string "nothing left to type"
+    "T[/memory]D[ \xe2\x80\x94 show or hide Librarian/Memory journal rows]"
+    (spans "/memory");
+  check bool "an argument stays a detail" true
+    (match Command.hint_spans (Command.hint "/thinking") with
+     | Command.Typed "/thinking" :: Command.Detail args :: _ ->
+         String.equal args " [hidden|folded|full]"
+     | _ -> false)
+
+let test_an_unknown_word_is_marked_wrong () =
+  check bool "the word carries the wrong span" true
+    (match Command.hint_spans (Command.hint "/zork") with
+     | Command.Wrong "/zork" :: Command.Detail rest :: [] ->
+         String.starts_with ~prefix:" is not a command" rest
+     | _ -> false)
+
+(* The row the renderer paints and the row the tests read have to be the same
+   row, or one of them is describing a footer nobody sees. *)
+let test_the_line_is_the_spans_joined () =
+  List.iter
+    (fun text ->
+      let joined =
+        match Command.hint_spans (Command.hint text) with
+        | [] -> None
+        | spans ->
+            Some
+              (String.concat ""
+                 (List.map Command.hint_span_text spans))
+      in
+      check (option string)
+        (Printf.sprintf "%S joins to its line" text)
+        (Command.hint_line (Command.hint text))
+        joined)
+    [ ""; "hello"; "/"; "/t"; "/th"; "/thinking"; "/task a b"; "/zork" ]
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -221,6 +412,33 @@ let () =
             test_an_unknown_command_is_named_not_sent
         ; test_case "the keeper message carries the task id first" `Quick
             test_the_keeper_message_carries_the_task_id_first
+        ; test_case "plain text has no hint" `Quick test_plain_text_has_no_hint
+        ; test_case "a lone slash lists everything" `Quick
+            test_a_lone_slash_lists_everything
+        ; test_case "a prefix narrows the list" `Quick
+            test_a_prefix_narrows_the_list
+        ; test_case "a half-typed word is not chosen" `Quick
+            test_a_half_typed_word_is_not_chosen
+        ; test_case "a complete word is described" `Quick
+            test_a_complete_word_is_described
+        ; test_case "a word that begins nothing is named" `Quick
+            test_a_word_that_begins_nothing_is_named
+        ; test_case "the hint line says what the hint holds" `Quick
+            test_the_hint_line_says_what_the_hint_holds
+        ; test_case "every catalogued command parses" `Quick
+            test_every_catalogued_command_parses
+        ; test_case "help lines come from the catalog" `Quick
+            test_help_lines_come_from_the_catalog
+        ; test_case "the typed run is what was pressed" `Quick
+            test_the_typed_run_is_what_was_pressed
+        ; test_case "colour boundaries keep every glyph" `Quick
+            test_colour_boundaries_keep_every_glyph
+        ; test_case "a complete word needs no untyped run" `Quick
+            test_a_complete_word_needs_no_untyped_run
+        ; test_case "an unknown word is marked wrong" `Quick
+            test_an_unknown_word_is_marked_wrong
+        ; test_case "the line is the spans joined" `Quick
+            test_the_line_is_the_spans_joined
         ] )
     ; ( "tools/call"
       , [ test_case "a tool answer is read off the SSE body" `Quick

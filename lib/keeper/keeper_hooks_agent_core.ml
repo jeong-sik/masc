@@ -491,10 +491,30 @@ let make_hooks
         (match outcome with
          | Tool_result.Error -> Log.Keeper.error
          | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
-          "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s \
-           out_len=%d failed_params=%s error_preview=%s"
-          (!meta_ref).name tool_name input_keys input_shape outcome_s out_len
-          failed_params error_preview;
+          "keeper:%s tool_call tool=%s source=%s params=[%s] input_shape=[%s] \
+           outcome=%s out_len=%d failed_params=%s error_preview=%s"
+          (!meta_ref).name
+          tool_name
+          (* Which shipped definition this name resolved to. A tool that
+             behaved unexpectedly is one an operator wants to open, and the
+             record did not say where to look. [-] is a tool with no shipped
+             TOML — a built-in or a composition — which is itself the answer. *)
+          (match Tool_help_registry.definition_source tool_name with
+           | Some rel -> rel
+           | None ->
+             (* A composition tool ships no TOML: its definition is the
+                SKILL.md the catalog read to create it. *)
+             (match
+                Keeper_tool_composition_catalog.skill_source_of_tool_name tool_name
+              with
+              | Some rel -> rel
+              | None -> "-"))
+          input_keys
+          input_shape
+          outcome_s
+          out_len
+          failed_params
+          error_preview;
         (* Agent Core measures duration per invocation. Do not reconstruct it
            from Keeper-global mutable state: sibling calls may overlap. *)
         let duration_ms = hook_duration_ms in

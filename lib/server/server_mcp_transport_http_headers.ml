@@ -112,7 +112,29 @@ let body_required_name_for_method body_str method_ =
         | _ -> None
       with Yojson.Json_error _ -> None)
 
-let header_mismatch msg = Error ("HeaderMismatch: " ^ msg)
+(* Three rejections that shared one string, and therefore one wire code. They
+   answer different questions and MCP 2026-07-28 gives two of them their own
+   codes, so the distinction lives in the type:
+
+   - [Mirrored_header_mismatch] -- the body parsed and disagrees with a header.
+     The request id is readable, so JSON-RPC 2.0 §5 requires echoing it.
+   - [Unreadable_body] -- the header opted into the stateless revision but the
+     body is not JSON. No id to echo; §5's null-id case.
+   - [Unsupported_version] -- not a header disagreement at all. It has carried
+     the mismatch code until now, so a client saw "your headers disagree" for a
+     version this server simply does not speak. *)
+type header_rejection =
+  | Mirrored_header_mismatch of string
+  | Unreadable_body of string
+  | Unsupported_version of { requested : string }
+  | Missing_required_meta of { key : string }
+
+let header_mismatch msg = Error (Mirrored_header_mismatch msg)
+
+let body_is_readable body_str =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc _ -> true
+  | _ | (exception Yojson.Json_error _) -> false
 
 let validate_2026_request_headers request body_str =
   if not (request_uses_stateless_protocol request body_str) then Ok ()
@@ -123,10 +145,18 @@ let validate_2026_request_headers request body_str =
     with
     | None, _ ->
         header_mismatch "missing MCP-Protocol-Version header"
+    | Some _, None when not (body_is_readable body_str) ->
+        Error
+          (Unreadable_body
+             "MCP-Protocol-Version names a stateless revision but the body is \
+              not a JSON object")
+    (* A required _meta field being absent is not a header disagreement: the
+       request is malformed, and 2026-07-28 answers that with -32602. It left
+       as a mismatch until now. *)
     | Some _, None ->
-        header_mismatch
-          ("missing params._meta."
-         ^ Mcp_transport_protocol.protocol_version_meta_key)
+        Error
+          (Missing_required_meta
+             { key = Mcp_transport_protocol.protocol_version_meta_key })
     | Some header_version, Some body_version
       when not (String.equal header_version body_version) ->
         header_mismatch
@@ -134,12 +164,16 @@ let validate_2026_request_headers request body_str =
              "MCP-Protocol-Version header value %S does not match body _meta \
               value %S"
              header_version body_version)
-    | Some version, Some _ when not (Mcp_transport_protocol.is_supported_protocol_version version) ->
+    | Some version, Some _
+      when not (Mcp_transport_protocol.is_supported_protocol_version version) ->
+        Error (Unsupported_version { requested = version })
+    | Some _version, Some _
+      when not
+             (Mcp_transport_protocol.request_meta_has_key body_str
+                Mcp_transport_protocol.client_capabilities_meta_key) ->
         Error
-          (Printf.sprintf "Unsupported protocol version %S (supported: %s)"
-             version
-             (String.concat ", "
-                Mcp_transport_protocol.supported_protocol_versions))
+          (Missing_required_meta
+             { key = Mcp_transport_protocol.client_capabilities_meta_key })
     | Some _version, Some _ -> (
         match body_jsonrpc_method_only body_str with
         | None -> Ok ()
@@ -170,6 +204,38 @@ let validate_2026_request_headers request body_str =
                               value %S"
                              header_name body_name)
                     | Some _ -> Ok ()))))
+
+(* One rejection type, one place that turns it into a body. Both transports
+   used to build this themselves and both wrote -32001 -- which is
+   [Auth_error] here, so a client could not tell "your headers disagree" from
+   "you are not authorized" from "this server does not speak that revision".
+   MCP 2026-07-28 gives two of the three their own codes. *)
+let header_rejection_body body_str = function
+  | Mirrored_header_mismatch msg -> (
+    let id =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> List.assoc_opt "id" fields
+      | _ | (exception Yojson.Json_error _) -> None
+    in
+    match id with
+    | Some id ->
+      Mcp_error_code.jsonrpc_error_body_with_id Mcp_error_code.Header_mismatch
+        ~id ~message:msg
+    (* No id is not the same as [id: null], and neither is a header
+       disagreement: JSON-RPC 2.0 requires a request to carry an id and
+       2026-07-28 forbids a null one, so such a request is malformed before
+       the header contract applies. *)
+    | None ->
+      Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request
+        ~message:msg)
+  | Unreadable_body msg ->
+    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request ~message:msg
+  | Unsupported_version { requested } ->
+    Mcp_error_code.unsupported_protocol_version_body ~requested
+      ~supported:Mcp_transport_protocol.supported_protocol_versions
+  | Missing_required_meta { key } ->
+    Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_params
+      ~message:(Printf.sprintf "missing required params._meta.%s" key)
 
 let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
   match body_jsonrpc_method body_str with

@@ -1,0 +1,117 @@
+name: Main CI Verdict
+
+# main is verified on a 30-minute timer rather than per push -- see the
+# reasoning in ci.yml. The timer works. What was missing is anyone hearing it.
+#
+# On 2026-08-25 the scheduled run went red at 07:43Z and stayed red for five
+# consecutive runs. Nothing said so. The failure surfaced only because an
+# unrelated PR inherited it two and a half hours later, which is the exact
+# shape main-nightly-health.yml was written to prevent after the 2026-05-05
+# incident -- that one watches doc truth and a build smoke, not the CI
+# verdict, and it looks once a day.
+#
+# This reacts to the verdict itself. It opens one tracking issue while main
+# is red and closes it when main is green again.
+#
+# Why the body is rewritten instead of commented on: the nightly job fires
+# once a day, so a "still failing" comment per run is one line a day. This
+# fires every 30 minutes. Forty-eight comments would bury the one thing a
+# reader wants, which is what is failing right now.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: main-ci-verdict
+  cancel-in-progress: false
+
+jobs:
+  verdict:
+    name: Report the scheduled main verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only the timer speaks for main. A pull_request run describes a merge
+    # commit that does not exist on main, and a develop push is not main at
+    # all, so neither can open or close an issue about main's health.
+    if: ${{ github.event.workflow_run.event == 'schedule' }}
+    steps:
+      - name: Open, refresh, or close the tracking issue
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const title = '[main-health] scheduled CI is failing on main';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'main-health', per_page: 50,
+            });
+            const existing = open.data.find(i => i.title === title);
+
+            if (run.conclusion === 'success') {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: existing.number,
+                  body: `Green again: run ${run.html_url} passed on \`${run.head_sha}\`.`,
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: existing.number, state: 'closed',
+                });
+              }
+              return;
+            }
+
+            // A cancelled or skipped run is not a verdict. Only a failure is.
+            if (run.conclusion !== 'failure') return;
+
+            // Name the jobs. Having to open the run and read the log to learn
+            // which suite went red is most of the delay in acting on this.
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id: run.id, per_page: 100 },
+            );
+            const failed = jobs
+              .filter(j => j.conclusion === 'failure')
+              .map(j => `- \`${j.name}\` — ${j.html_url}`);
+
+            const body = [
+              `Latest failing run: ${run.html_url}`,
+              `Commit: \`${run.head_sha}\``,
+              `Finished: ${run.updated_at}`,
+              '',
+              failed.length
+                ? `Failing jobs:\n${failed.join('\n')}`
+                : 'The run failed with no job reporting failure; open it to see why.',
+              '',
+              'main is verified on a 30-minute timer, not per push, so this is',
+              'the verdict for main itself rather than for one merge. Every PR',
+              'that merges main from here inherits the failure.',
+              '',
+              'This body is rewritten on each failing run and the issue closes',
+              'itself when a scheduled run passes.',
+              '',
+              '```masc-triage',
+              'kind: defect',
+              'area: ci',
+              'impact: internal',
+              'must-do: true',
+              '```',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner, repo, title, body, labels: ['main-health'],
+              });
+            }

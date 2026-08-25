@@ -108,11 +108,24 @@ history.
 
 ## 3. Design
 
-### 3.1 Three questions, not a protocol
+### 3.1 Two questions now, a third when it answers
 
-`textDocument/references`, `textDocument/definition`, `textDocument/hover`.
-Those three cover the 27% in §1.3: where is this used, where does it come
-from, what is its type.
+`textDocument/definition` and `textDocument/hover`. Both were measured against
+a real `ocamllsp 1.27.0` on this tree: definition crosses files correctly in
+99 ms, hover returns the full signature and the odoc comment in 65 ms.
+
+`textDocument/references` is **not** in the first surface. Measured at three
+positions on two symbols, it answers only the occurrences in the file that was
+opened -- one item where `rg` finds five across three files, and 2,200 ms to
+answer that one for `realpath_lenient`. There is no `.ocaml-index` anywhere in
+`_build`, and nothing in the repository runs `dune build @ocaml-index`
+(measured buildable: 48.7 s, 771 files). A short list is worse than an empty
+one: an empty list at least reads as odd, while "one reference" reads as an
+answer. §3.3 forbids exactly this, so the question waits for evidence rather
+than shipping wrong. Tracked in #30504.
+
+That leaves "where does it come from" and "what is it" of the 27% in §1.3.
+"Where is this used" stays with `Grep` for now.
 
 Not completion (no one is typing), not codeLens or inlayHint (nothing is being
 drawn), not rename (a write, and `tool_edit_file` already owns writes).
@@ -202,10 +215,12 @@ Worth tracking; not yet a thing to implement against.
   answers `Server_unavailable` naming the command. Neither answers `[]`.
 - **Found nothing:** a valid position with no references answers an empty list,
   distinct from both errors above.
-- **Against ocamllsp:** references for a symbol with a known count in this
-  tree returns that count. The one test that needs a real server, skipped by
-  the same PATH check the tool uses, so a host without `ocamllsp` runs the
-  rest.
+- **Against ocamllsp:** two workspace roots get two servers and the same root
+  gets one, asserted on the processes the pool hands back. The one test that
+  needs a real server, skipped by the same PATH check the tool uses, so a host
+  without `ocamllsp` runs the rest. It does not assert a reference count: §3.1
+  measured that this tree does not answer references project-wide, so a test
+  pinning a count would pin the wrong number.
 
 ## 6. Verification (closed) & open questions
 
@@ -217,7 +232,25 @@ Closed by measurement, 2026-08-25:
 - `.ml`/`.mli` 65.8%, `.ts` 9.1% of files named.
 - `ocamllsp` and `rust-analyzer` present; three of five mapped commands absent.
 
+Measured after the RFC was accepted, against `ocamllsp 1.27.0`:
+
+- `definition` crosses files in 99 ms; `hover` returns signature and doc in
+  65 ms.
+- `references` answers same-file only, at three positions on two symbols --
+  one item where `rg` finds five. 2,200 ms for one of them. No `.ocaml-index`
+  exists; `dune build @ocaml-index` builds one in 48.7 s and nothing in the
+  repository calls it. #30504.
+- A pool torn down by its switch alone hangs: `spawn` forks two readers onto
+  that switch and the pipes that would end them close in `on_release`, which
+  runs after the switch has waited for those readers. Two `ocamllsp` sat
+  resident for five minutes before this was found.
+
 Open:
+
+- **Does `references` ever answer here?** §3.1 measured that it does not
+  today. Whether `dune build @ocaml-index` changes that, and what a Keeper
+  should be told when no index exists, is #30504 and blocks the third
+  question.
 
 - **Does a Keeper ask better than it greps?** The 27% is what a language
   server *could* answer, not what a Keeper *would* ask. The tool records its

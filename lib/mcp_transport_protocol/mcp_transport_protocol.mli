@@ -73,6 +73,21 @@ val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 
 (** {1 JSON-RPC Response Builders} *)
 
+val server_info_meta_key : string
+(** ["io.modelcontextprotocol/serverInfo"] — the reserved [_meta] key a server
+    identifies itself under on every result (2026-07-28 basic/index,
+    per-response protocol fields). *)
+
+val server_info_meta_value : Yojson.Safe.t
+(** This server's [Implementation]: name, title, and version, the last from
+    {!Build_version}. Sole owner of those three — {!Mcp_server.server_info}
+    extends this rather than restating them, so the handshake identity and the
+    per-result identity cannot drift.
+
+    Self-reported and unverified by the protocol: the spec has it used for
+    display, logging, and debugging, never for a behavioural or security
+    decision. *)
+
 val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 (** [make_response ~id result] builds [{jsonrpc:"2.0", id, result}].
 
@@ -168,6 +183,17 @@ val normalize_protocol_version : string -> string
 val protocol_version_from_params : Yojson.Safe.t option -> string
 (** Extract [protocolVersion] from a JSON-RPC [params] object,
     falling back to {!default_protocol_version}. *)
+
+val client_capabilities_meta_key : string
+(** ["io.modelcontextprotocol/clientCapabilities"] — the second [_meta] field
+    2026-07-28 marks required on every client request. A request missing a
+    required field is malformed and answered with [-32602]. *)
+
+val request_meta_has_key : string -> string -> bool
+(** [request_meta_has_key body_str key] is whether [params._meta] in [body_str]
+    carries [key] with a non-null value. An unparseable body, an absent
+    [_meta], and an explicit [null] all answer [false] — none of them is a
+    declaration. *)
 
 val protocol_version_meta_key : string
 (** Fully qualified per-request [_meta] key used by the 2026-07-28

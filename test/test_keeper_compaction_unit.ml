@@ -503,8 +503,8 @@ let test_provider_admission_quarantines_malformed_overlap () =
 (* A provider timeout between the two checkpoint stages leaves the transcript
    ending on a ToolUse with no result. That is the ordinary shape of an
    interrupted turn, not corruption, so admission closes it and the turn runs;
-   before this, the lane failed every turn until a restart (rondo, 33
-   consecutive, 2026-08-25). *)
+   before this, the lane failed every turn until a restart (33 consecutive
+   turns on one lane, 2026-08-25). *)
 let test_interrupted_tool_cycle_is_closed_and_dispatched () =
   let interrupted =
     [ text T.User "do the thing"

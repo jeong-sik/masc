@@ -284,6 +284,73 @@ let test_package_id_is_one_path_segment () =
   check bool "separator rejected" true (Result.is_error (Snapshot.package_id_of_directory "a/b"))
 ;;
 
+(* An unreadable document and an unnameable directory are two different
+   rejections, and the snapshot has to say which. Collapsing the name check to
+   an option made [package_id = None] mean both "the directory is not a legal
+   package id" and "it is a legal one we did not record", so a reader could not
+   tell whether the skill had an identity at all.
+
+   Only the second of these two catches that collapse -- an option built from a
+   valid name carries the same [Some] either way, so the first passes against
+   the erasing version too. It is here for the other half of the pair: that a
+   file we could not open does not cost the skill its identity. *)
+let test_unreadable_document_keeps_its_package_id () =
+  let config = parse_config (config_text (source_row ~id:"first" ~path:"first-skills")) in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans
+         ~base_path:"/base"
+         config
+         [ [ Snapshot.Candidate_unreadable
+               { directory = "release-checklist"
+               ; path = "/base/first-skills/release-checklist/SKILL.md"
+               ; detail = "permission denied"
+               }
+           ] ])
+  in
+  match Snapshot.rejections snapshot with
+  | [ rejection ] ->
+    check
+      bool
+      "the directory it could not read is still named"
+      true
+      (rejection.Snapshot.package_id <> None);
+    (match rejection.Snapshot.reason with
+     | Snapshot.Document_unreadable { detail; _ } ->
+       check string "the reason is the unreadable file" "permission denied" detail
+     | _ -> fail "an unreadable document was rejected for something else")
+  | rejections -> failf "expected one rejection, got %d" (List.length rejections)
+;;
+
+let test_unnameable_directory_is_rejected_for_its_name () =
+  let config = parse_config (config_text (source_row ~id:"first" ~path:"first-skills")) in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans
+         ~base_path:"/base"
+         config
+         [ [ Snapshot.Candidate_unreadable
+               { directory = ".."
+               ; path = "/base/first-skills/../SKILL.md"
+               ; detail = "permission denied"
+               }
+           ] ])
+  in
+  match Snapshot.rejections snapshot with
+  | [ rejection ] ->
+    check
+      bool
+      "a directory that cannot be named has no identity"
+      true
+      (rejection.Snapshot.package_id = None);
+    (match rejection.Snapshot.reason with
+     | Snapshot.Invalid_package_id Snapshot.Parent_directory_package_id -> ()
+     | _ -> fail "the name was not what the rejection blamed")
+  | rejections -> failf "expected one rejection, got %d" (List.length rejections)
+;;
+
 let () =
   run
     "skill_catalog_snapshot"
@@ -305,6 +372,10 @@ let () =
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment
+        ; test_case "unreadable document keeps its id" `Quick
+            test_unreadable_document_keeps_its_package_id
+        ; test_case "unnameable directory blames the name" `Quick
+            test_unnameable_directory_is_rejected_for_its_name
         ] )
     ]
 ;;

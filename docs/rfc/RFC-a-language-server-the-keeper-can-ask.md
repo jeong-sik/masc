@@ -131,6 +131,20 @@ Keepers make that worse, not better: each has its own sandbox root, and they
 run concurrently. The cache key is `(lang_id, workspace_root)`. A Keeper
 asking about its own tree cannot be handed a server rooted in another's.
 
+The process manager is not what needs fixing. `Lsp_process_manager.spawn`
+already takes `~workspace_root`, and the proxy's own cache is inside
+`conn_state`, one table per connection, with that connection's root beside it
+-- so keying on `lang_id` there is correct. What `LspCall` added was a
+*server-scoped* table over a per-caller root. A Keeper surface is server-scoped
+by nature, which is why it carries the root in the key from the start.
+
+One thing the proxy does that a Keeper surface should not copy:
+`conn_state.workspace_root` is a `ref`, reassigned when `initialize` arrives,
+while any language server already cached still holds the root it was spawned
+with. LSP sends `initialize` once per connection, so the proxy is within the
+protocol; a Keeper surface has no handshake to rely on and so must not depend
+on the root being fixed after the fact.
+
 ### 3.3 What "no server" answers
 
 `command_for_lang` returns `None` for an unmapped language, and a mapped

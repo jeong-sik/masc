@@ -5,6 +5,11 @@
  (modules test_keeper_effective_tool_surface)
  (libraries masc masc_test_deps alcotest))
 
+(test
+ (name test_task_skill_reference)
+ (modules test_task_skill_reference)
+ (libraries masc.task_handlers masc alcotest unix fs_compat masc_string_util))
+
 (env
  (_
   (env-vars
@@ -2777,7 +2782,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc_tui_types unix))
 
 (test
  (name test_tool_transport_prefix)

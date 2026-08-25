@@ -26,6 +26,37 @@ let test_failed_probe_is_unread_not_stale () =
     (Option.is_none
        (Masc_tui_types.server_identity_of_refresh (Error "one failed tick")))
 
+let test_workspace_identity_matches_canonical_paths () =
+  let dir = Filename.temp_file "tui-workspace-identity-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let alias = dir ^ "-alias" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove alias with Sys_error _ -> ());
+      Unix.rmdir dir)
+    (fun () ->
+       Unix.symlink dir alias;
+       match
+         Masc_tui_types.workspace_identity_of_refresh
+           ~local_base_path:alias
+           (Ok (identity dir))
+       with
+       | Masc_tui_types.Workspace_identity_match -> ()
+       | _ -> Alcotest.fail "canonical aliases did not match")
+
+let test_workspace_identity_mismatch_keeps_both_paths () =
+  match
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:"/workspace/local"
+      (Ok (identity "/workspace/server"))
+  with
+  | Masc_tui_types.Workspace_identity_mismatch
+      { local_base_path; server_base_path } ->
+    Alcotest.(check string) "local path" "/workspace/local" local_base_path;
+    Alcotest.(check string) "server path" "/workspace/server" server_base_path
+  | _ -> Alcotest.fail "different workspaces were not blocked"
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -33,5 +64,9 @@ let () =
             test_same_endpoint_restart_replaces_a_with_b
         ; Alcotest.test_case "failed probe is unread, not stale" `Quick
             test_failed_probe_is_unread_not_stale
+        ; Alcotest.test_case "canonical aliases match" `Quick
+            test_workspace_identity_matches_canonical_paths
+        ; Alcotest.test_case "mismatch preserves both paths" `Quick
+            test_workspace_identity_mismatch_keeps_both_paths
         ] )
     ]

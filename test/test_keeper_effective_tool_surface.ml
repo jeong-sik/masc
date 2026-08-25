@@ -135,6 +135,69 @@ let test_instruction_skill_without_read_fails_closed () =
   | Ok _ -> fail "instruction skill was projected without Read"
 ;;
 
+let rec remove_tree path =
+  if Sys.is_directory path
+  then (
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path)
+  else Sys.remove path
+;;
+
+let test_turn_admission_rechecks_instruction_readability () =
+  let base = Filename.temp_file "keeper-skill-admission-" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> remove_tree base)
+    (fun () ->
+       let config = Workspace.default_config base in
+       ignore (Workspace.init config ~agent_name:None);
+       let created =
+         match
+           Workspace.add_task_with_result
+             ~created_by:"fixture"
+             ~skills:[ "guide" ]
+             config
+             ~title:"skill admission"
+             ~priority:3
+             ~description:"fixture"
+         with
+         | Ok created -> created
+         | Error error -> fail (Workspace.add_task_error_to_string error)
+       in
+       let current_task_id =
+         match Keeper_id.Task_id.of_string created.task_id with
+         | Ok task_id -> Some task_id
+         | Error detail -> fail detail
+       in
+       let meta =
+         match
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+                [ "name", `String "skill-admission"
+                ; "agent_name", `String "keeper-skill-admission-agent"
+                ; "trace_id", `String "skill-admission-trace"
+                ])
+         with
+         | Ok meta ->
+           { meta with current_task_id; tool_groups = Some [ "board" ] }
+         | Error detail -> fail detail
+       in
+       match
+         Keeper_run_tools_setup.validate_current_task_skill_admission
+           ~config
+           ~meta
+           ~skill_catalog:(skill_catalog ())
+       with
+       | Error error ->
+         check bool "turn admission names Read conflict" true
+           (String_util.contains_substring
+              (Agent_core.Error.to_string error)
+              "model-visible Read tool")
+       | Ok () -> fail "turn admission accepted an unreadable instruction skill")
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
@@ -145,6 +208,8 @@ let () =
             test_two_surfaces_have_different_names_and_digests
         ; test_case "instruction skill requires Read" `Quick
             test_instruction_skill_without_read_fails_closed
+        ; test_case "turn admission rechecks Read" `Quick
+            test_turn_admission_rechecks_instruction_readability
         ] )
     ]
 ;;

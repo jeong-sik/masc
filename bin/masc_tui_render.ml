@@ -1734,9 +1734,6 @@ let render_planning_list (state : state) =
            if idx < count then begin
              let g = List.nth goals idx in
              let is_selected = idx = state.planning_cursor in
-             let depth = planning_goal_depth p.pl_goals g in
-             let indent = String.make (depth * 2) ' ' in
-             let branch = if depth > 0 then "└─ " else "  " in
              let status_color = planning_phase_color g.pg_phase in
              let status_label = planning_phase_label g.pg_phase in
             let due =
@@ -1745,16 +1742,15 @@ let render_planning_list (state : state) =
               | None -> ""
             in
              let line =
-               Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
-                 indent branch status_color
+               Printf.sprintf "  %s[%s]%s %s P%d  %s%s"
+                 status_color
                  (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 30 - (depth * 2)
-                   - Message_layout.display_width due))
+                    (cols - 30 - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =
@@ -7404,6 +7400,40 @@ let render_terminal_too_small ~rows ~cols =
   finish_frame ~surface_key:"terminal-too-small"
     ~cursor:Frame_presenter.Hidden ~rows ~cols buf
 
+let render_workspace_identity_blocker state ~terminal_rows ~rows ~cols =
+  let buf = Buffer.create 512 in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Theme.bad
+    " WORKSPACE IDENTITY BLOCKER";
+  box_divider buf cols;
+  (match state.workspace_identity with
+   | Masc_tui_types.Workspace_identity_mismatch
+       { local_base_path; server_base_path } ->
+     box_line_styled buf cols ~style:Theme.bad
+       "  The TUI and server resolve different workspaces.";
+     box_line buf cols
+       ("  local  " ^ Terminal_text.single_line local_base_path);
+     box_line buf cols
+       ("  server " ^ Terminal_text.single_line server_base_path);
+     box_line_styled buf cols ~style:Ansi.dim
+       "  Local Keeper/context/metrics reads are disabled. Restart with the matching --base-path."
+   | Masc_tui_types.Workspace_identity_unread ->
+     box_line_styled buf cols ~style:Theme.warn
+       "  Waiting for /health?full=1 to prove the server's effective base path.";
+     box_line buf cols
+       ("  local  " ^ Terminal_text.single_line state.local_base_path);
+     box_line_styled buf cols ~style:Ansi.dim
+       "  Local Keeper/context/metrics reads remain disabled until identity is proven."
+   | Masc_tui_types.Workspace_identity_match -> ());
+  for _ = 1 to max 0 (rows - 9) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"r:retry identity  q:quit");
+  finish_surface state ~surface_key:"workspace-identity-blocker"
+    ~rows:terminal_rows ~cols buf
+
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
@@ -7414,7 +7444,13 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
-  else if state.palette_open then render_palette state
-  else if state.context_inspector_open then render_context_inspector state
-  else if state.help_open then render_help state
-  else render_surface state
+  else
+    match state.workspace_identity with
+    | Masc_tui_types.Workspace_identity_unread
+    | Masc_tui_types.Workspace_identity_mismatch _ ->
+      render_workspace_identity_blocker state ~terminal_rows ~rows ~cols
+    | Masc_tui_types.Workspace_identity_match ->
+      if state.palette_open then render_palette state
+      else if state.context_inspector_open then render_context_inspector state
+      else if state.help_open then render_help state
+      else render_surface state

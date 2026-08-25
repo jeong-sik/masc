@@ -40,6 +40,35 @@ let server_identity_of_refresh
   | Error _ -> None
 ;;
 
+type workspace_identity =
+  | Workspace_identity_unread
+  | Workspace_identity_match
+  | Workspace_identity_mismatch of
+      { local_base_path : string
+      ; server_base_path : string
+      }
+
+let canonical_path path =
+  if String.equal path ""
+  then ""
+  else
+    try Unix.realpath path with
+    | Unix.Unix_error _ -> path
+;;
+
+let workspace_identity_of_refresh ~local_base_path reading =
+  match reading with
+  | Error _ -> Workspace_identity_unread
+  | Ok identity ->
+    let local_base_path = canonical_path local_base_path in
+    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    if String.equal local_base_path "" || String.equal server_base_path ""
+    then Workspace_identity_unread
+    else if String.equal local_base_path server_base_path
+    then Workspace_identity_match
+    else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -474,21 +503,8 @@ type planning_snapshot = Tui_decode.planning_snapshot
   pl_generated_at: string;
 }
 
-(* Goals no longer nest, so every goal sits at depth 0. *)
-let planning_goal_depth (_goals : planning_goal list) (_goal : planning_goal) = 0
-
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
   goals
-  |> List.mapi (fun index goal -> (index, goal))
-  |> List.stable_sort (fun (left_index, left_goal) (right_index, right_goal) ->
-         match
-           Int.compare
-             (planning_goal_depth goals left_goal)
-             (planning_goal_depth goals right_goal)
-         with
-         | 0 -> Int.compare left_index right_index
-         | depth_cmp -> depth_cmp)
-  |> List.map snd
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -753,6 +769,8 @@ type state = {
      a different process on the same endpoint replaces this projection, while
      a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
+  local_base_path: string;
+  mutable workspace_identity: workspace_identity;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -1255,6 +1273,7 @@ let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
     ~workspace
+    ?(local_base_path = "")
     ~port
     ~refresh_interval
     ()
@@ -1276,6 +1295,11 @@ let create_state
   context_inspector_exact = None;
   roster_pane_hidden = false;
   server_identity = None;
+  local_base_path;
+  workspace_identity =
+    (if String.equal local_base_path ""
+     then Workspace_identity_match
+     else Workspace_identity_unread);
   help_scroll = 0;
   image_open = None;
   palette_open = false;

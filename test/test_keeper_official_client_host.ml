@@ -1019,6 +1019,12 @@ let test_native_none_needs_client_support () =
        ~approval_mode:Keeper_tool_approval_mode.Auto
        ~none_supported:false
        ~client_label:"Codex");
+  expect_admit "Antigravity none is refused" false
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_none
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:false
+       ~client_label:"Antigravity");
   expect_admit "none is admitted where the client supports it" true
     (Host.admit_native_posture
        ~posture:Runtime_native_tools.Native_none

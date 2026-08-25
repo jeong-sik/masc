@@ -46,7 +46,7 @@ type tree_node = {
     [.linked_keeper_names] / [.children] fields directly
     when assembling the per-keeper goal block. *)
 
-(** {1 Forest builder} *)
+(** {1 Flat goal projection} *)
 
 val build_forest :
   config:Workspace.config ->
@@ -54,11 +54,10 @@ val build_forest :
   tasks:Masc_domain.task list ->
   pending_approvals:Yojson.Safe.t list ->
   tree_node list
-(** Assembles the goal forest from [goals] / [tasks].
-    Every root goal (no parent or parent outside [goals])
-    becomes a top-level entry. Each node keeps only its direct linkage,
-    approval, receipt/runtime, and activity observations; child evidence
-    remains on child nodes instead of being promoted into parent status. *)
+(** Projects every flat Goal as one top-level node. [children] remains an
+    always-empty compatibility field in the JSON record; the Goal schema has
+    no parent relation. Each node keeps its own direct task, approval,
+    receipt/runtime, and activity observations. *)
 
 (** {1 Per-node JSON renderer} *)
 

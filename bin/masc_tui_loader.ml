@@ -328,6 +328,20 @@ let load_from_masc_dir (state : state) (base_path : string) =
 
   state.last_refresh <- Unix.gettimeofday ()
 
+let clear_local_workspace (state : state) =
+  state.agents <- [];
+  state.tasks <- [];
+  state.tasks_domain <- [];
+  state.tasks_error <- None;
+  state.keepers <- [];
+  state.keepers_error <- None;
+  state.keeper_cursor <- 0;
+  state.log_entries <- [];
+  state.log_error <- None;
+  state.live_context <- None;
+  state.live_context_error <- None
+;;
+
 (** Add event to the event log *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in

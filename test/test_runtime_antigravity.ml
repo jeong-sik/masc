@@ -722,11 +722,20 @@ let test_live_start_and_resume () =
   | Some "1", Some model ->
     let cwd = Sys.getcwd () in
     let cli_path = Option.value ~default:"agy" (Sys.getenv_opt "MASC_ANTIGRAVITY_CLI") in
+    let effort =
+      match Sys.getenv_opt "MASC_ANTIGRAVITY_EFFORT" with
+      | None -> None
+      | Some "low" -> Some Runtime_antigravity.Low
+      | Some "medium" -> Some Runtime_antigravity.Medium
+      | Some "high" -> Some Runtime_antigravity.High
+      | Some value -> failf "invalid MASC_ANTIGRAVITY_EFFORT %S" value
+    in
     let first, second =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_antigravity.default_config ~cwd ~model) with
             cli_path
+          ; effort
           ; timeout_s = Some 60.0
           }
         in

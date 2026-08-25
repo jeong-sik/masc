@@ -343,7 +343,7 @@ jobs:
           # runtime.toml, so a fixture edit changes test input while matching
           # none of the suffixes above (.toml is not .ml/.json/.sh) and the
           # Build job would skip.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|scripts/ci/check_env_reads_below_config\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 

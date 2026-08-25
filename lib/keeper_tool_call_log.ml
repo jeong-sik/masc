@@ -344,13 +344,39 @@ let take_queued_append () =
     else Some (Stdlib.Queue.take append_queue))
 ;;
 
+(* The entry leaves the queue before it is written, so a write that raises used
+   to end there with the row already gone. [append_to_store_result] re-raises
+   [Eio.Cancel.Cancelled] on purpose, to separate it from the failures it
+   counts, and the flush daemon's [Cancelled -> ()] arm then swallowed it: one
+   row lost per cancellation, with no counter and no log line (masc#30619).
+
+   Putting the entry back at the front preserves order and hands the loss back
+   to the queue's own bounded-drop accounting, which does report. This is the
+   shape [Board_votes.flush_dirty] settled on in #26168 — re-mark on failure,
+   because the counter and the log line are not the whole response.
+
+   [with_append_queue_lock] holds a [Stdlib.Mutex], so the requeue completes
+   even when the surrounding Eio context is already cancelled. *)
+let requeue_append_front entry =
+  with_append_queue_lock (fun () ->
+    let rest = Stdlib.Queue.create () in
+    Stdlib.Queue.transfer append_queue rest;
+    Stdlib.Queue.add entry append_queue;
+    Stdlib.Queue.transfer rest append_queue)
+;;
+
 let drain_queued_appends () =
   let count = ref 0 in
   let rec loop () =
     match take_queued_append () with
     | None -> !count
     | Some entry ->
-      append_to_store entry;
+      (match append_to_store entry with
+       | () -> ()
+       | exception exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         requeue_append_front entry;
+         Printexc.raise_with_backtrace exn backtrace);
       incr count;
       loop ()
   in

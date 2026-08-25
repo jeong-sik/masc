@@ -689,6 +689,15 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_selected_keeper_logs");
+  (* Where that one call sits, not just that there is one. Emptying the gate's
+     body and calling the loader from anywhere else keeps the count at one and
+     reads every workspace's logs. (From #30681, which reached the pair above
+     independently and saw the gap this closes.) *)
+  check int "and the gate is where that call sits" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"load_keeper_logs_if_safe"
+       ~callee:"load_selected_keeper_logs");
   check int "Board list success uses shared post replacement" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"

@@ -224,8 +224,8 @@ let load_from_masc_dir (state : state) (base_path : string) =
     match state.view with
     | Keepers mode -> Some mode
     | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
-    | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime
-    | Config | Resources | Tools
+    | Verification | Harness | Fusion | Repositories | Code | Changes
+    | Connectors | Runtime | Config | Resources | Tools
     | System_logs -> None
   in
   let current_navigation =

@@ -529,6 +529,7 @@
  (package masc)
  (libraries
   masc_tui_theme
+  masc_tui_code_lexer
   masc_tui_span
   masc_tui_diff
   masc

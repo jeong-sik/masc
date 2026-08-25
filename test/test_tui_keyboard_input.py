@@ -4533,6 +4533,67 @@ def enter_outside_changes_interaction(
     os.write(master_fd, b"q")
 
 
+
+
+WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/tree?depth=0&limit=200"
+WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=500"
+WORKSPACE_FILE_AML_PATH = "/api/v1/workspace/file?path=lib/a.ml"
+
+
+def code_lane_fixtures() -> HttpFixtures:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures[WORKSPACE_TREE_ROOT_PATH] = (
+        200,
+        [
+            {"path": "lib", "label": "lib", "depth": 0, "parent": "",
+             "hasChildren": True, "diff": None, "keeperId": None,
+             "hueIndex": None},
+            {"path": "README.md", "label": "README.md", "depth": 0,
+             "parent": "", "hasChildren": False, "diff": None,
+             "keeperId": None, "hueIndex": None},
+        ],
+    )
+    fixtures[WORKSPACE_CHILDREN_LIB_PATH] = (
+        200,
+        [
+            {"path": "lib/a.ml", "label": "a.ml", "depth": 1, "parent": "lib",
+             "hasChildren": False, "diff": None, "keeperId": None,
+             "hueIndex": None},
+        ],
+    )
+    file_response = (200, {"ok": True, "content": "let x = 1\n(* hi *)\n"})
+    fixtures[WORKSPACE_FILE_AML_PATH] = file_response
+    # uri's Query_value encoding may or may not spell the slash; serve both.
+    fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
+    return fixtures
+
+
+def code_lane_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """The Code surface: one directory level, Enter drills, a file opens
+    lexed. The keyword's yellow span and the dim gutter are the claim that
+    the file was lexed, not just printed."""
+    listing = tab_until(process, master_fd, output, b"README.md")
+    plain = CSI_RE.sub(b"", listing).decode("utf-8")
+    for needle in ("lib", "README.md"):
+        if needle not in plain:
+            raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
+    send_and_wait(process, master_fd, output, b"\r", b"a.ml")
+    opened = send_and_wait(
+        process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
+    )
+    if re.search(rb"\x1b\[2m\s+1\x1b\[0m", opened) is None:
+        raise AssertionError(f"no line-number gutter: {opened!r}")
+    if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
+        raise AssertionError(f"the comment did not colour: {opened!r}")
+    os.write(master_fd, b"q")
+
+
 RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
 RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
 RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
@@ -5474,6 +5535,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper lanes unread, failed, empty, and populated",
         interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
         http_fixtures=lanes_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Code lane lists, drills, and lexes",
+        interact=code_lane_interaction,
+        http_fixtures=code_lane_fixtures(),
     )
     enter_split_fixtures = keeper_runtime_http_fixtures()
     enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

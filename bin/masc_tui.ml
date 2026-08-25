@@ -987,6 +987,9 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Resources_listed of ((string * string) list, string) result
+  | Code_entries_loaded of
+      string * (Masc.Tui_decode.workspace_tree_node list, string) result
+  | Code_file_loaded of string * (string, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1430,6 +1433,51 @@ let launch_resource_read state ~mailbox ~uri =
   | None ->
       enqueue_async mailbox
         (Resource_read (uri, Error "Eio switch is unavailable"))
+
+(* The Code surface's two loads: one directory level, one whole file. Plain
+   HTTP GETs forked off the render loop, answered on the async mailbox and
+   stamped with what they answer for, so a slow reply cannot dress a newer
+   selection. *)
+let launch_code_entries_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let dir = state.code_dir in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_workspace_entries ~host ~port ~path:dir with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_entries_loaded (dir, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_entries_loaded (dir, Error "Eio switch is unavailable"))
+
+let launch_code_file_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_workspace_file ~host ~port ~path with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_file_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_file_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -1951,6 +1999,7 @@ let goto_surface state ~mailbox (destination : surface) =
    | Tools -> launch_tools_load state ~mailbox
    | Config -> launch_runtime_config_load state ~mailbox
    | Resources -> launch_resources_list state ~mailbox
+   | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
   (* Leaving Approvals drops a half-armed decision, exactly as the old Tab
      arm did on the Approvals -> Board step. *)
@@ -4119,6 +4168,36 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.runtime_config_view <- Some view;
           state.runtime_config_view_error <- None
       | Error detail -> state.runtime_config_view_error <- Some detail)
+  | Code_entries_loaded (dir, result) ->
+      if String.equal dir state.code_dir then (
+        match result with
+        | Ok entries ->
+            state.code_entries <- entries;
+            state.code_entries_error <- None;
+            state.code_cursor <-
+              max 0 (min state.code_cursor (List.length entries - 1))
+        | Error detail -> state.code_entries_error <- Some detail)
+  | Code_file_loaded (path, result) -> (
+      match result with
+      | Ok content ->
+          (* Lex once at load: comment and string state crosses rows, so a
+             window could not answer. Past the budget the file draws plain
+             rather than slowly. *)
+          let language =
+            if String.length content > 500_000 then None
+            else Masc_tui_code_lexer.language_of_path path
+          in
+          let rows =
+            Masc_tui_code_lexer.rows_of_source ~language content
+            |> List.map
+                 (List.map (fun (text, kind) ->
+                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+          in
+          state.code_file <- Some (path, rows);
+          state.code_file_error <- None;
+          state.code_file_scroll <- 0;
+          state.code_focus_file <- true
+      | Error detail -> state.code_file_error <- Some detail)
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -4657,6 +4736,7 @@ let toggle_roster_pane_key = "\002"
 
 let terminal_title_visible_keeper state =
   match state.view with
+  | Code -> None
   | Keepers Keeper_message -> state.msg_target_keeper_name
   | Keepers
       (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
@@ -5561,6 +5641,7 @@ let main () =
              ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
            (match state.view with
+            | Code -> launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 load_selected_keeper_logs state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -5622,6 +5703,19 @@ let main () =
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
+            | Code ->
+                if state.code_focus_file then state.code_focus_file <- false
+                else if not (String.equal state.code_dir "") then begin
+                  (* Up one directory; "." from Filename.dirname means the
+                     root, which this surface spells "". *)
+                  let parent = Filename.dirname state.code_dir in
+                  state.code_dir <-
+                    (if String.equal parent "." then "" else parent);
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
@@ -5709,6 +5803,20 @@ let main () =
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
+            | Code ->
+                if state.code_focus_file then (
+                  match state.code_file with
+                  | Some (_, rows) ->
+                      state.code_file_scroll <-
+                        min
+                          (max 0 (List.length rows - 1))
+                          (state.code_file_scroll + 1)
+                  | None -> ())
+                else
+                  state.code_cursor <-
+                    Masc_tui_scroll.cursor_down
+                      ~count:(List.length state.code_entries)
+                      state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
@@ -5886,6 +5994,14 @@ let main () =
             | Keepers Keeper_message -> ())
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
+            | Code ->
+                if state.code_focus_file then
+                  state.code_file_scroll <- max 0 (state.code_file_scroll - 1)
+                else
+                  state.code_cursor <-
+                    Masc_tui_scroll.cursor_up
+                      ~count:(List.length state.code_entries)
+                      state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
@@ -6057,6 +6173,23 @@ let main () =
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
+            | Code -> (
+                if state.code_focus_file then ()
+                else
+                  match List.nth_opt state.code_entries state.code_cursor with
+                  | Some node ->
+                      if node.Masc.Tui_decode.wt_has_children then begin
+                        state.code_dir <- node.Masc.Tui_decode.wt_path;
+                        state.code_cursor <- 0;
+                        state.code_entries <- [];
+                        state.code_entries_error <- None;
+                        launch_code_entries_load state
+                          ~mailbox:async_messages
+                      end
+                      else
+                        launch_code_file_load state ~mailbox:async_messages
+                          ~path:node.Masc.Tui_decode.wt_path
+                  | None -> ())
             | Keepers Keeper_runtime_pick ->
                 (match state.runtime_pick_keeper with
                  | Some keeper_name ->
@@ -6239,6 +6372,7 @@ let main () =
            (* Focus the Overview task panel. The list is always on screen, but
               j/k belong to the event log until the operator asks for tasks. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <- not state.task_focus;
@@ -6377,6 +6511,7 @@ let main () =
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in
@@ -6399,6 +6534,7 @@ let main () =
               talk to is the one under the cursor. [c] is an alias for [m]
               because the footer names the action rather than the mnemonic. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
@@ -6429,6 +6565,7 @@ let main () =
               applies is a fact about the keeper, not a choice the operator
               should have to make. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> (
                 match
@@ -6448,6 +6585,7 @@ let main () =
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "s" | Some "S" ->
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
@@ -6462,6 +6600,7 @@ let main () =
               live, and Board compose takes the key only from the list --
               inside the compose pane the letter is draft text. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Board ->
                 (match state.board_mode with
@@ -6484,6 +6623,7 @@ let main () =
               inside the keeper-action pipeline: the loop is inside the
               editor, and the POST happens only after the editor returns. *)
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Config -> handle_runtime_config_edit ()
@@ -6497,6 +6637,7 @@ let main () =
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with
+            | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
@@ -6542,6 +6683,7 @@ let main () =
           ~mailbox:async_messages;
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
+         | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_selected_keeper_logs state base_path 200

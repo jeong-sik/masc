@@ -66,9 +66,13 @@ let measured ~surface =
    (surface = All) must keep the exact same tool surface it had before this
    feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
    2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
-   surface by 567 bytes (count unchanged at 82). *)
-let all_surface_golden_count = 86
-let all_surface_golden_bytes = 72_787
+   surface by 567 bytes (count unchanged at 82); re-pinned on 2026-08-25 to 87
+   tools and 74,267 bytes because #30539 gave keepers [keeper_code_query],
+   which asks the language server where a name comes from. That is a tool
+   arriving on its own merits, not RFC-0389 reshaping the surface, which is
+   what this golden is here to catch. *)
+let all_surface_golden_count = 87
+let all_surface_golden_bytes = 74_267
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

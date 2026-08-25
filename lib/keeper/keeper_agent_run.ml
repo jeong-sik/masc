@@ -334,7 +334,7 @@ let prune_raw_traces_after_turn_record
    and any turn that dies in that window leaves one behind — a provider timeout
    does it without the process ever dying, which boot recovery's "process
    death" premise did not cover. Measured 2026-08-22..25: one timeout latched
-   rondo for 33 consecutive turns and sangsu and lane-smith likewise, 555 turns
+   one lane for 33 consecutive turns and two other lanes likewise, 555 turns
    on 2026-08-23 alone, each lane failing every turn until a restart.
 
    So the routine case is closed here with the same synthesized results boot

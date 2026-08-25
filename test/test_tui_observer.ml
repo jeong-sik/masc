@@ -168,12 +168,12 @@ let test_keeper_events_decode_by_name () =
 (* Shapes taken from the server: keeper_chat_broadcast.ml names the keeper in
    "name", keeper_waiting_inventory_broadcast.ml in "keeper_name". *)
 let chat_stream_delta_frame =
-  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"rondo\",\
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
    \"operation_id\":\"op-1\",\"ts_unix\":1787507570.5,\
    \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
 
 let chat_stream_custom_frame =
-  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"rondo\",\
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
    \"operation_id\":\"op-1\",\"ts_unix\":1787507571.5,\
    \"ag_ui_event\":{\"type\":\"CUSTOM\",\"name\":\"KEEPER_TOOL_RESULT_READY\"}}\n\n"
 
@@ -187,8 +187,8 @@ let waiting_inventory_frame =
    keeper and the timestamp were in the frame the whole time. *)
 let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
   check (list string) "stream frames and a queue change decode by their own fields"
-    [ "stream(rondo,TEXT_MESSAGE_CONTENT)"
-    ; "stream(rondo,CUSTOM KEEPER_TOOL_RESULT_READY)"
+    [ "stream(test-keeper,TEXT_MESSAGE_CONTENT)"
+    ; "stream(test-keeper,CUSTOM KEEPER_TOOL_RESULT_READY)"
     ; "waiting(lane-smith,board)"
     ]
     (List.map summary

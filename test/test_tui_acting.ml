@@ -55,7 +55,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "internal_agent_runs_changed"
     ; Observer.Keeper_chat_stream_frame
-        { keeper = "rondo"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
+        { keeper = "test-keeper"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
     ; Observer.Keeper_waiting_inventory_changed
         { keeper = "lane-smith"; queue_kind = Some "board"; at = 100. }
     ]
@@ -78,7 +78,7 @@ let test_one_reply_does_not_bury_the_actions_it_sits_between () =
   let frames =
     List.init 400 (fun index ->
         Observer.Keeper_chat_stream_frame
-          { keeper = "rondo"
+          { keeper = "test-keeper"
           ; frame = Some "TEXT_MESSAGE_CONTENT"
           ; at = 100. +. float_of_int index
           })
@@ -95,9 +95,9 @@ let test_a_stream_frame_draws_its_keeper_and_its_clock () =
   let row =
     Acting.row_of_event ~duration_ms:None
       (Observer.Keeper_chat_stream_frame
-         { keeper = "rondo"; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
+         { keeper = "test-keeper"; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
   in
-  check string "keeper" "rondo" row.Acting.keeper;
+  check string "keeper" "test-keeper" row.Acting.keeper;
   check bool "clock is the server's" true (Float.equal row.Acting.at 1787507570.5);
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
     row.Acting.detail
@@ -109,7 +109,7 @@ let test_a_stream_frame_draws_its_keeper_and_its_clock () =
 let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
   let stream index =
     Observer.Keeper_chat_stream_frame
-      { keeper = "rondo"
+      { keeper = "test-keeper"
       ; frame = Some "TEXT_MESSAGE_CONTENT"
       ; at = 200. +. float_of_int index
       }
@@ -131,7 +131,7 @@ let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
 let test_the_old_arrival_trim_would_have_lost_them () =
   let stream index =
     Observer.Keeper_chat_stream_frame
-      { keeper = "rondo"; frame = Some "TEXT_MESSAGE_CONTENT"; at = float_of_int index }
+      { keeper = "test-keeper"; frame = Some "TEXT_MESSAGE_CONTENT"; at = float_of_int index }
   in
   let ring = List.init 1_200 stream @ [ settled "largo" ] in
   let by_arrival = List.filteri (fun index _ -> index < 1_000) ring in

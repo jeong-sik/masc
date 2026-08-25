@@ -3605,6 +3605,14 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         # instead would stop pumping the terminal, and a TUI whose output
         # nobody reads blocks before it ever posts.
         sending = send_and_wait(process, master_fd, output, b"\r", b"(sending ")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"ACTIVE TURN",
+            start=0,
+            timeout=5.0,
+        )
         footer_while_sending = frame_row_of(sending, b"  Enter:")
 
         send_and_wait(
@@ -3825,6 +3833,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "role": "assistant",
                 "content": "",
                 "ts": 1787348490.3,
+                "turn_ref": "trace-1787333555531-00020#54",
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
                 # The server writes null, not "", when the turn said nothing.
                 # (content is set above; the marker is what the decoder keys on.)
@@ -3855,6 +3864,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "role": "assistant",
                 "content": "",
                 "ts": 1787348491.3,
+                "turn_ref": "trace-1787333555531-00021#55",
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00021#55"},
                 "blocks": [],
             },
@@ -3929,13 +3939,15 @@ def autonomous_turn_history_interaction() -> Interaction:
             timeout=5.0,
         )
         pane = bytes(output[pane_start:])
+        plain_pane = CSI_RE.sub(b"", pane)
         for needle, what in (
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("\u00b7 auto".encode(), "the autonomous origin badge"),
+            ("turn \u00b7 thinking".encode(), "the turn start"),
+            ("\u21b3 tools".encode(), "the nested tool block"),
         ):
-            if needle not in pane:
+            if needle not in plain_pane:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
@@ -4193,7 +4205,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             master_fd,
             output,
             b"m",
-            "\u2717 Ran 2 tools".encode(),
+            "\u2717 Tools 2".encode(),
         )
         wait_for_output(
             process,
@@ -4206,6 +4218,10 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
+        if "turn · tools".encode() not in CSI_RE.sub(b"", initial):
+            raise AssertionError(
+                f"the first visible block did not start its turn: {initial!r}"
+            )
 
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"

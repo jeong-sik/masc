@@ -282,7 +282,10 @@
  (name masc_tui_keeper_chat_history)
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
- (libraries masc_tui_keeper_chat_transcript yojson))
+ (libraries
+  masc.keeper_chat_delivery_identity
+  masc_tui_keeper_chat_transcript
+  yojson))
 
 (library
  (name masc_tui_keeper_chat_transcript)

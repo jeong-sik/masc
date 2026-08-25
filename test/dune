@@ -3193,6 +3193,16 @@
  (libraries alcotest masc masc.skill_config))
 
 (test
+ (name test_skill_catalog_snapshot)
+ (modules test_skill_catalog_snapshot)
+ (libraries
+  alcotest
+  masc.skill_snapshot
+  masc.skill_config
+  masc.string_util
+  yojson))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))

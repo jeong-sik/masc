@@ -10,6 +10,7 @@ type access =
   | Read_write
 
 type activation_lifetime = Session
+type precedence = Earlier_source_wins
 
 type source =
   { id : source_id
@@ -19,7 +20,8 @@ type source =
   }
 
 type t =
-  { activation_lifetime : activation_lifetime
+  { activation_lifetime : activation_lifetime option
+  ; precedence : precedence option
   ; sources : source list
   }
 
@@ -48,10 +50,20 @@ type path_rejection =
   | Current_directory_component
   | Parent_directory_component
 
+type anchor_rejection =
+  | Empty_anchor
+  | Relative_anchor
+  | Anchor_contains_nul
+
 type diagnostic =
   | Toml_syntax of string
+  | Missing_activation_lifetime
   | Invalid_activation_lifetime_type of value_kind
   | Unsupported_activation_lifetime of string
+  | Missing_precedence
+  | Invalid_precedence_type of value_kind
+  | Unsupported_precedence of string
+  | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
       { index : int
@@ -95,6 +107,10 @@ type diagnostic =
 type resolution =
   | Resolved of string
   | Anchor_unavailable of anchor
+  | Anchor_invalid of
+      { anchor : anchor
+      ; rejection : anchor_rejection
+      }
   | Path_rejected of path_rejection
 
 type resolved_source =
@@ -103,6 +119,7 @@ type resolved_source =
   }
 
 let source_id_to_string id = id
+let top_level_namespace = "skills"
 
 let anchor_to_string = function
   | Base_path -> "base-path"
@@ -116,6 +133,7 @@ let access_to_string = function
 ;;
 
 let activation_lifetime_to_string Session = "session"
+let precedence_to_string Earlier_source_wins = "earlier-source-wins"
 
 let value_kind = function
   | Keeper_toml_loader.Toml_string _ -> String
@@ -157,14 +175,30 @@ let path_rejection_to_string = function
   | Parent_directory_component -> "contains a parent-directory component"
 ;;
 
+let anchor_rejection_to_string = function
+  | Empty_anchor -> "anchor is empty"
+  | Relative_anchor -> "anchor must be absolute"
+  | Anchor_contains_nul -> "anchor contains a NUL byte"
+;;
+
 let diagnostic_to_string = function
   | Toml_syntax detail -> "invalid runtime TOML: " ^ detail
+  | Missing_activation_lifetime -> "skills.activation-lifetime is required"
   | Invalid_activation_lifetime_type actual ->
     Printf.sprintf
       "skills.activation-lifetime must be a string, got %s"
       (value_kind_to_string actual)
   | Unsupported_activation_lifetime value ->
     Printf.sprintf "unsupported Skill activation lifetime %S" value
+  | Missing_precedence -> "skills.precedence is required"
+  | Invalid_precedence_type actual ->
+    Printf.sprintf
+      "skills.precedence must be a string, got %s"
+      (value_kind_to_string actual)
+  | Unsupported_precedence value ->
+    Printf.sprintf "unsupported Skill source precedence %S" value
+  | Unexpected_skill_field field ->
+    Printf.sprintf "skills has unexpected field %S" field
   | Invalid_sources_type actual ->
     Printf.sprintf
       "skills.sources must be an array of tables, got %s"
@@ -328,25 +362,37 @@ let parse_entry ~index = function
   | value -> Error [ Invalid_source_entry_type { index; actual = value_kind value } ]
 ;;
 
-let activation_lifetime doc =
-  match List.assoc_opt "skills.activation-lifetime" doc with
-  | None -> Ok Session
-  | Some (Keeper_toml_loader.Toml_string "session") -> Ok Session
-  | Some (Toml_string value) -> Error (Unsupported_activation_lifetime value)
-  | Some value -> Error (Invalid_activation_lifetime_type (value_kind value))
+let activation_lifetime_key = top_level_namespace ^ ".activation-lifetime"
+let precedence_key = top_level_namespace ^ ".precedence"
+let sources_key = top_level_namespace ^ ".sources"
+
+let activation_lifetime ~required doc =
+  match List.assoc_opt activation_lifetime_key doc with
+  | None -> if required then None, [ Missing_activation_lifetime ] else None, []
+  | Some (Keeper_toml_loader.Toml_string "session") -> Some Session, []
+  | Some (Toml_string value) -> None, [ Unsupported_activation_lifetime value ]
+  | Some value -> None, [ Invalid_activation_lifetime_type (value_kind value) ]
+;;
+
+let precedence ~required doc =
+  match List.assoc_opt precedence_key doc with
+  | None -> if required then None, [ Missing_precedence ] else None, []
+  | Some (Keeper_toml_loader.Toml_string "earlier-source-wins") ->
+    Some Earlier_source_wins, []
+  | Some (Toml_string value) -> None, [ Unsupported_precedence value ]
+  | Some value -> None, [ Invalid_precedence_type (value_kind value) ]
 ;;
 
 let source_entries doc =
-  match List.assoc_opt "skills.sources" doc with
+  match List.assoc_opt sources_key doc with
   | None -> Ok []
   | Some (Keeper_toml_loader.Toml_table_array entries) -> Ok entries
   | Some value -> Error (Invalid_sources_type (value_kind value))
 ;;
 
-let duplicate_diagnostics sources =
-  let seen = Hashtbl.create (List.length sources) in
-  sources
-  |> List.mapi (fun index source -> index, source)
+let duplicate_diagnostics indexed_sources =
+  let seen = Hashtbl.create (List.length indexed_sources) in
+  indexed_sources
   |> List.filter_map (fun (index, source) ->
     match Hashtbl.find_opt seen source.id with
     | None ->
@@ -359,29 +405,64 @@ let duplicate_diagnostics sources =
 ;;
 
 let parse_doc doc =
-  let lifetime = activation_lifetime doc in
-  let entries = source_entries doc in
-  match lifetime, entries with
-  | Error diagnostic, Error source_diagnostic ->
-    Error [ diagnostic; source_diagnostic ]
-  | Error diagnostic, Ok _ | Ok _, Error diagnostic -> Error [ diagnostic ]
-  | Ok activation_lifetime, Ok entries ->
-    let parsed_entries =
-      List.mapi (fun index entry -> parse_entry ~index entry) entries
-    in
-    let sources, diagnostics =
-      List.fold_right
-        (fun result (sources, diagnostics) ->
-           match result with
-           | Ok source -> source :: sources, diagnostics
-           | Error errors -> sources, errors @ diagnostics)
-        parsed_entries
-        ([], [])
-    in
-    let diagnostics = diagnostics @ duplicate_diagnostics sources in
-    if diagnostics = []
-    then Ok { activation_lifetime; sources }
-    else Error diagnostics
+  let namespace_prefix = top_level_namespace ^ "." in
+  let known_fields = [ activation_lifetime_key; precedence_key; sources_key ] in
+  let configured =
+    List.exists (fun (key, _) -> String.starts_with ~prefix:namespace_prefix key) doc
+  in
+  let unexpected =
+    List.filter_map
+      (fun (key, _) ->
+         if
+           String.starts_with ~prefix:namespace_prefix key
+           && not (List.mem key known_fields)
+         then
+           Some
+             (Unexpected_skill_field
+                (String.sub
+                   key
+                   (String.length namespace_prefix)
+                   (String.length key - String.length namespace_prefix)))
+         else None)
+      doc
+  in
+  let activation_lifetime, lifetime_diagnostics =
+    activation_lifetime ~required:configured doc
+  in
+  let precedence, precedence_diagnostics = precedence ~required:configured doc in
+  let entries, source_container_diagnostics =
+    match source_entries doc with
+    | Ok entries -> entries, []
+    | Error diagnostic -> [], [ diagnostic ]
+  in
+  let parsed_entries =
+    List.mapi (fun index entry -> index, parse_entry ~index entry) entries
+  in
+  let indexed_sources, entry_diagnostics =
+    List.fold_right
+      (fun (index, result) (sources, diagnostics) ->
+         match result with
+         | Ok source -> (index, source) :: sources, diagnostics
+         | Error errors -> sources, errors @ diagnostics)
+      parsed_entries
+      ([], [])
+  in
+  let diagnostics =
+    unexpected
+    @ lifetime_diagnostics
+    @ precedence_diagnostics
+    @ source_container_diagnostics
+    @ entry_diagnostics
+    @ duplicate_diagnostics indexed_sources
+  in
+  if diagnostics = []
+  then
+    Ok
+      { activation_lifetime
+      ; precedence
+      ; sources = List.map snd indexed_sources
+      }
+  else Error diagnostics
 ;;
 
 let parse_text content =
@@ -391,6 +472,29 @@ let parse_text content =
 ;;
 
 let validate_text content = Result.map (fun _ -> ()) (parse_text content)
+
+let to_yojson config =
+  let option_string render = function
+    | Some value -> `String (render value)
+    | None -> `Null
+  in
+  `Assoc
+    [ ( "activation_lifetime"
+      , option_string activation_lifetime_to_string config.activation_lifetime )
+    ; "precedence", option_string precedence_to_string config.precedence
+    ; ( "sources"
+      , `List
+          (List.map
+             (fun source ->
+                `Assoc
+                  [ "id", `String (source_id_to_string source.id)
+                  ; "anchor", `String (anchor_to_string source.anchor)
+                  ; "path", `String source.configured_path
+                  ; "access", `String (access_to_string source.access)
+                  ])
+             config.sources) )
+    ]
+;;
 
 let normalize_absolute path =
   let components = String.split_on_char '/' path in
@@ -409,16 +513,32 @@ let normalize_absolute path =
   "/" ^ String.concat "/" normalized
 ;;
 
+let anchor_rejection path =
+  if String.equal path ""
+  then Some Empty_anchor
+  else if String.contains path '\000'
+  then Some Anchor_contains_nul
+  else if Filename.is_relative path
+  then Some Relative_anchor
+  else None
+;;
+
 let resolve ~base_path ~user_home source =
   let resolution =
     match path_rejection source.anchor source.configured_path with
     | Some rejection -> Path_rejected rejection
     | None ->
       (match source.anchor with
-       | Base_path -> Resolved (Filename.concat base_path source.configured_path)
+       | Base_path ->
+         (match anchor_rejection base_path with
+          | Some rejection -> Anchor_invalid { anchor = Base_path; rejection }
+          | None -> Resolved (Filename.concat base_path source.configured_path))
        | User_home ->
          (match user_home with
-          | Some home -> Resolved (Filename.concat home source.configured_path)
+          | Some home ->
+            (match anchor_rejection home with
+             | Some rejection -> Anchor_invalid { anchor = User_home; rejection }
+             | None -> Resolved (Filename.concat home source.configured_path))
           | None -> Anchor_unavailable User_home)
        | Absolute -> Resolved (normalize_absolute source.configured_path))
   in

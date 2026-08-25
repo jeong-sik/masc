@@ -11,6 +11,7 @@
 
 [skills]
 activation-lifetime = "session"
+precedence = "earlier-source-wins"
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.
@@ -24,7 +25,7 @@ access = "read-write"
 id = "project-agents"
 anchor = "base-path"
 path = ".agents/skills"
-access = "read-only"
+access = "read-write"
 
 [[skills.sources]]
 id = "user-masc"
@@ -36,7 +37,7 @@ access = "read-write"
 id = "user-agents"
 anchor = "user-home"
 path = ".agents/skills"
-access = "read-only"
+access = "read-write"
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"

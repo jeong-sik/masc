@@ -175,8 +175,13 @@ let folded_thinking_summary body =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
   in
-  Printf.sprintf "(%d reasoning line(s) folded - /thinking to unfold)"
+  Printf.sprintf "(%d reasoning line(s) folded - Ctrl-R to change)"
     (List.length lines)
+
+let tool_projection_mode (state : state) =
+  match state.msg_tool_visibility with
+  | Tools_compact -> Keeper_chat_transcript.Compact
+  | Tools_full -> Keeper_chat_transcript.Full
 
 let render_chat_row buf cols (row : Message_layout.row) =
   match row.kind with
@@ -3250,12 +3255,17 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      Printf.sprintf "%s  %s  %smemory:%s  (port %d)%s"
+      (* Three modes, because both features put one here: memory arrived on
+         main (#30401) while this branch was open, and dropping either would
+         hide a state the operator can change from this screen. *)
+      Printf.sprintf "%s  %s  %smemory:%s reasoning:%s tools:%s  (port %d)%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
         Ansi.dim
         (if state.msg_memory_visible then "on" else "off")
+        (reasoning_visibility_to_string state.msg_reasoning_visibility)
+        (tool_visibility_to_string state.msg_tool_visibility)
         state.port Ansi.reset
     in
     let target_registered =
@@ -3306,6 +3316,11 @@ let render_keeper_message (state : state) =
          another cache-key field, so an index never authorizes stale rows. *)
       List.mapi
         (fun entry_index message ->
+          if
+            message.me_role = Message_thinking
+            && state.msg_reasoning_visibility = Reasoning_hidden
+          then None
+          else
           let style, role_label =
             match message.me_role with
             | Message_user speaker -> Message_layout.User, speaker
@@ -3324,7 +3339,8 @@ let render_keeper_message (state : state) =
           let role_label = Message_layout.align_role_label role_label in
           let body =
             match message.me_role with
-            | Message_thinking when state.msg_thinking_collapsed ->
+            | Message_thinking
+              when state.msg_reasoning_visibility = Reasoning_folded ->
                 folded_thinking_summary message.me_text
             | Message_memory ->
                 (* A Memory journal's leading [+]/[-] is data, not a Markdown
@@ -3340,27 +3356,38 @@ let render_keeper_message (state : state) =
                   then "\\" ^ line
                   else line)
                 |> String.concat "\n"
+            | Message_tool ->
+                (match message.me_tool_block with
+                 | None -> message.me_text
+                 | Some block ->
+                     let projection =
+                       Keeper_chat_transcript.project_tool_block
+                         (tool_projection_mode state) block
+                     in
+                     String.concat "\n" projection.rows)
             | Message_thinking | Message_user _ | Message_keeper
             | Message_autonomous
-            | Message_status | Message_error | Message_tool ->
+            | Message_status | Message_error ->
                 message.me_text
           in
-          ({ style;
-             timestamp = message.me_timestamp;
-             role_label;
-             request_label =
-               Keeper_chat.compact_request_id message.me_request_id;
-             body;
-             markdown_source =
-               Message_layout.Markdown_stable
-                 { keeper_name = message.me_keeper_name;
-                   request_id = message.me_request_id;
-                   observed_at = message.me_at;
-                   entry_index;
-                 };
-           }
-            : Message_layout.entry))
+          Some
+            ({ style;
+               timestamp = message.me_timestamp;
+               role_label;
+               request_label =
+                 Keeper_chat.compact_request_id message.me_request_id;
+               body;
+               markdown_source =
+                 Message_layout.Markdown_stable
+                   { keeper_name = message.me_keeper_name;
+                     request_id = message.me_request_id;
+                     observed_at = message.me_at;
+                     entry_index;
+                   };
+             }
+              : Message_layout.entry))
         messages
+      |> List.filter_map Fun.id
     in
     (* Rows for the turn still streaming, drawn under the committed history so
        the streaming reply sits at the bottom edge, where the eye rests while
@@ -3395,30 +3422,45 @@ let render_keeper_message (state : state) =
             Keeper_chat.terminal_safe_text
               (Keeper_chat_transcript.keeper_name live)
           in
-          List.mapi
-            (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
+          (* Indexed and filtered at once. The index is the growing-markdown
+             cache key (#30290) and the filter is how hidden reasoning
+             disappears; the stdlib has [mapi] and [filter_map] but not both,
+             so the index is taken first and the [None]s dropped after.
+
+             The index counts trail positions, not surviving rows, which is
+             what the cache key needs: hiding reasoning must not renumber the
+             text entries and invalidate every cached render below it. *)
+          List.filter_map Fun.id
+          @@ List.mapi
+               (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
               match item with
+              | Keeper_chat_transcript.Trail_thinking _
+                when state.msg_reasoning_visibility = Reasoning_hidden ->
+                  None
               | Keeper_chat_transcript.Trail_thinking lines ->
-                  entry Message_layout.Thinking "thinking"
-                    (if state.msg_thinking_collapsed
-                     then folded_thinking_summary (String.concat "\n" lines)
-                     else String.concat "\n" lines)
+                  Some
+                    (entry Message_layout.Thinking "thinking"
+                       (if state.msg_reasoning_visibility = Reasoning_folded
+                        then folded_thinking_summary (String.concat "\n" lines)
+                        else String.concat "\n" lines))
               | Keeper_chat_transcript.Trail_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block
-                      Keeper_chat_transcript.Full block
+                      (tool_projection_mode state) block
                   in
-                  entry Message_layout.Tool "tools"
-                    (String.concat "\n" projection.rows)
+                  Some
+                    (entry Message_layout.Tool "tools"
+                       (String.concat "\n" projection.rows))
               | Keeper_chat_transcript.Trail_text text ->
-                  entry
-                    ~markdown_source:
-                      (Message_layout.Markdown_growing
-                         { keeper_name;
-                           request_id;
-                           entry_index;
-                         })
-                    Message_layout.Keeper keeper_label text)
+                  Some
+                    (entry
+                       ~markdown_source:
+                         (Message_layout.Markdown_growing
+                            { keeper_name;
+                              request_id;
+                              entry_index;
+                            })
+                       Message_layout.Keeper keeper_label text))
             (Keeper_chat_transcript.trail live)
       | Some _ | None -> []
     in
@@ -3670,7 +3712,8 @@ let render_keeper_message (state : state) =
       | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
     in
     let footer =
-      Printf.sprintf "%s  %s  Ctrl-J:newline  %s%s  %s  Ctrl-U:clear%s"
+      Printf.sprintf
+        "%s  %s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear%s"
         Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
     in
     Buffer.add_string chat_buf

@@ -476,6 +476,8 @@ let parse_args () =
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
+  let reasoning_visibility = ref "full" in
+  let tool_visibility = ref "full" in
 
   let specs = [
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
@@ -487,6 +489,12 @@ let parse_args () =
     ( "--base",
       Arg.Set_string base_path,
       "Alias for --base-path" );
+    ( "--reasoning",
+      Arg.Symbol ([ "hidden"; "folded"; "full" ], fun value -> reasoning_visibility := value),
+      "Keeper chat reasoning default: hidden, folded, or full" );
+    ( "--tool-view",
+      Arg.Symbol ([ "compact"; "full" ], fun value -> tool_visibility := value),
+      "Keeper chat tool-call default: compact or full" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -507,7 +515,18 @@ let parse_args () =
       | None -> Filename.basename base
   in
 
-  (base, r, !port, !refresh)
+  let reasoning_visibility =
+    match !reasoning_visibility with
+    | "hidden" -> Reasoning_hidden
+    | "folded" -> Reasoning_folded
+    | "full" | _ -> Reasoning_full
+  in
+  let tool_visibility =
+    match !tool_visibility with
+    | "compact" -> Tools_compact
+    | "full" | _ -> Tools_full
+  in
+  (base, r, !port, !refresh, reasoning_visibility, tool_visibility)
 
 let save_message_draft state =
   match state.msg_target_keeper_name with
@@ -879,11 +898,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
-    (* Ctrl-R reconnected an unverified request against the durable fence.
-       Both are gone: the server keys operations by request id and the
-       transcript reloads after every settle, so there is nothing here for a
-       key to reconcile. *)
-    if c = Some 21 then begin
+    if c = Some 18 then begin
+      (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
+      state.msg_reasoning_visibility <-
+        next_reasoning_visibility state.msg_reasoning_visibility;
+      true
+    end else if c = Some 4 then begin
+      (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
+      state.msg_tool_visibility <- toggle_tool_visibility state.msg_tool_visibility;
+      true
+    end else if c = Some 21 then begin
       (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
          is the operator saying they do not want what is there, and a spill
          that outlived it would attach to the next message. *)
@@ -1090,13 +1114,14 @@ let clock_text_of_unix at =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
 
-let append_chat_history state request role text =
+let append_chat_history ?tool_block state request role text =
   let text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   state.msg_history <-
     state.msg_history
     @ [ {
           me_role = role;
           me_text = text;
+          me_tool_block = tool_block;
           me_timestamp = current_clock_text ();
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -1209,7 +1234,7 @@ let settle_live_turn state (request : Keeper_chat.request) =
       (match projection.rows with
        | [] -> ()
        | rows ->
-           append_chat_history state request Message_tool
+           append_chat_history ~tool_block:block state request Message_tool
              (String.concat "\n" rows));
       (match state.msg_live with
        | Some visible
@@ -2281,20 +2306,25 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
       state.msg_history
 
 let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
-  let role, text =
+  let role, text, tool_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         ( Message_user (Keeper_chat_history.addressed_label speaker surface)
-        , row.text )
-    | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
+        , row.text
+        , None )
+    | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text, None)
     | Keeper_chat_history.Autonomous_reply ->
-        (Message_autonomous, if String.trim row.text = "" then "\xc2\xb7" else row.text)
-    | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
+        ( Message_autonomous
+        , (if String.trim row.text = "" then "\xc2\xb7" else row.text)
+        , None )
+    | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text, None)
     | Keeper_chat_history.Tool_calls block ->
-        (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
+        ( Message_tool
+        , String.concat "\n" (Keeper_chat_history.tool_rows block)
+        , Some block )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, String.concat "\n" lines)
-    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text)
+        (Message_thinking, String.concat "\n" lines, None)
+    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text, None)
   in
   let timestamp =
     match row.Keeper_chat_history.kind with
@@ -2305,6 +2335,7 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
+  ; me_tool_block = tool_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* The transcript carries no request id: these rows predate this session, or
@@ -2640,6 +2671,7 @@ let chat_notice state ~keeper_name ~role text =
         @ [ {
               me_role = role;
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+              me_tool_block = None;
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";
@@ -2784,13 +2816,26 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           notice ~role:Message_status
             "an interrupt is already outstanding for this turn"
       | None -> notice ~role:Message_status "no turn is streaming in this pane")
-  | Masc_tui_command.Toggle_thinking ->
+  | Masc_tui_command.Set_thinking mode ->
       Buffer.clear state.msg_input;
-      state.msg_thinking_collapsed <- not state.msg_thinking_collapsed;
+      state.msg_reasoning_visibility <-
+        (match mode with
+         | `Hidden -> Reasoning_hidden
+         | `Folded -> Reasoning_folded
+         | `Full -> Reasoning_full
+         | `Cycle -> next_reasoning_visibility state.msg_reasoning_visibility);
       notice ~role:Message_status
-        (if state.msg_thinking_collapsed
-         then "reasoning folded (/thinking to unfold)"
-         else "reasoning unfolded (/thinking to fold)")
+        ("reasoning "
+         ^ reasoning_visibility_to_string state.msg_reasoning_visibility)
+  | Masc_tui_command.Set_tools mode ->
+      Buffer.clear state.msg_input;
+      state.msg_tool_visibility <-
+        (match mode with
+         | `Compact -> Tools_compact
+         | `Full -> Tools_full
+         | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
+      notice ~role:Message_status
+        ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Toggle_memory ->
       Buffer.clear state.msg_input;
       state.msg_memory_visible <- not state.msg_memory_visible;
@@ -4048,8 +4093,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.msg_scroll <- 0
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
-       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
-       | Masc_tui_command.Toggle_memory
+       | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
+       | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -5061,7 +5106,14 @@ let main () =
      to protect, so it routes them the same way and before anything can ask the
      catalog a question. *)
   Provider_diag_log_sink.install ();
-  let (base_path, workspace, port, refresh) = parse_args () in
+  let ( base_path
+      , workspace
+      , port
+      , refresh
+      , reasoning_visibility
+      , tool_visibility ) =
+    parse_args ()
+  in
   require_interactive_terminal ();
   (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
      on the same [/dev/ttys*]. Everything that writes there writes into the
@@ -5079,7 +5131,10 @@ let main () =
      before anything can log. *)
   redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
-  let state = create_state ~workspace ~port ~refresh_interval:refresh in
+  let state =
+    create_state ~reasoning_visibility ~tool_visibility ~workspace ~port
+      ~refresh_interval:refresh ()
+  in
   state.view <- Overview;
 
   (* Setup terminal *)
@@ -5754,14 +5809,18 @@ let main () =
              ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
-           let recovery_key =
+           let reasoning_key =
              String.length k = 1 && Char.code k.[0] = 18
+           in
+           let tool_view_key =
+             String.length k = 1 && Char.code k.[0] = 4
            in
            let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
            if
              keeper_message_input_supported state
              || String.equal k "esc"
-             || recovery_key
+             || reasoning_key
+             || tool_view_key
              || switch_key
            then
              if switch_key then

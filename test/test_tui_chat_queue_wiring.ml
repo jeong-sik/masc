@@ -57,7 +57,7 @@ let test_concurrent_turns_keep_request_owned_transcripts () =
 
 let test_live_transcripts_are_kept_per_keeper () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   let entry keeper_name started_at =
     let sent_request =
@@ -91,11 +91,61 @@ let test_live_transcripts_are_kept_per_keeper () =
    until enough keys have burned through the invisible excess. *)
 let test_message_scroll_accepts_the_rendered_clamp () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.msg_scroll <- 30;
   Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
+;;
+
+let test_chat_visibility_defaults_and_cycles () =
+  let default =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  check string "reasoning compatibility default" "full"
+    (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
+  check string "tool compatibility default" "full"
+    (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
+  let configured =
+    Tui_types.create_state
+      ~reasoning_visibility:Tui_types.Reasoning_hidden
+      ~tool_visibility:Tui_types.Tools_compact
+      ~workspace:"test"
+      ~port:8935
+      ~refresh_interval:2.0
+      ()
+  in
+  check string "configured reasoning default" "hidden"
+    (Tui_types.reasoning_visibility_to_string configured.msg_reasoning_visibility);
+  check string "configured tool default" "compact"
+    (Tui_types.tool_visibility_to_string configured.msg_tool_visibility);
+  check (list string) "reasoning cycles through all three states"
+    [ "hidden"; "folded"; "full"; "hidden" ]
+    (let rec collect count mode =
+       if count = 0
+       then [ Tui_types.reasoning_visibility_to_string mode ]
+       else
+         Tui_types.reasoning_visibility_to_string mode
+         :: collect (count - 1) (Tui_types.next_reasoning_visibility mode)
+     in
+     collect 3 Tui_types.Reasoning_hidden);
+  check string "tool detail toggles open" "full"
+    (Tui_types.tool_visibility_to_string
+       (Tui_types.toggle_tool_visibility Tui_types.Tools_compact))
+;;
+
+let test_chat_shortcuts_reach_visibility_state () =
+  List.iter
+    (fun callee ->
+      let count =
+        Ast_grep.count_calls_in_value_binding
+          ~module_path:"bin/masc_tui.ml"
+          ~binding_name:"handle_message_key"
+          ~callee
+      in
+      if count < 1 then
+        failf "handle_message_key must call %s; observed %d call(s)" callee count)
+    [ "next_reasoning_visibility"; "toggle_tool_visibility" ]
 ;;
 
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
@@ -318,6 +368,10 @@ let () =
             test_live_transcripts_are_kept_per_keeper
         ; test_case "message scroll accepts the rendered clamp" `Quick
             test_message_scroll_accepts_the_rendered_clamp
+        ; test_case "chat visibility defaults and cycles" `Quick
+            test_chat_visibility_defaults_and_cycles
+        ; test_case "chat shortcuts reach visibility state" `Quick
+            test_chat_shortcuts_reach_visibility_state
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
         ; test_case "the pane draws the queue it counts" `Quick

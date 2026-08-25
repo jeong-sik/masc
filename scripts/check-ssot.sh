@@ -219,15 +219,19 @@ check_rule "R11-tui-palette-for-testing" 0 \
 # a Masc_tui_theme alias, and the declaration pattern prevents hiding the
 # fixture module behind another alias before the member is selected.
 r12_owner_pattern='Masc_tui_theme[[:space:]]*\.[[:space:]]*For_testing'
-r12_member_pattern='For_testing[[:space:]]*\.[[:space:]]*(user_message_background|user_message_background_rgb)'
+r12_member_pattern='For_testing[[:space:]]*\.[[:space:]]*(colors_enabled|user_message_background|user_message_background_rgb)'
 r12_alias_pattern="module[[:space:]]+[A-Z][A-Za-z0-9_']*[[:space:]]*=[[:space:]]*([A-Z][A-Za-z0-9_']*[[:space:]]*\.[[:space:]]*)+For_testing"
-r12_pattern="${r12_owner_pattern}|${r12_member_pattern}|${r12_alias_pattern}"
+r12_scope_pattern="(open!?|include)[[:space:]]+([A-Z][A-Za-z0-9_']*[[:space:]]*\.[[:space:]]*)+For_testing"
+r12_pattern="${r12_owner_pattern}|${r12_member_pattern}|${r12_alias_pattern}|${r12_scope_pattern}"
 r12_self_test_failed=0
 for fixture in \
   'Masc_tui_theme.For_testing.user_message_background' \
   'Theme.For_testing.user_message_background' \
+  'Theme.For_testing.colors_enabled' \
   'module X = Masc_tui_theme.For_testing' \
-  'module X = Theme.For_testing'; do
+  'module X = Theme.For_testing' \
+  'open Theme.For_testing' \
+  'include Theme.For_testing'; do
   if ! printf '%s\n' "$fixture" | rg -q "$r12_pattern"; then
     echo "ERROR[R12-pattern-self-test]: did not match $fixture" >&2
     r12_self_test_failed=1
@@ -236,13 +240,15 @@ done
 if printf '%s\n' \
   'Masc_tui_theme.user_message_background' \
   'Theme.user_message_background' \
+  'Masc_tui_theme.colors_enabled' \
+  'Theme.colors_enabled' \
   'module Theme = Masc_tui_theme' \
   | rg -q "$r12_pattern"; then
   echo "ERROR[R12-pattern-self-test]: matched the production API" >&2
   r12_self_test_failed=1
 fi
 if [ "$r12_self_test_failed" -eq 0 ]; then
-  echo "OK[R12-pattern-self-test]: direct, member, and alias-declaration boundaries covered."
+  echo "OK[R12-pattern-self-test]: direct, member, alias-declaration, and scope boundaries covered."
 else
   fail=1
 fi

@@ -3190,7 +3190,7 @@
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config))
+ (libraries alcotest masc masc.skill_config masc_runtime masc.string_util))
 
 (test
  (name test_skill_catalog_snapshot)

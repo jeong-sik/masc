@@ -94,8 +94,18 @@ let measured ~surface =
    The count did not move: the surface is the same tools describing themselves
    more fully, which is the distinction this pair of numbers exists to draw.
    (Phrasing from #30611, which reached the same re-pin independently.) *)
+
+(* 2026-08-26: 74,521 -> 74,507, and this is the first time the number went
+   down. #30658 shortened [masc_goal_upsert]'s description from "Goal metadata
+   and parent linkage" to "flat Goal metadata". The tool takes id, title,
+   metric, target_value, due_date and priority -- there is no parent
+   parameter, so the old sentence advertised something no caller could reach.
+   A shrinking surface is the one direction this pair cannot tell apart on its
+   own: fourteen fewer bytes reads the same whether a description stopped
+   lying or a tool quietly lost a field. The count staying at 87 is what says
+   which happened here. *)
 let all_surface_golden_count = 87
-let all_surface_golden_bytes = 74_521
+let all_surface_golden_bytes = 74_507
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

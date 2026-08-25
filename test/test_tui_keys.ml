@@ -61,6 +61,11 @@ let test_listing_footers_share_one_shape () =
         (Masc_tui_keys.footer_hints surface))
     [ Lanes; Harness; System_logs ]
 
+(* Tools left the plain group when it grew a per-Keeper axis: the pane now
+   shows one Keeper's effective tool surface, so it needs a key to change
+   which Keeper that is. Pinned on its own rather than dropped from the list
+   above -- a surface removed from the shared shape and named nowhere else
+   can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
     "j/k:scroll  [/]:Keeper  Esc:overview  r:refresh  Tab:next  q:quit"

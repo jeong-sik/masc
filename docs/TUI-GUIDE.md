@@ -227,7 +227,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
     HEALTH       KEEPER             A P TURNS LIFECYCLE / MODEL   TASK
  >  ● healthy    adm-race-cf-001    A P   498 running claude-opus task-471
     ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
-  j/k move  p pause  w wake  s shutdown  c chat  enter detail
+  j/k move  p pause  w wake  s shutdown  g yolo  c chat  right/enter detail
 ```
 
 The metadata list needs no server, so names, turn counts, and tasks stay
@@ -238,6 +238,10 @@ colour cue. `healthy` answers whether the heartbeat/readiness checks are good;
 `running` answers whether the Keeper process exists. They are separate axes,
 so `healthy` and `running` on the same row is expected. Phase and model stay neutral so an ordinary row does not turn into
 a strip of competing colours.
+
+`g` toggles the selected Keeper's tool gate. The footer names the action that
+will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
+active, so the safe return path is visible.
 
 ### Lanes
 
@@ -267,7 +271,7 @@ reading.
 
 ### Keeper detail
 
-`Enter` from the list. Live context comes from the newest trace-matched
+Right or `Enter` from the list. Live context comes from the newest trace-matched
 TurnRecord; missing, malformed, unreadable, usage-less, and prior-trace
 observations stay distinct unavailable states rather than collapsing to zero.
 
@@ -532,7 +536,8 @@ onto a different request.
 
 ### Board
 
-Posts with their vote and comment counts. `Enter` opens the body.
+Posts with their vote and comment counts. Right or `Enter` opens the body;
+Left or `Esc` returns to the list.
 
 ```
  MASC Board (50)  10:44:52  [connected]
@@ -614,9 +619,9 @@ local guess from the status column. The payload target column names who the
 wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
-`Enter` opens the selected schedule. The detail includes schedule and instance
+Right or `Enter` opens the selected schedule. The detail includes schedule and instance
 identity, dispatch state, requesting actors, timestamps, recurrence, payload
-kind/tool/digest/summary, last wake, and queue/reaction evidence. `Esc` returns
+kind/tool/digest/summary, last wake, and queue/reaction evidence. Left or `Esc` returns
 to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
@@ -648,6 +653,13 @@ retained completed/failed run has no current Board projection; it does not
 claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
+
+### Changes
+
+Changes follows the Keeper selected on the Keepers surface. `[` and `]` move
+that selection directly from Changes and reload the 24-hour change window;
+the header always names whose rows are shown. Right or `Enter` opens the
+selected recorded diff, and Left or `Esc` returns without moving the cursor.
 
 ### Runtime
 
@@ -730,21 +742,23 @@ Per surface:
 | `j` / `k` | Keepers, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Lanes, Runtime, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
-| `Enter` | Keepers | Open keeper detail |
-| `Enter` | Board | Open post body |
+| Right / `Enter` | Keepers | Open keeper detail |
+| Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
 | `h` / `l` | Wide Board read | Focus post list / post detail |
 | `PgUp` / `PgDn` | Board, Schedules, Fusion | Move the active list or detail by a page |
-| `Enter` | Schedules | Open schedule details |
-| `Enter` | Planning | Open goal detail |
-| `Enter` | Fusion | Open exact run evidence detail |
+| Right / `Enter` | Schedules | Open schedule details |
+| Right / `Enter` | Planning | Open goal detail |
+| Right / `Enter` | Fusion | Open exact run evidence detail |
+| `[` / `]` | Changes | Previous / next Keeper |
+| Right / `Enter` | Changes | Open the selected recorded diff |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
 | `e` | Keeper list or detail | Edit the selected keeper's settings in `$EDITOR` (JSON patch; only the fields you keep in the file are sent). Exit 0 sends, any other exit changes nothing |
 | `a` | Keeper list or detail | Create a keeper: a declaration stub opens in `$EDITOR`; the `name` field in the file names the new keeper |
-| `Esc` | any detail or logs view | Back one level |
+| Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
 | `Enter` | Message | Send |
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
@@ -763,15 +777,15 @@ Tab cycles the surfaces:
 
 Within a surface:
 
-  Keepers   --Enter-->  Keeper detail  --l-->  Keeper logs
+  Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
       |                       |
       c                       c
       v                       v
   Message input          Message input
 
-  Board     --Enter-->  Board read
-  Planning  --Enter-->  Goal detail
-  Fusion    --Enter-->  Run evidence detail
+  Board     --Right/Enter-->  Board read
+  Planning  --Right/Enter-->  Goal detail
+  Fusion    --Right/Enter-->  Run evidence detail
 ```
 
 `2` reaches Keepers from any surface. `Esc` returns one level within Keepers,

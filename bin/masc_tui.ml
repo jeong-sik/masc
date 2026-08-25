@@ -1886,6 +1886,43 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+(* Changes follows the selected Keeper, but the surface is useful precisely
+   when comparing more than one Keeper. Brackets move that shared selection
+   and invalidate every row whose identity belonged to the previous Keeper;
+   the stamped async response below already rejects a late answer. *)
+let cycle_changes_keeper state ~mailbox ~delta =
+  let count = List.length state.keepers in
+  if count > 0 then begin
+    let current =
+      match state.changes_keeper with
+      | Some keeper_name ->
+          let rec find index = function
+            | [] -> min state.keeper_cursor (count - 1)
+            | (keeper : keeper) :: rest ->
+                if String.equal keeper.k_name keeper_name
+                then index
+                else find (index + 1) rest
+          in
+          find 0 state.keepers
+      | None -> min state.keeper_cursor (count - 1)
+    in
+    let next = (current + delta + count) mod count in
+    match List.nth_opt state.keepers next with
+    | None -> ()
+    | Some keeper ->
+        state.keeper_cursor <- next;
+        state.changes_keeper <- Some keeper.k_name;
+        state.changes <- None;
+        state.changes_error <- None;
+        state.changes_scroll <- 0;
+        state.changes_diff_row <- None;
+        state.changes_diff_scroll <- 0;
+        state.changes_tree_diff <- None;
+        state.changes_tree_diff_error <- None;
+        state.changes_tree_diff_path <- None;
+        launch_file_changes_load state ~mailbox ~keeper_name:keeper.k_name
+  end
+
 (* What the tree holds for one file, against its last commit. HEAD rather
    than a branch point: the question the surface answers is "did this survive
    into the tree", and a merge base would answer a different one. *)
@@ -5778,6 +5815,10 @@ let main () =
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
             | _, Detail_info | None, _ -> ())
+       | Some (("[" | "]") as bracket)
+         when state.view = Changes && not compact_viewport ->
+           cycle_changes_keeper state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github
@@ -6155,6 +6196,70 @@ let main () =
             | Verification | Harness | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> ())
+       | Some "left" ->
+           (* Left is the non-destructive structural back key. Unlike Esc it
+              never interrupts a live chat turn; it only closes a detail the
+              matching Right key can open. *)
+           (match state.view with
+            | Code ->
+                if state.code_focus_file then state.code_focus_file <- false
+                else if not (String.equal state.code_dir "") then begin
+                  let parent = Filename.dirname state.code_dir in
+                  state.code_dir <-
+                    (if String.equal parent "." then "" else parent);
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end
+            | Keepers Keeper_detail ->
+                state.view <- Keepers Keeper_list;
+                state.detail_scroll <- 0
+            | Keepers Keeper_logs | Keepers Keeper_calls ->
+                state.view <- Keepers Keeper_detail;
+                state.log_scroll <- 0;
+                state.keeper_calls_scroll <- 0;
+                state.detail_scroll <- 0
+            | Board ->
+                (match state.board_mode with
+                 | Board_read _ -> leave_board_detail state
+                 | Board_list | Board_compose -> ())
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_detail _ ->
+                     state.planning_mode <- Planning_list;
+                     state.planning_scroll <- 0
+                 | Planning_list -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_detail _ ->
+                     state.fusion_mode <- Fusion_list;
+                     state.fusion_scroll <- 0;
+                     state.fusion_detail <- None;
+                     state.fusion_detail_error <- None;
+                     state.fusion_detail_generation <-
+                       state.fusion_detail_generation + 1
+                 | Fusion_list -> ())
+            | Overview ->
+                if Option.is_some state.task_detail_id then begin
+                  state.task_detail_id <- None;
+                  state.task_detail_scroll <- 0
+                end
+                else state.task_focus <- false
+            | Schedules ->
+                state.schedule_detail_id <- None;
+                state.schedule_scroll <- 0
+            | Resources -> state.resource_focus <- false
+            | Changes ->
+                state.changes_diff_row <- None;
+                state.changes_diff_scroll <- 0;
+                state.changes_tree_diff <- None;
+                state.changes_tree_diff_error <- None;
+                state.changes_tree_diff_path <- None
+            | Keepers Keeper_runtime_pick | Keepers Keeper_message
+            | Keepers Keeper_list | Acting | Lanes | Approvals | Verification
+            | Harness | Repositories | Connectors | Runtime | Config | Tools
+            | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
@@ -6517,8 +6622,9 @@ let main () =
                 if state.runtime_pick_cursor > 0 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
             | Keepers Keeper_message -> ())
-       | Some "\r" | Some "\n" ->
-           (* Enter opens detail from list *)
+       | Some "\r" | Some "\n" | Some "right" ->
+           (* Enter remains compatible; Right makes list -> detail and Left
+              makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
                 if state.code_focus_file then ()

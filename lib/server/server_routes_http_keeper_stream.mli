@@ -381,8 +381,9 @@ val handle_keeper_asks_list :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
 
-    Returns the Keeper's questions with their choices and current resolution.
-    Defaults to open questions only.
+    Without [name] this covers the whole fleet and every row names the Keeper
+    it belongs to; with [name] it narrows to one and returns [`Not_found] when
+    that Keeper is not registered. Defaults to open questions only.
 
     A surface renders these rows and answers through
     {!handle_keeper_ask_answer}, sending back choice ids taken from the rows it

@@ -1170,6 +1170,7 @@ type ask_resolution =
     }
 
 type ask_row = {
+  ar_keeper : string;
   ar_id : string;
   ar_asked_at : float;
   ar_context : string option;
@@ -1180,7 +1181,7 @@ type ask_row = {
 }
 
 type asks_snapshot = {
-  asn_keeper : string;
+  asn_keeper : string option;
   asn_open_count : int;  (** the server's count, not [List.length asn_rows] *)
   asn_rows : ask_row list;
 }

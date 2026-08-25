@@ -1371,11 +1371,16 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
     Open questions only. The rows carry choice ids next to labels and
     {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
     matches a choice by its wording. *)
-let fetch_keeper_asks ~(host : string) ~(port : int) ~(keeper_name : string) :
+let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
     (Masc.Tui_decode.asks_snapshot, string) result =
+  (* No keeper named means the whole fleet. An operator opening this surface
+     does not know which Keeper is stuck yet, and asking them to pick a name
+     first is asking them to guess. *)
   let path =
-    Printf.sprintf "/api/v1/keepers/asks?name=%s"
-      (percent_encode_query_value keeper_name)
+    match keeper_name with
+    | None -> "/api/v1/keepers/asks"
+    | Some name ->
+        Printf.sprintf "/api/v1/keepers/asks?name=%s" (percent_encode_query_value name)
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error detail

@@ -659,7 +659,7 @@ let own_typed_messages (state : state) =
             | Message_user label -> String.equal label "you"
             | Message_keeper | Message_autonomous | Message_status
             | Message_error | Message_tool
-            | Message_thinking ->
+            | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
     |> List.map (fun entry -> entry.me_text)
@@ -923,7 +923,10 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      int * string * (Keeper_chat_history.decoded, string) result
+      int
+      * string
+      * (Keeper_chat_history.decoded, string) result
+      * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -2004,15 +2007,23 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_older_loading <- false;
+  state.msg_memory_error <- None;
+  state.msg_memory_dropped <- 0;
   let generation = state.msg_history_load_generation in
   let run () =
-    let result =
+    let history_result =
       try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
+    let memory_result =
+      try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
     enqueue_async mailbox
-      (Keeper_chat_history_loaded (generation, keeper_name, result))
+      (Keeper_chat_history_loaded
+         (generation, keeper_name, history_result, memory_result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2022,7 +2033,10 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_history_loaded
-           (generation, keeper_name, Error "Eio switch is unavailable"))
+           ( generation
+           , keeper_name
+           , Error "Eio switch is unavailable"
+           , Error "Eio switch is unavailable" ))
 
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
@@ -2035,6 +2049,8 @@ let switch_to_next_keeper_message state ~mailbox =
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
       state.msg_loaded_dropped <- 0;
+      state.msg_memory_error <- None;
+      state.msg_memory_dropped <- 0;
       state.msg_older_cursor <- None;
       state.msg_older_exist <- false;
       state.msg_older_loading <- false;
@@ -2070,7 +2086,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Tool_calls _
-        | Keeper_chat_history.Reasoning _ -> None)
+        | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Memory_activity -> None)
       rows
   in
   state.msg_history <-
@@ -2087,7 +2104,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
         | Message_user _ | Message_keeper | Message_autonomous | Message_tool
-        | Message_thinking ->
+        | Message_thinking | Message_memory ->
             false)
       state.msg_history
 
@@ -2105,10 +2122,18 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, String.concat "\n" lines)
+    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text)
+  in
+  let timestamp =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Memory_activity
+      when Float.equal row.Keeper_chat_history.at 0.0 ->
+        "--:--:--"
+    | _ -> clock_text_of_unix row.Keeper_chat_history.at
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_timestamp = clock_text_of_unix row.Keeper_chat_history.at
+  ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* The transcript carries no request id: these rows predate this session, or
        came from another client. The pane shows the compacted id beside a row,
@@ -2594,6 +2619,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_thinking_collapsed
          then "reasoning folded (/thinking to unfold)"
          else "reasoning unfolded (/thinking to fold)")
+  | Masc_tui_command.Toggle_memory ->
+      Buffer.clear state.msg_input;
+      state.msg_memory_visible <- not state.msg_memory_visible;
+      notice ~role:Message_status
+        (if state.msg_memory_visible
+         then "Librarian/Memory timeline shown (/memory to hide)"
+         else "Librarian/Memory timeline hidden (/memory to show)")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -3839,6 +3871,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
+       | Masc_tui_command.Toggle_memory
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -4389,7 +4422,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (generation, keeper_name, result) ->
+  | Keeper_chat_history_loaded
+      (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
          target or an older request for a target revisited since must not
@@ -4399,11 +4433,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         && Option.exists (String.equal keeper_name)
              state.msg_target_keeper_name
       then
-        (match result with
-         | Ok { Keeper_chat_history.rows; dropped } ->
-             state.msg_loaded <-
-               List.map (msg_entry_of_history_row keeper_name) rows;
-             state.msg_loaded_keeper <- Some keeper_name;
+        let prior_loaded =
+          match state.msg_loaded_keeper with
+          | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+              state.msg_loaded
+          | Some _ | None -> []
+        in
+        let prior_history, prior_memory =
+          List.partition
+            (fun entry -> entry.me_role <> Message_memory)
+            prior_loaded
+        in
+        let history_entries =
+          match history_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
              (* Where reading further back starts. The oldest row this load
@@ -4421,11 +4464,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                  None rows;
              state.msg_older_exist <- Option.is_some state.msg_older_cursor;
              state.msg_older_error <- None;
-             forget_session_rows_the_transcript_holds state keeper_name rows
-         | Error detail ->
+             forget_session_rows_the_transcript_holds state keeper_name rows;
+             List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
                 failed load must not be the reason the pane goes blank. *)
-             state.msg_loaded_error <- Some detail)
+             state.msg_loaded_error <- Some detail;
+             prior_history
+        in
+        let memory_entries =
+          match memory_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
+              state.msg_memory_error <- None;
+              state.msg_memory_dropped <- dropped;
+              List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
+              state.msg_memory_error <- Some detail;
+              prior_memory
+        in
+        state.msg_loaded <- history_entries @ memory_entries;
+        state.msg_loaded_keeper <- Some keeper_name
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->

@@ -40,7 +40,7 @@ let origin_request_id = function
   | History.Delivery_failed { origin_request_id } -> origin_request_id
   | History.Addressed_to_keeper _ | History.Said_by_keeper
   | History.Autonomous_reply
-  | History.Tool_calls _ | History.Reasoning _ -> None
+  | History.Tool_calls _ | History.Reasoning _ | History.Memory_activity -> None
 
 let full_tool_rows = History.tool_rows
 
@@ -54,6 +54,7 @@ let kind_to_string : History.kind -> string = function
       Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
+  | History.Memory_activity -> "memory"
 
 (* An assistant row the way an autonomous turn persists it: the server's
    [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
@@ -156,7 +157,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
         History.addressed_label speaker surface
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
-    | History.Reasoning _ ->
+    | History.Reasoning _ | History.Memory_activity ->
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
@@ -224,7 +225,8 @@ let test_consecutive_tool_rows_become_one_block () =
              (List.for_all (fun r -> String.length r > 0) rows)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
-       | History.Delivery_failed _ | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _
+       | History.Memory_activity ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
         tools.History.at
@@ -339,7 +341,8 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
-       | History.Delivery_failed _ | History.Reasoning _ ->
+       | History.Delivery_failed _ | History.Reasoning _
+       | History.Memory_activity ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
   | rows -> failf "expected two rows, got %d" (List.length rows)
@@ -547,6 +550,104 @@ let test_a_page_without_messages_is_an_error () =
   | Ok _ -> fail "a page with no rows array should not decode"
   | Error detail -> check bool "and says so" true (String.length detail > 0)
 
+let contains text needle =
+  let rec loop at =
+    if at + String.length needle > String.length text
+    then false
+    else if String.sub text at (String.length needle) = needle
+    then true
+    else loop (at + 1)
+  in
+  loop 0
+;;
+
+let test_memory_commit_names_added_removed_and_drop_reason () =
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "ok", `Bool true
+                ; "outcome", `String "committed"
+                ; "recorded_at", `Float 1_700_000_010.0
+                ; "revision", `Int 7
+                ; "source", `Assoc [ "kind", `String "librarian" ]
+                ; ( "change"
+                  , `Assoc
+                      [ ( "added"
+                        , `List
+                            [ `Assoc
+                                [ "category", `String "fact"
+                                ; "claim", `String "the probe uses HTTP/2"
+                                ]
+                            ] )
+                      ; ( "removed"
+                        , `List
+                            [ `Assoc
+                                [ "category", `String "constraint"
+                                ; "claim", `String "use the old endpoint"
+                                ]
+                            ] )
+                      ; "retained", `Int 3
+                      ] )
+                ; ( "dropped"
+                  , `List
+                      [ `Assoc
+                          [ "memory_id", `String "memory-old"
+                          ; "reason", `String "superseded by live evidence"
+                          ]
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Error detail -> failf "memory journal decode failed: %s" detail
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check (float 0.0) "journal timestamp retained" 1_700_000_010.0 row.at;
+      check bool "typed as memory activity" true (row.kind = History.Memory_activity);
+      List.iter
+        (fun needle ->
+           check bool needle true (contains row.text needle))
+        [ "Librarian committed memory revision 7"
+        ; "+ [fact] the probe uses HTTP/2"
+        ; "- [constraint] use the old endpoint"
+        ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
+        ]
+  | Ok decoded ->
+      failf "expected one decoded memory row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+;;
+
+let test_memory_failure_keeps_kind_and_detail () =
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "ok", `Bool true
+                ; "outcome", `String "failed"
+                ; "recorded_at", `Float 1_700_000_020.0
+                ; "kind", `String "exact_execution_failure"
+                ; "detail", `String "provider returned 503"
+                ; "snapshot_present", `Bool true
+                ; "cadence_deferred", `Bool false
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check bool "failure kind survives" true
+        (contains row.text "exact_execution_failure");
+      check bool "failure detail survives" true
+        (contains row.text "provider returned 503")
+  | Ok decoded ->
+      failf "expected one failed memory row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+  | Error detail -> failf "memory failure decode failed: %s" detail
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -599,5 +700,11 @@ let () =
             test_a_non_array_payload_is_an_error
         ; test_case "a missing ts reads as zero" `Quick
             test_a_missing_ts_reads_as_zero_not_a_failure
+        ] )
+    ; ( "memory journal"
+      , [ test_case "commit names added removed and drop reason" `Quick
+            test_memory_commit_names_added_removed_and_drop_reason
+        ; test_case "failure keeps kind and detail" `Quick
+            test_memory_failure_keeps_kind_and_detail
         ] )
     ]

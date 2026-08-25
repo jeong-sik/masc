@@ -3737,6 +3737,47 @@ def autonomous_turn_history_fixture() -> HttpResponse:
     )
 
 
+def memory_journal_fixture() -> HttpResponse:
+    return (
+        200,
+        {
+            "keeper": "alpha",
+            "returned": 1,
+            "undecodable_lines": 0,
+            "entries": [
+                {
+                    "ok": True,
+                    "outcome": "committed",
+                    "recorded_at": 1787348490.35,
+                    "revision": 9,
+                    "source": {"kind": "librarian", "trace_id": "trace-memory"},
+                    "change": {
+                        "added": [
+                            {
+                                "category": "fact",
+                                "claim": "the Runtime probe shares one provider endpoint",
+                            }
+                        ],
+                        "removed": [
+                            {
+                                "category": "constraint",
+                                "claim": "probe every model separately",
+                            }
+                        ],
+                        "retained": 3,
+                    },
+                    "dropped": [
+                        {
+                            "memory_id": "memory-old-probe-rule",
+                            "reason": "superseded by provider grouping",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+
 def autonomous_turn_history_interaction() -> Interaction:
     """The chat pane draws what an autonomous turn did, not a blank line."""
 
@@ -3773,6 +3814,58 @@ def autonomous_turn_history_interaction() -> Interaction:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def memory_journal_timeline_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        start = len(output)
+        send_and_wait(process, master_fd, output, b"m", b"memory:on")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Librarian committed memory revision 9",
+            start=start,
+            timeout=5.0,
+        )
+        visible = bytes(output[start:])
+        for needle in (
+            b"+ [fact] the Runtime probe shares one provider endpoint",
+            b"- [constraint] probe every model separately",
+            b"drop memory-old-probe-rule",
+            b"superseded by provider grouping",
+        ):
+            if needle not in visible:
+                raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
+
+        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
+        if b"Librarian committed memory revision 9" in hidden:
+            raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
+
+        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        restored = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Librarian committed memory revision 9",
+        )
+        if b"memory:on" not in restored:
+            raise AssertionError(f"Memory timeline did not return to on: {restored!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
@@ -5445,6 +5538,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=autonomous_turn_history_interaction(),
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper Memory journal timeline",
+        interact=memory_journal_timeline_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": (200, []),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_fixture(),
         },
     )
     run_terminal_scenario(

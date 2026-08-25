@@ -399,6 +399,23 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
       | exception Yojson.Json_error detail ->
           Error ("chat history was not JSON: " ^ detail))
 
+let fetch_keeper_memory_journal ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_keeper_chat_history.decoded, string) result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/memory-journal?limit=20"
+      (percent_encode_path_segment keeper_name)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "memory journal returned %d: %s" status body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_keeper_chat_history.memory_rows_of_json json
+       | exception Yojson.Json_error detail ->
+           Error ("memory journal was not JSON: " ^ detail))
+
 (** Fetch one page of chat rows older than [before].
 
     [before] absent asks for the newest window, which is what the transcript

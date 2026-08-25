@@ -65,6 +65,8 @@ type msg_role =
           the lines the server kept and the count it withheld. Drawn with the
           live pane's thinking style, so a turn the keeper ran on its own and
           one watched live read alike. *)
+  | Message_memory
+      (** One Memory OS journal pass interleaved by its recorded timestamp. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -845,6 +847,9 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  mutable msg_memory_visible: bool;
+  mutable msg_memory_error: string option;
+  mutable msg_memory_dropped: int;
   (* Every full-history GET captures this generation. Keeper identity alone is
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
@@ -1147,6 +1152,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_memory_visible = true;
+  msg_memory_error = None;
+  msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
@@ -1345,6 +1353,8 @@ let keeper_message_status_rows (state : state) =
      past the terminal, and the presenter drops whatever ran off the bottom. *)
   + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
+  + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)

@@ -3192,11 +3192,13 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      Printf.sprintf "%s  %s  %s(port %d)%s"
+      Printf.sprintf "%s  %s  %smemory:%s  (port %d)%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
-        Ansi.dim state.port Ansi.reset
+        Ansi.dim
+        (if state.msg_memory_visible then "on" else "off")
+        state.port Ansi.reset
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -3235,7 +3237,11 @@ let render_keeper_message (state : state) =
        terminal's bottom edge. [message_viewport_supported] already states
        the same chrome as [8 + status_rows]: 7 plus one history row. *)
     let history_height = max 0 (rows - 7 - status_rows) in
-    let messages = chat_rows_for state keeper_name in
+    let messages =
+      chat_rows_for state keeper_name
+      |> List.filter (fun message ->
+        state.msg_memory_visible || message.me_role <> Message_memory)
+    in
     let layout_entries =
       (* The position distinguishes rows whose durable timestamp and request
          fields tie. A history reorder can only cause a miss: the exact body is
@@ -3253,6 +3259,7 @@ let render_keeper_message (state : state) =
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
             | Message_thinking -> Message_layout.Thinking, "thinking"
+            | Message_memory -> Message_layout.Status, "memory"
           in
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
@@ -3261,9 +3268,24 @@ let render_keeper_message (state : state) =
             match message.me_role with
             | Message_thinking when state.msg_thinking_collapsed ->
                 folded_thinking_summary message.me_text
+            | Message_memory ->
+                (* A Memory journal's leading [+]/[-] is data, not a Markdown
+                   list marker. Escaping it only for presentation keeps the
+                   decoder honest and preserves the added/removed distinction
+                   in the rendered timeline. *)
+                message.me_text
+                |> String.split_on_char '\n'
+                |> List.map (fun line ->
+                  if String.length line > 1
+                     && (line.[0] = '+' || line.[0] = '-')
+                     && line.[1] = ' '
+                  then "\\" ^ line
+                  else line)
+                |> String.concat "\n"
             | Message_thinking | Message_user _ | Message_keeper
             | Message_autonomous
-            | Message_status | Message_error | Message_tool -> message.me_text
+            | Message_status | Message_error | Message_tool ->
+                message.me_text
           in
           ({ style;
              timestamp = message.me_timestamp;
@@ -3423,6 +3445,17 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
+    (match state.msg_memory_visible, state.msg_memory_error with
+     | false, _ -> ()
+     | true, None -> ()
+     | true, Some detail ->
+         box_line_styled chat_buf chat_cols ~style:Theme.warn
+           ("  memory journal unavailable: " ^ detail));
+    (if state.msg_memory_visible && state.msg_memory_dropped > 0 then
+       box_line_styled chat_buf chat_cols ~style:Theme.warn
+         (Printf.sprintf
+            "  %d memory journal row(s) could not be read and are not shown"
+            state.msg_memory_dropped));
     (* The row [keeper_message_status_rows] reserves for the older-page
        fetch. Counting it without drawing it floated the footer a row up,
        and a failed page load was silent -- the one thing it must not be. *)

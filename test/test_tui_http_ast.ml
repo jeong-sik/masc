@@ -390,10 +390,19 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
        ~callee:"replace_board_posts");
-  check int "Board detail success uses shared post replacement" 1
+  (* Detail does not go through the shared replacement any more, and that is
+     the fix rather than drift: #30409 found that a detail response ranking
+     the list snapped rapid j/k back to row zero as answers arrived. It now
+     rewrites the one row in place and leaves the order alone, so the pin
+     names the absence -- a reintroduced call is the regression. *)
+  check int "Board detail leaves list order alone" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"replace_board_posts");
+  check int "Board detail rewrites the row in place" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
+       ~callee:"List.map");
   check int "Board post replacement reconciles selection once" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"replace_board_posts"
@@ -403,7 +412,13 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"start_board_post_refresh"
        ~callee:"Board_detail.start");
-  check int "Board detail success validates the response post identity" 1
+  (* Two identity comparisons now, and they answer different questions: one
+     guards that the response is for the post that was asked for, the other
+     finds the row to rewrite. The second arrived with the in-place rewrite
+     (#30409); before it, the list was replaced wholesale and no row had to be
+     found. Counting them together is what this helper can see -- dropping to
+     one would mean either the guard or the row lookup went missing. *)
+  check int "Board detail compares identities to guard and to locate" 2
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"String.equal");

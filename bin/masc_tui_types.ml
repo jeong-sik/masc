@@ -101,11 +101,9 @@ let tool_visibility_to_string = function
 
 (* The chat modes worth a place in the header.
 
-   All three default to showing everything, so at rest the header would read
-   "memory:on reasoning:full tools:full" -- three labels that say nothing is
-   unusual, on every chat, for every operator. They also cost enough width to
-   push the port off the right edge at 170 columns, which is a fact the header
-   was carrying and now would not.
+   Reasoning starts hidden and tools compact, so the answer remains the
+   strongest level in the pane. At rest those defaults say nothing unusual and
+   therefore cost no header width.
 
    So only a mode away from its default appears. That is exactly when the
    operator needs reminding: reasoning is missing from the pane because they
@@ -119,12 +117,12 @@ let chat_visibility_summary ~memory_visible ~reasoning ~tools =
     List.filter_map Fun.id
       [ (if memory_visible then None else Some "memory:off")
       ; (match reasoning with
-         | Reasoning_full -> None
-         | (Reasoning_hidden | Reasoning_folded) as mode ->
+         | Reasoning_hidden -> None
+         | (Reasoning_folded | Reasoning_full) as mode ->
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
-         | Tools_full -> None
-         | Tools_compact -> Some "tools:compact")
+         | Tools_compact -> None
+         | Tools_full -> Some "tools:full")
       ]
   in
   String.concat " " parts
@@ -1118,8 +1116,8 @@ let next_keeper_message_target (state : state) =
 
 (** Create initial state *)
 let create_state
-    ?(reasoning_visibility = Reasoning_full)
-    ?(tool_visibility = Tools_full)
+    ?(reasoning_visibility = Reasoning_hidden)
+    ?(tool_visibility = Tools_compact)
     ~workspace
     ~port
     ~refresh_interval

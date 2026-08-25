@@ -324,10 +324,10 @@ let project_tool_block mode (block : tool_block) =
         let outcomes = String.concat ", " (compact_outcome_parts activities) in
         let hidden_activity_rows = List.length full_activity_rows in
         ( [ safe_line
-              (Printf.sprintf "%s %s · %s · %s hidden"
+              (Printf.sprintf "%s Ran %s · %s · %s folded"
                  (compact_marker activities)
-                 (plural activity_count "tool call") outcomes
-                 (plural hidden_activity_rows "detail row"))
+                 (plural activity_count "tool") outcomes
+                 (plural hidden_activity_rows "detail"))
           ]
         , hidden_activity_rows )
   in

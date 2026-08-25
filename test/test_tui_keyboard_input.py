@@ -3971,13 +3971,13 @@ def chat_visibility_modes_interaction() -> Interaction:
             master_fd,
             output,
             b"m",
-            b"reasoning:hidden tools:compact",
+            "\u2717 Ran 2 tools".encode(),
         )
         wait_for_output(
             process,
             master_fd,
             output,
-            b"detail rows hidden",
+            b"2 details folded",
             start=pane_start,
             timeout=5.0,
         )
@@ -3988,7 +3988,7 @@ def chat_visibility_modes_interaction() -> Interaction:
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
         )
-        if b"reasoning line(s) folded" not in folded:
+        if b"Reasoning" not in folded or b"line(s) folded" not in folded:
             raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
 
         full = send_and_wait(process, master_fd, output, b"\x12", b"reasoning:full")
@@ -6110,6 +6110,7 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
         },
+        extra_args=("--reasoning", "full", "--tool-view", "full"),
     )
     run_terminal_scenario(
         executable,
@@ -6127,7 +6128,6 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
         },
-        extra_args=("--reasoning", "hidden", "--tool-view", "compact"),
     )
     run_terminal_scenario(
         executable,

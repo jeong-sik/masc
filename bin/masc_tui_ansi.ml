@@ -93,14 +93,15 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Keeper -> Ansi.blue
     | Masc_tui_message_layout.Status -> Theme.warn
     | Masc_tui_message_layout.Error -> Theme.bad
-    | Masc_tui_message_layout.Tool -> Ansi.magenta
-    | Masc_tui_message_layout.Thinking -> Ansi.gray
+    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking ->
+        Ansi.gray
 
   let body : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
     | Masc_tui_message_layout.Status -> Theme.warn
     | Masc_tui_message_layout.Error -> Theme.bad
-    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking -> Ansi.dim
+    | Masc_tui_message_layout.Tool -> Ansi.reset
+    | Masc_tui_message_layout.Thinking -> Ansi.dim
 
   let snapshot_cache : snapshot option Atomic.t = Atomic.make None
 

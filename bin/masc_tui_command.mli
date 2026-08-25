@@ -33,6 +33,9 @@ type t =
       (** [/tools [compact|full]] — set or toggle tool-call detail. *)
   | Toggle_memory
       (** [/memory] — show or hide Librarian/Memory journal rows. *)
+  | Inspect_context
+      (** [/context] — inspect the last provider input observed for this
+          Keeper, including exact prompt-block text where it was captured. *)
   | View_image of string
       (** [/image <path>] — draw an image file on the terminal, if it can
           hold one. The path is the rest of the first line, untrimmed of

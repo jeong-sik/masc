@@ -1079,6 +1079,8 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Context_inspector_loaded of
+      int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -2561,6 +2563,52 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
            , Error "Eio switch is unavailable"
            , Error "Eio switch is unavailable" ))
 
+let launch_context_inspector_load state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  state.context_inspector_generation <- state.context_inspector_generation + 1;
+  state.context_inspector_loading <- true;
+  let generation = state.context_inspector_generation in
+  let run () =
+    let reading =
+      try
+        Masc_tui_http.fetch_keeper_context_inspector ~host ~port ~keeper_name
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          let error = Error (Printexc.to_string exn) in
+          { Masc_tui_context_inspector.turn = error; prompt = error }
+    in
+    enqueue_async mailbox
+      (Context_inspector_loaded (generation, keeper_name, reading))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      let error = Error "Eio switch is unavailable" in
+      enqueue_async mailbox
+        (Context_inspector_loaded
+           ( generation
+           , keeper_name
+           , { Masc_tui_context_inspector.turn = error; prompt = error } ))
+
+let open_context_inspector state ~mailbox ~keeper_name =
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some keeper_name;
+  (* A fresh Keeper target starts unread. Showing the previous Keeper's
+     already-loaded composition under this name while the GET is in flight
+     would be a more dangerous lie than a loading row. Refreshing the same
+     target keeps its reading; opening a target does not. *)
+  state.context_inspector_reading <- None;
+  state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
+  state.context_inspector_cursor <- 0;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_exact <- None;
+  launch_context_inspector_load state ~mailbox ~keeper_name
+
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
   | Masc_tui_keeper_selection.No_alternative -> ()
@@ -3169,6 +3217,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_memory_visible
          then "Librarian/Memory timeline shown (/memory to hide)"
          else "Librarian/Memory timeline hidden (/memory to show)")
+  | Masc_tui_command.Inspect_context ->
+      (match target with
+       | Some keeper_name ->
+           Buffer.clear state.msg_input;
+           open_context_inspector state ~mailbox ~keeper_name
+       | None ->
+           notice ~role:Message_error
+             "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -4467,6 +4523,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
+       | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -5196,6 +5253,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
+  | Context_inspector_loaded (generation, keeper_name, reading) ->
+      if
+        generation = state.context_inspector_generation
+        && Option.exists (String.equal keeper_name)
+             state.context_inspector_keeper
+      then begin
+        state.context_inspector_loading <- false;
+        state.context_inspector_reading <- Some (keeper_name, reading)
+      end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
@@ -6300,6 +6366,7 @@ let main () =
       let composer_claimed =
         (not compact_viewport)
         && (not state.help_open)
+        && (not state.context_inspector_open)
         && (not state.palette_open)
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
@@ -6337,6 +6404,87 @@ let main () =
        | Some k when String.equal k toggle_roster_pane_key ->
            state.roster_pane_hidden <- not state.roster_pane_hidden;
            Render_schedule.request render_schedule Render_schedule.Force
+       (* [/context] is modal: the summary and exact prompt text must not leak
+          keys into the composer underneath. The quit confirmation and chrome
+          toggles remain global above it, matching Help and Palette. *)
+       | Some k when state.context_inspector_open && not compact_viewport ->
+           let prompt_blocks () =
+             match state.context_inspector_reading with
+             | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
+                 capture.Masc.Keeper_prompt_capture.blocks
+             | Some _ | None -> []
+           in
+           let close () =
+             state.context_inspector_open <- false;
+             state.context_inspector_exact <- None;
+             state.context_inspector_scroll <- 0
+           in
+           (match k with
+            | "esc" ->
+                (match state.context_inspector_exact with
+                 | Some _ ->
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0
+                 | None -> close ())
+            | "r" ->
+                Option.iter
+                  (fun keeper_name ->
+                     launch_context_inspector_load state
+                       ~mailbox:async_messages ~keeper_name)
+                  state.context_inspector_keeper
+            | "1" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Composition;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "2" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Prompt_blocks;
+                state.context_inspector_exact <- None;
+                state.context_inspector_scroll <- 0
+            | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
+                state.context_inspector_tab <-
+                  (match state.context_inspector_tab with
+                   | Masc_tui_context_inspector.Composition ->
+                       Masc_tui_context_inspector.Prompt_blocks
+                   | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Composition);
+                state.context_inspector_cursor <- 0;
+                state.context_inspector_scroll <- 0
+            | ("j" | "down" | "k" | "up")
+              when Option.is_some state.context_inspector_exact
+                   || state.context_inspector_tab
+                      = Masc_tui_context_inspector.Composition ->
+                let count, height =
+                  Masc_tui_render.context_inspector_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_scroll <-
+                  move ~count ~height state.context_inspector_scroll
+            | "j" | "down" ->
+                let last = max 0 (List.length (prompt_blocks ()) - 1) in
+                state.context_inspector_cursor <-
+                  min last (state.context_inspector_cursor + 1)
+            | "k" | "up" ->
+                state.context_inspector_cursor <-
+                  max 0 (state.context_inspector_cursor - 1)
+            | "\r" ->
+                if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Prompt_blocks
+                then begin
+                  match List.nth_opt (prompt_blocks ()) state.context_inspector_cursor with
+                  | Some _ ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | None -> ()
+                end
+            | _ -> ())
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
@@ -6521,6 +6669,14 @@ let main () =
            search_jump state ~query:state.search_last ~after
              ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
+       (* In chat, printable keys normally belong to the draft. Keep [?] as
+          the documented global Help key when the draft is empty; once a
+          sentence has started it remains an ordinary question mark. This
+          makes shortcuts and slash commands discoverable without discarding
+          text the operator is already writing. *)
+       | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
+           state.help_open <- true;
+           state.help_scroll <- 0
        | Some k when message_mode ->
            let reasoning_key =
              String.length k = 1 && Char.code k.[0] = 18

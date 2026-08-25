@@ -24,6 +24,27 @@ running process, so the gate can express them.
 `&` is the exception. It asks for a process that outlives the call, and there
 is no other call to rewrite it into.
 
+**1.0 And it does not even background. Measured 2026-08-25.**
+
+An argv-shaped `&` is not refused -- it arrives as one opaque program and
+runs. What it does not do is background anything:
+
+```
+sh -c "sleep 5 &"                     Execute returns after 5.0s
+sh -c "sleep 30 &"                    Execute returns after 30.0s
+sh -c "sleep 5 >/dev/null 2>&1 &"     Execute returns after 0.03s
+```
+
+The elapsed time tracks the sleep, not a timeout, and closing the child's
+streams releases the call at once. The shell exits immediately; the call waits
+because the backgrounded child inherited its output pipe and Execute reads to
+EOF. So a writer who reaches for `&` today gets no backgrounding, no handle,
+and no refusal either -- the call blocks for exactly as long as it would have
+without the `&`, and nothing says why.
+
+(Measured through `test_keeper_tool_execute_exit_result`'s harness, which
+calls `handle_tool_execute_with_outcome` the way a keeper turn does.)
+
 **1.1 The result type cannot hold one.**
 
 ```ocaml
@@ -42,8 +63,8 @@ one, and that is not a gap to patch — it is what the record means.
 costumes=1584   background=5
 ```
 
-Five is not a measurement of how much backgrounding is wanted. `&` is refused
-and has no alternative, so a caller that needs it does not ask — it reaches
+Five is not a measurement of how much backgrounding is wanted. `&` has no
+alternative and, per §1.0, does not work, so a caller that needs it does not ask — it reaches
 for something else, and that reach is not recorded as an Execute call at all.
 This is the one construct in the corpus whose count cannot be read as
 priority.

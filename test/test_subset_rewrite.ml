@@ -103,8 +103,9 @@ let test_the_background_advice_names_a_registered_tool () =
   Alcotest.(check string)
     "the sentence names the spawn tool as it is registered"
     (Printf.sprintf
-       "call %s instead: a backgrounded command outlives this call, so its result is a \
-        handle rather than an exit status"
+       "call %s instead: [&] backgrounds nothing here -- the child inherits this call's \
+        output pipe, so the call waits for it anyway. A handle is how a process outlives \
+        the call"
        spawn)
     sentence
 ;;

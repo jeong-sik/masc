@@ -203,7 +203,7 @@ let default_favicon_url url =
 
 let extract_html_preview_fields ~url body =
   let head =
-    String.sub body 0 (min (String.length body) max_html_chars)
+    String_util.utf8_prefix ~max_bytes:max_html_chars body
     |> Markup_document.parse_html
   in
   let title =
@@ -353,9 +353,8 @@ let fetch_preview ~clock ~net url =
                            ~cache_state:"miss" ())
                     else
                       let body =
-                        if String.length response.body > max_html_chars then
-                          String.sub response.body 0 max_html_chars
-                        else response.body
+                        String_util.utf8_prefix ~max_bytes:max_html_chars
+                          response.body
                       in
                       let extracted =
                         extract_html_preview_fields ~url:normalized_url body

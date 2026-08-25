@@ -3433,7 +3433,6 @@ let render_keeper_message (state : state) =
     in
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
-        (List.map role_label_of messages)
     in
     let layout_entries =
       (* The position distinguishes rows whose durable timestamp and request

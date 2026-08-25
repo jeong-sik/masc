@@ -28,6 +28,7 @@ type kind =
       ; surface : Surface.t option
       }
   | Said_by_keeper
+  | Autonomous_reply
   | Delivery_failed of { origin_request_id : string option }
   | Tool_calls of Transcript.tool_block
   | Reasoning of string list
@@ -343,14 +344,24 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                  -- the server joins the raw trace onto rows with a turn ref
                  -- but its calls are already in the transcript as
                  [role: "tool"] rows, and reading both drew every call twice. *)
-              let trace_rows =
+              let autonomous =
                 match List.assoc_opt "autonomous_turn" fields with
-                | Some (`Assoc _) -> rows_of_trace at (trace_summary_of fields)
-                | Some _ | None -> []
+                | Some (`Assoc _) -> true
+                | Some _ | None -> false
+              in
+              let trace_rows =
+                if autonomous then rows_of_trace at (trace_summary_of fields)
+                else []
               in
               let said =
                 if String.equal content "" && trace_rows <> [] then []
-                else [ Utterance { at; kind = Said_by_keeper; text = content } ]
+                else
+                  [ Utterance
+                      { at
+                      ; kind = if autonomous then Autonomous_reply else Said_by_keeper
+                      ; text = content
+                      }
+                  ]
               in
               trace_rows @ said)
       | Some "tool" -> (

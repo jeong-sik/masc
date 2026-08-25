@@ -73,19 +73,28 @@ let link_of_yojson = function
       | Some (`String value) -> String.trim value
       | _ -> ""
     in
+    (* [link_to_yojson] always writes "task_ids" as a list, so a row without
+       one — or with something else there — is damaged, not a goal with no
+       links. Folding it to [] made the damage read as an answer: the goal
+       showed zero linked tasks and nothing said the row could not be parsed.
+       Same fact as the [links] guard below, one layer in (#29355). *)
     let task_ids =
       match List.assoc_opt "task_ids" fields with
       | Some (`List values) ->
-        List.filter_map
-          (function
-            | `String value ->
-              let value = String.trim value in
-              if String.equal value "" then None else Some value
-            | _ -> None)
-          values
-      | _ -> []
+        Some
+          (List.filter_map
+             (function
+               | `String value ->
+                 let value = String.trim value in
+                 if String.equal value "" then None else Some value
+               | _ -> None)
+             values)
+      | _ -> None
     in
-    if String.equal goal_id "" then None else Some (goal_id, task_ids)
+    (match task_ids with
+     | None -> None
+     | Some task_ids ->
+       if String.equal goal_id "" then None else Some (goal_id, task_ids))
   | _ -> None
 ;;
 
@@ -98,7 +107,17 @@ let links_of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "links" fields with
      | Some (`List values) ->
-       Ok (normalize_link_set (List.filter_map link_of_yojson values))
+       (* [filter_map] used to drop a row [link_of_yojson] refused, so a
+          damaged row read as one fewer link instead of a damaged file — the
+          same fold this guard exists to stop, one element in. *)
+       let rec collect acc = function
+         | [] -> Ok (normalize_link_set (List.rev acc))
+         | value :: rest ->
+           (match link_of_yojson value with
+            | Some link -> collect (link :: acc) rest
+            | None -> Error "goal_task_links: a link row does not decode")
+       in
+       collect [] values
      | Some _ -> Error "goal_task_links: \"links\" is present but not a list"
      (* [read_json_result] answers a missing key with [`Assoc []], so an absent
         "links" is a registry nobody has written yet, not a damaged one. *)

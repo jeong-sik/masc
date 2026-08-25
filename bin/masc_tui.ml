@@ -642,7 +642,8 @@ let own_typed_messages (state : state) =
     |> List.filter (fun entry ->
            (match entry.me_role with
             | Message_user label -> String.equal label "you"
-            | Message_keeper | Message_status | Message_error | Message_tool
+            | Message_keeper | Message_autonomous | Message_status
+            | Message_error | Message_tool
             | Message_thinking ->
                 false)
            && String.equal entry.me_keeper_name target)
@@ -742,6 +743,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        thought. *)
     forget_recall state;
     Buffer.add_char state.msg_input '\n';
+    true
+  | "up" when state.msg_scroll > 0 ->
+    state.msg_scroll <- state.msg_scroll + 1;
+    (match state.msg_older_cursor with
+     | Some before when state.msg_older_exist && not state.msg_older_loading ->
+         load_older ~before
+     | Some _ | None -> ());
+    true
+  | "down" when state.msg_scroll > 0 ->
+    state.msg_scroll <- max 0 (state.msg_scroll - 1);
     true
   | "up" ->
     recall_older state;
@@ -2023,7 +2034,9 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Delivery_failed { origin_request_id } ->
             origin_request_id
         | Keeper_chat_history.Addressed_to_keeper _
-        | Keeper_chat_history.Said_by_keeper | Keeper_chat_history.Tool_calls _
+        | Keeper_chat_history.Said_by_keeper
+        | Keeper_chat_history.Autonomous_reply
+        | Keeper_chat_history.Tool_calls _
         | Keeper_chat_history.Reasoning _ -> None)
       rows
   in
@@ -2040,7 +2053,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                  (List.exists
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
-        | Message_user _ | Message_keeper | Message_tool | Message_thinking ->
+        | Message_user _ | Message_keeper | Message_autonomous | Message_tool
+        | Message_thinking ->
             false)
       state.msg_history
 
@@ -2051,6 +2065,8 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         ( Message_user (Keeper_chat_history.addressed_label speaker surface)
         , row.text )
     | Keeper_chat_history.Said_by_keeper -> (Message_keeper, row.text)
+    | Keeper_chat_history.Autonomous_reply ->
+        (Message_autonomous, if String.trim row.text = "" then "\xc2\xb7" else row.text)
     | Keeper_chat_history.Delivery_failed _ -> (Message_error, row.text)
     | Keeper_chat_history.Tool_calls block ->
         (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
@@ -2716,6 +2732,7 @@ let replace_board_posts state posts =
 
 let leave_board_detail state =
   state.board_mode <- Board_list;
+  state.board_focus <- Board_detail_pane;
   state.board_scroll <- 0;
   state.board_detail <- Board_detail.clear state.board_detail
 
@@ -3177,6 +3194,23 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
         in
         apply_board_post_load state request result
 
+let open_board_post state ~mailbox ~focus (post : board_post) =
+  state.board_mode <- Board_read post.bp_id;
+  state.board_focus <- focus;
+  state.board_scroll <- 0;
+  start_board_post_refresh state ~host:(Env_config_core.masc_host ())
+    ~port:state.port ~post_id:post.bp_id ~mailbox
+
+let move_board_posts_pane state ~mailbox ~delta =
+  let count = List.length state.board_posts in
+  let next = max 0 (min (count - 1) (state.board_cursor + delta)) in
+  if count > 0 && next <> state.board_cursor then begin
+    state.board_cursor <- next;
+    Option.iter
+      (open_board_post state ~mailbox ~focus:Board_posts_pane)
+      (List.nth_opt state.board_posts next)
+  end
+
 let apply_approval_decision_result state approval decision approvals result =
   (match result with
    | Ok (Approval.Completed _) ->
@@ -3578,7 +3612,15 @@ let handle_schedule_cancel_key state ~mailbox =
     | None -> []
     | Some snapshot -> snapshot.scs_rows
   in
-  match List.nth_opt rows state.schedule_cursor with
+  let selected =
+    match state.schedule_detail_id with
+    | Some schedule_id ->
+        List.find_opt
+          (fun row -> String.equal row.sch_schedule_id schedule_id)
+          rows
+    | None -> List.nth_opt rows state.schedule_cursor
+  in
+  match selected with
   | None -> ()
   | Some row -> (
       match state.schedule_cancel_armed with
@@ -4105,7 +4147,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              that exists. *)
           let count = List.length snapshot.scs_rows in
           if state.schedule_cursor >= count then
-            state.schedule_cursor <- max 0 (count - 1)
+            state.schedule_cursor <- max 0 (count - 1);
+          (match state.schedule_detail_id with
+           | Some schedule_id
+             when not
+                    (List.exists
+                       (fun row -> String.equal row.sch_schedule_id schedule_id)
+                       snapshot.scs_rows) ->
+               state.schedule_detail_id <- None;
+               state.schedule_scroll <- 0
+           | Some _ | None -> ())
       | Error err -> state.schedules_error <- Some err)
   | Schedule_cancel_done result -> (
       match result with
@@ -4586,14 +4637,18 @@ let terminal_title_visible_keeper state =
 ;;
 
 let terminal_title_runtime state keeper_name =
+  (* Option.bind takes the option first, so it cannot sit after [|>] the way
+     Option.map does -- piping handed it the continuation in the option's
+     slot and the build stopped compiling. *)
   Option.bind keeper_name (fun name ->
-    List.find_opt
-      (fun (keeper : keeper) -> String.equal keeper.k_name name)
-      state.keepers
-    |> Option.bind (fun keeper ->
-      match (keeper_reading state keeper).Keeper_control.liveness with
-      | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-      | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+    Option.bind
+      (List.find_opt
+         (fun (keeper : keeper) -> String.equal keeper.k_name name)
+         state.keepers)
+      (fun keeper ->
+        match (keeper_reading state keeper).Keeper_control.liveness with
+        | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
+        | Keeper_control.Absent | Keeper_control.Unobserved -> None))
 ;;
 
 let terminal_title_snapshot state =
@@ -5116,7 +5171,7 @@ let main () =
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      let terminal_rows, _terminal_columns = get_terminal_size () in
+      let terminal_rows, terminal_columns = get_terminal_size () in
       let compact_viewport =
         Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
       in
@@ -5418,6 +5473,18 @@ let main () =
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
+       | Some "\023"
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ ->
+                state.board_focus <-
+                  (match state.board_focus with
+                   | Board_posts_pane -> Board_detail_pane
+                   | Board_detail_pane -> Board_posts_pane)
+            | Board_list | Board_compose -> ())
+       | Some "\023" when state.view = Resources ->
+           state.resource_focus <- not state.resource_focus
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -5590,9 +5657,11 @@ let main () =
                   state.task_detail_scroll <- 0
                 end
                 else state.task_focus <- false
-            | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
-            | Resources ->
-                state.resource_focus <- false
+            | Schedules ->
+                state.schedule_detail_id <- None;
+                state.schedule_scroll <- 0
+            | Resources -> state.resource_focus <- false
+            | Acting | Keepers Keeper_list | Lanes | Approvals -> ()
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the
@@ -5636,7 +5705,12 @@ let main () =
                      if state.board_cursor < List.length state.board_posts - 1 then
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
-                     state.board_scroll <- state.board_scroll + 1
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:1
+                      | Board_detail_pane ->
+                          state.board_scroll <- state.board_scroll + 1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -5663,13 +5737,16 @@ let main () =
                  | Fusion_detail _ ->
                      state.fusion_scroll <- state.fusion_scroll + 1)
             | Schedules ->
-                let count =
-                  match state.schedules with
-                  | None -> 0
-                  | Some snapshot -> List.length snapshot.scs_rows
-                in
-                if state.schedule_cursor < count - 1 then
-                  state.schedule_cursor <- state.schedule_cursor + 1
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <- state.schedule_scroll + 1
+                else
+                  let count =
+                    match state.schedules with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.scs_rows
+                  in
+                  if state.schedule_cursor < count - 1 then
+                    state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- state.task_detail_scroll + 1
@@ -5728,13 +5805,16 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.config_scroll
             | Resources ->
-                let total =
-                  match state.resources_list with
-                  | Some rows -> List.length rows
-                  | None -> 0
-                in
-                if state.resources_cursor < total - 1 then
-                  state.resources_cursor <- state.resources_cursor + 1
+                if state.resource_focus then
+                  state.resource_scroll <- state.resource_scroll + 1
+                else
+                  let total =
+                    match state.resources_list with
+                    | Some rows -> List.length rows
+                    | None -> 0
+                  in
+                  if state.resources_cursor < total - 1 then
+                    state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
             | System_logs -> state.system_logs_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5782,8 +5862,13 @@ let main () =
                      if state.board_cursor > 0 then
                        state.board_cursor <- state.board_cursor - 1
                  | Board_read _ ->
-                     if state.board_scroll > 0 then
-                       state.board_scroll <- state.board_scroll - 1
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:(-1)
+                      | Board_detail_pane ->
+                          if state.board_scroll > 0 then
+                            state.board_scroll <- state.board_scroll - 1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -5802,7 +5887,9 @@ let main () =
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
-                if state.schedule_cursor > 0 then
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
+                else if state.schedule_cursor > 0 then
                   state.schedule_cursor <- state.schedule_cursor - 1
             | Overview ->
                 if Option.is_some state.task_detail_id then begin
@@ -5874,7 +5961,9 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.config_scroll
             | Resources ->
-                if state.resources_cursor > 0 then
+                if state.resource_focus then
+                  state.resource_scroll <- max 0 (state.resource_scroll - 1)
+                else if state.resources_cursor > 0 then
                   state.resources_cursor <- state.resources_cursor - 1
             | Acting ->
                 if state.acting_scroll > 0 then begin
@@ -5952,15 +6041,19 @@ let main () =
                  | Board_list ->
                      (match List.nth_opt state.board_posts state.board_cursor with
                       | Some p ->
-                          let host = Env_config_core.masc_host () in
-                          let port = state.port in
-                          state.board_mode <- Board_read p.bp_id;
-                          state.board_scroll <- 0;
-                          start_board_post_refresh state ~host ~port
-                            ~post_id:p.bp_id
-                            ~mailbox:async_messages
+                          open_board_post state ~mailbox:async_messages
+                            ~focus:Board_detail_pane p
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
+            | Schedules ->
+                (match state.schedule_detail_id, state.schedules with
+                 | None, Some snapshot ->
+                     Option.iter
+                       (fun row ->
+                          state.schedule_detail_id <- Some row.sch_schedule_id;
+                          state.schedule_scroll <- 0)
+                       (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+                 | Some _, _ | None, None -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -6015,8 +6108,9 @@ let main () =
                         state.changes_tree_diff_path <- None))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Acting | Lanes | Approvals | Verification | Harness
+            | Repositories | Connectors | Runtime | Config | Resources | Tools
+            | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->

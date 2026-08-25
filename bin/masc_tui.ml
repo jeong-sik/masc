@@ -89,13 +89,25 @@ let require_interactive_terminal () =
    keypress cannot move past what the frame can show. Surfaces the state
    cannot count keep their old unbounded step; the drawing still clamps those
    on the way past. *)
+(* The rows a surface's list actually draws in. A surface that puts a preview
+   under its list says so in its [scrolled], and both movers ask here: a bound
+   worked out from the full body while the frame draws half of it is not a
+   bound, and the rows past the shortened list stop being reachable. *)
+let surface_body_height ~rows { sc_count; sc_chrome; sc_preview_keep } =
+  let total = max 1 (rows - sc_chrome) in
+  match sc_preview_keep with
+  | None -> total
+  | Some _ when sc_count = 0 -> total
+  | Some keep -> Masc_tui_scroll.body_height ~total ~keep
+
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
   | None -> current + delta
-  | Some { sc_count; sc_chrome } ->
-      let height = max 1 (rows - sc_chrome) in
-      if delta >= 0 then Masc_tui_scroll.down ~count:sc_count ~height current
-      else Masc_tui_scroll.up ~count:sc_count ~height current
+  | Some scrolled ->
+      let height = surface_body_height ~rows scrolled in
+      if delta >= 0 then
+        Masc_tui_scroll.down ~count:scrolled.sc_count ~height current
+      else Masc_tui_scroll.up ~count:scrolled.sc_count ~height current
 
 (* The rows a surface has to draw in: the terminal's, less the composer's,
    which owns the last row. The same arithmetic the drawing does -- a bound
@@ -118,8 +130,8 @@ let surface_page_rows () = max 1 (surface_rows () - 8)
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
-  | Some { sc_count; sc_chrome } ->
-      let height = max 1 (surface_rows () - sc_chrome) in
+  | Some ({ sc_count; _ } as scrolled) ->
+      let height = surface_body_height ~rows:(surface_rows ()) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor

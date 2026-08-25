@@ -1453,6 +1453,8 @@ let approval_items (state : state) =
 type palette_action =
   | Palette_goto of surface
   | Palette_chat of string
+  | Palette_task of string
+  | Palette_board_post of string
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1475,6 +1477,13 @@ let palette_entries (state : state) =
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
       state.keepers
+  @ List.map
+      (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
+      state.tasks
+  @ List.map
+      (fun (p : board_post) ->
+        ("post " ^ p.bp_title, Palette_board_post p.bp_id))
+      state.board_posts
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)

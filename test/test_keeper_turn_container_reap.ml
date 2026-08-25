@@ -87,6 +87,43 @@ let test_filters_narrow_by_owner_and_turn () =
     (joined every_turn_of_mine = joined this_turn)
 ;;
 
+(* The reap takes the wide listing before this turn's, and the [let] bindings in
+   [reap_prior_turn_containers] are what make that true: OCaml leaves tuple
+   evaluation order unspecified and native code generally runs right to left,
+   so reading both inside one [match] takes the narrow listing first. A
+   container the current turn creates between the two listings would then be
+   present only in the wide list, and the reap would kill a live sibling.
+
+   Order is a source fact, so this is a text check rather than a behavioural
+   one: intercepting the two listings would need injection the function does
+   not take. It can only fail in the safe direction — writing that shape in a
+   comment makes the suite red rather than letting the regression through. *)
+let regressed_shape = "match listing (), listing"
+
+let source_of path =
+  let root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let ic = open_in (Filename.concat root path) in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> In_channel.input_all ic)
+;;
+
+let test_listings_are_ordered () =
+  let src = source_of "lib/keeper/keeper_sandbox_runtime.ml" in
+  let n = String.length regressed_shape
+  and h = String.length src in
+  let rec found i =
+    i + n <= h && (String.sub src i n = regressed_shape || found (i + 1))
+  in
+  check
+    bool
+    "the two listings are sequenced, not read from one tuple"
+    false
+    (found 0)
+;;
+
 let () =
   run
     "keeper turn container reap"
@@ -96,6 +133,7 @@ let () =
             "filters narrow by owner and turn"
             `Quick
             test_filters_narrow_by_owner_and_turn
+        ; test_case "listings are ordered" `Quick test_listings_are_ordered
         ] )
     ]
 ;;

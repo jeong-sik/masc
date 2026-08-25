@@ -580,7 +580,20 @@ let reap_prior_turn_containers ~base_path ~keeper_name ~turn_id ~timeout_sec () 
       ~timeout_sec
       ()
   in
-  match listing (), listing ~turn_id () with
+  (* The wide listing is taken first, and the [let] bindings are what make that
+     true: OCaml does not specify the evaluation order of a tuple, and the
+     native compiler generally evaluates right to left, so reading both inside
+     one [match] would have taken this turn's listing first.
+
+     Order decides whether a live sibling can be reaped. This function runs at
+     every container creation and a turn can hold several, so a container the
+     current turn creates between the two listings is a real case. Taken wide
+     first, such a container is absent from [every_turn_of_mine] and cannot be
+     a target; taken narrow first, it would appear only in the wide list and
+     would be killed while its turn was still using it. *)
+  let every_turn_of_mine = listing () in
+  let this_turn = listing ~turn_id () in
+  match every_turn_of_mine, this_turn with
   | Error err, _ | Ok _, Error err ->
     { scanned = 0; removed = 0; already_absent = 0; errors = [ err ] }
   | Ok every_turn_of_mine, Ok this_turn ->

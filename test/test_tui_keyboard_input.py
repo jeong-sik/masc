@@ -4575,6 +4575,17 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
                        "content": "why three?"}:
             raise AssertionError(f"note POST body: {payload!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # c: which keeper wrote which lines, through what, and when.
+        activity = send_and_wait(
+            process, master_fd, output, b"c", b"Edit (turn 7)"
+        )
+        activity_plain = CSI_RE.sub(b"", activity).decode("utf-8")
+        for needle in ("activity: note.ml", "L1", "alpha"):
+            if needle not in activity_plain:
+                raise AssertionError(
+                    f"the activity view missed {needle!r}: {activity_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"let")
         os.write(master_fd, b"q")
 
     return interact
@@ -6451,6 +6462,17 @@ def run_keyboard_regression(executable: str) -> None:
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = notes_response
+    repositories_fixtures[
+        "/api/v1/ide/regions?codebase=github.com_jeong-sik_masc&file_path=note.ml"
+    ] = (
+        200,
+        {"ok": True, "data": [
+            {"file_path": "note.ml", "line_start": 1, "line_end": 1,
+             "keeper_id": "alpha",
+             "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
+             "timestamp_ms": 1787600000000},
+        ]},
+    )
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
     ] = (

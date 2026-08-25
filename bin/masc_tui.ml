@@ -1163,6 +1163,8 @@ type async_msg =
       string * (Masc.Tui_decode.ide_annotation list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
+  | Code_activity_loaded of
+      string * (Masc.Tui_decode.ide_region list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1817,6 +1819,29 @@ let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run
   | None -> run ()
+
+let launch_code_activity_load state ~mailbox ~codebase ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
+          ~file_path:path
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_activity_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -4799,7 +4824,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0
+          state.code_notes_scroll <- 0;
+          state.code_activity <- None;
+          state.code_activity_error <- None;
+          state.code_activity_open <- false;
+          state.code_activity_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
@@ -4832,6 +4861,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 launch_code_notes_load state ~mailbox ~codebase ~path
             | Error _ -> ())
       | Error detail -> state.code_notes_error <- Some detail)
+  | Code_activity_loaded (path, result) ->
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok regions ->
+            state.code_activity <- Some (path, regions);
+            state.code_activity_error <- None;
+            state.code_activity_scroll <- 0
+        | Error detail -> state.code_activity_error <- Some detail)
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
@@ -6564,6 +6606,34 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "c" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* Which keeper wrote which lines of the open file, through what,
+              and when. Repository scope, like the notes: the regions are
+              keyed by the same server-minted codebase slug. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else
+                  match code_scope_codebase state with
+                  | Error why ->
+                      add_event state "system" ("activity: " ^ why)
+                  | Ok codebase ->
+                      state.code_activity_open <- true;
+                      state.code_notes_open <- false;
+                      state.code_diff_open <- false;
+                      state.code_history_open <- false;
+                      (match state.code_activity with
+                       | Some (loaded_path, _)
+                         when String.equal loaded_path path ->
+                           ()
+                       | Some _ | None ->
+                           state.code_activity <- None;
+                           state.code_activity_error <- None;
+                           launch_code_activity_load state
+                             ~mailbox:async_messages ~codebase ~path))
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
@@ -6585,6 +6655,7 @@ let main () =
                       state.code_notes_open <- true;
                       state.code_diff_open <- false;
                       state.code_history_open <- false;
+                      state.code_activity_open <- false;
                       (match state.code_notes with
                        | Some (loaded_path, _)
                          when String.equal loaded_path path ->
@@ -6608,6 +6679,7 @@ let main () =
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
+                  state.code_activity_open <- false;
                   (match state.code_diff with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6631,6 +6703,7 @@ let main () =
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
+                  state.code_activity_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6811,7 +6884,9 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -6932,7 +7007,9 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
+                if state.code_activity_open then
+                  state.code_activity_open <- false
+                else if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -7005,7 +7082,15 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_notes_open then (
+                  if state.code_activity_open then (
+                    match state.code_activity with
+                    | Some (_, regions) ->
+                        state.code_activity_scroll <-
+                          min
+                            (max 0 (List.length regions - 1))
+                            (state.code_activity_scroll + 1)
+                    | None -> ())
+                  else if state.code_notes_open then (
                     match state.code_notes with
                     | Some (_, notes) ->
                         state.code_notes_scroll <-
@@ -7232,7 +7317,10 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_notes_open then
+                  if state.code_activity_open then
+                    state.code_activity_scroll <-
+                      max 0 (state.code_activity_scroll - 1)
+                  else if state.code_notes_open then
                     state.code_notes_scroll <-
                       max 0 (state.code_notes_scroll - 1)
                   else if state.code_diff_open then

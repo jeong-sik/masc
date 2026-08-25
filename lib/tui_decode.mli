@@ -1033,3 +1033,16 @@ type ide_annotation = {
 val decode_ide_annotations :
   Yojson.Safe.t -> (ide_annotation list, string) result
 (** The route's [{ok; data}] envelope. *)
+
+(** One [/api/v1/ide/regions] row: which lines a keeper wrote, through what
+    (tool and turn, or a manual note), and when. *)
+type ide_region = {
+  ir_line_start : int;
+  ir_line_end : int;
+  ir_keeper : string;
+  ir_source : string;
+  ir_at_ms : float;
+}
+
+val decode_ide_regions : Yojson.Safe.t -> (ide_region list, string) result
+(** The route's [{ok; data}] envelope. *)

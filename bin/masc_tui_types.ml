@@ -949,6 +949,13 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
+  (* The file pane's activity view: c on an open file (repository scope,
+     like the notes) swaps the content for which keeper wrote which lines,
+     through what, and when. *)
+  mutable code_activity: (string * Tui_decode.ide_region list) option;
+  mutable code_activity_error: string option;
+  mutable code_activity_open: bool;
+  mutable code_activity_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -1344,6 +1351,10 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
+  code_activity = None;
+  code_activity_error = None;
+  code_activity_open = false;
+  code_activity_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;

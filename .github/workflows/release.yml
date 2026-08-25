@@ -109,6 +109,7 @@ jobs:
         run: |
           opam exec -- dune build --release \
             bin/main_eio.exe \
+            bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe
 
       - name: Source quickstart onboarding smoke
@@ -118,6 +119,17 @@ jobs:
         run: |
           chmod +x scripts/release-binary-smoke.sh
           scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
+
+      # masc-tui refuses to start without an interactive TTY, so a runner
+      # cannot boot it the way the server binary is booted above. --help
+      # returns before that check, which is enough to prove the shipped file
+      # loads its dynamic libraries -- the one thing that differs between this
+      # runner and the machine that downloads the asset. Rendering is covered
+      # by test/test_tui_keyboard_input.py in CI, over a real PTY.
+      - name: Terminal UI binary smoke (dynamic link)
+        run: |
+          _build/default/bin/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
+          grep -q -- '--base-path' /tmp/masc-tui-help.txt
 
       - name: Generate release evidence bundle
         run: |
@@ -131,11 +143,13 @@ jobs:
         run: |
           mkdir -p dist
           cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
+          cp _build/default/bin/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
           cp _build/default/bin/deployment_preflight_helper.exe \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }}
           cp scripts/check-runtime-deployment-preflight.sh \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
+          chmod +x dist/masc-tui-${{ matrix.arch }}
           chmod +x \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
@@ -167,6 +181,7 @@ jobs:
           for arch in macos-arm64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
+              "masc-tui-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch"; do
               if [ ! -f "dist/$asset" ]; then

@@ -149,16 +149,23 @@ let clear_resource_subscriptions_for_session session_id =
 
 let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
+let resource_updated_notification uri =
+  jsonrpc_notification
+    "notifications/resources/updated"
+    ~params:(`Assoc [ "uri", `String uri ])
+;;
+
 let send_resource_updated_notification ~session_id ~uri =
-  Sse.send_to
-    session_id
-    (jsonrpc_notification
-       "notifications/resources/updated"
-       ~params:(`Assoc [ "uri", `String uri ]))
+  Sse.send_to session_id (resource_updated_notification uri)
 ;;
 
 let broadcast_tools_list_changed () =
-  Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
+  let notification = jsonrpc_notification "notifications/tools/list_changed" in
+  Sse.broadcast notification;
+  (* 2026-07-28 clients receive this on a subscriptions/listen stream instead
+     of the GET endpoint, and only if they asked for toolsListChanged. Both go
+     out: the older revisions this server still speaks read the SSE broadcast. *)
+  Mcp_subscriptions.notify_tools_list_changed notification
 ;;
 
 let dedup_strings items = items |> List.sort_uniq String.compare
@@ -207,7 +214,18 @@ let maybe_emit_resource_notifications ~success ~tool_name =
                   && List.mem (resource_id_of_uri uri) affected_ids
                 then send_resource_updated_notification ~session_id ~uri)
              uris)
-        resource_subscriptions))
+        resource_subscriptions);
+    (* The session table above is how revisions through 2025-11-25 subscribe.
+       A 2026-07-28 client named its URIs on a subscriptions/listen request
+       instead, and that registry keeps its own filter. *)
+    List.iter
+      (fun uri ->
+         if resource_is_dynamic uri
+            && List.mem (resource_id_of_uri uri) affected_ids
+         then
+           Mcp_subscriptions.notify_resource_updated ~uri
+             (resource_updated_notification uri))
+      (Mcp_subscriptions.subscribed_resource_uris ()))
 ;;
 
 (** {1 Protocol Handlers} *)
@@ -818,6 +836,28 @@ let handle_request
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                      | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
+              | "subscriptions/listen" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     (* The graceful-closure result. The transport answers with
+                        the open stream when it can; reaching here means it
+                        could not, and the specification has a server end a
+                        subscription with a completion result rather than a
+                        silent drop. *)
+                     make_response
+                       ~id
+                       (`Assoc
+                         [ ( "_meta"
+                           , `Assoc
+                               [ ( Mcp_transport_protocol
+                                   .subscription_id_meta_key
+                                 , id )
+                               ] )
+                         ]))
               | "resources/subscribe" ->
                 with_required_auth
                   ~base_path
@@ -1170,19 +1210,82 @@ let run_stdio ~handle_request ~sw ~env state =
     in
     if content_length > 0 then Some (Eio.Buf_read.take content_length buf) else None
   in
+  (* One channel carries every response and every subscription's
+     notifications, and a notification is written by whichever fiber the change
+     happened on. Two interleaved writes would splice one message into another,
+     so every write to stdout goes through here. *)
+  let write_mutex = Eio.Mutex.create () in
+  let write_json ~mode json =
+    Eio_guard.with_mutex write_mutex (fun () ->
+      match mode with
+      | Framed -> write_framed_message stdout json
+      | LineDelimited -> write_line_message stdout json)
+  in
   let respond ~mode response =
-    match response with
-    | `Null -> ()
-    | json ->
-      (match mode with
-       | Framed -> write_framed_message stdout json
-       | LineDelimited -> write_line_message stdout json)
+    match response with `Null -> () | json -> write_json ~mode json
+  in
+  (* Live subscriptions/listen streams on this process's stdio channel, keyed
+     by the request id that opened each one. On stdio the loop does not park on
+     the request the way HTTP does -- the client keeps sending on the same
+     channel -- so a subscription ends when the client cancels it or at EOF. *)
+  let listen_tokens : (string, Mcp_subscriptions.token) Hashtbl.t =
+    Hashtbl.create 4
+  in
+  let json_field json name =
+    match json with `Assoc fields -> List.assoc_opt name fields | _ -> None
+  in
+  let close_listen ~mode key subscription_id =
+    match Hashtbl.find_opt listen_tokens key with
+    | None -> false
+    | Some token ->
+      Hashtbl.remove listen_tokens key;
+      Mcp_subscriptions.unregister token;
+      write_json ~mode (Mcp_subscriptions.graceful_closure ~subscription_id);
+      true
+  in
+  let serve_stdio_listen ~mode request_json =
+    match json_field request_json "id" with
+    (* JSON-RPC 2.0 requires a request id and 2026-07-28 forbids a null one, so
+       such a request has no identity to tag its notifications with. *)
+    | None | Some `Null ->
+      respond ~mode
+        (Mcp_transport_protocol.make_error ~id:`Null
+           (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_request)
+           "subscriptions/listen requires a non-null request id")
+    | Some subscription_id ->
+      let key = Yojson.Safe.to_string subscription_id in
+      (* A client re-listening on an id it already used replaces that
+         subscription: either way the id ends up bound to the filter this
+         request named. Matches the reconnect rule -- a client re-sends
+         subscriptions/listen and the server holds nothing across the gap. *)
+      (* fire-and-forget: whether one was already open is not interesting. *)
+      ignore (close_listen ~mode key subscription_id : bool);
+      let filter =
+        Mcp_subscriptions.honoured_filter
+          (Mcp_transport_protocol.subscription_filter_of_params
+             (json_field request_json "params"))
+      in
+      write_json ~mode
+        (Mcp_subscriptions.acknowledgement ~subscription_id filter);
+      let token =
+        Mcp_subscriptions.register ~subscription_id ~filter ~send:(fun json ->
+          write_json ~mode json;
+          true)
+      in
+      Hashtbl.replace listen_tokens key token
+  in
+  let close_all_listens ~mode =
+    Hashtbl.iter
+      (fun _ token -> Mcp_subscriptions.unregister token)
+      listen_tokens;
+    Hashtbl.reset listen_tokens;
+    ignore mode
   in
   let rec loop mode_opt =
     match read_line_message buf with
     | None ->
       Log.Mcp.info "EOF received, shutting down";
-      ()
+      close_all_listens ~mode:LineDelimited
     | Some first_line ->
       let first_line = String.trim first_line in
       if first_line = ""
@@ -1209,19 +1312,55 @@ let run_stdio ~handle_request ~sw ~env state =
         match request_opt with
         | None ->
           Log.Mcp.info "EOF received, shutting down";
-          ()
+          close_all_listens ~mode
         | Some "" -> loop (Some mode)
-        | Some request_str ->
-          let response =
-            handle_request
-              ~clock
-              ~sw
-              ~mcp_session_id:transport_session_id
-              state
-              request_str
+        | Some request_str -> (
+          let parsed =
+            match Yojson.Safe.from_string request_str with
+            | json -> Some json
+            | exception Yojson.Json_error _ -> None
           in
-          respond ~mode response;
-          loop (Some mode))
+          let method_of json =
+            match json_field json "method" with
+            | Some (`String m) -> Some m
+            | Some _ | None -> None
+          in
+          let dispatched =
+            (* Matching on the parsed body rather than on its method alone
+               keeps the JSON in scope, so neither arm has to reach back for a
+               value it knows is there. *)
+            match parsed with
+            | None -> false
+            | Some json -> (
+              match method_of json with
+              | Some "subscriptions/listen" ->
+                serve_stdio_listen ~mode json;
+                true
+              (* The stdio way to end a subscription: the client references the
+                 listen request's id. Answers false when no such subscription
+                 is open, because the same notification cancels ordinary
+                 requests and those still need the handler. *)
+              | Some "notifications/cancelled" -> (
+                match json_field json "params" with
+                | Some params -> (
+                  match json_field params "requestId" with
+                  | Some id -> close_listen ~mode (Yojson.Safe.to_string id) id
+                  | None -> false)
+                | None -> false)
+              | Some _ | None -> false)
+          in
+          if dispatched then loop (Some mode)
+          else
+            let response =
+              handle_request
+                ~clock
+                ~sw
+                ~mcp_session_id:transport_session_id
+                state
+                request_str
+            in
+            respond ~mode response;
+            loop (Some mode)))
   in
   try loop None with
   | End_of_file -> Log.Mcp.info "Connection closed"

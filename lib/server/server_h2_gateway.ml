@@ -58,7 +58,87 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
   (* ═══════════════════════════════════════════════════════════════════════
      HTTP/2 Request Handler - Full implementation
      ═══════════════════════════════════════════════════════════════════════ *)
-  let h2_request_handler _client_addr h2_reqd =
+  (* subscriptions/listen over h2c. The HTTP/1 side parks on the SSE
+   connection's stop promise; there is no such record here, so this keeps its
+   own: a write that fails means the peer is gone, and a keepalive comment is
+   what makes a silent departure fail a write instead of never being noticed.
+
+   The acknowledgement, the honoured filter, and the closure result come from
+   [Mcp_subscriptions] rather than being rebuilt -- the two transports wrote
+   their own header-mismatch body once and drifted. *)
+let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
+  match Server_mcp_transport_http.body_jsonrpc_id body_str with
+  | None | Some `Null ->
+    h2_respond_json h2_reqd
+      (Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request
+         ~message:"subscriptions/listen requires a non-null request id")
+      ~status:`Bad_request ~extra_headers:cors
+  | Some subscription_id ->
+    let headers =
+      H2.Headers.of_list
+        ([ ("content-type", "text/event-stream")
+         ; ("cache-control", "no-cache")
+         ; ("x-accel-buffering", "no")
+         ]
+         @ cors)
+    in
+    let writer =
+      H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
+        (H2.Response.create ~headers `OK)
+    in
+    let stop, resolve_stop = Eio.Promise.create () in
+    let closed = Atomic.make false in
+    let stop_once () =
+      if Atomic.compare_and_set closed false true then
+        Eio.Promise.resolve resolve_stop ()
+    in
+    let write_frame text =
+      if Atomic.get closed then false
+      else
+        try
+          H2.Body.Writer.write_string writer text;
+          H2.Body.Writer.flush writer (fun _ -> ());
+          true
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ ->
+          stop_once ();
+          false
+    in
+    let send json =
+      write_frame (Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json))
+    in
+    let filter =
+      Mcp_subscriptions.honoured_filter
+        (Mcp_transport_protocol.subscription_filter_of_params
+           (Server_mcp_transport_http.body_jsonrpc_params body_str))
+    in
+    if send (Mcp_subscriptions.acknowledgement ~subscription_id filter) then (
+      let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
+      Eio.Fiber.fork ~sw (fun () ->
+        let rec beat () =
+          if not (Atomic.get closed) then (
+            Eio.Time.sleep clock 15.0;
+            if write_frame ": keepalive\n\n" then beat ())
+        in
+        beat ());
+      Eio.Promise.await stop;
+      Mcp_subscriptions.unregister token;
+      (* The stop signal fires on a failed write, so by the time this runs the
+         peer is usually already gone and a closure that does not land is the
+         ordinary case rather than an error. *)
+      (* fire-and-forget: best effort on a stream that is already closing. *)
+      ignore
+        (send (Mcp_subscriptions.graceful_closure ~subscription_id) : bool));
+    stop_once ();
+    (* Cancellation travels as an exception in Eio, so a wildcard that ate it
+       here would report a clean exit from a fiber the switch had cancelled. *)
+    (try H2.Body.Writer.close writer with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> ())
+  in
+
+let h2_request_handler _client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
@@ -594,6 +674,15 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
+                                   if
+                                     Server_mcp_transport_http
+                                     .body_is_subscriptions_listen
+                                       post_context.body_str
+                                   then
+                                     serve_subscriptions_listen_h2 ~sw ~clock
+                                       ~cors ~body_str:post_context.body_str
+                                       h2_reqd
+                                   else
                                    let response_json =
                                      let otel_transport_context =
                                        Otel_dispatch_hook.http_transport_context

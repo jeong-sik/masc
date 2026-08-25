@@ -28,6 +28,7 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
+let ask = schema_of_name "masc_ask"
 let broadcast = schema_of_name "masc_broadcast"
 let config = schema_of_name "masc_config"
 let dashboard = schema_of_name "masc_dashboard"
@@ -52,5 +53,5 @@ let tool_help = schema_of_name "masc_tool_help"
    pause_status are absent from it by design — they are Operator_only, reached
    as individual values rather than through the Keeper-visible list. *)
 let schemas : Masc_domain.tool_schema list =
-  [ broadcast; config; dashboard; deliver; gc; keeper_waiting_inventory; messages; note_add; plan_clear_task; plan_get; plan_get_task; plan_init; plan_set_task; plan_update; start; tool_help ]
+  [ ask; broadcast; config; dashboard; deliver; gc; keeper_waiting_inventory; messages; note_add; plan_clear_task; plan_get; plan_get_task; plan_init; plan_set_task; plan_update; start; tool_help ]
 ;;

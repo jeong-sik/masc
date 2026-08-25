@@ -3245,3 +3245,5 @@
 (include stanzas/test_keeper_ask.inc)
 
 (include stanzas/test_keeper_ask_store.inc)
+
+(include stanzas/test_masc_ask_tool_surface.inc)

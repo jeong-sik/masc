@@ -4,9 +4,167 @@ type rgb =
   ; blue : int
   }
 
+let make_rgb ~red ~green ~blue =
+  let component_in_range component = component >= 0 && component <= 255 in
+  if
+    not
+      (component_in_range red
+       && component_in_range green
+       && component_in_range blue)
+  then invalid_arg "Masc_tui_terminal_palette.make_rgb: component outside 0..255";
+  { red; green; blue }
+;;
+
 let red color = color.red
 let green color = color.green
 let blue color = color.blue
+
+type stdout_color_level =
+  | True_color
+  | Ansi256
+  | Ansi16
+  | Unknown
+
+type projected_color =
+  | Rgb of rgb
+  | Indexed of int
+
+let term_is_usable = function
+  | Some term ->
+    String.length term > 0
+    && not (String.equal (String.lowercase_ascii term) "dumb")
+  | None -> false
+;;
+
+let classify_stdout_color_level ~is_tty ~term ~colorterm ~terminfo_rgb
+    ~terminfo_colors =
+  let colorterm_is_truecolor =
+    match colorterm with
+    | Some value -> String.equal (String.lowercase_ascii value) "truecolor"
+    | None -> false
+  in
+  let terminfo_is_truecolor =
+    match terminfo_rgb, terminfo_colors with
+    | Some true, Some colors -> colors >= 16_777_216
+    | (Some false | None), _ | Some true, None -> false
+  in
+  if not is_tty || not (term_is_usable term) then Unknown
+  else if colorterm_is_truecolor || terminfo_is_truecolor then True_color
+  else
+    match terminfo_colors with
+    | Some colors when colors >= 256 -> Ansi256
+    | Some colors when colors >= 16 -> Ansi16
+    | Some _ | None -> Unknown
+;;
+
+external native_terminfo_capabilities_raw : string -> int * int
+  = "masc_tui_terminal_palette_terminfo_capabilities"
+
+let native_terminfo_capabilities term =
+  let rgb, colors = native_terminfo_capabilities_raw term in
+  let terminfo_rgb =
+    match rgb with
+    | 0 -> Some false
+    | 1 -> Some true
+    | _ -> None
+  in
+  let terminfo_colors = if colors >= 0 then Some colors else None in
+  terminfo_rgb, terminfo_colors
+;;
+
+let detect_stdout_color_level () =
+  let is_tty =
+    try Unix.isatty Unix.stdout with
+    | Unix.Unix_error _ -> false
+  in
+  let term = Sys.getenv_opt "TERM" in
+  let terminfo_rgb, terminfo_colors =
+    match is_tty, term with
+    | true, Some term when term_is_usable (Some term) ->
+      native_terminfo_capabilities term
+    | true, (Some _ | None) | false, _ -> None, None
+  in
+  classify_stdout_color_level ~is_tty ~term
+    ~colorterm:(Sys.getenv_opt "COLORTERM") ~terminfo_rgb ~terminfo_colors
+;;
+
+(* Stdlib Lazy is intentional: this process fact can be forced during module
+   startup and from unit tests, where no Eio context exists. *)
+let stdout_color_level_lazy = lazy (detect_stdout_color_level ())
+let stdout_color_level () = Lazy.force stdout_color_level_lazy
+
+let xterm_cube_level = function
+  | 0 -> 0
+  | 1 -> 95
+  | 2 -> 135
+  | 3 -> 175
+  | 4 -> 215
+  | 5 -> 255
+  | _ -> invalid_arg "Masc_tui_terminal_palette.xterm_cube_level"
+;;
+
+let xterm_fixed_rgb index =
+  if index >= 16 && index <= 231 then (
+    let offset = index - 16 in
+    make_rgb ~red:(xterm_cube_level (offset / 36))
+      ~green:(xterm_cube_level (offset / 6 mod 6))
+      ~blue:(xterm_cube_level (offset mod 6)))
+  else if index >= 232 && index <= 255 then
+    let component = 8 + (10 * (index - 232)) in
+    make_rgb ~red:component ~green:component ~blue:component
+  else invalid_arg "Masc_tui_terminal_palette.xterm_fixed_rgb"
+;;
+
+let squared_distance left right =
+  let square value = value * value in
+  square (left.red - right.red)
+  + square (left.green - right.green)
+  + square (left.blue - right.blue)
+;;
+
+let nearest_xterm_fixed_index target =
+  let best_index = ref 16 in
+  let best_distance = ref max_int in
+  for index = 16 to 255 do
+    let distance = squared_distance target (xterm_fixed_rgb index) in
+    if distance < !best_distance then (
+      best_index := index;
+      best_distance := distance)
+  done;
+  !best_index
+;;
+
+let project_color_for_level ~level color =
+  match level with
+  | True_color -> Some (Rgb color)
+  | Ansi256 -> Some (Indexed (nearest_xterm_fixed_index color))
+  | Ansi16 | Unknown -> None
+;;
+
+let best_color color = project_color_for_level ~level:(stdout_color_level ()) color
+
+let fold_projected_color ~rgb ~indexed = function
+  | Rgb color -> rgb color
+  | Indexed index -> indexed index
+;;
+
+module For_testing = struct
+  type classifier_input =
+    { is_tty : bool
+    ; term : string option
+    ; colorterm : string option
+    ; terminfo_rgb : bool option
+    ; terminfo_colors : int option
+    }
+
+  let classify input =
+    classify_stdout_color_level ~is_tty:input.is_tty ~term:input.term
+      ~colorterm:input.colorterm ~terminfo_rgb:input.terminfo_rgb
+      ~terminfo_colors:input.terminfo_colors
+  ;;
+
+  let best_color_for_level = project_color_for_level
+end
 
 type t =
   { foreground : rgb

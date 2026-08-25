@@ -204,7 +204,7 @@ describe('MemoryInspector current snapshot', () => {
 
     // head: store size (current facts only) + latest delta
     const head = [...section.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)
-    expect(head).toEqual(['2', '+1 −1'])
+    expect(head).toEqual(['2', '추가 1 · 제거 1 · 유지 1'])
 
     // rows: current snapshot order, then the removed rows of the latest revision
     const rows = [...section.querySelectorAll('.mem-store-row')]
@@ -215,8 +215,8 @@ describe('MemoryInspector current snapshot', () => {
     ])
     expect(rows.map(row => row.querySelector('.mem-delta')?.textContent ?? null)).toEqual([
       null,
-      '+ 새 기억',
-      '− 사라진 기억',
+      '+ 추가됨 · 현재 기억에 들어옴',
+      '− 제거됨 · 현재 기억에서 빠짐',
     ])
     expect(rows.map(row => row.classList.contains('removed'))).toEqual([false, false, true])
 
@@ -315,7 +315,7 @@ describe('MemoryInspector current snapshot', () => {
       '◈ 사실',
     ])
     expect(container.querySelector('.mem-delta')).toBeNull()
-    expect([...container.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)).toEqual(['2', '+0 −0'])
+    expect([...container.querySelectorAll('.mem-sec-head .mem-n')].map(n => n.textContent)).toEqual(['2', '추가 0 · 제거 0 · 유지 2'])
   })
 
   it('mounts the last captured prompt for the bound keeper from the recall chain', async () => {

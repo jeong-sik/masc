@@ -713,12 +713,33 @@ type prompt_row = {
           the file's words rather than emptying the prompt. *)
   pr_file_exists : bool;
   pr_file_path : string;
+  pr_source : string;
+  pr_template_variables : string list;
 }
 
 type prompts_snapshot = { ps_rows : prompt_row list }
 (** GET /api/v1/prompts. *)
 
 val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
+
+val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
+(** Read the first Librarian row from the newest-first exact-lane summary. The
+    summary has no payload; callers use this id for one lazy detail read. *)
+
+type librarian_run_page =
+  { lrp_run_id : string option
+  ; lrp_next : (float * string) option
+  }
+
+val decode_librarian_run_page : Yojson.Safe.t -> (librarian_run_page, string) result
+(** One cursor page of exact-lane summaries. [lrp_next] is present only when
+    the server says older rows exist, so a client can search through the full
+    retained registry without assuming the newest page contains a Librarian. *)
+
+val decode_librarian_actual_input :
+  run_id:string -> Yojson.Safe.t -> (string list, string) result
+(** Read [run.input.payload.actual_input] from one exact-lane detail response,
+    prefixed with the run/actor/status identity the TUI displays above it. *)
 
 type log_kind =
   | Log_turn

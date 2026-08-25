@@ -2481,6 +2481,8 @@ let prompts_payload =
                ("has_override", `Bool false);
                ("file_exists", `Bool true);
                ("file_path", `String "config/prompts/keeper.md");
+               ("source", `String "file");
+               ("template_variables", `List [ `String "keeper_instructions" ]);
              ];
            `Assoc
              [ ("key", `String "judge.board");
@@ -2500,7 +2502,10 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check string) "key" "keeper" first.Tui_decode.pr_key;
     Alcotest.(check string) "the effective text keeps its line break"
       "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
-    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override
+    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override;
+    Alcotest.(check string) "source" "file" first.Tui_decode.pr_source;
+    Alcotest.(check (list string)) "template input names"
+      [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -2521,6 +2526,111 @@ let test_decode_prompts_rejects_a_row_with_no_key () =
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "a keyless prompt row must not decode"
   | Error _ -> ()
+
+let test_decode_prompts_rejects_a_partial_template_variable_list () =
+  let json =
+    `Assoc
+      [ ( "prompts"
+        , `List
+            [ `Assoc
+                [ "key", `String "librarian"
+                ; "template_variables", `List [ `String "current_memory"; `Int 1 ]
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "a partial input-contract list must not decode"
+  | Error _ -> ()
+
+let test_decode_latest_librarian_input_follows_summary_to_detail () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ `Assoc
+                [ "run_id", `String "judge-newer"
+                ; "lane", `String "hitl_auto_judge"
+                ]
+            ; `Assoc
+                [ "run_id", `String "lib-latest"
+                ; "lane", `String "librarian_exact"
+                ]
+            ] )
+      ]
+  in
+  let detail =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "actor", `String "omicron"
+            ; "status", `String "succeeded"
+            ; ( "input"
+              , `Assoc
+                  [ ( "payload"
+                    , `Assoc
+                        [ ( "actual_input"
+                          , `Assoc
+                              [ "keeper_instructions", `String "curate carefully"
+                              ; "message_count", `Int 4
+                              ] )
+                        ] )
+                  ] )
+            ] )
+      ]
+  in
+  match Tui_decode.decode_latest_librarian_run_id listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok run_id ->
+      Alcotest.(check string) "latest Librarian id" "lib-latest" run_id;
+      (match Tui_decode.decode_librarian_actual_input ~run_id detail with
+       | Error detail -> Alcotest.fail detail
+       | Ok lines ->
+           let text = String.concat "\n" lines in
+           Alcotest.(check bool) "identity prefix" true
+             (Astring.String.is_infix
+                ~affix:"lib-latest \xc2\xb7 omicron \xc2\xb7 succeeded"
+                text);
+           Alcotest.(check bool) "actual instructions" true
+             (Astring.String.is_infix ~affix:"curate carefully" text))
+
+let test_decode_latest_librarian_input_requires_actual_input () =
+  let detail =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "actor", `String "omicron"
+            ; "status", `String "succeeded"
+            ; "input", `Assoc [ "payload", `Assoc [] ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_librarian_actual_input ~run_id:"lib-old" detail with
+  | Ok _ -> Alcotest.fail "a run without actual_input must not render as empty"
+  | Error _ -> ()
+
+let test_decode_librarian_page_keeps_the_server_cursor () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool true
+      ; ( "runs"
+        , `List
+            [ `Assoc
+                [ "run_id", `String "judge-older"
+                ; "lane", `String "hitl_auto_judge"
+                ; "started_at", `Float 42.5
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_librarian_run_page listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      Alcotest.(check (option string)) "no Librarian on this page" None
+        page.Tui_decode.lrp_run_id;
+      Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
+        (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
 let () =
   Alcotest.run "tui_decode" [
@@ -2771,6 +2881,14 @@ let () =
           test_decode_prompts_survives_a_sparse_row;
         Alcotest.test_case "rejects a row with no key" `Quick
           test_decode_prompts_rejects_a_row_with_no_key;
+        Alcotest.test_case "rejects a partial template-variable list" `Quick
+          test_decode_prompts_rejects_a_partial_template_variable_list;
+        Alcotest.test_case "latest Librarian input follows summary to detail" `Quick
+          test_decode_latest_librarian_input_follows_summary_to_detail;
+        Alcotest.test_case "latest Librarian input requires actual input" `Quick
+          test_decode_latest_librarian_input_requires_actual_input;
+        Alcotest.test_case "Librarian page keeps the server cursor" `Quick
+          test_decode_librarian_page_keeps_the_server_cursor;
       ] );
     ( "server_identity",
       [

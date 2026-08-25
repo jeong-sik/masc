@@ -3968,14 +3968,14 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed memory revision 9",
+            b"Librarian committed current memory revision 9",
             start=start,
             timeout=5.0,
         )
         visible = bytes(output[start:])
         for needle in (
-            b"+ [fact] the Runtime probe shares one provider endpoint",
-            b"- [constraint] probe every model separately",
+            b"ADDED (now in current memory) [fact] the Runtime probe shares one provider endpoint",
+            b"REMOVED (no longer in current memory) [constraint] probe every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
@@ -3984,7 +3984,7 @@ def memory_journal_timeline_interaction() -> Interaction:
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
-        if b"Librarian committed memory revision 9" in hidden:
+        if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
@@ -3993,7 +3993,7 @@ def memory_journal_timeline_interaction() -> Interaction:
             master_fd,
             output,
             b"\r",
-            b"Librarian committed memory revision 9",
+            b"Librarian committed current memory revision 9",
         )
         if b"Librarian/Memory timeline shown" not in restored:
             raise AssertionError(f"Memory timeline did not report restoration: {restored!r}")

@@ -609,9 +609,12 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
       List.iter
         (fun needle ->
            check bool needle true (contains row.text needle))
-        [ "Librarian committed memory revision 7"
-        ; "+ [fact] the probe uses HTTP/2"
-        ; "- [constraint] use the old endpoint"
+        [ "Librarian committed current memory revision 7"
+        ; "DELTA: 1 added (now present)"
+        ; "1 removed (now absent)"
+        ; "3 retained from previous"
+        ; "+ ADDED (now in current memory) [fact] the probe uses HTTP/2"
+        ; "- REMOVED (no longer in current memory) [constraint] use the old endpoint"
         ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
         ]
   | Ok decoded ->

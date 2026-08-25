@@ -21,7 +21,11 @@ vi.mock('../sse-store', () => ({
   registerInternalAgentRefresh: vi.fn(() => vi.fn()),
 }))
 
-import { InternalAgentsMonitor } from './internal-agents-monitor'
+import {
+  InternalAgentsMonitor,
+  librarianInputEvidence,
+  renderCapturedLibrarianPrompt,
+} from './internal-agents-monitor'
 import { keepers, shellRuntimeResolution } from '../store'
 import { ApiRequestError } from '../api/core'
 
@@ -30,6 +34,34 @@ afterEach(() => {
   vi.clearAllMocks()
   keepers.value = []
   shellRuntimeResolution.value = null
+})
+
+describe('Librarian prompt evidence', () => {
+  it('reconstructs the rendered prompt from the captured template and actual sections', () => {
+    const evidence = librarianInputEvidence({
+      message_count: 2,
+      actual_input: {
+        prompt: {
+          key: 'librarian',
+          source: 'override',
+          file_path: '/config/prompts/librarian.md',
+          effective_template: 'Memory={{ current_memory }}\nHistory={{conversation_history}}',
+          rendered_bytes: 30,
+          rendered_sha256: 'a'.repeat(64),
+        },
+        rendered_prompt_variables: {
+          current_memory: '[m1] keep this',
+          conversation_history: 'user: hello {{literal}}',
+        },
+      },
+    })
+    expect(evidence).not.toBeNull()
+    expect(renderCapturedLibrarianPrompt(evidence!)).toBe(
+      'Memory=[m1] keep this\nHistory=user: hello {{literal}}',
+    )
+    expect(evidence?.promptSource).toBe('override')
+    expect(evidence?.messageCount).toBe(2)
+  })
 })
 
 describe('InternalAgentsMonitor', () => {
@@ -175,7 +207,23 @@ describe('InternalAgentsMonitor', () => {
       selectedSlot: 'librarian-primary',
       input: {
         kind: 'exact',
-        payload: { current_fact_count: 1, message_count: 5 },
+        payload: {
+          current_fact_count: 1,
+          message_count: 5,
+          actual_input: {
+            prompt: {
+              key: 'librarian',
+              source: 'file',
+              file_path: '/config/prompts/librarian.md',
+              effective_template: 'Current={{current_memory}}',
+              rendered_bytes: 21,
+              rendered_sha256: 'b'.repeat(64),
+            },
+            rendered_prompt_variables: {
+              current_memory: '[m1] old fact',
+            },
+          },
+        },
       },
       output: {
         before: { present: true, fact_count: 1 },
@@ -219,6 +267,12 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('TOOL-FREE')
     expect(container.textContent).toContain('선택 slot librarian-primary')
     expect(container.textContent).toContain('외부 research/RAW 입력을 받지 않습니다')
+    expect(container.querySelector('[data-librarian-input-evidence]')?.textContent)
+      .toContain('Librarian prompt + input provenance')
+    expect(container.textContent).toContain('/config/prompts/librarian.md')
+    const renderedPromptButton = screen.getByRole('button', { name: '최종 rendered prompt 보기' })
+    fireEvent.click(renderedPromptButton)
+    expect(container.textContent).toContain('Current=[m1] old fact')
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',
       500,

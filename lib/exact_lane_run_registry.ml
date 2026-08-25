@@ -459,7 +459,8 @@ let status_label = function
 ;;
 
 (* Identity and outcome of a run, without either exact payload. A lane run
-   embeds the whole rendered prompt — on this host one field,
+   embeds the captured template and actual input material that reconstructs
+   the rendered prompt — on this host one field,
    [rendered_prompt_variables.conversation_history], was 136.6 MB of a 286 MB
    store — so a list that carried payloads shipped hundreds of megabytes to
    draw a table of timestamps. The payloads live behind {!run_to_yojson}, which

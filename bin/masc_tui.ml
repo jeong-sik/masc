@@ -1146,6 +1146,7 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
+  | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of ((string * string) list, string) result
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -1992,6 +1993,30 @@ let launch_prompts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+
+let launch_librarian_input_load state ~mailbox ~prompt_key =
+  let host = server_peer_host in
+  let port = state.port in
+  state.prompts_librarian_input <- None;
+  state.prompts_librarian_input_error <- None;
+  state.prompts_librarian_input_loading <- true;
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_latest_librarian_input ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Librarian_input_loaded (prompt_key, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Librarian_input_loaded
+           (prompt_key, Error "Eio switch is unavailable"))
 
 let launch_keeper_config_view state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -4843,6 +4868,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            state.prompts_snapshot <- Some snapshot;
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
+  | Librarian_input_loaded (prompt_key, result) ->
+      let still_selected =
+        match state.prompts_snapshot with
+        | None -> false
+        | Some snapshot ->
+            (match List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor with
+             | Some row -> String.equal row.Tui_decode.pr_key prompt_key
+             | None -> false)
+      in
+      if still_selected then begin
+        state.prompts_librarian_input_loading <- false;
+        state.config_scroll <- 0;
+        match result with
+        | Ok lines ->
+            state.prompts_librarian_input <- Some (prompt_key, lines);
+            state.prompts_librarian_input_error <- None
+        | Error detail ->
+            state.prompts_librarian_input <- None;
+            state.prompts_librarian_input_error <- Some detail
+      end
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok view ->
@@ -6217,6 +6262,15 @@ let main () =
     | Some snapshot ->
         List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor
   in
+  let handle_librarian_input_read () =
+    match selected_prompt () with
+    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | Some row when not (String.equal row.Tui_decode.pr_category "librarian") ->
+        add_event state "error" "actual input is available on the Librarian prompt"
+    | Some row ->
+        launch_librarian_input_load state ~mailbox:async_messages
+          ~prompt_key:row.Tui_decode.pr_key
+  in
   let handle_prompt_edit () =
     match selected_prompt () with
     | None -> add_event state "error" "prompts not loaded yet; r to reload"
@@ -7095,6 +7149,9 @@ let main () =
                     max 0
                       (min (count - 1)
                          (state.schedule_cursor + (direction * page)))
+            | Config when state.config_prompts ->
+                state.config_scroll <-
+                  max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
             | Verification | Harness | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
@@ -7444,8 +7501,13 @@ let main () =
                   | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
                   | None -> 0
                 in
-                if state.prompts_cursor < count - 1 then
-                  state.prompts_cursor <- state.prompts_cursor + 1
+                if state.prompts_cursor < count - 1 then begin
+                  state.prompts_cursor <- state.prompts_cursor + 1;
+                  state.config_scroll <- 0;
+                  state.prompts_librarian_input <- None;
+                  state.prompts_librarian_input_error <- None;
+                  state.prompts_librarian_input_loading <- false
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
@@ -7661,7 +7723,14 @@ let main () =
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Config when state.config_prompts ->
-                state.prompts_cursor <- max 0 (state.prompts_cursor - 1)
+                let next = max 0 (state.prompts_cursor - 1) in
+                if next <> state.prompts_cursor then begin
+                  state.prompts_cursor <- next;
+                  state.config_scroll <- 0;
+                  state.prompts_librarian_input <- None;
+                  state.prompts_librarian_input_error <- None;
+                  state.prompts_librarian_input_loading <- false
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -8290,12 +8359,19 @@ let main () =
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+       | Some "i" | Some "I"
+         when state.view = Config && state.config_prompts ->
+           handle_librarian_input_read ()
        | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
            state.config_prompts <- not state.config_prompts;
            state.prompts_cursor <- 0;
+           state.config_scroll <- 0;
+           state.prompts_librarian_input <- None;
+           state.prompts_librarian_input_error <- None;
+           state.prompts_librarian_input_loading <- false;
            if state.config_prompts && state.prompts_snapshot = None then
              launch_prompts_load state ~mailbox:async_messages
        | Some "p" | Some "P" ->

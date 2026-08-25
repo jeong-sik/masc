@@ -612,6 +612,53 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
        | exception Yojson.Json_error detail ->
            Error ("memory journal was not JSON: " ^ detail))
 
+(** Fetch one actual Librarian input only when the operator asks from Config.
+    The run listing deliberately omits payloads; first resolve the newest
+    Librarian run id, then open that one Admin-only detail record. This keeps a
+    normal prompt-list refresh from downloading the potentially large bounded
+    conversation input of every retained run. *)
+let fetch_latest_librarian_input ~(host : string) ~(port : int) :
+    (string list, string) result =
+  let get_json ~label path =
+    match http_get ~host ~port ~path with
+    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+        Error (Printf.sprintf "%s returned %d: %s" label status body)
+    | Ok (_, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> Ok json
+         | exception Yojson.Json_error detail ->
+             Error (label ^ " was not JSON: " ^ detail))
+  in
+  let open Result.Syntax in
+  let rec find_run_id ~pages_left before =
+    if pages_left <= 0 then
+      Error "Librarian run search exceeded 50 exact-lane pages"
+    else
+      let path =
+        match before with
+        | None -> "/api/v1/dashboard/exact-lane-runs?limit=200"
+        | Some (started_at, run_id) ->
+            Printf.sprintf
+              "/api/v1/dashboard/exact-lane-runs?limit=200&before_started_at=%.17g&before_run_id=%s"
+              started_at
+              (percent_encode_path_segment run_id)
+      in
+      let* listing = get_json ~label:"exact lane run listing" path in
+      let* page = Masc.Tui_decode.decode_librarian_run_page listing in
+      match page.lrp_run_id, page.lrp_next with
+      | Some run_id, _ -> Ok run_id
+      | None, Some cursor -> find_run_id ~pages_left:(pages_left - 1) (Some cursor)
+      | None, None -> Error "no retained Librarian exact run"
+  in
+  let* run_id = find_run_id ~pages_left:50 None in
+  let* detail =
+    get_json
+      ~label:"Librarian exact run detail"
+      ("/api/v1/dashboard/exact-lane-runs/" ^ percent_encode_path_segment run_id)
+  in
+  Masc.Tui_decode.decode_librarian_actual_input ~run_id detail
+
 (** Fetch the two independent observations the context inspector joins. A
     failure on one stays beside the other instead of blanking the whole view:
     turn records can still prove composition when exact prompt text was never

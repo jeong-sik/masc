@@ -187,6 +187,32 @@ let () =
                      && (try ignore (Str.search_forward (Str.regexp_string "TestKeeper") rendered 0); true
                          with Not_found -> false))
               | Error msg -> fail msg);
+          test_case "resolve and render returns the exact source snapshot" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.resolve_and_render_prompt_template "test.render"
+                  [
+                    ("identity_header", "TestKeeper");
+                    ("instructions_block", "do things");
+                    ("goal_lines", "goal1");
+                  ]
+              with
+              | Ok (resolution, rendered) ->
+                  check string "source" "file" resolution.source;
+                  check string "rendered from returned template"
+                    rendered
+                    (match
+                       Prompt_registry.render_prompt_template "test.render"
+                         [
+                           ("identity_header", "TestKeeper");
+                           ("instructions_block", "do things");
+                           ("goal_lines", "goal1");
+                         ]
+                     with
+                     | Ok value -> value
+                     | Error msg -> fail msg)
+              | Error msg -> fail msg);
           test_case "render_prompt_template leaves braces in values literal" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->

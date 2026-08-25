@@ -1254,10 +1254,15 @@ let run_turn
          | Some (_, reason) -> Some reason
          | None -> fallback_reason
        in
-       let settled_runtime_id, settled_max_context =
+       let settled_runtime_id =
          match turn_result with
-         | Ok result -> result.runtime_id, result.max_context
-         | Error _ -> runtime_id_string, max_context
+         | Ok result -> result.runtime_id
+         | Error _ -> runtime_id_string
+       in
+       let settled_context_window =
+         Keeper_turn_record_writer.context_window_of_turn
+           ~turn_budget:max_context
+           (match turn_result with Ok _ -> `Produced_result | Error _ -> `Errored)
        in
        let receipt_result =
          Keeper_agent_run_receipt.finalize
@@ -1436,7 +1441,7 @@ let run_turn
             (Option.map
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
-          ~context_window:(Some settled_max_context)
+          ~context_window:settled_context_window
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms

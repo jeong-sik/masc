@@ -109,6 +109,45 @@ let test_missing_database_is_not_a_denial () =
   | Ok () -> fail "a nonexistent database reported readable"
 ;;
 
+(* The branch that actually fires on a Mac without Full Disk Access, and the
+   only reason [Access_denied] is a separate constructor. Written as "the
+   module agrees with the OS" rather than "the module says denied", because a
+   CI runner that happens to be root can read a mode-000 file and a test that
+   asserted the verdict outright would be lying about what it proved. *)
+let test_access_verdict_matches_the_os () =
+  incr temp_counter;
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "imessage-unreadable-%d-%06d.db" (Unix.getpid ())
+         !temp_counter)
+  in
+  let oc = open_out path in
+  output_string oc "not really a database";
+  close_out oc;
+  Unix.chmod path 0o000;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chmod path 0o600;
+      Sys.remove path)
+    (fun () ->
+      let os_says_readable =
+        match Unix.access path [ Unix.R_OK ] with
+        | () -> true
+        | exception Unix.Unix_error _ -> false
+      in
+      match Db.check_access ~db_path:path, os_says_readable with
+      | Ok (), true -> ()
+      | Error (Db.Access_denied reported), false ->
+        check string "the denial names the file the operator has to grant"
+          path reported
+      | Ok (), false -> fail "the OS refuses the read and check_access allowed it"
+      | Error other, true ->
+        failf "the OS allows the read and check_access refused it (%s)"
+          (Db.error_to_string other)
+      | Error other, false ->
+        failf "expected Access_denied, got %s" (Db.error_to_string other))
+;;
+
 let test_poll_selects_only_inbound_imessages () =
   with_temp_db @@ fun path ->
   create_fixture path;
@@ -309,6 +348,8 @@ let () =
             test_redaction_keeps_the_routing_prefix
         ; test_case "a missing database is not a denial" `Quick
             test_missing_database_is_not_a_denial
+        ; test_case "the access verdict matches the OS" `Quick
+            test_access_verdict_matches_the_os
         ; test_case "the poll selects only inbound iMessages" `Quick
             test_poll_selects_only_inbound_imessages
         ; test_case "the cursor excludes what was delivered" `Quick

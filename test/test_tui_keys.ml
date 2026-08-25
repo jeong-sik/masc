@@ -87,7 +87,7 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp / PgDn:page  Right / Enter:detail  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp / PgDn:page  Right / Enter:detail  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_overview_footer_projects_by_focus () =

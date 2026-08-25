@@ -159,6 +159,7 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp / PgDn" "page"
       ; b Act "Right / Enter" "detail"
+      ; b Act "Esc" "overview"
       ]
       @ listing_meta
   | Repositories ->

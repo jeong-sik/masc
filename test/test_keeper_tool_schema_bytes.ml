@@ -66,9 +66,13 @@ let measured ~surface =
    (surface = All) must keep the exact same tool surface it had before this
    feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
    2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
-   surface by 567 bytes (count unchanged at 82). *)
-let all_surface_golden_count = 86
-let all_surface_golden_bytes = 72_787
+   surface by 567 bytes (count unchanged at 82). Re-pinned on 2026-08-25 to 87
+   tools / 74,267 bytes: [keeper_code_query] joined the surface with the
+   language-server lookup (#30539), which is a tool the feature means every
+   undeclared Keeper to have. The golden moves when a tool is added on purpose;
+   it exists so one added by accident cannot move it quietly. *)
+let all_surface_golden_count = 87
+let all_surface_golden_bytes = 74_267
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

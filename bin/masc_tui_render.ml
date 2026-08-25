@@ -3526,15 +3526,14 @@ let render_keeper_message (state : state) =
           let request_label = Keeper_chat.compact_request_id request_id in
           let entry ?(markdown_source = Message_layout.Markdown_streaming) style
               role_label body =
-            let role_label =
-              Message_layout.align_role_label ~column:role_label_column
-                ("↳ " ^ role_label)
-            in
             ({ style;
                timestamp = "live";
+               (* Aligned once, like the committed rows above. The arrow is
+                  part of the name it continues, so it goes in before the
+                  alignment rather than after it. *)
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
-                   ~style role_label;
+                   ~style ("↳ " ^ role_label);
                request_label;
                body;
                markdown_source;

@@ -2762,3 +2762,153 @@ module For_testing = struct
   let on_operation_execution_settled = on_operation_execution_settled
   let register_operation_live_sink = register_operation_live_sink
 end
+
+(* POST /api/v1/keepers/ask-answer
+
+   The operator answers a Keeper's question from whichever surface they happen
+   to be at. Two surfaces can submit for the same ask at once and nothing here
+   locks the log: the fold settles on first write, so this responds with what
+   actually landed rather than echoing what this caller sent. A second
+   submission gets the answer that won, not a bare rejection -- the surface
+   showing it has to be able to say what was chosen. *)
+let ask_answer_response_of_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String "chose") -> (
+          match List.assoc_opt "choice_ids" fields with
+          | Some (`List items) ->
+              let rec collect acc = function
+                | [] -> Ok (Keeper_ask.Chose { choice_ids = List.rev acc })
+                | `String id :: rest -> collect (id :: acc) rest
+                | _ -> Error "choice_ids must be an array of strings"
+              in
+              collect [] items
+          | Some _ | None -> Error "chose requires choice_ids")
+      | Some (`String "wrote") -> (
+          match List.assoc_opt "text" fields with
+          | Some (`String text) -> Ok (Keeper_ask.Wrote text)
+          | Some _ | None -> Error "wrote requires text")
+      | Some (`String "skipped") -> Ok Keeper_ask.Skipped
+      | Some (`String other) -> Error (Printf.sprintf "unknown response kind %S" other)
+      | Some _ | None -> Error "response requires a kind")
+  | _ -> Error "each answer response must be an object"
+
+let ask_answer_submissions_of_json items =
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | (`Assoc fields as item) :: rest -> (
+        match List.assoc_opt "question_id" fields with
+        | Some (`String question_id) -> (
+            match List.assoc_opt "response" fields with
+            | Some response_json -> (
+                match ask_answer_response_of_json response_json with
+                | Ok response -> collect ((question_id, response) :: acc) rest
+                | Error message -> Error message)
+            | None -> Error "each answer requires a response")
+        | Some _ | None ->
+            let (_ : Yojson.Safe.t) = item in
+            Error "each answer requires a question_id (string)")
+    | _ -> Error "answers must be an array of objects"
+  in
+  collect [] items
+
+let ask_answer_failure_status = function
+  | Keeper_ask_store.Ask_not_found _ -> `Not_found
+  | Keeper_ask_store.Already_answered _ | Keeper_ask_store.Already_withdrawn _ -> `Conflict
+  | Keeper_ask_store.Rejected _ -> `Bad_request
+  | Keeper_ask_store.Store_failed _ -> `Internal_server_error
+
+let ask_answer_failure_json failure =
+  let detail = Keeper_ask_store.answer_failure_to_string failure in
+  match failure with
+  | Keeper_ask_store.Already_answered { answers; answered_at; _ } ->
+      `Assoc
+        [
+          ("error", `String detail);
+          ("state", `String "answered");
+          ("answered_at", `Float answered_at);
+          ( "answered_question_ids",
+            `List
+              (List.map
+                 (fun (answer : Keeper_ask.answer) -> `String answer.question_id)
+                 answers) );
+        ]
+  | Keeper_ask_store.Ask_not_found _
+  | Keeper_ask_store.Already_withdrawn _
+  | Keeper_ask_store.Rejected _
+  | Keeper_ask_store.Store_failed _ ->
+      `Assoc [ ("error", `String detail) ]
+
+let handle_keeper_ask_answer state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      let parsed =
+        try
+          match Yojson.Safe.from_string body_str with
+          | `Assoc fields ->
+              let string_field name =
+                match List.assoc_opt name fields with
+                | Some (`String value) -> Ok (String.trim value)
+                | Some _ | None -> Error (Printf.sprintf "%s (string) is required" name)
+              in
+              let ( let* ) = Result.bind in
+              let* keeper_name = string_field "name" in
+              let* ask_id = string_field "ask_id" in
+              let* submissions =
+                match List.assoc_opt "answers" fields with
+                | Some (`List items) -> ask_answer_submissions_of_json items
+                | Some _ | None -> Error "answers (array) is required"
+              in
+              let actor_id =
+                match List.assoc_opt "actor_id" fields with
+                | Some (`String value) -> Some (String.trim value)
+                | Some _ | None -> None
+              in
+              let session_id =
+                match List.assoc_opt "session_id" fields with
+                | Some (`String value) -> Some (String.trim value)
+                | Some _ | None -> None
+              in
+              Ok (keeper_name, ask_id, submissions, actor_id, session_id)
+          | _ -> Error "JSON object body required"
+        with Yojson.Json_error message -> Error ("invalid json: " ^ message)
+      in
+      match parsed with
+      | Error message ->
+          respond_json_value_with_cors ~status:`Bad_request request reqd
+            (keeper_chat_stream_error_json message)
+      | Ok (keeper_name, ask_id, submissions, actor_id, session_id) ->
+          if not (Keeper_registry.is_registered ~base_path keeper_name) then
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (keeper_chat_stream_error_json "keeper not registered")
+          else
+            let responder =
+              {
+                Keeper_ask.surface = Surface_ref.Dashboard { session_id };
+                actor_id;
+                display_name = None;
+              }
+            in
+            let now = Time_compat.now () in
+            match
+              Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id ~submissions ~responder
+                ~now
+            with
+            | Error failure ->
+                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s refused=%s" keeper_name
+                  ask_id
+                  (Keeper_ask_store.answer_failure_to_string failure);
+                respond_json_value_with_cors ~status:(ask_answer_failure_status failure) request
+                  reqd (ask_answer_failure_json failure)
+            | Ok answers ->
+                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s answers=%d" keeper_name
+                  ask_id (List.length answers);
+                respond_json_value_with_cors ~status:`OK request reqd
+                  (`Assoc
+                    [
+                      ("recorded", `Bool true);
+                      ("ask_id", `String ask_id);
+                      ("answer_count", `Int (List.length answers));
+                      ( "open_remaining",
+                        `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name) );
+                    ]))

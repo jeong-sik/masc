@@ -1,8 +1,8 @@
 (** Server_routes_http_routes_channel_gate — HTTP routes for the
     channel-gate connector dashboard surface.
 
-    Wires read-only operator endpoints exposing connector state
-    (Discord, iMessage). Daemon-side fetch fibers are spawned under
+    Wires read-only operator endpoints exposing the state of every
+    registered connector. Daemon-side fetch fibers are spawned under
     [~sw]; periodic refresh uses [~clock]. *)
 
 val add_routes :

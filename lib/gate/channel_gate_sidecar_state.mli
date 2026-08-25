@@ -5,7 +5,7 @@
     keeps its bindings beside it. This functor turns that pair of files into
     the same dashboard bind/unbind and connector status API the in-process
     connectors serve, so liveness, staleness and path resolution are decided
-    in one place rather than per connector. Telegram and iMessage instantiate
+    in one place rather than per connector. Telegram instantiates
     it. *)
 
 module type Config = sig

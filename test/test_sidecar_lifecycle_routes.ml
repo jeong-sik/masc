@@ -189,9 +189,12 @@ let test_validate_rejects_path_traversal () =
 let test_known_ids_size_matches_dashboard () =
   check
     int
-    "exactly 2 external sidecars (dashboard KNOWN minus IN_PROCESS ids)"
-    2
-    (List.length Routes.known_ids)
+    "exactly 1 external sidecar (dashboard KNOWN minus IN_PROCESS ids)"
+    1
+    (List.length Routes.known_ids);
+  (* Naming it as well as counting it: a swap that kept the count would pass
+     the size check while pointing the allowlist at a different connector. *)
+  check (list string) "and it is telegram" [ "telegram" ] Routes.known_ids
 ;;
 
 (* ---- clamp_lines: bound the ?lines=N query param to [1, 1000] so a
@@ -1336,7 +1339,7 @@ let () =
             test_today_log_file_falls_back_to_project_root_log
         ] )
     ; ( "invariants"
-      , [ test_case "known_ids size = 2" `Quick test_known_ids_size_matches_dashboard ] )
+      , [ test_case "known_ids size = 1" `Quick test_known_ids_size_matches_dashboard ] )
     ; ( "start_plan"
       , [ test_case
             "detached argv contract"

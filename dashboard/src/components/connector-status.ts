@@ -27,7 +27,7 @@ import {
 import { dashboardRuntime } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
-  IN_PROCESS_CONNECTOR_ENV,
+  IN_PROCESS_CONNECTOR_ACTIVATION,
   isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
   sidecarCommands,
@@ -40,7 +40,7 @@ import {
 export {
   KNOWN_CONNECTOR_IDS,
   IN_PROCESS_CONNECTOR_IDS,
-  IN_PROCESS_CONNECTOR_ENV,
+  IN_PROCESS_CONNECTOR_ACTIVATION,
   isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
   sidecarCommands,
@@ -605,7 +605,7 @@ function connectorWarningNextHint(
     return html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
   }
   if (isInProcessConnector(connectorId)) {
-    return html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and the <${Tk}>${IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]}<//> env var.`
+    return html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and <${Tk}>${IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId]}<//>.`
   }
   return html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`
 }
@@ -1060,12 +1060,13 @@ function ConnectorLivePanel({
 
       ${showInProcessUnavailableHint
         ? (() => {
-            // RFC-0203 §Phase 3: in-process gateways (Discord, Slack) have no
-            // sidecar process to start, so the operator sees this hint
-            // instead of the "Start sidecar" panel. Same amber tone as
-            // the sidecar panel — "needs action, not broken" — but the
-            // remediation is an env var + restart, not a CLI command.
-            const envVar = IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]
+            // RFC-0203 §Phase 3: in-process gateways (Discord, Slack,
+            // iMessage) have no sidecar process to start, so the operator sees
+            // this hint instead of the "Start sidecar" panel. Same amber tone
+            // as the sidecar panel — "needs action, not broken" — but the
+            // remediation is a credential or a permission plus a restart, not
+            // a CLI command.
+            const activation = IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId]
             return html`
               <${SurfaceCard}
                 class="mt-3 !border-dashed !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-3 text-xs"
@@ -1086,7 +1087,7 @@ function ConnectorLivePanel({
                     : null}
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${activation}<//>을 갖춘 뒤 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </${SurfaceCard}>

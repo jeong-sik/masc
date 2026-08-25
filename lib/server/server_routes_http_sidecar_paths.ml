@@ -1,11 +1,11 @@
 (** Sidecar id, root, status, and script path helpers. *)
 
 (** Whitelist of sidecars the backend will spawn or signal: the connectors
-    that run as external processes under [sidecars/<id>-bot/]. Discord and
-    Slack run in-process and are not sidecar ids. Anything else
+    that run as external processes under [sidecars/<id>-bot/]. Discord, Slack
+    and iMessage run in-process and are not sidecar ids. Anything else
     short-circuits at the request boundary before any process dispatch can see
     an attacker-controlled id. *)
-let known_ids = [ "imessage"; "telegram" ]
+let known_ids = [ "telegram" ]
 
 (** Pure whitelist check; exposed so unit tests can confirm shell-meta and
     path traversal in [name=] are rejected before any process dispatch is
@@ -110,8 +110,8 @@ let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
 
 (* Local time on purpose, and the one place in this repository where that is
    the correct answer for a filename. The names this has to match are produced
-   by the sidecar launchers — sidecars/{telegram,imessage}-bot/run.sh both
-   build "$LOG_DIR/<id>-sidecar-$(date +%Y%m%d).log", and `date` without -u is
+   by the sidecar launcher — sidecars/telegram-bot/run.sh builds
+   "$LOG_DIR/<id>-sidecar-$(date +%Y%m%d).log", and `date` without -u is
    the host's calendar. Switching this to UTC would make the lookup miss the
    live file for the whole UTC-offset window, which is #10392's failure with
    the reader and writer swapped. Change it only together with those scripts. *)
@@ -135,11 +135,6 @@ type sidecar_status_config =
   }
 
 let sidecar_status_config = function
-  | "imessage" ->
-    { env_names = [ "IMESSAGE_STATUS_PATH"; "status_path" ]
-    ; toml_keys = [ "status_path" ]
-    ; stale_after_env_name = "MASC_IMESSAGE_STATUS_STALE_SEC"
-    }
   | "telegram" ->
     { env_names = [ "TELEGRAM_STATUS_PATH"; "MASC_TELEGRAM_STATUS_PATH"; "status_path" ]
     ; toml_keys = [ "status_path" ]

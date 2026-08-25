@@ -76,20 +76,21 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
 }
 
 export function ConnectorOnboardingGrid() {
+  // Derived, not written down. The literal here said 4 while the grid below
+  // rendered 2, and it drifted again the moment iMessage moved in-process.
+  const externalIds = KNOWN_CONNECTOR_IDS.filter(id => !isInProcessConnector(id))
   return html`
     <div class="v2-connector-onboarding">
       <div class="mb-3">
         <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 사이드카 없음</h3>
         <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
-          4개의 채널 사이드카를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
+          ${externalIds.length}개의 채널 사이드카를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
           <strong>Start All</strong>로 한 번에 실행하세요. 실행 후 이 화면이 라이브 상태로 갱신됩니다.
         </div>
       </div>
       <${ConnectorBulkActions} connectors=${[]} />
       <div class="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
-        ${KNOWN_CONNECTOR_IDS
-          .filter(id => !isInProcessConnector(id))
-          .map(id => html`<${OnboardingCard} connectorId=${id} />`)}
+        ${externalIds.map(id => html`<${OnboardingCard} connectorId=${id} />`)}
       </div>
     </div>
   `

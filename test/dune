@@ -710,6 +710,14 @@
   masc.embedded_config masc.tool_spawn))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
+; The iMessage connector's platform-independent core. Needs sqlite3 directly
+; because it builds a fixture chat.db rather than reading the real one, which
+; is 240MB of personal correspondence and only exists on a Mac.
+(test
+ (name test_imessage_in_process)
+ (modules test_imessage_in_process)
+ (libraries alcotest masc_test_deps sqlite3 unix))
+
 (test
  (name test_repo_store)
  (modules test_repo_store)

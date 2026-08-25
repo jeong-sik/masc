@@ -462,6 +462,40 @@ let test_finalize_tool_use_invalid_json () =
   | Ok _ -> Alcotest.fail "expected malformed tool_use arguments to fail closed"
 ;;
 
+let test_finalize_tool_use_invalid_json_preserves_assembly_boundaries () =
+  let acc = Streaming.create_stream_acc () in
+  let first = {|{"argv":["python3","-c","print(1)"|} in
+  let second = {|,"cwd":"repos/masc"}|} in
+  acc_events
+    acc
+    [ MessageStart { id = "m"; model = "glm-5.3"; usage = None }
+    ; ContentBlockStart
+        { index = 2
+        ; content_type = "tool_use"
+        ; tool_id = Some "call_live_shape"
+        ; tool_name = Some "Execute"
+        }
+    ; ContentBlockDelta { index = 2; delta = InputJsonDelta first }
+    ; ContentBlockDelta { index = 2; delta = InputJsonDelta second }
+    ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
+    ];
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "raw remains exact" (first ^ second) raw;
+    Alcotest.(check bool)
+      "delta byte boundaries retained"
+      true
+      (String.ends_with
+         ~suffix:
+           (Printf.sprintf
+              ":assembly=delta:%d,delta:%d"
+              (String.length first)
+              (String.length second))
+         reason)
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "expected malformed assembled arguments to fail closed"
+;;
+
 let test_finalize_tool_use_rejects_non_object_json () =
   List.iter
     (fun (label, raw) ->
@@ -668,6 +702,10 @@ let () =
             "tool_use invalid json"
             `Quick
             test_finalize_tool_use_invalid_json
+        ; Alcotest.test_case
+            "tool_use invalid json preserves assembly boundaries"
+            `Quick
+            test_finalize_tool_use_invalid_json_preserves_assembly_boundaries
         ; Alcotest.test_case
             "tool_use non-object json"
             `Quick

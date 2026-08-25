@@ -35,8 +35,8 @@ let test_all_variants () =
 
 let test_agent_completed_stop_reason_wire_uses_agent_core_string () =
   let fields =
-    Masc.Keeper_event_bridge_error_json.agent_completed_result_fields
-      (Ok (response (Agent_core.Types.Unknown "provider_raw_stop")))
+    Masc.Keeper_event_bridge_error_json.agent_completed_response_fields
+      (response (Agent_core.Types.Unknown "provider_raw_stop"))
   in
   match List.assoc_opt "stop_reason" fields with
   | Some (`String value) ->

@@ -1,4 +1,4 @@
-name = "masc_spawn_stop"
+name = "keeper_spawn_stop"
 description = "Signal a spawned process to end. Stopping one that has already ended is not an error, so there is no need to check first."
 additional_properties = false
 
@@ -6,4 +6,4 @@ additional_properties = false
 name = "handle"
 type = "string"
 required = true
-description = "Handle returned by masc_spawn."
+description = "Handle returned by keeper_spawn."

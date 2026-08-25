@@ -85,6 +85,31 @@ let test_a_nested_pipeline_is_flattened_not_refused () =
       (Rewrite.tag other)
 ;;
 
+(* The advice for a backgrounded command names a tool, not a pattern, and a
+   name nobody has is worse than no advice. [Subset_rewrite] lives below the
+   tool schemas and cannot read them; this is the layer that sees both. *)
+let test_the_background_advice_names_a_registered_tool () =
+  let sentence = Rewrite.to_string (Rewrite.of_reason (Gate.Unsupported_construct `Background)) in
+  let spawn =
+    match
+      List.find_opt
+        (fun (d : Tool_schemas_spawn.definition) ->
+           d.action = Tool_schemas_spawn.Start)
+        Tool_schemas_spawn.definitions
+    with
+    | Some d -> d.schema.Masc_domain.name
+    | None -> Alcotest.fail "the spawn surface has no Start tool"
+  in
+  Alcotest.(check string)
+    "the sentence names the spawn tool as it is registered"
+    (Printf.sprintf
+       "call %s instead: [&] backgrounds nothing here -- the child inherits this call's \
+        output pipe, so the call waits for it anyway, and a timeout leaves it running \
+        with no handle to stop it"
+       spawn)
+    sentence
+;;
+
 let () =
   Alcotest.run
     "subset_rewrite"
@@ -105,6 +130,10 @@ let () =
             "a nested pipeline is flattened, not refused"
             `Quick
             test_a_nested_pipeline_is_flattened_not_refused
+        ; Alcotest.test_case
+            "the background advice names a registered tool"
+            `Quick
+            test_the_background_advice_names_a_registered_tool
         ] )
     ]
 ;;

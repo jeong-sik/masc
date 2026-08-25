@@ -675,6 +675,7 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh
           python3 scripts/ci/check_h2_route_auth_parity.py
           python3 scripts/ci/check_exact_field_decoder_preflight.py
+          python3 scripts/ci/check_model_prefix_inheritance.py
           bash scripts/ci/check-enum-string-safety.sh
           python3 scripts/ci/check-env-snapshot-default-drift.py
           bash scripts/ci/check-publication-recovery-test-boundary.sh
@@ -1086,6 +1087,18 @@ jobs:
         id: ocaml_test_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         run: scripts/ci-run-test-suite.sh
+
+      # The step prints the failed assertions; this keeps everything around
+      # them. Without it the full output lived only in RUNNER_TEMP and went
+      # with the runner, so a red suite could not be diagnosed after the fact
+      # (#30117).
+      - name: Upload the test suite log
+        if: ${{ always() && steps.ocaml_test_suite.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-suite-log
+          path: ${{ runner.temp }}/test-suite.log
+          if-no-files-found: warn
 
       - name: Run transport harness suite
         id: transport_harness_suite

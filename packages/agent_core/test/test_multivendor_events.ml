@@ -96,7 +96,7 @@ let test_envelope_preserved_across_variants () =
     ; AgentCompleted
         { agent_name = "alpha"
         ; task_id = "t1"
-        ; result = Ok stub_api_response
+        ; response = stub_api_response
         ; elapsed = 1.0
         }
     ; Custom ("example.namespace.ok", `Null)
@@ -127,7 +127,7 @@ let test_payload_kind_mapping () =
     ; ( AgentCompleted
           { agent_name = "a"
           ; task_id = "t"
-          ; result = Ok stub_api_response
+          ; response = stub_api_response
           ; elapsed = 0.0
           }
       , "agent_completed" )
@@ -268,7 +268,7 @@ let test_golden_lifecycle_transcript () =
        (AgentCompleted
           { agent_name = "a"
           ; task_id = "t"
-          ; result = Ok stub_api_response
+          ; response = stub_api_response
           ; elapsed = 0.1
           }));
   let names =

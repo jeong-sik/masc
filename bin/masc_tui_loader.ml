@@ -744,6 +744,14 @@ let load_keeper_file_changes ~(host : string) ~(port : int)
   | Error err -> Error ("file change load failed: " ^ err)
   | Ok snapshot -> Ok snapshot
 
+(** Load what the working tree holds for one file, from /api/v1/git/diff. *)
+let load_git_diff ~(host : string) ~(port : int) ~(keeper : string option)
+    ~(path : string) ~(base_ref : string) : (Tui_decode.git_diff, string) result
+    =
+  match fetch_git_diff ~host ~port ~keeper ~path ~base_ref with
+  | Error err -> Error ("git diff load failed: " ^ err)
+  | Ok diff -> Ok diff
+
 (** Load the harness snapshot from /api/v1/dashboard/harness-health *)
 let load_harness ~(host : string) ~(port : int) :
     (Tui_decode.harness_snapshot, string) result =
@@ -778,6 +786,14 @@ let load_planning ~(host : string) ~(port : int) :
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json -> Tui_decode.decode_planning_snapshot json
+
+(* Which server this is. It changes only when the server restarts, so the
+   caller asks once and keeps the answer rather than paying for it per tick. *)
+let load_server_identity ~(host : string) ~(port : int) :
+    (Tui_decode.server_identity, string) result =
+  match fetch_server_identity ~host ~port with
+  | Error err -> Error ("server identity load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_server_identity json
 
 (* The fleet reading answers what the keeper list cannot: a keeper that never
    started has no row, so the roster shows nine keepers whether the tenth is

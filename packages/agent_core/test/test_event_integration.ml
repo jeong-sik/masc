@@ -176,13 +176,13 @@ let test_handoff_emits_request_and_completion () =
   | Exit -> ()
 ;;
 
-(* ── B. Agent.run emits AgentStarted/AgentCompleted/AgentFailed ── *)
-(* ── B. Agent.run emits AgentStarted/AgentCompleted/AgentFailed ── *)
+(* ── B. Agent.run emits AgentStarted and one terminal outcome ── *)
 
-(* Run-level lifecycle triple restored in [Agent.run]: the legacy
+(* Run-level lifecycle pair restored in [Agent.run]: the legacy
    orchestrator producer was removed in #1755, leaving the variants
-   without any producer.  [publish_agent_started]/[publish_agent_finished]
-   in [lib/agent/agent.ml] now emit the triple around every run. *)
+   without any producer. [publish_started]/[publish_finished]
+   in [lib/agent/agent_lifecycle_events.ml] now emit a start and one terminal
+   outcome around every run. *)
 
 let with_mock_server ~handler f =
   let port = fresh_port () in
@@ -218,6 +218,17 @@ let index_of_kind kind names =
   List.find_index (( = ) kind) names |> Option.value ~default:(-1)
 ;;
 
+let count_name kind names =
+  List.fold_left
+    (fun count name -> if String.equal name kind then count + 1 else count)
+    0
+    names
+;;
+
+let terminal_count names =
+  count_name "agent_completed" names + count_name "agent_failed" names
+;;
+
 let run_agent_once ~sw env ~base_url bus =
   let provider_config = local_provider_config ~base_url ~model_id:"mock" in
   let options =
@@ -247,14 +258,17 @@ let test_run_emits_started_and_completed () =
     in
     let sub = Event_bus.subscribe ~config bus in
     let agent, result = run_agent_once ~sw env ~base_url bus in
-    (match result with
-     | Ok _ -> ()
-     | Error error -> fail (Error.to_string error));
+    let response =
+      match result with
+      | Ok response -> response
+      | Error error -> fail (Error.to_string error)
+    in
     let events = Event_bus.drain sub in
     let names = List.map event_kind events in
     check bool "agent_started emitted" true (List.mem "agent_started" names);
-    check bool "agent_completed emitted" true (List.mem "agent_completed" names);
+    check int "one agent_completed emitted" 1 (count_name "agent_completed" names);
     check bool "agent_failed not emitted" false (List.mem "agent_failed" names);
+    check int "one terminal outcome emitted" 1 (terminal_count names);
     check
       bool
       "started before completed"
@@ -271,8 +285,8 @@ let test_run_emits_started_and_completed () =
     (match completed.payload with
      | Event_bus.AgentCompleted r ->
        check string "completed agent_name" agent_name r.agent_name;
-       check string "completed task_id groups the triple" started.meta.run_id r.task_id;
-       check bool "completed carries Ok result" true (Result.is_ok r.result);
+       check string "completed task_id groups the run" started.meta.run_id r.task_id;
+       check string "completed carries returned response" response.id r.response.id;
        check bool "completed elapsed non-negative" true (r.elapsed >= 0.)
      | _ -> fail "expected AgentCompleted payload");
     check
@@ -297,8 +311,8 @@ let failing_mock_handler _conn _req _body =
     ()
 ;;
 
-let test_run_emits_failed_companion_on_error () =
-  skip_if_bisect "Agent.run emits Failed companion on error";
+let test_run_emits_only_failed_on_error () =
+  skip_if_bisect "Agent.run emits only Failed on error";
   with_mock_server ~handler:failing_mock_handler (fun ~sw env base_url ->
     let bus = Event_bus.create () in
     let config =
@@ -313,25 +327,21 @@ let test_run_emits_failed_companion_on_error () =
     let events = Event_bus.drain sub in
     let names = List.map event_kind events in
     check bool "agent_started emitted" true (List.mem "agent_started" names);
-    check bool "agent_completed emitted" true (List.mem "agent_completed" names);
-    check bool "agent_failed emitted" true (List.mem "agent_failed" names);
+    check bool "agent_completed not emitted" false (List.mem "agent_completed" names);
+    check int "one agent_failed emitted" 1 (count_name "agent_failed" names);
+    check int "one terminal outcome emitted" 1 (terminal_count names);
     check
       bool
       "started before failed"
       true
       (index_of_kind "agent_started" names < index_of_kind "agent_failed" names);
     let started = find_kind "agent_started" events in
-    let completed = find_kind "agent_completed" events in
     let failed = find_kind "agent_failed" events in
     let agent_name = (Agent.state agent).config.name in
-    (match completed.payload with
-     | Event_bus.AgentCompleted r ->
-       check bool "completed carries Error result" true (Result.is_error r.result)
-     | _ -> fail "expected AgentCompleted payload");
     (match failed.payload with
      | Event_bus.AgentFailed r ->
        check string "failed agent_name" agent_name r.agent_name;
-       check string "failed task_id groups the triple" started.meta.run_id r.task_id;
+       check string "failed task_id groups the run" started.meta.run_id r.task_id;
        check
          bool
          "failed error non-empty"
@@ -339,11 +349,6 @@ let test_run_emits_failed_companion_on_error () =
          (String.length (Error.to_string r.error) > 0);
        check bool "failed elapsed non-negative" true (r.elapsed >= 0.)
      | _ -> fail "expected AgentFailed payload");
-    check
-      (option string)
-      "completed caused_by points at started.run_id"
-      (Some started.meta.run_id)
-      completed.meta.caused_by;
     check
       (option string)
       "failed caused_by points at started.run_id"
@@ -357,7 +362,7 @@ let test_run_emits_failed_companion_on_error () =
    observes [Eio.Cancel.Cancelled] from the inner pipeline.  Before the
    exception-arm fix in [lib/agent/agent_lifecycle_events.ml], that path
    skipped [publish_finished], leaving a dangling [AgentStarted] with no
-   [AgentCompleted]/[AgentFailed].  The wrapper now mirrors the
+   [AgentFailed].  The wrapper now mirrors the
    [Agent_trace] exception-arm contract: publish a terminal event, then
    re-raise. *)
 
@@ -416,11 +421,9 @@ let test_run_emits_terminal_on_switch_cancel () =
     let events = Event_bus.drain sub in
     let names = List.map event_kind events in
     check bool "agent_started emitted" true (List.mem "agent_started" names);
-    check
-      bool
-      "terminal event emitted (completed or failed)"
-      true
-      (List.mem "agent_completed" names || List.mem "agent_failed" names);
+    check bool "agent_completed not emitted" false (List.mem "agent_completed" names);
+    check int "one agent_failed emitted" 1 (count_name "agent_failed" names);
+    check int "one terminal outcome emitted" 1 (terminal_count names);
     Eio.Switch.fail sw Exit)
 ;;
 
@@ -443,9 +446,9 @@ let () =
             `Quick
             test_run_emits_started_and_completed
         ; test_case
-            "Agent.run emits Failed companion on error"
+            "Agent.run emits only Failed on error"
             `Quick
-            test_run_emits_failed_companion_on_error
+            test_run_emits_only_failed_on_error
         ; test_case
             "Agent.run emits terminal on switch cancel"
             `Quick

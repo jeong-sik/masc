@@ -26,10 +26,20 @@ type = "string"
 [[params]]
 name = "probe_runs"
 type = "integer"
+minimum = 1
+maximum = 4
+description = """
+How many generate calls to time. Values outside 1..4 are clamped to that \
+range rather than refused."""
 
 [[params]]
 name = "max_tokens"
 type = "integer"
+minimum = 1
+maximum = 128
+description = """
+Token ceiling for each timed generate call. Values outside 1..128 are \
+clamped to that range rather than refused."""
 
 [[params]]
 name = "think"

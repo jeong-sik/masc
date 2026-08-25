@@ -795,11 +795,10 @@ let hidden_script_findings ~sandbox { source; _ } =
     Option.map
       (fun costume ->
          ( costume.Keeper_tooling.Shell_costume.shell
-         , Keeper_tooling.Shell_costume.finding_tag
-             (Keeper_tooling.Shell_costume.classify
-                ~syntax_policy
-                ~sandbox:gate_sandbox
-                costume) ))
+         , Keeper_tooling.Shell_costume.classify
+             ~syntax_policy
+             ~sandbox:gate_sandbox
+             costume ))
       (Keeper_tooling.Shell_costume.of_argv stage.argv)
   in
   let of_program { head; tail } = List.filter_map of_stage (head :: tail) in

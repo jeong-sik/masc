@@ -646,7 +646,13 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
       |> Result.map_error Keeper_invocation_contract.request_error_to_string
       |> message_error
     in
-    let* message = message_error (Turn.preflight_keeper_msg_resolved ~meta message) in
+    let* message =
+      message_error
+        (Turn.preflight_keeper_msg_resolved
+           ~base_path:ctx.config.base_path
+           ~meta
+           message)
+    in
     submit_agent_operation
       ?continuation_channel
       ~submitted_by

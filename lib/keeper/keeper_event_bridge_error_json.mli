@@ -1,7 +1,7 @@
 (** JSON field builders for AGENT_CORE agent completion/failure SSE events. *)
 
-val agent_completed_result_fields
-  :  (Agent_core.Types.api_response, Agent_core.Error.t) result
+val agent_completed_response_fields
+  :  Agent_core.Types.api_response
   -> (string * Yojson.Safe.t) list
 
 type agent_failed_error_projection =

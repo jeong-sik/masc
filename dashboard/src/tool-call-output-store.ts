@@ -6,9 +6,11 @@
 // on a separate surface, GET /api/v1/keepers/:name/tool-calls, keyed by the
 // provider-minted tool_use_id (RFC-0233 PR-2). That id is globally unique and
 // equals the chat tool row's tool_call_id for the same execution
-// (keeper_chat_store.normalize_tool_call_id passes a non-empty call id through
-// verbatim). The join preserves that opaque identity exactly; whitespace is
-// used only to reject a blank id. A single global id→entry map lets the chat
+// (keeper_chat_store.provider_tool_call_id passes a non-empty call id through
+// verbatim, and records nothing for a call the provider did not name). The
+// join preserves that opaque identity exactly; whitespace is used only to
+// reject a blank id — an execution with no provider id has nothing to join on
+// here, and the server no longer invents one for it (#21894, #25034). A single global id→entry map lets the chat
 // ToolCallBubble derive its output by stripping the `tool-` prefix off its
 // entry id. No per-keeper scoping is needed because tool_use_ids do not
 // collide across keepers.

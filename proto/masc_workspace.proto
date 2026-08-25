@@ -46,12 +46,23 @@ message HeartbeatAck {
   int64 timestamp_ms = 1;
   int32 active_agent_count = 2;
   int32 pending_task_count = 3;
-  // Wire codec: pause | wakeup | claim:<task_id>. These are exactly the
-  // constructors of the closed Keeper_directive type this field decodes to;
-  // anything else is a decode error. ("resume" was listed here and has never
-  // been one of them — a client sending it got a decode failure, not the
-  // behaviour the comment promised.)
-  repeated string directives = 4;
+  // The closed set of directives this ack can carry. Each arm is exactly one
+  // constructor of Keeper_directive, so a wire value that names no arm is a
+  // decode error the type produces rather than a string the reader has to
+  // recognise. Previously these travelled as "pause" | "wakeup" |
+  // "claim:<task_id>": a prefix the decoder split on ':' and matched by name,
+  // which is how "resume" could sit in this comment for months while every
+  // client that sent it got a decode failure.
+  repeated Directive directives = 4;
+}
+
+message Directive {
+  oneof kind {
+    // Presence is the whole payload for these two; the value is ignored.
+    bool pause = 1;
+    bool wakeup = 2;
+    string claim_task_id = 3;
+  }
 }
 
 // ===== Event Subscription =====

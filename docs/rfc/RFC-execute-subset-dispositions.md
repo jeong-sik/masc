@@ -307,21 +307,30 @@ answers the question the live tap answers, over a month instead of an
 afternoon. Run over `<base-path>/.masc/tool_calls/2026-08/*.jsonl`, 2026-08-25:
 
 ```
-execute=29610  argv_form=28858  costumes=1584
+execute=31798  argv_form=31008  costumes=2724  lowered=1474
 
 what the gate would have said        what the caller should have called
-   1212  representable                  252  move_to_field:connector
-    252  command_separator                79  call_this_instead:execute-twice
-     79  cmd_subst                        32  move_to_field:stdin
-     27  heredoc                           5  call_this_instead:spawn
-      5  background                        4  call_this_instead:write-then-execute
-      5  redirect
-      4  subshell
+   1484  representable                 1019  move_to_field:connector
+   1019  command_separator              145  call_this_instead:execute-twice
+    142  cmd_subst                       53  move_to_field:stdin
+     39  heredoc                         18  call_this_instead:write-then-execute
+     17  subshell                         5  call_this_instead:spawn
+     13  redirect
+      5  background
+      3  arith_expansion
+      1  here_string
+      1  proc_subst
 ```
 
-Live traffic says something different, and the difference is the point.
-`shell_costume` records from `<base-path>/.masc/logs/`, 531 of them on
-2026-08-24:
+`lowered` is not an estimate: the census calls the same
+`to_shell_ir_unvalidated` step 4 calls, so the three guards it applies are the
+ones counted. 1474 of the 1484 `representable` costumes come out of it wearing
+no shell, which puts the cost of the other two guards -- a declared stream, a
+`Var` in the lowered IR -- at ten calls.
+
+Live traffic looked like it said something different, and what dissolved the
+difference is the point. `shell_costume` records from `<base-path>/.masc/logs/`,
+531 of them on 2026-08-24:
 
 ```
    314  command_separator      12  subshell         2  arith_expansion
@@ -329,26 +338,42 @@ Live traffic says something different, and the difference is the point.
     38  cmd_subst               4  heredoc          1  here_string
 ```
 
-The corpus and the tap disagree about which construct dominates: `;` is 16% of
-recorded costumes over 24 days and 59% of live ones. An earlier reading of 27
-records put `subshell` at 44%; at 531 it is 2%, so that one was sample noise
-and this note keeps both numbers rather than only the one that survived.
+This note first read that as the corpus and the tap disagreeing about which
+construct dominates -- `;` at 16% of recorded costumes against 59% of live
+ones. They were never compared over the same window: 16% averaged 24 days and
+59% was one of them. Counting the corpus a day at a time settles it.
+
+```
+days 01-23   costumes 1413   command_separator  207 (15%)   representable 1099 (78%)
+day  24      costumes 1246   command_separator  758 (61%)   representable  379 (30%)
+```
+
+61% against the tap's 59%, on the same day. The two instruments agree; what
+changed is the traffic, on 2026-08-24 and sharply. Eighty percent of the whole
+corpus is the last three days, so a month-wide average now describes a month
+that no longer exists, and the numbers above are quoted per day for that
+reason.
+
+An earlier reading of 27 records put `subshell` at 44%; at 531 it is 2%, so
+that one was sample noise, and this note keeps both numbers rather than only
+the one that survived.
 
 Two things follow for the staging below.
 
-The flip covers less than the corpus suggested. `representable` is 29% of live
-escapes, not 76%, so §3.7 step 4 buys the boundary for roughly a third of them
-rather than three quarters. It is still the largest thing the gate can take
-without refusing anything, and it is still worth doing; it is not the whole
-problem.
+The flip covers less than the first corpus reading suggested. `representable`
+was 78% of costumes through the 23rd and is 30% on the 24th, so step 4 buys the
+boundary for roughly a third of recent escapes rather than three quarters. It
+is still the largest thing the gate can take without refusing anything, and it
+is still worth doing; it is not the whole problem.
 
 And the largest live category is the one the IR refuses on purpose. `;` means
 "run the next thing whether or not the last one worked", and
 `Shell_ir.connector` omits it deliberately. Six of every ten escapes are
 someone reaching for exactly that.
 
-Except the rewrite is not reaching them, and the same logs say so: 531
-`shell_costume` records, and zero occurrences of any `Subset_rewrite` sentence.
+Except the rewrite was not reaching them, and the logs said so: 531
+`shell_costume` records on 2026-08-24, and zero occurrences of any
+`Subset_rewrite` sentence.
 
 The reason is structural rather than a defect. `Subset_rewrite` speaks on the
 refusal path, and an argv-shaped costume is never refused -- it arrives as one
@@ -358,13 +383,18 @@ and told what to write instead. §3.7 step 4 does not touch it either, because
 it lowers the `representable` ones and deliberately leaves the rest on the
 path they already work on.
 
-So the largest live category has nothing in this plan pointed at it. Refusing
+So the largest live category had nothing in this plan pointed at it. Refusing
 those calls would break work that runs today; saying nothing leaves the caller
-with no reason to stop writing them. What is left is to **tell without
+with no reason to stop writing them. What was left was to **tell without
 refusing**: when a costume is not representable, carry its rewrite back beside
 the successful result, so the caller learns what the call should have been
 while the call still does what it did. That is the same "a refusal is a
 rewrite" shape as §3.1, applied where there is no refusal to carry it.
+
+Shipped. The rewrite rides back on the answer as `escaped_shell` metadata --
+`shell`, `finding`, and `should_have_been`, one entry per costume the gate
+would have refused. The disposition and the payload are untouched, so a call
+that worked still reads as a call that worked.
 
 
 Two entries of the first draft do not survive it.
@@ -374,15 +404,16 @@ Two entries of the first draft do not survive it.
 `representable` rather than refused. Brace expansion does not appear in a month
 of traffic. The glob half of step 2 is cancelled: there is nothing to rewrite.
 
-**76.5% of the escapes carry nothing the IR cannot hold.** 1212 of 1584
+**Over half the escapes carry nothing the IR cannot hold.** 1484 of 2724
 `sh -c` calls are `representable`, so routing them through the gate costs
 nothing and buys them path scope, redirect policy, and the connector rules.
 That makes the flip the highest-value step rather than the last one -- but it
-must be partial. A blanket flip would refuse the other 372, which run today.
+must be partial. A blanket flip would refuse the other 1240, which run today.
 
-The largest refusal is `;` (252, 16% of costumes). It is the one thing
-`Shell_ir.connector` deliberately cannot say, so the most common reason to
-leave the typed surface is to ignore whether the last command worked.
+The largest refusal is `;` (1019, 37% of the whole corpus and 61% of the most
+recent day). It is the one thing `Shell_ir.connector` deliberately cannot say,
+so the most common reason to leave the typed surface is to ignore whether the
+last command worked.
 
 Revised order:
 
@@ -394,14 +425,22 @@ Revised order:
 3. **§3.6 typed-path invariants** -- shipped.
 4. **Flip §3.5, for the representable only.** Lower an argv-shaped shell
    through the gate when the classifier says `representable`, and leave the
-   rest on today's path with the tap still recording them. 1212 calls gain the
-   boundary and none change what they do.
-5. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus, and it
-   splits `dispatch_result` across 14 non-test consumers. The count says this
-   is last on traffic, not that it is unnecessary -- backgrounding has no
-   alternative today, so a caller that needs it cannot ask.
+   rest on today's path with the tap still recording them. **Shipped.** 1474
+   of the corpus's 1484 `representable` calls come out of the lowering wearing
+   no shell; none change what they do.
+5. **Tell without refusing** -- shipped, and not in the first draft at all:
+   it exists because step 4 left the largest live category untouched. The
+   rewrite rides back as `escaped_shell` metadata on the answer.
+6. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus. The
+   count says this is last on traffic, not that it is unnecessary --
+   backgrounding has no alternative today, so a caller that needs it cannot
+   ask. Its core is shipped and its tools are being wired.
 
-Steps 1-4 leave `dispatch_result` untouched.
+No step splits `dispatch_result`. The 14 non-test consumers this RFC priced
+that split at are the reason §4 of the spawn RFC declined it: a spawned
+process answers with a handle, which is a separate tool surface rather than a
+second shape for the same record, so `dispatch_result` keeps the shape only a
+dead process can fill.
 
 ## 4. Rejected alternatives
 

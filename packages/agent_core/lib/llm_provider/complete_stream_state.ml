@@ -29,9 +29,15 @@ type media =
   ; source_type : Types.media_source_kind
   }
 
+type input_piece =
+  | Delta_bytes of int
+  | Snapshot_bytes of int
+
 type block =
   { header : block_header
   ; text_chunks_rev : string list
+  ; input_pieces_rev : input_piece list
+  ; input_piece_count : int
   ; signature_chunks_rev : string list
   ; reasoning_details_rev : Types.reasoning_detail list
   ; media : media option
@@ -85,6 +91,8 @@ let empty =
 let empty_block =
   { header = Unannounced
   ; text_chunks_rev = []
+  ; input_pieces_rev = []
+  ; input_piece_count = 0
   ; signature_chunks_rev = []
   ; reasoning_details_rev = []
   ; media = None
@@ -106,6 +114,40 @@ let block_kind_of_string = function
 ;;
 
 let text_of_block block = String.concat "" (List.rev block.text_chunks_rev)
+
+let max_input_trace_pieces = 32
+
+let rec take count = function
+  | _ when count <= 0 -> []
+  | [] -> []
+  | item :: rest -> item :: take (count - 1) rest
+;;
+
+let record_input_piece piece block =
+  { block with
+    input_pieces_rev = take max_input_trace_pieces (piece :: block.input_pieces_rev)
+  ; input_piece_count = block.input_piece_count + 1
+  }
+;;
+
+let input_trace_suffix block =
+  match block.input_piece_count with
+  | 0 -> ""
+  | count ->
+    let retained = List.rev block.input_pieces_rev in
+    let omitted = count - List.length retained in
+    let pieces =
+      retained
+      |> List.map (function
+        | Delta_bytes bytes -> Printf.sprintf "delta:%d" bytes
+        | Snapshot_bytes bytes -> Printf.sprintf "snapshot:%d" bytes)
+      |> String.concat ","
+    in
+    let pieces =
+      if omitted = 0 then pieces else Printf.sprintf "omitted:%d,%s" omitted pieces
+    in
+    Printf.sprintf ":assembly=%s" pieces
+;;
 
 let signature_of_block block =
   match block.signature_chunks_rev with
@@ -169,15 +211,17 @@ let transition_open state = function
       index
       (fun block ->
          match delta with
-         | Types.TextDelta text
-         | Types.ThinkingDelta text
-         | Types.InputJsonDelta text ->
+         | Types.TextDelta text | Types.ThinkingDelta text ->
            (* Incremental deltas append unconditionally. A whole-value re-emit
               has its own [InputJsonSnapshot] constructor below, so no string
               heuristic guesses whether an object-shaped fragment replaces. *)
            { block with text_chunks_rev = text :: block.text_chunks_rev }
+         | Types.InputJsonDelta text ->
+           { block with text_chunks_rev = text :: block.text_chunks_rev }
+           |> record_input_piece (Delta_bytes (String.length text))
          | Types.InputJsonSnapshot text ->
            { block with text_chunks_rev = [ text ] }
+           |> record_input_piece (Snapshot_bytes (String.length text))
          | Types.ReasoningDetailsDelta { reasoning_content; details } ->
            { block with
              text_chunks_rev =
@@ -267,7 +311,7 @@ let media_content ~index ~kind ~make block text =
         ())
 ;;
 
-let tool_input ~index text =
+let tool_input ~index ~trace text =
   if String.trim text = ""
   then Ok (`Assoc [])
   else (
@@ -281,7 +325,11 @@ let tool_input ~index text =
     | Error (Tool_call_input.Invalid_json reason) ->
       stream_parse_failed
         ~reason:
-          (Printf.sprintf "malformed_tool_use_arguments:index:%d:%s" index reason)
+          (Printf.sprintf
+             "malformed_tool_use_arguments:index:%d:%s%s"
+             index
+             reason
+             (input_trace_suffix trace))
         ~raw:text
         ())
 ;;
@@ -324,7 +372,7 @@ let content_of_block ~disposition ~stop_reason (index, block) =
         ~reason:(Printf.sprintf "malformed_tool_use:index:%d:missing_name" index)
         tool_name
     in
-    let* input = tool_input ~index text in
+    let* input = tool_input ~index ~trace:block text in
     let* id =
       required_nonblank
         ~reason:(Printf.sprintf "malformed_tool_use:index:%d:missing_id" index)

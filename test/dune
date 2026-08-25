@@ -343,6 +343,7 @@
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
+  test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
   test_blocker_class_exhaustiveness
@@ -680,6 +681,7 @@
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
+  test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
   test_blocker_class_exhaustiveness
@@ -699,7 +701,7 @@
   test_operator_surface_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config))
+  masc.embedded_config masc.tool_spawn))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 (test
@@ -812,8 +814,18 @@
 ; them dune keeps a cached pass and the suite never re-runs when the code it
 ; asserts on changes.
 (test
+ (name test_tool_failure_logs_its_arguments)
+ (modules test_tool_failure_logs_its_arguments)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_chat_send_checks_the_registry)
  (modules test_chat_send_checks_the_registry)
+ (libraries alcotest ast_grep))
+
+(test
+ (name test_tool_call_id_is_not_invented)
+ (modules test_tool_call_id_is_not_invented)
  (libraries alcotest ast_grep))
 
 (test
@@ -2653,7 +2665,13 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries alcotest ast_grep masc_tui_keeper_chat_queue)
+ (libraries
+  alcotest
+  ast_grep
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_types)
  (deps
   (source_tree ../bin)))
 
@@ -2771,6 +2789,21 @@
  (libraries alcotest masc_tui_markdown_render_cache))
 
 (test
+ (name test_tui_diff)
+ (modules test_tui_diff)
+ (libraries alcotest masc_tui_diff))
+
+(test
+ (name test_tui_git_diff_decode)
+ (modules test_tui_git_diff_decode)
+ (libraries alcotest masc yojson))
+
+(test
+ (name test_tui_span)
+ (modules test_tui_span)
+ (libraries alcotest masc_tui_span))
+
+(test
  (name test_tui_csi)
  (modules test_tui_csi)
  (libraries alcotest masc_tui_csi))
@@ -2794,6 +2827,11 @@
  (name test_tui_frame_presenter)
  (modules test_tui_frame_presenter)
  (libraries alcotest masc_tui_frame_presenter))
+
+(test
+ (name test_tui_terminal_title)
+ (modules test_tui_terminal_title)
+ (libraries alcotest masc_tui_terminal_title masc_tui_types))
 
 (test
  (name test_tui_board_selection)
@@ -2901,6 +2939,16 @@
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
  (libraries alcotest masc masc_tui_planning_detail))
+
+(test
+ (name test_tui_roster_pane)
+ (modules test_tui_roster_pane)
+ (libraries alcotest masc_tui_roster_pane))
+
+(test
+ (name test_tui_keeper_mark)
+ (modules test_tui_keeper_mark)
+ (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))
 
 (test
  (name test_tui_render_schedule)
@@ -3023,7 +3071,7 @@
 (test
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
- (libraries alcotest yojson masc.tool_schemas masc_types))
+ (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types))
 
 (test
  (name test_skill_definition)

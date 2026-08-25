@@ -46,6 +46,14 @@ module Ansi = struct
   let default_fg = style "\027[39m"
   let gray = style "\027[90m"
 
+  (* Backgrounds, which exist for one reader: a diff row's colour has to reach
+     the right edge, because a removed line and a shorter removed line are the
+     same fact and ragged colour reads as a difference between them. 256-colour
+     rather than truecolour -- the terminals this runs in all have the cube,
+     and a palette entry degrades to something sensible where they do not. *)
+  let bg_removed = style "\027[48;5;52m"
+  let bg_added = style "\027[48;5;22m"
+
   (* Cursor movement *)
   let move_to row col = Printf.sprintf "\027[%d;%dH" row col
 

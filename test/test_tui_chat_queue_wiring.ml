@@ -9,6 +9,10 @@
 
 open Alcotest
 
+module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Tui_types = Masc_tui_types
+
 let calls ~module_path ~callee = Ast_grep.count_calls ~module_path ~callee
 
 let test_enter_during_a_turn_queues () =
@@ -27,6 +31,58 @@ let test_a_settled_turn_drains_the_queue () =
       "bin/masc_tui.ml must drain the queue when a turn settles; \
        drain_queued_message is called %d time(s)"
       n
+;;
+
+(* Two Keepers can stream at once. A single [state.msg_live] slot lets the
+   later dispatch replace the earlier transcript, so the earlier turn's next
+   delta and tool rows disappear. Both the streaming and settle paths must
+   resolve the transcript from the request's own in-flight entry. *)
+let test_concurrent_turns_keep_request_owned_transcripts () =
+  List.iter
+    (fun binding_name ->
+      let n =
+        Ast_grep.count_calls_in_value_binding
+          ~module_path:"bin/masc_tui.ml"
+          ~binding_name
+          ~callee:"inflight_entry_by_request_id"
+      in
+      if n < 1 then
+        failf
+          "%s must resolve the live transcript from the request's in-flight \
+           entry; inflight_entry_by_request_id is called %d time(s)"
+          binding_name
+          n)
+    [ "settle_live_turn"; "apply_async_message" ]
+;;
+
+let test_live_transcripts_are_kept_per_keeper () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+  in
+  let entry keeper_name started_at =
+    let sent_request =
+      Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name)
+    in
+    let live =
+      Keeper_chat_transcript.create
+        ~keeper_name
+        ~request_id:sent_request.request_id
+        ~started_at
+    in
+    ({ Tui_types.sent_request = sent_request; sent_at = started_at; live }
+      : Tui_types.inflight)
+  in
+  let alpha = entry "alpha" 1.0 in
+  let beta = entry "beta" 2.0 in
+  state.msg_inflight <- [ beta; alpha ];
+  check bool "alpha keeps its own live transcript" true
+    (match Tui_types.live_for_keeper state "alpha" with
+     | Some live -> live == alpha.live
+     | None -> false);
+  check bool "beta keeps its own live transcript" true
+    (match Tui_types.live_for_keeper state "beta" with
+     | Some live -> live == beta.live
+     | None -> false)
 ;;
 
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
@@ -243,6 +299,10 @@ let () =
             test_enter_during_a_turn_queues
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
+        ; test_case "concurrent turns keep request-owned transcripts" `Quick
+            test_concurrent_turns_keep_request_owned_transcripts
+        ; test_case "live transcripts are kept per Keeper" `Quick
+            test_live_transcripts_are_kept_per_keeper
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
         ; test_case "the pane draws the queue it counts" `Quick

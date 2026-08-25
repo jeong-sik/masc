@@ -69,7 +69,10 @@ let test_benchmark () =
 
   (* Benchmark 1: Parsing Latency (10,000 iterations) *)
   let n_parse = 10_000 in
-  let input = "echo '=== store open PRs ==='; gh pr list --repo kidsnote/web-store; echo '=== store 825 branch? ==='" in
+  (* A stand-in org. Concrete Keeper identities are declared in TOML, and
+     test_keeper_toml refuses them anywhere in OCaml source -- examples
+     included, because a name that lives in two places drifts in one. *)
+  let input = "echo '=== store open PRs ==='; gh pr list --repo acme/web-store; echo '=== store 825 branch? ==='" in
   let (_, parse_total_ms) = time_it (fun () ->
     for _ = 1 to n_parse do
       match Bash.parse_string input with

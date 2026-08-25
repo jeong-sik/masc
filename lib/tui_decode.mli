@@ -642,13 +642,16 @@ val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
-    clock's epoch reading when the wait opened. *)
+    clock's epoch reading when the wait opened. [kta_because] is the
+    policy's one-line reason for asking — for a composition it is the only
+    place the node that caused the ask is named. *)
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;
+  kta_because : string;
   kta_asked_at : float;
   kta_timeout_sec : float;
 }

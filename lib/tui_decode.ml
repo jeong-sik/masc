@@ -241,6 +241,7 @@ type keeper_tool_approval = {
   kta_tool : string;
   kta_args : string;
   kta_question : string;
+  kta_because : string;
   kta_asked_at : float;
   kta_timeout_sec : float;
 }
@@ -2887,6 +2888,7 @@ let decode_keeper_tool_approval json =
   let* kta_tool = required_string_field json "tool" in
   let* kta_args = required_string_field json "args" in
   let* kta_question = required_string_field json "question" in
+  let* kta_because = required_string_field json "because" in
   let* kta_asked_at = require_float_field json "asked_at" in
   let* kta_timeout_sec = require_float_field json "timeout_sec" in
   Ok
@@ -2895,6 +2897,7 @@ let decode_keeper_tool_approval json =
     ; kta_tool
     ; kta_args
     ; kta_question
+    ; kta_because
     ; kta_asked_at
     ; kta_timeout_sec
     }

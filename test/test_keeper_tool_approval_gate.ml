@@ -189,12 +189,48 @@ let test_the_settled_event_is_sent_on_every_path () =
       in
       check int "exactly one closing event" 1 (List.length settled))
 
+let test_a_synthetic_composition_asks_with_its_node_name () =
+  (* A composition tool has no descriptor, so the policy falls to the plan
+     index; its because is the only place the node that caused the ask is
+     named. This pins that the node name survives the gate — dropped here,
+     an operator sees a plan name and a blind yes. *)
+  let module Index = Masc.Keeper_tool_composition_plan_index in
+  let index = Index.shared () in
+  Index.record index
+    ~composition:"keeper_compose_gate_fixture"
+    ~node_tools:[ "Read"; "Edit"; "Grep" ];
+  Fun.protect
+    ~finally:(fun () -> Index.forget_all index)
+    (fun () ->
+      with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
+          match gate.Gate.pre_tool_use (pre_tool_use_event
+                 ~tool_name:"keeper_compose_gate_fixture"
+                 ~input:(`Assoc [])) with
+          | Agent_core.Hooks.ElicitToolApproval { because; _ } ->
+              let has_affix affix s =
+                let n = String.length affix in
+                let m = String.length s in
+                let rec at i =
+                  i + n <= m
+                  && (String.sub s i n = affix || at (i + 1))
+                in
+                m >= n && at 0
+              in
+              check bool "a composition's because names the node that asks"
+                true
+                (has_affix "node Edit:" because)
+          | other ->
+              Alcotest.fail
+                ("composition should ask, got: " ^ decision_to_string other)))
+
 let () =
   run "keeper_tool_approval_gate"
     [ ( "deciding whether to ask"
       , [ test_case "a read runs without asking" `Quick
             test_a_read_runs_without_asking
         ; test_case "an edit asks" `Quick test_an_edit_asks
+        ; test_case "a synthetic composition asks with its node name" `Quick
+            test_a_synthetic_composition_asks_with_its_node_name
         ; test_case "other stages pass through" `Quick
             test_other_stages_pass_through
         ] )

@@ -2173,6 +2173,7 @@ let keeper_tool_approvals_json =
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
               ; ("question", `String "Run Execute on git status?")
+              ; ("because", `String "fs tools change something outside this turn")
               ; ("asked_at", `Float 1787555000.)
               ; ("timeout_sec", `Float 180.)
               ]
@@ -2188,6 +2189,8 @@ let test_decode_keeper_tool_approvals () =
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
         held.kta_question;
+      Alcotest.(check string) "because rides with the question"
+        "fs tools change something outside this turn" held.kta_because;
       Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
       Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
   | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)

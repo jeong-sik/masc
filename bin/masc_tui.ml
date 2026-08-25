@@ -911,6 +911,10 @@ type async_msg =
      lands. *)
   | File_changes_loaded of
       string * (Masc.Tui_decode.file_change_snapshot, string) result
+  (* Keyed by the path it answers for, for the same reason the file-change
+     message carries a keeper: an answer for a file the operator has since
+     left is not this view's answer. *)
+  | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -1594,6 +1598,18 @@ let change_absolute_path ~base_path (change : Masc.Tui_decode.file_change) =
       Filename.concat bundle
         (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
 
+(* The address the git-diff read wants: relative to the keeper's playground,
+   because that is the root the server resolves ?keeper= against. Absolute
+   writes have no such address -- a worktree beside the clones is not under
+   the playground -- so they have no tree reading either, and the caller is
+   told rather than sent a path the server would resolve somewhere else. *)
+let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> Some bundle_path
+  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      Some (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
+  | Masc.Tui_decode.Fc_at_absolute_path _ -> None
+
 (* Which line to open at.
 
    The tool call records what was written and not where it landed, so the line
@@ -1663,6 +1679,34 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* What the tree holds for one file, against its last commit. HEAD rather
+   than a branch point: the question the surface answers is "did this survive
+   into the tree", and a merge base would answer a different one. *)
+let tree_diff_base_ref = "HEAD"
+
+let launch_git_diff_load state ~mailbox ~keeper ~path =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
+          ~base_ref:tree_diff_base_ref
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Git_diff_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Git_diff_loaded (path, Error "Eio switch is unavailable"))
 
 let launch_harness_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -1831,7 +1875,9 @@ let goto_surface state ~mailbox (destination : surface) =
             state.changes_keeper <- Some name;
             state.changes <- None;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0
         | Some _ | None -> ());
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
@@ -4345,8 +4391,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Ok snapshot ->
             state.changes <- Some snapshot;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            (* The open row indexes the snapshot it was opened against. A new
+               snapshot can hold a different change at the same index, so the
+               diff closes rather than silently changing what it shows. *)
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0;
+            state.changes_tree_diff <- None;
+            state.changes_tree_diff_error <- None;
+            state.changes_tree_diff_path <- None
         | Error detail -> state.changes_error <- Some detail)
+  | Git_diff_loaded (path, result) ->
+      (* An answer for a file the view has since left is not this view's
+         answer, and drawing it would put one file's diff under another's
+         name. *)
+      if Option.equal String.equal state.changes_tree_diff_path (Some path) then (
+        match result with
+        | Ok diff ->
+            state.changes_tree_diff <- Some diff;
+            state.changes_tree_diff_error <- None
+        | Error detail -> state.changes_tree_diff_error <- Some detail)
   | Lanes_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -5419,7 +5483,16 @@ let main () =
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
             | Resources ->
                 state.resource_focus <- false
-            | Verification | Harness | Repositories | Changes | Connectors | Runtime
+            | Changes ->
+                (* Esc closes the open diff and leaves the list where it was,
+                   so the row an operator was reading is still under the
+                   cursor when they come back. *)
+                state.changes_diff_row <- None;
+                state.changes_diff_scroll <- 0;
+                state.changes_tree_diff <- None;
+                state.changes_tree_diff_error <- None;
+                state.changes_tree_diff_path <- None
+            | Verification | Harness | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -5519,10 +5592,17 @@ let main () =
                 state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.repositories_scroll
-            | Changes ->
-                state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.changes_scroll
+            | Changes -> (
+                (* An open diff owns the scroll keys: the list is behind it and
+                   moving both would put the cursor somewhere the operator
+                   cannot see. *)
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <- state.changes_diff_scroll + 1
+                | None ->
+                    state.changes_scroll <-
+                      move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                        ~current:state.changes_scroll)
             | Connectors ->
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5653,11 +5733,16 @@ let main () =
                   state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.repositories_scroll
-            | Changes ->
-                if state.changes_scroll > 0 then
-                  state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.changes_scroll
+            | Changes -> (
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <-
+                      max 0 (state.changes_diff_scroll - 1)
+                | None ->
+                    if state.changes_scroll > 0 then
+                      state.changes_scroll <-
+                        move_surface_scroll state ~rows:(surface_rows ())
+                          ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
                 if state.connectors_scroll > 0 then
                   state.connectors_scroll <-
@@ -5801,7 +5886,27 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Changes -> (
+                (* The row under the cursor, read as the lines it removed and
+                   added. Held as an index rather than a copy: a refresh
+                   replaces the list, and a copy would keep drawing a change
+                   the answer no longer holds. *)
+                match state.changes with
+                | None -> add_event state "error" "no changes loaded yet"
+                | Some snapshot -> (
+                    match
+                      List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                        state.changes_scroll
+                    with
+                    | None ->
+                        add_event state "error" "no change under the cursor"
+                    | Some _ ->
+                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_scroll <- 0;
+                        state.changes_tree_diff <- None;
+                        state.changes_tree_diff_error <- None;
+                        state.changes_tree_diff_path <- None))
+            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -5875,6 +5980,33 @@ let main () =
             | Lanes | Board | Approvals | Planning | Schedules
             | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
+       | Some "d" when state.view = Changes ->
+           (* The same file, read from the tree instead of from the log. Two
+              keys rather than one view: the log says what the keeper tried to
+              write and the tree says what survived, and merging them would
+              make both untrue. *)
+           (match state.changes with
+            | None -> add_event state "error" "no changes loaded yet"
+            | Some snapshot -> (
+                match
+                  List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                    state.changes_scroll
+                with
+                | None -> add_event state "error" "no change under the cursor"
+                | Some change -> (
+                    match change_bundle_relative_path change with
+                    | None ->
+                        add_event state "error"
+                          "this write is outside the playground; the tree \
+                           reading needs a path under it"
+                    | Some path ->
+                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_scroll <- 0;
+                        state.changes_tree_diff <- None;
+                        state.changes_tree_diff_error <- None;
+                        state.changes_tree_diff_path <- Some path;
+                        launch_git_diff_load state ~mailbox:async_messages
+                          ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which is the top of the visible page. *)

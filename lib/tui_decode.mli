@@ -892,3 +892,38 @@ type file_change_snapshot = {
 
 val decode_file_change_snapshot :
   Yojson.Safe.t -> (file_change_snapshot, string) result
+
+(** {1 What the tree holds}
+
+    The other half of the diff story. A file change says what a keeper tried
+    to write; this says what is actually in the working tree now, and the two
+    disagree often enough that merging them would make both untrue.
+
+    The rows arrive already parsed, with the line numbers git computed. That
+    is the part the tool-call reading cannot have: an [Edit] records two
+    pieces of text and no idea where in the file they sit. *)
+
+type git_diff_row_kind =
+  | Gd_context
+  | Gd_added
+  | Gd_removed
+
+type git_diff_row = {
+  gdr_kind : git_diff_row_kind;
+  gdr_old_line : int option;
+      (** Absent on an added line, which exists in no earlier revision. *)
+  gdr_new_line : int option;  (** Absent on a removed line. *)
+  gdr_text : string;  (** Without git's leading marker column. *)
+}
+
+type git_diff = {
+  gd_has_changes : bool;
+      (** False when the file matches the base ref. Distinct from an empty row
+          list caused by a failed read: the caller is told which happened. *)
+  gd_rows : git_diff_row list;
+}
+
+val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
+(** Reject an unrecognised row kind rather than reading it as context: git's
+    vocabulary is closed, so a fourth word means the server changed, and
+    drawing it as unchanged would say the opposite of what happened. *)

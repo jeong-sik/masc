@@ -1243,6 +1243,7 @@ def run_terminal_scenario(
     *,
     description: str,
     interact: Interaction,
+    confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
@@ -1366,6 +1367,12 @@ def run_terminal_scenario(
                         f"TUI did not enter noncanonical no-echo mode: {active_lflag:#x}"
                     )
                 interact(process, master_fd, slave_fd, output, base_path)
+                # Most interactions finish by pressing q once. Exit is now an
+                # armed action, so the harness supplies the matching confirming
+                # input. The dedicated q and Ctrl-C interactions verify that a
+                # first press stays alive before asking for the second one.
+                if process.poll() is None:
+                    os.write(master_fd, confirm_exit)
                 wait_for_stop(
                     process,
                     master_fd,
@@ -1427,10 +1434,45 @@ def navigate_with_arrows_and_quit(
     )
     send_and_wait(process, master_fd, output, b"c", b"Esc:list")
     send_and_wait(process, master_fd, output, b"q2Q", composer_showing(b"q2Q"))
-    # That the letters became draft text is the claim above. Leaving the
-    # pane returns to the list it opened from; quitting is this walk's own exit.
+    # That the letters became draft text is the claim above. Leave the pane,
+    # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-    os.write(master_fd, b"q")
+    tab_until(process, master_fd, output, b"MASC Overview")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"q",
+        b"q: press again to quit",
+    )
+    # A different key cancels the arm and still performs its surface action.
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    tab_until(process, master_fd, output, b"MASC Overview")
+    # Arm once more, then Ctrl-C must withdraw q's separate confirmation. Both
+    # notices are events, so waiting for them also synchronizes the signal path.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"q",
+        b"q: press again to quit",
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x03",
+        b"Ctrl-C: press again to quit",
+    )
+    # If Ctrl-C left q armed, this press would end the process. Instead it
+    # starts q's own confirmation; run_terminal_scenario sends the second q.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"q",
+        b"q: press again to quit",
+    )
 
 
 def keeper_runtime_phase_and_model_interaction(
@@ -2035,13 +2077,19 @@ def keeper_message_unreliable_roster_interaction(
 
 
 def interrupt_with_ctrl_c(
-    _process: subprocess.Popen[bytes],
+    process: subprocess.Popen[bytes],
     master_fd: int,
     _slave_fd: int,
-    _output: bytearray,
+    output: bytearray,
     _base_path: str,
 ) -> None:
-    os.write(master_fd, b"\x03")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x03",
+        b"Ctrl-C: press again to quit",
+    )
 
 
 def quit_from_compact_message(
@@ -6166,6 +6214,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="Ctrl-C",
         interact=interrupt_with_ctrl_c,
+        confirm_exit=b"\x03",
     )
 
 

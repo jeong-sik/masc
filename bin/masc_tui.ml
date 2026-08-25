@@ -5576,14 +5576,16 @@ let main () =
          because it has to survive the frame the operator is looking at, and
          because the answer to "why did nothing happen" belongs in the log
          they can scroll back to. *)
-      if Atomic.exchange interrupt_requested false then
+      if Atomic.exchange interrupt_requested false then begin
+        state.quit_armed <- false;
         if Atomic.get interrupt_armed then exit 0
         else begin
           Atomic.set interrupt_armed true;
           add_event state "system"
             "Ctrl-C: press again to quit, or any other key to stay";
           Render_schedule.request render_schedule Render_schedule.Background
-        end;
+        end
+      end;
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           async_messages
@@ -5649,6 +5651,14 @@ let main () =
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
       in
+      let quit_key =
+        match key with
+        | Some k -> Render_schedule.Input_shortcut.is_quit ~message_mode k
+        | None -> false
+      in
+      (* Exit confirmation belongs only to two consecutive quit keys. A paste,
+         a mouse report, or any other key means the operator stayed. *)
+      if Option.is_some input && not quit_key then state.quit_armed <- false;
       (match state.view, key with
        | _ when compact_viewport -> ()
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
@@ -5687,13 +5697,18 @@ let main () =
       in
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some k
-         when Render_schedule.Input_shortcut.is_quit ~message_mode k
+       | Some _
+         when quit_key
               && Option.is_none state.search
               && not
                    (state.view = Board
                    && state.board_mode = Board_compose) ->
-           raise Break
+           if state.quit_armed then raise Break
+           else begin
+             state.quit_armed <- true;
+             add_event state "system"
+               "q: press again to quit, or any other key to stay"
+           end
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
           screens worth copying from. *)

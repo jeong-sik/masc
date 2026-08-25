@@ -256,6 +256,28 @@ let file_mtime path =
 
 let reset_past_day_cache_for_testing () = Atomic.set past_day_cache Past_day_path_map.empty
 
+(* What the caches are holding, so an operator reads it instead of estimating
+   it. Sizing this from outside meant taking process RSS, reading [live_words]
+   off /health, and multiplying the on-disk JSONL by a guessed parse factor --
+   an estimate that lands within a factor of two and settles nothing. The
+   parsed record count is the number that matters: it is what a retention
+   change moves, and RFC-0201 Step 4 sized this design against "15+ MB of
+   historic data" that is now an order of magnitude larger.
+
+   A read, not a gauge: this module has no metric dependency, and the caller
+   that already exports gauges decides how often to look. *)
+type cache_stats = {
+  past_day_files : int;  (** parsed day files held *)
+  past_day_records : int;  (** events across them *)
+}
+
+let cache_stats () =
+  let cache = Atomic.get past_day_cache in
+  { past_day_files = Past_day_path_map.cardinal cache
+  ; past_day_records =
+      Past_day_path_map.fold (fun _ (_, events) acc -> acc + List.length events) cache 0
+  }
+
 (* P0-4 (masc perf root-cause report, 2026-07-15, item (1)): the 2s
    [Dashboard_snapshot.refresh_loop] calls [read_all_events] up to 3x per
    tick — [json_response], [graph_json], and [agent_spans_json] each call

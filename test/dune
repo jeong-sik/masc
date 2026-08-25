@@ -3018,7 +3018,7 @@
 (test
  (name test_tui_roster_pane)
  (modules test_tui_roster_pane)
- (libraries alcotest masc_tui_roster_pane))
+ (libraries alcotest masc_tui_roster_pane masc_tui_message_layout))
 
 (test
  (name test_tui_keeper_mark)

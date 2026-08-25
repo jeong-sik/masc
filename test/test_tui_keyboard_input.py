@@ -3944,8 +3944,8 @@ def autonomous_turn_history_interaction() -> Interaction:
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("turn \u00b7 thinking".encode(), "the turn start"),
-            ("\u21b3 tools".encode(), "the nested tool block"),
+            ("TURN \u00b7 THINKING".encode(), "the turn start"),
+            ("\u21b3 TOOLS".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(
@@ -4230,7 +4230,7 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if "turn · tools".encode() not in CSI_RE.sub(b"", initial):
+        if "TURN · TOOLS".encode() not in CSI_RE.sub(b"", initial):
             raise AssertionError(
                 f"the first visible block did not start its turn: {initial!r}"
             )
@@ -4422,11 +4422,11 @@ def message_origin_badge_interaction(
     plain_frame = CSI_RE.sub(b"", frame)
     for pattern, description in (
         (
-            b"\xe2\x96\xb6\\s+(?:turn \xc2\xb7 )?vincent {2}operator-body-neutral",
+            b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
             "operator mark, origin, and separated body",
         ),
         (
-            b"\xe2\x97\x8f\\s+(?:turn \xc2\xb7 )?alpha {2}keeper-body-neutral",
+            b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
             "Keeper mark, origin, and separated body",
         ),
     ):

@@ -772,6 +772,9 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
+  (* Derived display phase for the selected long name in the narrow roster.
+     The main loop advances it only while that roster is visible. *)
+  mutable roster_marquee_frame: int;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
      a different process on the same endpoint replaces this projection, while
      a failed probe returns the display to unread rather than showing stale. *)
@@ -1306,6 +1309,7 @@ let create_state
   context_inspector_scroll = 0;
   context_inspector_exact = None;
   roster_pane_hidden = false;
+  roster_marquee_frame = 0;
   server_identity = None;
   local_base_path;
   workspace_identity =

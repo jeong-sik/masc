@@ -120,7 +120,7 @@ let test_the_cursor_lines_names_are_the_candidates () =
     (code_cursor_line_symbols state);
   (* The candidates ride the palette only with the file focused on Code. *)
   state.view <- Code;
-  state.code_focus_file <- true;
+  state.code_focus_file <- Right_pane;
   state.code_file_cursor <- 0;
   check_bool "the palette carries the def candidate" true
     (List.exists
@@ -128,7 +128,7 @@ let test_the_cursor_lines_names_are_the_candidates () =
          | _, Palette_lsp ("definition", "x") -> true
          | _ -> false)
        (palette_entries state));
-  state.code_focus_file <- false;
+  state.code_focus_file <- Left_pane;
   check_bool "an unfocused file offers no candidate" false
     (List.exists
        (function _, Palette_lsp _ -> true | _ -> false)

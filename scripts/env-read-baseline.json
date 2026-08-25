@@ -81,7 +81,7 @@
       172
     ],
     "lib/runtime/runtime_claude_code.ml": [
-      298
+      303
     ],
     "lib/runtime_model/provider_runtime_projection.ml": [
       37
@@ -172,7 +172,7 @@
       15
     ],
     "lib/workspace/workspace_utils_backend_setup.ml": [
-      207
+      251
     ],
     "packages/agent_core/lib/llm_provider/cli_common_env.ml": [
       11

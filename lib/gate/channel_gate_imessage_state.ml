@@ -103,7 +103,6 @@ let poll_state_ref : poll_state Atomic.t = Atomic.make Not_started
 let cursor_rowid_ref : int Atomic.t = Atomic.make 0
 let self_chat_guid_ref : string Atomic.t = Atomic.make ""
 let startup_error : string option Atomic.t = Atomic.make None
-let current_poll_state () = Atomic.get poll_state_ref
 
 let record_poll_ok ~cursor_rowid =
   Atomic.set cursor_rowid_ref cursor_rowid;

@@ -55,9 +55,6 @@ type poll_state =
   | Polling  (** The most recent poll read chat.db. *)
   | Degraded of string  (** The most recent poll failed; carries the reason. *)
 
-val poll_state_to_string : poll_state -> string
-val current_poll_state : unit -> poll_state
-
 val record_poll_ok : cursor_rowid:int -> unit
 (** Called after each successful poll. Publishes liveness and the cursor that
     {!status_json} reports. *)

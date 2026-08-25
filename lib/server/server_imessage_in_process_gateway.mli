@@ -24,9 +24,6 @@
 val default_poll_interval_sec : float
 (** Cadence used when [MASC_IMESSAGE_POLL_INTERVAL_SEC] is unset. *)
 
-val min_poll_interval_sec : float
-(** Floor for the configured cadence. Below it the poll is reading a 240MB
-    SQLite file faster than a person can type into it. *)
 
 val resolved_poll_interval_sec : unit -> (float, string) result
 (** The configured cadence, or an error. An unparseable or out-of-range value

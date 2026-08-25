@@ -17,6 +17,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
@@ -32,14 +33,6 @@ let wheel_notch_rows = 3
 
 let maximum_input_wait_seconds = 0.016
 let nanoseconds_per_second = 1_000_000_000.0
-
-let synchronized_output_enabled () =
-  match Sys.getenv_opt "MASC_TUI_SYNC" with
-  | Some value ->
-      (match String.lowercase_ascii (String.trim value) with
-       | "0" | "false" | "no" | "off" -> false
-       | "" | "1" | "true" | "yes" | "on" | _ -> true)
-  | None -> true
 
 (* Point fd 2 at a file under the base path, so writing to stderr cannot land
    in the frame. Best effort by construction: a surface that cannot open its
@@ -5735,9 +5728,12 @@ let main () =
     { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
   in
 
+  let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
   let frame_presenter =
     Frame_presenter.create
-      ~synchronized_output:(synchronized_output_enabled ()) ()
+      ~synchronized_output:
+        (Terminal_profile.synchronized_output terminal_profile)
+      ()
   in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
@@ -5748,8 +5744,9 @@ let main () =
        off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
-    Terminal_title.clear terminal_title ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout);
+    if Terminal_profile.dynamic_title terminal_profile then
+      Terminal_title.clear terminal_title ~write:(output_string stdout)
+        ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
   in
 
@@ -5768,7 +5765,8 @@ let main () =
       output_string stdout bracketed_paste_disable;
       (* The mode belongs to this program's screen. A shell that inherited it
          would see its own keys reported in a form it does not read. *)
-      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+      if Terminal_profile.kitty_keyboard terminal_profile then
+        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
       flush stdout
     end
   in
@@ -5825,11 +5823,11 @@ let main () =
     ~flush:(fun () -> flush stdout);
   output_string stdout mouse_tracking_enable;
   output_string stdout bracketed_paste_enable;
-  (* Asks the terminal to report which modifiers were held. A terminal that
-     does not know the request ignores it and keeps sending the legacy forms,
-     which the same vocabulary already reads -- so this is written without a
-     capability query, the way the two modes above are. *)
-  output_string stdout Masc_tui_csi.enable_kitty_keyboard;
+  (* Only terminals with an extended profile receive this opt-in. Apple
+     Terminal does not implement the protocol; keeping an unsupported control
+     sequence off its parser also keeps its crash-sensitive render path small. *)
+  if Terminal_profile.kitty_keyboard terminal_profile then
+    output_string stdout Masc_tui_csi.enable_kitty_keyboard;
   flush stdout;
 
   (* Initial load *)
@@ -8369,9 +8367,10 @@ let main () =
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
            Option.iter (apply_clamped_scroll state) clamped;
-           Terminal_title.present terminal_title ~write:(output_string stdout)
-             ~flush:(fun () -> flush stdout)
-             (terminal_title_snapshot state);
+           if Terminal_profile.dynamic_title terminal_profile then
+             Terminal_title.present terminal_title ~write:(output_string stdout)
+               ~flush:(fun () -> flush stdout)
+               (terminal_title_snapshot state);
            Frame_presenter.present frame_presenter
              ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)

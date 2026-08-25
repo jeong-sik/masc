@@ -415,6 +415,23 @@ type keeper_health
 val keeper_health_of_string : string -> keeper_health option
 val keeper_health_to_string : keeper_health -> string
 
+type keeper_health_reading =
+  | Health_running  (** Keepalive alive, turns recent, nothing quiet about it *)
+  | Health_idle  (** Keepalive alive, no recent activity *)
+  | Health_offline  (** No agent present, or the agent says it is inactive *)
+  | Health_stale  (** The last signal is older than the health window *)
+  | Health_degraded  (** The agent's status file did not read or decode *)
+  | Health_zombie  (** Registry entry outstanding, its fiber already ended *)
+
+val keeper_health_reading : keeper_health -> keeper_health_reading
+(** The health reading as a variant a surface can match.
+
+    {!keeper_health_to_string} is for showing a person a word. A surface that
+    branches on health matched that word instead, which put a renamed label
+    one edit away from silently reading as the healthy case -- and collapsed
+    stale, degraded, and zombie into it, so three broken keepers drew the
+    same mark as a working one. *)
+
 
 type keeper_runtime = {
   kr_name : string;
@@ -661,6 +678,23 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+(** Which server the TUI is talking to, as [/health] reports it.
+
+    The footer said [Port: 8935] and nothing else, so two checkouts serving
+    on the same port were indistinguishable from the screen -- and a binary
+    older than the tree it was built from looked exactly like a current one.
+    [sid_binary_commit_age_s] is how long ago that binary's commit landed,
+    which is the number that separates the two. *)
+
+val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -892,3 +926,38 @@ type file_change_snapshot = {
 
 val decode_file_change_snapshot :
   Yojson.Safe.t -> (file_change_snapshot, string) result
+
+(** {1 What the tree holds}
+
+    The other half of the diff story. A file change says what a keeper tried
+    to write; this says what is actually in the working tree now, and the two
+    disagree often enough that merging them would make both untrue.
+
+    The rows arrive already parsed, with the line numbers git computed. That
+    is the part the tool-call reading cannot have: an [Edit] records two
+    pieces of text and no idea where in the file they sit. *)
+
+type git_diff_row_kind =
+  | Gd_context
+  | Gd_added
+  | Gd_removed
+
+type git_diff_row = {
+  gdr_kind : git_diff_row_kind;
+  gdr_old_line : int option;
+      (** Absent on an added line, which exists in no earlier revision. *)
+  gdr_new_line : int option;  (** Absent on a removed line. *)
+  gdr_text : string;  (** Without git's leading marker column. *)
+}
+
+type git_diff = {
+  gd_has_changes : bool;
+      (** False when the file matches the base ref. Distinct from an empty row
+          list caused by a failed read: the caller is told which happened. *)
+  gd_rows : git_diff_row list;
+}
+
+val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
+(** Reject an unrecognised row kind rather than reading it as context: git's
+    vocabulary is closed, so a fourth word means the server changed, and
+    drawing it as unchanged would say the opposite of what happened. *)

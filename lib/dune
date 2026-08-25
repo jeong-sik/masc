@@ -166,6 +166,7 @@
   masc.dashboard_utils
   masc.masc_dashboard_api_types
   masc.tool_schemas
+  masc.tool_spawn
   masc.masc_tool_blob_store
   masc.activity_graph
   masc.prompt_registry

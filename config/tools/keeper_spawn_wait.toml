@@ -1,4 +1,4 @@
-name = "masc_spawn_wait"
+name = "keeper_spawn_wait"
 description = "Wait for a spawned process to exit, or for it to print something. The wait ends on the event, not on a clock, so it returns as soon as the thing happens. timeout_sec is a bound: reaching it is a failure to report, never a result to guess at. There is no way to wait a fixed length of time, because that succeeds on one machine and reports a state that has not happened on another."
 additional_properties = false
 
@@ -6,7 +6,7 @@ additional_properties = false
 name = "handle"
 type = "string"
 required = true
-description = "Handle returned by masc_spawn."
+description = "Handle returned by keeper_spawn."
 
 [[params]]
 name = "until"

@@ -25,9 +25,11 @@ type payload =
   | AgentCompleted of
       { agent_name : string
       ; task_id : string
-      ; result : (Types.api_response, Error.t) result
+      ; response : Types.api_response
       ; elapsed : float
       }
+  (** Successful terminal outcome for one agent run. Failed runs publish
+      [AgentFailed] instead; the two terminal variants are mutually exclusive. *)
   | AgentYielded of
       { agent_name : string
       ; task_id : string
@@ -46,12 +48,9 @@ type payload =
       ; error : Error.t
       ; elapsed : float
       }
-  (** Explicit failure variant companion to [AgentCompleted].
-          Reserved for task-level producers that end with [Error _].
-          Subscribers that only care about failures can filter on this
-          variant directly instead of matching [AgentCompleted] with a
-          [Result.is_error] check.
-          @since 0.154.0 *)
+  (** Failed terminal outcome for one agent run. A failed run does not also
+      publish [AgentCompleted].
+      @since 0.154.0 *)
   | ToolCalled of
       { invocation : Tool_contract.Invocation.t
         (** Exact run-scoped model-tool occurrence. @since 0.216.0 *)

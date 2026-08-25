@@ -149,36 +149,40 @@ module HeartbeatAck = struct
     ; directives : Keeper_directive.t list
     }
 
-  let directive_of_wire raw =
-    match raw with
-    | "pause" -> Ok Keeper_directive.Pause
-    | "wakeup" -> Ok Keeper_directive.Wakeup
-    | _ ->
-      (match String.index_opt raw ':' with
-       | Some separator ->
-         let tag = String.sub raw 0 separator in
-         let payload =
-           String.sub raw (separator + 1) (String.length raw - separator - 1)
-         in
-         if String.equal tag "claim"
-         then (
-           match Keeper_id.Task_id.of_string payload with
-           | Ok task_id -> Ok (Keeper_directive.Assign_task task_id)
-           | Error error ->
-             Error
-               (Printf.sprintf
-                  "invalid HeartbeatAck task assignment %S: %s"
-                  raw
-                  error))
-         else Error (Printf.sprintf "unknown HeartbeatAck directive tag %S" tag)
-       | None -> Error (Printf.sprintf "unknown HeartbeatAck directive %S" raw))
+  type directive_wire =
+    [ `Pause of bool
+    | `Wakeup of bool
+    | `Claim_task_id of string
+    | `not_set
+    ]
+
+  (* The wire carries one oneof arm per directive, so a value that names no
+     arm cannot be built. This used to be "pause" | "wakeup" |
+     "claim:<task_id>": a prefix split on ':' and matched by name, which is
+     how "resume" sat in the proto comment for months while every client that
+     sent it got a decode failure instead of the documented behaviour
+     (#29396 A6). [`not_set] is the one shape protobuf still admits — a
+     Directive message with no field set — and it is a decode error. *)
+  let directive_of_wire : directive_wire -> _ = function
+    | `Pause _ -> Ok Keeper_directive.Pause
+    | `Wakeup _ -> Ok Keeper_directive.Wakeup
+    | `Claim_task_id payload ->
+      (match Keeper_id.Task_id.of_string payload with
+       | Ok task_id -> Ok (Keeper_directive.Assign_task task_id)
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "invalid HeartbeatAck task assignment %S: %s"
+              payload
+              error))
+    | `not_set -> Error "HeartbeatAck directive has no kind set"
   ;;
 
-  let directive_to_wire = function
-    | Keeper_directive.Pause -> "pause"
-    | Keeper_directive.Wakeup -> "wakeup"
+  let directive_to_wire : _ -> directive_wire = function
+    | Keeper_directive.Pause -> `Pause true
+    | Keeper_directive.Wakeup -> `Wakeup true
     | Keeper_directive.Assign_task task_id ->
-      "claim:" ^ Keeper_id.Task_id.to_string task_id
+      `Claim_task_id (Keeper_id.Task_id.to_string task_id)
   ;;
 
   let decode_directives directives =

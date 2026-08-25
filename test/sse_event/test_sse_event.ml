@@ -576,21 +576,21 @@ let test_slot_scheduler_observed_byte_equal () =
     typed
 ;;
 
-(* === PR-3b byte-equal cases: agent_completed (Ok + Error), agent_failed payload.
+(* === PR-3b byte-equal cases: successful agent_completed, agent_failed payload.
 
-   These three cases pin the caller-supplied-addendum splice path
+   These cases pin the caller-supplied-addendum splice path
    (Sse_event.merge_addendum_into_record) against the pre-PR-3b
    inline `Assoc construction in runtime_event_bridge.ml.  Field
    order is [base record (atd declaration order) @ addendum]. *)
 
-let baseline_agent_completed ~agent_name ~task_id ~elapsed_s ~result_fields =
+let baseline_agent_completed ~agent_name ~task_id ~elapsed_s ~response_fields =
   let payload =
     `Assoc
       ([ "agent_name", `String agent_name
        ; "task_id", `String task_id
        ; "elapsed_s", `Float elapsed_s
        ]
-       @ result_fields)
+       @ response_fields)
   in
   baseline_wrap_event
     ~ts:common_ts
@@ -612,9 +612,9 @@ let baseline_agent_failed ~agent_name ~task_id ~elapsed_s ~error_fields =
      @ error_fields)
 ;;
 
-let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
-  (* Shape mirrors runtime_event_bridge.agent_completed_result_fields
-     for the Ok branch, including the usage tail.  Concrete values are
+let agent_completed_response_fields : (string * Yojson.Safe.t) list =
+  (* Shape mirrors keeper_event_bridge.agent_completed_response_fields,
+     including the usage tail. Concrete values are
      arbitrary -- the test pins the byte-equal property, not the
      business meaning. *)
   [ "success", `Bool true
@@ -625,14 +625,6 @@ let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
   ; "input_tokens", `Int 1234
   ; "output_tokens", `Int 567
   ; "cost_usd", `Float 0.0125
-  ]
-;;
-
-let agent_completed_error_fields : (string * Yojson.Safe.t) list =
-  [ "success", `Bool false
-  ; "result", `String "error"
-  ; "error", `String "HookExecutionFailed { hook_name = post_tool_use }"
-  ; "usage_reported", `Bool false
   ]
 ;;
 
@@ -660,14 +652,14 @@ let agent_failed_error_fields_sample : (string * Yojson.Safe.t) list =
   ]
 ;;
 
-let test_agent_completed_ok_byte_equal () =
+let test_agent_completed_response_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
       (baseline_agent_completed
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:3.5
-         ~result_fields:agent_completed_ok_fields)
+         ~response_fields:agent_completed_response_fields)
   in
   let typed =
     Yojson.Safe.to_string
@@ -678,36 +670,10 @@ let test_agent_completed_ok_byte_equal () =
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:3.5
-         ~result_fields:agent_completed_ok_fields)
+         ~response_fields:agent_completed_response_fields)
   in
   Alcotest.(check string)
-    "agent_completed (Ok) typed == baseline"
-    baseline
-    typed
-;;
-
-let test_agent_completed_error_byte_equal () =
-  let baseline =
-    Yojson.Safe.to_string
-      (baseline_agent_completed
-         ~agent_name:"alpha"
-         ~task_id:"task_42"
-         ~elapsed_s:3.5
-         ~result_fields:agent_completed_error_fields)
-  in
-  let typed =
-    Yojson.Safe.to_string
-      (Sse_event.agent_completed
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
-         ~agent_name:"alpha"
-         ~task_id:"task_42"
-         ~elapsed_s:3.5
-         ~result_fields:agent_completed_error_fields)
-  in
-  Alcotest.(check string)
-    "agent_completed (Error) typed == baseline"
+    "agent_completed success typed == baseline"
     baseline
     typed
 ;;
@@ -738,7 +704,7 @@ let test_agent_failed_payload_byte_equal () =
 
 let test_agent_completed_empty_addendum_byte_equal () =
   (* Regression guard for the empty-addendum case -- byte-equal
-     property must hold even when [result_fields = []], confirming
+     property must hold even when [response_fields = []], confirming
      the splice helper does not introduce trailing commas / spacing. *)
   let baseline =
     Yojson.Safe.to_string
@@ -746,7 +712,7 @@ let test_agent_completed_empty_addendum_byte_equal () =
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:0.001
-         ~result_fields:[])
+         ~response_fields:[])
   in
   let typed =
     Yojson.Safe.to_string
@@ -757,7 +723,7 @@ let test_agent_completed_empty_addendum_byte_equal () =
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:0.001
-         ~result_fields:[])
+         ~response_fields:[])
   in
   Alcotest.(check string)
     "agent_completed (empty addendum) typed == baseline"
@@ -813,10 +779,8 @@ let () =
             test_content_replacement_kept_byte_equal
         ; Alcotest.test_case "slot_scheduler_observed" `Quick
             test_slot_scheduler_observed_byte_equal
-        ; Alcotest.test_case "agent_completed (Ok)" `Quick
-            test_agent_completed_ok_byte_equal
-        ; Alcotest.test_case "agent_completed (Error)" `Quick
-            test_agent_completed_error_byte_equal
+        ; Alcotest.test_case "agent_completed (success)" `Quick
+            test_agent_completed_response_byte_equal
         ; Alcotest.test_case "agent_failed payload" `Quick
             test_agent_failed_payload_byte_equal
         ; Alcotest.test_case "agent_completed (empty addendum)" `Quick

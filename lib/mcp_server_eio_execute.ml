@@ -361,6 +361,23 @@ let execute_tool_eio
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args
+                 (* Keeper-only. A process started at this boundary would
+                    need a switch outliving the request, and the only one here
+                    is the server root -- which owns it for the life of the
+                    server, with no turn to end it. The name is registered and
+                    this endpoint simply cannot run it, so it says that rather
+                    than answering "Unknown tool". *)
+                 | Mod_spawn ->
+                   Some
+                     (Tool_result.error
+                        ~failure_class:Tool_result.Workflow_rejection
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                            (a spawned process needs the turn's switch, which this endpoint \
+                            does not have)"
+                           name))
                  | Mod_schedule ->
                    Tool_schedule.dispatch
                      { Tool_schedule.config

@@ -873,6 +873,63 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
         (Some "survive malformed normalized ref")
         (fetch_ok store ~sha256:reference.sha256))
 
+let test_maintenance_ignores_route_evidence_artifact_schema () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"schema-safe live artifact" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-08/25.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      let artifact_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "output_artifact"
+                  , `Assoc
+                      [ "type", `String "object"
+                      ; ( "properties"
+                        , `Assoc
+                            [ ( "_blob"
+                              , `Assoc [ "type", `String "object" ] )
+                            ] )
+                      ] )
+                ] )
+          ]
+      in
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "route_evidence"
+               , `Assoc
+                   [ ( "composable_output"
+                     , `Assoc
+                         [ "kind", `String "json"
+                         ; "schema", artifact_schema
+                         ] )
+                   ] )
+             ; ( "artifact_refs"
+               , `List [ O.normalized_artifact_ref_to_json reference ] )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "route schema is not an artifact and the durable root remains live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "live artifact is not recorded as a deletion candidate"
+        0
+        observed.candidates_recorded)
+;;
+
 let test_maintenance_truncated_normalized_blob_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1251,6 +1308,10 @@ let () =
             "maintenance malformed normalized blob fails closed"
             `Quick
             test_maintenance_malformed_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance ignores route evidence artifact schema"
+            `Quick
+            test_maintenance_ignores_route_evidence_artifact_schema;
           Alcotest.test_case
             "maintenance truncated normalized blob fails closed"
             `Quick

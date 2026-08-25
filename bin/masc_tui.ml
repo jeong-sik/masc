@@ -17,6 +17,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
@@ -568,6 +569,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
    Buffer.add_string state.msg_input materialised);
   save_message_draft state;
   state.msg_target_keeper_name <- Some keeper_name;
+  state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   Buffer.clear state.msg_input;
   List.assoc_opt keeper_name state.msg_drafts
@@ -864,6 +866,7 @@ type http_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
+  http_server_identity: (Tui_decode.server_identity, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -911,6 +914,10 @@ type async_msg =
      lands. *)
   | File_changes_loaded of
       string * (Masc.Tui_decode.file_change_snapshot, string) result
+  (* Keyed by the path it answers for, for the same reason the file-change
+     message carries a keeper: an answer for a file the operator has since
+     left is not this view's answer. *)
+  | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
@@ -1055,15 +1062,26 @@ let post_keeper_chat_watching ~mailbox ~port request =
       Masc_tui_http.post_keeper_chat_streaming ~clock ~host ~port ~on_chunk
         request
 
+let inflight_entry_by_request_id state request_id =
+  List.find_opt
+    (fun entry -> String.equal entry.sent_request.request_id request_id)
+    state.msg_inflight
+;;
+
+let inflight_by_request_id state request_id =
+  Option.map
+    (fun entry -> entry.sent_request)
+    (inflight_entry_by_request_id state request_id)
+;;
+
 (* The strict decode carries no tool information, so the rows the live pane
    drew are the only record of what the turn did. They are committed before
    the reply lands so the scrollback reads in the order it happened. *)
 let settle_live_turn state (request : Keeper_chat.request) =
-  match state.msg_live with
-  | Some live
-    when String.equal
-           (Keeper_chat_transcript.request_id live)
-           request.Keeper_chat.request_id ->
+  match inflight_entry_by_request_id state request.Keeper_chat.request_id with
+  | Some entry
+    when Keeper_chat.same_request_identity entry.sent_request request ->
+      let live = entry.live in
       let block =
         Keeper_chat_transcript.tool_block
           (Keeper_chat_transcript.tool_calls live)
@@ -1077,7 +1095,13 @@ let settle_live_turn state (request : Keeper_chat.request) =
        | rows ->
            append_chat_history state request Message_tool
              (String.concat "\n" rows));
-      state.msg_live <- None
+      (match state.msg_live with
+       | Some visible
+         when String.equal
+                (Keeper_chat_transcript.request_id visible)
+                request.Keeper_chat.request_id ->
+           state.msg_live <- None
+       | Some _ | None -> ())
   | Some _ | None -> ()
 
 (* Ask the server to interrupt the turn this request opened.
@@ -1594,6 +1618,18 @@ let change_absolute_path ~base_path (change : Masc.Tui_decode.file_change) =
       Filename.concat bundle
         (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
 
+(* The address the git-diff read wants: relative to the keeper's playground,
+   because that is the root the server resolves ?keeper= against. Absolute
+   writes have no such address -- a worktree beside the clones is not under
+   the playground -- so they have no tree reading either, and the caller is
+   told rather than sent a path the server would resolve somewhere else. *)
+let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_location with
+  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> Some bundle_path
+  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
+      Some (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
+  | Masc.Tui_decode.Fc_at_absolute_path _ -> None
+
 (* Which line to open at.
 
    The tool call records what was written and not where it landed, so the line
@@ -1663,6 +1699,34 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* What the tree holds for one file, against its last commit. HEAD rather
+   than a branch point: the question the surface answers is "did this survive
+   into the tree", and a merge base would answer a different one. *)
+let tree_diff_base_ref = "HEAD"
+
+let launch_git_diff_load state ~mailbox ~keeper ~path =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
+          ~base_ref:tree_diff_base_ref
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Git_diff_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Git_diff_loaded (path, Error "Eio switch is unavailable"))
 
 let launch_harness_load state ~mailbox =
   let host = Env_config_core.masc_host () in
@@ -1831,7 +1895,9 @@ let goto_surface state ~mailbox (destination : surface) =
             state.changes_keeper <- Some name;
             state.changes <- None;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0
         | Some _ | None -> ());
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
@@ -2078,14 +2144,6 @@ let inflight_for state keeper_name =
        state.msg_inflight)
 ;;
 
-let inflight_by_request_id state request_id =
-  Option.map
-    (fun entry -> entry.sent_request)
-    (List.find_opt
-       (fun entry -> String.equal entry.sent_request.request_id request_id)
-       state.msg_inflight)
-;;
-
 let drop_inflight state request =
   state.msg_inflight <-
     List.filter
@@ -2102,9 +2160,20 @@ let drop_inflight state request =
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
 let launch_keeper_request state ~mailbox request =
+  let live =
+    Keeper_chat_transcript.create
+      ~keeper_name:request.Keeper_chat.keeper_name
+      ~request_id:request.request_id
+      ~started_at:(Unix.gettimeofday ())
+  in
   state.msg_inflight <-
-    { sent_request = request; sent_at = Unix.gettimeofday () }
+    { sent_request = request; sent_at = Unix.gettimeofday (); live }
     :: state.msg_inflight;
+  if
+    Option.exists
+      (String.equal request.Keeper_chat.keeper_name)
+      state.msg_target_keeper_name
+  then state.msg_live <- Some live;
   let run () =
     if enqueue_dispatch_start mailbox request false
     then begin
@@ -2834,7 +2903,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation
+let load_http_surfaces ~host ~port ~approval_generation ~identity_known
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
@@ -2863,6 +2932,11 @@ let load_http_surfaces ~host ~port ~approval_generation
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
+  (* Asked for only while the answer is missing. The server names itself once;
+     a restart drops the connection, and the reconnect asks again. *)
+  let http_server_identity =
+    when_needed (not identity_known) (fun () -> load_server_identity ~host ~port)
+  in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
         load_keeper_roster ~host ~port)
@@ -2874,6 +2948,7 @@ let load_http_surfaces ~host ~port ~approval_generation
   ; http_planning
   ; http_system_logs
   ; http_fleet_safety
+  ; http_server_identity
   ; http_keeper_roster
   }
 
@@ -2885,6 +2960,14 @@ let apply_http_surfaces state results =
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
+  (* A failed read leaves the previous answer standing: the identity is the
+     same server it was, and blanking the footer on one bad tick would say
+     the opposite. *)
+  Option.iter
+    (function
+      | Ok identity -> state.server_identity <- Some identity
+      | Error _ -> ())
+    results.http_server_identity;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -3010,7 +3093,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~needs))
+             (load_http_surfaces ~host ~port ~approval_generation
+               ~identity_known:(Option.is_some state.server_identity) ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -3027,7 +3111,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~needs))
+               (load_http_surfaces ~host ~port ~approval_generation
+               ~identity_known:(Option.is_some state.server_identity) ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -4042,21 +4127,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       Fun.protect
         ~finally:(fun () -> Eio.Promise.resolve acknowledge !proceed)
         (fun () ->
-          match inflight_by_request_id state request.Keeper_chat.request_id with
-          | Some current
-            when Keeper_chat.same_request_identity current request ->
+          match
+            inflight_entry_by_request_id state request.Keeper_chat.request_id
+          with
+          | Some entry
+            when Keeper_chat.same_request_identity entry.sent_request request ->
               append_user_history_once state request;
               consume_dispatched_message_draft state request;
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")
                    request.request_id);
-              state.msg_live <-
-                Some
-                  (Keeper_chat_transcript.create
-                     ~keeper_name:request.Keeper_chat.keeper_name
-                     ~request_id:request.request_id
-                     ~started_at:(Unix.gettimeofday ()));
+              if
+                Option.exists
+                  (String.equal request.Keeper_chat.keeper_name)
+                  state.msg_target_keeper_name
+              then state.msg_live <- Some entry.live;
               proceed := true
           | Some _ | None -> ())
   | Keeper_chat_done (request, was_replay, result, acknowledge) ->
@@ -4084,14 +4170,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
       drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
-      (* Identity-guarded: a late chunk from a superseded turn must not draw
-         into the one now running. *)
-      (match state.msg_live with
-       | Some live
-         when String.equal
-                (Keeper_chat_transcript.request_id live)
-                request.Keeper_chat.request_id ->
-           List.iter (Keeper_chat_transcript.apply live) deltas
+      (* Each Keeper can stream independently. Looking up the request keeps a
+         background turn from replacing the selected Keeper's transcript and
+         keeps its tool rows available when that turn settles. *)
+      (match
+         inflight_entry_by_request_id state request.Keeper_chat.request_id
+       with
+       | Some entry
+         when Keeper_chat.same_request_identity entry.sent_request request ->
+           List.iter (Keeper_chat_transcript.apply entry.live) deltas
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       append_chat_history state request Message_status detail
@@ -4183,11 +4270,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail)
   | Keeper_chat_interrupt_done (request, result) ->
-      (match state.msg_live with
-       | Some live
-         when String.equal
-                (Keeper_chat_transcript.request_id live)
-                request.Keeper_chat.request_id ->
+      (match
+         inflight_entry_by_request_id state request.Keeper_chat.request_id
+       with
+       | Some entry
+         when Keeper_chat.same_request_identity entry.sent_request request ->
+           let live = entry.live in
            let noted =
              match result with
              | Ok (Masc_tui_http.Signalled { turn_id }) ->
@@ -4345,8 +4433,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Ok snapshot ->
             state.changes <- Some snapshot;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            (* The open row indexes the snapshot it was opened against. A new
+               snapshot can hold a different change at the same index, so the
+               diff closes rather than silently changing what it shows. *)
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0;
+            state.changes_tree_diff <- None;
+            state.changes_tree_diff_error <- None;
+            state.changes_tree_diff_path <- None
         | Error detail -> state.changes_error <- Some detail)
+  | Git_diff_loaded (path, result) ->
+      (* An answer for a file the view has since left is not this view's
+         answer, and drawing it would put one file's diff under another's
+         name. *)
+      if Option.equal String.equal state.changes_tree_diff_path (Some path) then (
+        match result with
+        | Ok diff ->
+            state.changes_tree_diff <- Some diff;
+            state.changes_tree_diff_error <- None
+        | Error detail -> state.changes_tree_diff_error <- Some detail)
   | Lanes_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -4459,6 +4565,64 @@ let mouse_tracking_disable = "\x1b[?1006;1000l"
 let mouse_tracking_on = Atomic.make true
 let toggle_mouse_tracking_key = "\020"
 
+(* Ctrl-B, as an editor toggles its side bar. The roster beside a keeper chat
+   costs 30 of the terminal's columns, and a reader who knows which keeper
+   they are talking to wants them back. A letter would not do -- in the
+   composer every letter is text. *)
+let toggle_roster_pane_key = "\002"
+
+let terminal_title_visible_keeper state =
+  match state.view with
+  | Keepers Keeper_message -> state.msg_target_keeper_name
+  | Keepers
+      (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+      | Keeper_runtime_pick) ->
+      Option.map
+        (fun (keeper : keeper) -> keeper.k_name)
+        (selected_keeper state)
+  | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
+  | Verification | Harness | Fusion | Repositories | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs -> None
+;;
+
+let terminal_title_runtime state keeper_name =
+  Option.bind keeper_name (fun name ->
+    List.find_opt
+      (fun (keeper : keeper) -> String.equal keeper.k_name name)
+      state.keepers
+    |> Option.bind (fun keeper ->
+      match (keeper_reading state keeper).Keeper_control.liveness with
+      | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
+      | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+;;
+
+let terminal_title_snapshot state =
+  let live =
+    Option.map Keeper_chat_transcript.keeper_name state.msg_live
+  in
+  let inflight =
+    List.map
+      (fun entry -> entry.sent_request.keeper_name)
+      state.msg_inflight
+  in
+  let keeper_name =
+    Terminal_title.select_keeper
+      ~live
+      ~inflight
+      ~visible:(terminal_title_visible_keeper state)
+  in
+  let activity =
+    match live, inflight with
+    | Some _, _ | None, _ :: _ -> Terminal_title.Working
+    | None, [] -> Terminal_title.Connection state.connection_status
+  in
+  Terminal_title.make
+    ~activity
+    ~keeper_name
+    ~runtime_id:(terminal_title_runtime state keeper_name)
+    ~workspace:state.workspace
+;;
+
 let toggle_mouse_tracking () =
   let on = not (Atomic.get mouse_tracking_on) in
   Atomic.set mouse_tracking_on on;
@@ -4544,6 +4708,7 @@ let main () =
     Frame_presenter.create
       ~synchronized_output:(synchronized_output_enabled ()) ()
   in
+  let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
   let restore_terminal () =
@@ -4551,6 +4716,8 @@ let main () =
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    Terminal_title.clear terminal_title ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
   in
@@ -4986,6 +5153,7 @@ let main () =
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
+        && key <> Some toggle_roster_pane_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -5005,6 +5173,12 @@ let main () =
           screens worth copying from. *)
        | Some k when String.equal k toggle_mouse_tracking_key ->
            toggle_mouse_tracking ();
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* Also above the modals: the roster is chrome around whatever is
+          showing, and reclaiming its columns should not depend on which
+          surface is up. *)
+       | Some k when String.equal k toggle_roster_pane_key ->
+           state.roster_pane_hidden <- not state.roster_pane_hidden;
            Render_schedule.request render_schedule Render_schedule.Force
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
@@ -5419,7 +5593,16 @@ let main () =
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
             | Resources ->
                 state.resource_focus <- false
-            | Verification | Harness | Repositories | Changes | Connectors | Runtime
+            | Changes ->
+                (* Esc closes the open diff and leaves the list where it was,
+                   so the row an operator was reading is still under the
+                   cursor when they come back. *)
+                state.changes_diff_row <- None;
+                state.changes_diff_scroll <- 0;
+                state.changes_tree_diff <- None;
+                state.changes_tree_diff_error <- None;
+                state.changes_tree_diff_path <- None
+            | Verification | Harness | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -5519,10 +5702,17 @@ let main () =
                 state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.repositories_scroll
-            | Changes ->
-                state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.changes_scroll
+            | Changes -> (
+                (* An open diff owns the scroll keys: the list is behind it and
+                   moving both would put the cursor somewhere the operator
+                   cannot see. *)
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <- state.changes_diff_scroll + 1
+                | None ->
+                    state.changes_scroll <-
+                      move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                        ~current:state.changes_scroll)
             | Connectors ->
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5653,11 +5843,16 @@ let main () =
                   state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.repositories_scroll
-            | Changes ->
-                if state.changes_scroll > 0 then
-                  state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.changes_scroll
+            | Changes -> (
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <-
+                      max 0 (state.changes_diff_scroll - 1)
+                | None ->
+                    if state.changes_scroll > 0 then
+                      state.changes_scroll <-
+                        move_surface_scroll state ~rows:(surface_rows ())
+                          ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
                 if state.connectors_scroll > 0 then
                   state.connectors_scroll <-
@@ -5798,10 +5993,30 @@ let main () =
                             ~mailbox:async_messages ~run_id:run.fur_run_id
                       | None -> ())
                  | Fusion_detail _ -> ())
+            | Changes -> (
+                (* The row under the cursor, read as the lines it removed and
+                   added. Held as an index rather than a copy: a refresh
+                   replaces the list, and a copy would keep drawing a change
+                   the answer no longer holds. *)
+                match state.changes with
+                | None -> add_event state "error" "no changes loaded yet"
+                | Some snapshot -> (
+                    match
+                      List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                        state.changes_scroll
+                    with
+                    | None ->
+                        add_event state "error" "no change under the cursor"
+                    | Some _ ->
+                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_scroll <- 0;
+                        state.changes_tree_diff <- None;
+                        state.changes_tree_diff_error <- None;
+                        state.changes_tree_diff_path <- None))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->
@@ -5875,6 +6090,33 @@ let main () =
             | Lanes | Board | Approvals | Planning | Schedules
             | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
+       | Some "d" when state.view = Changes ->
+           (* The same file, read from the tree instead of from the log. Two
+              keys rather than one view: the log says what the keeper tried to
+              write and the tree says what survived, and merging them would
+              make both untrue. *)
+           (match state.changes with
+            | None -> add_event state "error" "no changes loaded yet"
+            | Some snapshot -> (
+                match
+                  List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                    state.changes_scroll
+                with
+                | None -> add_event state "error" "no change under the cursor"
+                | Some change -> (
+                    match change_bundle_relative_path change with
+                    | None ->
+                        add_event state "error"
+                          "this write is outside the playground; the tree \
+                           reading needs a path under it"
+                    | Some path ->
+                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_scroll <- 0;
+                        state.changes_tree_diff <- None;
+                        state.changes_tree_diff_error <- None;
+                        state.changes_tree_diff_path <- Some path;
+                        launch_git_diff_load state ~mailbox:async_messages
+                          ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which is the top of the visible page. *)
@@ -6215,6 +6457,9 @@ let main () =
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
            Option.iter (apply_clamped_scroll state) clamped;
+           Terminal_title.present terminal_title ~write:(output_string stdout)
+             ~flush:(fun () -> flush stdout)
+             (terminal_title_snapshot state);
            Frame_presenter.present frame_presenter
              ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)

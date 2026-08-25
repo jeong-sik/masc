@@ -8,6 +8,8 @@ module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_types_profile = Masc.Keeper_types_profile
 module KT = Keeper_types
 module KR = Masc.Keeper_registry
+module Invocation = Masc.Keeper_invocation_contract
+module Turn = Masc.Keeper_turn
 module KHB = Masc.Keeper_heartbeat_snapshot
 module KHS = Masc.Keeper_keepalive_signal
 module KST = Keeper_state_machine
@@ -614,6 +616,54 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
            ~base_path:config.base_path
            ~keeper_name))
 
+let test_message_preflight_rejects_unregistered_keeper () =
+  let base_dir = temp_dir "keeper_message_preflight_registry" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      KR.For_testing.clear ();
+      let keeper_name = "persisted-but-unregistered" in
+      let meta = make_keeper_meta ~name:keeper_name () in
+      let message =
+        match
+          Invocation.direct_message
+            ~keeper_name
+            ~prompt:"run the requested turn"
+            ~direct_reply:true
+            ~channel:"agent"
+            ~user_blocks:[]
+            ~attachments:[]
+            ()
+        with
+        | Ok message -> message
+        | Error error -> fail (Invocation.request_error_to_string error)
+      in
+      match
+        Turn.preflight_keeper_msg_resolved
+          ~base_path:base_dir
+          ~meta
+          message
+      with
+      | Error detail ->
+        check string
+          "unregistered keeper is refused before durable submission"
+          "keeper persisted-but-unregistered is not registered in this server process; retry shortly or start it before sending a message"
+          detail;
+        ignore
+          (KR.For_testing.register ~base_path:base_dir keeper_name meta);
+        (match
+           Turn.preflight_keeper_msg_resolved
+             ~base_path:base_dir
+             ~meta
+             message
+         with
+         | Ok _ -> ()
+         | Error detail ->
+           failf "registered keeper was refused by message preflight: %s" detail)
+      | Ok _ -> fail "message preflight accepted an unregistered keeper")
+
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -641,6 +691,8 @@ let () =
             test_publication_recovery_turn_resolution_is_filesystem_idle;
           test_case "publication recovery scope preserves typed lookup failures" `Quick
             test_publication_recovery_scope_preserves_typed_lookup_failures;
+          test_case "message preflight rejects unregistered keeper" `Quick
+            test_message_preflight_rejects_unregistered_keeper;
           test_case "registry canonicalizes mismatched meta on register" `Quick
             test_registry_canonicalizes_mismatched_meta_on_register;
         ] );

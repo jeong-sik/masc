@@ -219,21 +219,43 @@ let turn_resources_error ~surface failure =
        ])
 ;;
 
+let require_registered_keeper ~base_path ~name ~action =
+  if Keeper_registry.is_registered ~base_path name
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "keeper %s is not registered in this server process; retry shortly or start it before %s"
+         name
+         action)
+;;
+
 let preflight_keeper_invocation ctx request =
   let name = Keeper_invocation_contract.target_name request in
   match ensure_keeper_exists ~ctx ~name with
   | Error e -> Error e
   | Ok meta ->
-    resolve_turn_runtime_id meta
-    |> Result.map (fun _ -> request)
+    Result.bind
+      (require_registered_keeper
+         ~base_path:ctx.config.base_path
+         ~name
+         ~action:"delegating work")
+      (fun () ->
+         resolve_turn_runtime_id meta
+         |> Result.map (fun _ -> request))
 ;;
 
 (* The message path resolves the keeper one call earlier and carries the
    effective meta here, so this preflight validates without a second disk
    read (RFC-0371 B6). The delegate path below still reads: it has no
    resolution step of its own. *)
-let preflight_keeper_msg_resolved ~(meta : keeper_meta) message =
-  resolve_turn_runtime_id meta |> Result.map (fun _ -> message)
+let preflight_keeper_msg_resolved ~base_path ~(meta : keeper_meta) message =
+  Result.bind
+    (require_registered_keeper
+       ~base_path
+       ~name:meta.name
+       ~action:"sending a message")
+    (fun () -> resolve_turn_runtime_id meta |> Result.map (fun _ -> message))
 ;;
 
 let preflight_keeper_delegate ctx request =

@@ -1,12 +1,12 @@
-(** A chat message is refused before it is stored when the keeper is down.
+(** A chat message is refused before it is stored when the keeper is unregistered.
 
     Whether a keeper can take a turn lives in [Keeper_registry], which is
-    process-local. [ensure_keeper_exists] reads disk meta, which a stopped
-    keeper still has, so it passed. The user row was committed first and the
-    turn then failed resolving its resources, and the raw
-    [keeper_turn_resources_unavailable] payload was what the person saw in
-    their own chat — stored durably beside the two characters they typed
-    (#25529, live 2026-07-21).
+    process-local. [ensure_keeper_exists] reads disk meta, which both a stopped
+    keeper and one awaiting autoboot registration still have, so it passed. The
+    user row was committed first and the turn then failed resolving its
+    resources, and the raw [keeper_turn_resources_unavailable] payload was what
+    the person saw in their own chat — stored durably beside the two characters
+    they typed (#25529, live 2026-07-21).
 
     [process_single_turn] asks the registry before anything is written. These
     check that the ask is still there and still ahead of the write. *)
@@ -22,7 +22,7 @@ let test_the_send_path_asks_the_registry () =
   in
   if n < 1 then
     Alcotest.failf
-      "%s must ask the registry whether the keeper is running; \
+      "%s must ask the registry whether the keeper is registered; \
        Keeper_registry.is_registered is called %d time(s)"
       binding n
 ;;

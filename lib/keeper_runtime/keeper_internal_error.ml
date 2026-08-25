@@ -1037,6 +1037,23 @@ let classify_masc_internal_error_of_string (raw : string) :
 
 let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
+  let terminal_effect_failed ~effect_disposition ~diagnostic =
+    let effect_disposition =
+      match Agent_core.Error.terminal_effect_disposition effect_disposition with
+      | Agent_core.Tool_contract.Proven_pre_effect ->
+        Tool_result.Proven_pre_effect
+      | Agent_core.Tool_contract.Proven_post_effect ->
+        Tool_result.Proven_post_effect
+      | Agent_core.Tool_contract.Effect_outcome_unknown ->
+        Tool_result.Effect_outcome_unknown
+    in
+    Some
+      (Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition
+         ; diagnostic
+         })
+  in
   match err with
   (* Live values carry the typed payload (RFC-0371 B12); the string parse
      below stays as the boundary for persisted strings and for [Internal]
@@ -1045,4 +1062,12 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
   | Agent_core.Error.Internal_carried { message; _ } ->
     classify_masc_internal_error_of_string message
   | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolEffectFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~diagnostic:detail
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolDurabilityFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~diagnostic:detail
   | _ -> None

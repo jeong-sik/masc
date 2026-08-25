@@ -473,12 +473,28 @@ let make_hooks
             |> Observability_redact.redact_preview ~max_len:240
             |> one_line_preview_for_log
         in
+        (* [params] carries key names only, which answers what the model
+           reached for but not what it asked for. A repository audit could see
+           that a gh call failed and not which slug it named, so "the keeper
+           invented an org" and "the keeper never ran gh" read the same
+           afterwards (#23822). On failure the redacted argument values go
+           beside it; a successful call still logs keys only, so the added
+           bytes land only where someone is reading back. *)
+        let failed_params =
+          match output with
+          | Ok _ -> "-"
+          | Error _ ->
+            Observability_redact.redact_json_value input
+            |> Yojson.Safe.to_string
+            |> one_line_preview_for_log
+        in
         (match outcome with
          | Tool_result.Error -> Log.Keeper.error
          | Tool_result.Ok | Tool_result.Unknown -> Log.Keeper.info)
-          "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
+          "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s \
+           out_len=%d failed_params=%s error_preview=%s"
           (!meta_ref).name tool_name input_keys input_shape outcome_s out_len
-          error_preview;
+          failed_params error_preview;
         (* Agent Core measures duration per invocation. Do not reconstruct it
            from Keeper-global mutable state: sibling calls may overlap. *)
         let duration_ms = hook_duration_ms in

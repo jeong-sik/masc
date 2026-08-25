@@ -819,6 +819,10 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
           in
           let result =
             match terminal_boundary with
+            | Some
+                (Terminal_tool_boundary
+                  { outcome = Terminal_failed _; _ } as abort_turn) ->
+              { result with success = false; abort_turn = Some abort_turn }
             | Some abort_turn -> { result with abort_turn = Some abort_turn }
             | None -> result
           in

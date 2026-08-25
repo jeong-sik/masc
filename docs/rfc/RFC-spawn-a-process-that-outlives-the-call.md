@@ -220,10 +220,14 @@ error is a typed result rendered as a message that names the next call, in the
 sense `Subset_rewrite` established: an unknown handle says the process is gone
 rather than that something failed.
 
-The `Background` arm of `Subset_rewrite` already answers `call_this_instead:
-spawn`. It becomes true when this ships; today it names a call that does not
-exist yet, which is the same gap §1 of the parent RFC described in the other
-direction.
+The `Background` arm of `Subset_rewrite` answers `call_this_instead: spawn`,
+and shipping this made it true. Its sentence names `keeper_spawn` exactly --
+the census tag stays `spawn`, because the corpus table in the parent RFC is
+keyed on it, but what the caller reads is the tool as registered. A sentence
+that said "call spawn instead" would send the reader looking for a tool nobody
+has, which is the same gap §1 of the parent RFC described in the other
+direction. `Subset_rewrite` sits below the tool schemas and cannot read them,
+so `test_subset_rewrite` compares the two.
 
 ## 4. Rejected alternatives
 
@@ -276,14 +280,18 @@ Closed by reading, 2026-08-25:
 - `dispatch_result` has fourteen non-test consumers, measured, which is the
   cost §4 declines to pay.
 
+**Whose switch?** -- answered, 2026-08-25. `Spawn_registry` takes `sw` as an
+argument, so the caller decides, and the caller the tools use is
+`Spawn_turn_registry`: the turn's. A registry held longer would keep answering
+for processes its switch already ended, and would need a retention bound to
+stop the table growing -- a cap with nothing to say. Binding it to the turn
+removes the question instead: a handle from an earlier turn finds no entry,
+and "the process ended with its turn" is what the caller is told. The MCP
+endpoint declines the four tools for the same reason -- it has no turn, only
+the server root, which owns its switch for the life of the server.
+
 Open:
 
-- **Whose switch?** A turn's switch ends when the turn does, which is the
-  behaviour codex#10767 complains about. A keeper's switch outlives turns,
-  which is what a dev server needs and also what makes #26382 possible if
-  teardown is wrong. This RFC does not choose; the first implementation takes
-  the switch as an argument and the caller decides, and the decision needs its
-  own evidence before a default exists.
 - **Does `Output_contains` need more than a literal?** A regexp would invite
   inferring meaning from output, which the workspace rules forbid elsewhere
   for good reason. Left literal until a case shows up that a literal cannot

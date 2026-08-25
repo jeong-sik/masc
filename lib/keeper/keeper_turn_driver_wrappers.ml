@@ -252,5 +252,12 @@ let run_model_with_masc_tools
                   ~config
                   ~masc_tools
                   ~dispatch
+                  ~agent_core_tool_of_masc:
+                    (fun ~name ~description ~input_schema handler ->
+                      Tool_bridge.agent_core_tool_of_masc
+                        ~name
+                        ~description
+                        ~input_schema
+                        handler)
                   ?on_event
                   goal))

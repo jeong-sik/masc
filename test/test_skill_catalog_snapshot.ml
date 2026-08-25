@@ -284,6 +284,87 @@ let test_package_id_is_one_path_segment () =
   check bool "separator rejected" true (Result.is_error (Snapshot.package_id_of_directory "a/b"))
 ;;
 
+(* entries keeps every exact identity, the shadowed one included; the
+   effective list is what a reader resolving by name actually gets. Two
+   sources declaring the same Skill name is the case that separates them, and
+   the winner has to stay addressable by package id and content revision. *)
+let test_effective_entries_drop_the_shadowed_one () =
+  let config = parse_config (config_text two_sources) in
+  let first =
+    candidate
+      ~directory:"review"
+      (document ~name:"review" ~description:"First" ~body:"first body")
+  in
+  let second =
+    candidate
+      ~directory:"review"
+      (document ~name:"review" ~description:"Second" ~body:"second body")
+  in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ first ]; [ second ] ])
+  in
+  check int "both identities kept" 2 (List.length (Snapshot.entries snapshot));
+  check int "one shadowed" 1 (List.length (Snapshot.shadows snapshot));
+  match Snapshot.effective_entries snapshot with
+  | [ entry ] ->
+    check
+      string
+      "the winner is the effective entry"
+      "First"
+      entry.Snapshot.document.description;
+    check
+      string
+      "its package id is addressable"
+      "review"
+      (Snapshot.package_id_to_string entry.Snapshot.identity.package_id);
+    check
+      bool
+      "its content revision is named"
+      true
+      (String.length (Snapshot.content_revision_to_string entry.Snapshot.content_revision) > 0)
+  | entries -> failf "expected one effective entry, got %d" (List.length entries)
+;;
+
+(* A Skill config that cannot be read still produces a snapshot. Without one
+   the catalog reads as a workspace that has no Skills, which is a different
+   fact from a workspace whose Skill config could not be opened. *)
+let test_unreadable_config_still_produces_a_snapshot () =
+  let snapshot = Snapshot.config_unreadable ~detail:"permission denied" in
+  (match Snapshot.config_state snapshot with
+   | Snapshot.Config_unreadable { detail } ->
+     check string "the reason is kept" "permission denied" detail
+   | Snapshot.Configured _ | Snapshot.Config_rejected _ ->
+     fail "an unreadable config did not record itself as unreadable");
+  check int "no entries" 0 (List.length (Snapshot.entries snapshot));
+  check int "no effective entries" 0 (List.length (Snapshot.effective_entries snapshot))
+;;
+
+(* A rejected config keeps the diagnostics that rejected it, and names the
+   source revision they were produced from: an operator reading the catalog
+   has to be able to tell which text was refused. *)
+let test_rejected_config_keeps_its_diagnostics () =
+  let bad = "[skills]\nactivation-lifetime = 3\n" in
+  let diagnostics =
+    match Skill_source_config.parse_text bad with
+    | Error diagnostics -> diagnostics
+    | Ok _ -> fail "expected the sample config to be rejected"
+  in
+  let snapshot = Snapshot.config_rejected ~source_text:bad ~diagnostics in
+  check int "no entries" 0 (List.length (Snapshot.entries snapshot));
+  match Snapshot.config_state snapshot with
+  | Snapshot.Config_rejected { source_revision; diagnostics = kept } ->
+    check int "diagnostics kept" (List.length diagnostics) (List.length kept);
+    check
+      bool
+      "the refused source is named by a revision"
+      true
+      (String.length (Snapshot.config_source_revision_to_string source_revision) > 0)
+  | Snapshot.Configured _ | Snapshot.Config_unreadable _ ->
+    fail "a rejected config did not record itself as rejected"
+;;
+
 let () =
   run
     "skill_catalog_snapshot"
@@ -305,6 +386,12 @@ let () =
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment
+        ; test_case "effective entries drop the shadowed one" `Quick
+            test_effective_entries_drop_the_shadowed_one
+        ; test_case "unreadable config still snapshots" `Quick
+            test_unreadable_config_still_produces_a_snapshot
+        ; test_case "rejected config keeps diagnostics" `Quick
+            test_rejected_config_keeps_its_diagnostics
         ] )
     ]
 ;;

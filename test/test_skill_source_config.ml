@@ -251,6 +251,67 @@ let test_seed_declares_sources () =
     projected
 ;;
 
+(* These strings reach dashboards and diagnostics, so the label is the
+   contract and a rename has to be a deliberate edit here too. Listing every
+   value_kind also means a new kind fails to compile in this test rather than
+   reaching a reader unnamed. *)
+let test_labels_name_every_case () =
+  check string "activation lifetime" "session" (activation_lifetime_to_string Session);
+  check
+    string
+    "precedence"
+    "earlier-source-wins"
+    (precedence_to_string Earlier_source_wins);
+  check
+    (list string)
+    "every value kind"
+    [ "string"
+    ; "integer"
+    ; "float"
+    ; "boolean"
+    ; "array"
+    ; "table"
+    ; "table array"
+    ; "date/time"
+    ]
+    (List.map
+       value_kind_to_string
+       [ String; Integer; Float; Boolean; Array; Table; Table_array; Date_time ])
+;;
+
+(* parse_doc and parse_text are one parse behind two entry points. A caller
+   holding an already-parsed document must not get a different answer than one
+   holding the text it came from. *)
+let test_parse_doc_agrees_with_parse_text () =
+  let text =
+    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n"
+  in
+  match Keeper_toml_loader.parse_toml text with
+  | Error message -> fail message
+  | Ok doc ->
+    (match parse_doc doc, parse_text text with
+     | Ok from_doc, Ok from_text ->
+       check
+         string
+         "same config either way"
+         (Yojson.Safe.to_string (to_yojson from_text))
+         (Yojson.Safe.to_string (to_yojson from_doc))
+     | Error diagnostics, Ok _ ->
+       fail
+         ("parse_doc rejected what parse_text accepted: "
+          ^ String.concat "; " (List.map diagnostic_to_string diagnostics))
+     | Ok _, Error diagnostics ->
+       fail
+         ("parse_text rejected what parse_doc accepted: "
+          ^ String.concat "; " (List.map diagnostic_to_string diagnostics))
+     | Error from_doc, Error from_text ->
+       check
+         string
+         "same diagnostics either way"
+         (String.concat "; " (List.map diagnostic_to_string from_text))
+         (String.concat "; " (List.map diagnostic_to_string from_doc)))
+;;
+
 let () =
   run
     "skill_source_config"
@@ -266,6 +327,9 @@ let () =
         ; test_case "duplicate indices" `Quick test_duplicate_indices_are_original
         ; test_case "invalid anchor inputs" `Quick test_invalid_anchor_inputs_are_visible
         ; test_case "seed declares sources" `Quick test_seed_declares_sources
+        ; test_case "labels name every case" `Quick test_labels_name_every_case
+        ; test_case "parse_doc agrees with parse_text" `Quick
+            test_parse_doc_agrees_with_parse_text
         ] )
     ]
 ;;

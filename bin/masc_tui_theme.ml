@@ -76,6 +76,13 @@ let border_focus = Sgr.cyan
 module Syntax = struct
   let keyword = Sgr.yellow
   let string_ = Sgr.green
+
+  (* Diff rows are content, like a keyword or a literal: "this line is green"
+     says the file gained it, not that anything is healthy. Named here so the
+     renderer asks for the reading rather than picking a colour, which is what
+     every other content colour already does. *)
+  let diff_added_bg = Sgr.bg_added
+  let diff_removed_bg = Sgr.bg_removed
 end
 
 let strip_sgr text =

@@ -93,7 +93,10 @@ let install_operator_token ~base_path ~host ~port =
           Auth_login.mint ~base_path ~host ~port
             ~agent_name:default_agent_name ~role:Masc_domain.Admin
             ~token_env_var:Masc_tui_credential.token_env_var
-            ~token_lifetime:Auth_login.Long_lived ()
+            ~token_lifetime:
+              (Auth_login.Expires_in_hours
+                 Masc_tui_credential.self_mint_expiry_hours)
+            ()
         with
         | Ok report ->
             operator_token_cell := Some report.bearer_token;

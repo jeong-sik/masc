@@ -1044,6 +1044,28 @@ let test_missing_operator_token_is_reported () =
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Masc_tui_credential.outcome_notice");
+  (* The mint's window is a policy, and the three the type offers mean different
+     things. [Long_lived] leaves an admin secret on disk that nothing retires;
+     [With_expiry] takes the workspace's operator-session day, which is the very
+     window that refuses a session left running overnight. Only a named window
+     is this client's own answer. *)
+  check int "the self-mint does not ask for a bearer that never expires" 0
+    (Ast_grep.count_constructors
+       ~module_path:"bin/masc_tui_http.ml"
+       ~constructor:"Auth_login.Long_lived");
+  check int "the self-mint names its own window" 1
+    (Ast_grep.count_constructors
+       ~module_path:"bin/masc_tui_http.ml"
+       ~constructor:"Auth_login.Expires_in_hours");
+  (* And the number is read off the client's own constant. A literal here would
+     compile, mint, and quietly disagree with what the startup notice tells the
+     operator the credential is good for. *)
+  check int "the window comes from the one place that states it" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"install_operator_token"
+       ~callees:[]
+       ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
      401 never established -- which is the failure these lines exist to end. *)

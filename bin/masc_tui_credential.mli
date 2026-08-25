@@ -15,6 +15,12 @@ val token_env_var : string
 val login_command : string
 (** The command that mints and persists a bearer for {!agent_name}. *)
 
+val self_mint_expiry_hours : int
+(** How long a bearer this client mints for itself lasts. Longer than the
+    workspace's operator-session window, which is a day and would refuse a
+    session left running overnight; shorter than forever, which would leave an
+    admin secret on disk that nothing retires. *)
+
 val refusal_cause : credential_sent:bool -> string
 (** Why the server refused, as a lowercase clause a caller can place in its own
     sentence. [credential_sent] is whether the request carried a bearer at all:

@@ -917,6 +917,11 @@ type state = {
   mutable code_file: (string * (string * string) list list) option;
   mutable code_file_error: string option;
   mutable code_file_scroll: int;
+  (* Horizontal offset in display cells, and the widest row's width -- the
+     clamp. Measured once at load: measuring ten thousand rows on every
+     keypress is what this field exists to avoid. *)
+  mutable code_file_hscroll: int;
+  mutable code_file_max_width: int;
   mutable code_focus_file: bool;
   (* The file pane's history view: H on an open file swaps the content for
      the commits that touched it, keyed by the path they were fetched for so
@@ -1305,6 +1310,8 @@ let create_state
   code_file = None;
   code_file_error = None;
   code_file_scroll = 0;
+  code_file_hscroll = 0;
+  code_file_max_width = 0;
   code_focus_file = false;
   code_history = None;
   code_history_error = None;

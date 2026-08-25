@@ -5064,6 +5064,13 @@ def code_lane_interaction(
         raise AssertionError(f"no line-number gutter: {opened!r}")
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # l pans the open file sideways by one cell: the keyword span is cut
+    # mid-word but its colour still opens the remainder, and the title says
+    # the view is shifted. h pans back and the full keyword returns.
+    panned = send_and_wait(process, master_fd, output, b"ll", b"(col 3)")
+    if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
+        raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
+    send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).
     # The needle is a commit hash so the wait crosses the "(loading

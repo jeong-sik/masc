@@ -88,6 +88,17 @@ let test_terminal_cell_width_and_fit () =
     (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
   check string "emoji grapheme is never split by fit" " ~"
     (Layout.fit_width "👍🏽A" 2);
+  (* drop_cells is fit_width's left-edge counterpart: the Code pane's
+     horizontal scroll. Styles crossed by the cut still open the remainder,
+     and a wide scalar on the boundary pads rather than splits. *)
+  check string "drop keeps the remainder" "cd" (Layout.drop_cells "abcd" 2);
+  check string "zero drop is identity" "abcd" (Layout.drop_cells "abcd" 0);
+  check string "over-length drop empties the row" ""
+    (Layout.drop_cells "abcd" 9);
+  check string "ANSI crossed by the cut still styles the remainder"
+    "\x1B[31m\x1B[0m글" (Layout.drop_cells "\x1B[31m한\x1B[0m글" 2);
+  check string "a wide scalar on the boundary pads its remaining cell"
+    " 글" (Layout.drop_cells "한글" 1);
   (* The widest footer the chat pane assembles, built from the longest value
      of each part rather than quoted whole. The fixture used to be a short
      blocked hint and stopped being the widest when the queue hint arrived,

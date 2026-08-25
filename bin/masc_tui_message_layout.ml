@@ -306,6 +306,35 @@ let display_width text = pieces_width (display_pieces text)
 let cell_prefix text max_cells =
   cell_prefix_of_pieces text (display_pieces text) max_cells
 
+(* Drop the first [cells] display cells, keeping every ANSI sequence crossed
+   so the remainder opens under the styles the cut passed through. A wide
+   grapheme straddling the boundary is dropped whole and its remaining cells
+   are padded with spaces, so the columns to the right stay aligned. *)
+let drop_cells text cells =
+  if cells <= 0 then text
+  else
+    let pieces = display_pieces text in
+    let buffer = Buffer.create (String.length text) in
+    let rec loop dropped = function
+      | [] -> ()
+      | piece :: rest when piece.ansi ->
+          Buffer.add_substring buffer text piece.start_offset
+            (piece.end_offset - piece.start_offset);
+          loop dropped rest
+      | piece :: rest when dropped + piece.cell_width <= cells ->
+          loop (dropped + piece.cell_width) rest
+      | piece :: rest when dropped < cells ->
+          Buffer.add_string buffer
+            (String.make (dropped + piece.cell_width - cells) ' ');
+          loop cells rest
+      | piece :: rest ->
+          Buffer.add_substring buffer text piece.start_offset
+            (piece.end_offset - piece.start_offset);
+          loop dropped rest
+    in
+    loop 0 pieces;
+    Buffer.contents buffer
+
 let fit_width text width =
   if width <= 0 then ""
   else

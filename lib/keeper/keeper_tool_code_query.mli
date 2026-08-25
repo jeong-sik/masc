@@ -4,9 +4,11 @@
     servers and [Lsp_questions] asks them; this is the surface a Keeper reaches
     them through, and it is where the Keeper's sandbox bounds the question.
 
-    Two questions, not three. §3.1 measured [textDocument/references] answering
-    only the opened file's own occurrences on this tree — one item where [rg]
-    finds six — so it is not offered here (#30504).
+    Three questions. [textDocument/references] answers only the opened file's
+    own occurrences when the project's reference index is missing — one where
+    the truth was three, measured — so it is checked for before the question is
+    asked, and its absence is an answer naming the command that fixes it
+    (#30504).
 
     Positions are 1-based in and out, the way [Grep] and [Read] report them.
     LSP counts from 0; that conversion happens here rather than in the Keeper's

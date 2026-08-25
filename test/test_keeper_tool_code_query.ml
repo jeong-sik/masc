@@ -122,27 +122,65 @@ let test_a_keeper_is_offered_the_tool () =
     (List.exists (String.equal "keeper_code_query") offered)
 ;;
 
-let test_the_definition_offers_two_questions () =
-  (* references answers same-file only on this repository (#30504). The enum
-     is where a Keeper learns which questions exist, so it is where the third
-     one is absent. *)
+let test_the_definition_offers_three_questions () =
   let schema = Tool_schemas_code_query.schema in
   let json = Yojson.Safe.to_string schema.Masc_domain.input_schema in
-  check_mentions "the schema" ~needle:"definition" json;
-  check_mentions "the schema" ~needle:"hover" json;
-  Alcotest.(check bool)
-    ("references must not be offered -- got: " ^ json)
-    false
-    (mentions ~needle:"\"references\"" json)
+  List.iter
+    (fun question -> check_mentions "the schema" ~needle:question json)
+    [ "definition"; "hover"; "references" ]
 ;;
 
-let test_references_is_refused_by_name () =
+let test_references_without_an_index_says_which_command_builds_it () =
+  (* The failure this replaces is not an error: a language server with no index
+     answers references with the occurrences in the file it was given -- one
+     where the truth was three, measured on a two-file project. A short list
+     reads like an answer, so it is caught before the question is asked. *)
   with_workspace (fun config ->
+    let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
     let path = write ~config "a.ml" "let value = 1\n" in
     let message = refusal_message ~config (args ~question:"references" ~symbol:"value" path) in
-    check_mentions "the refusal" ~needle:"references" message;
-    (* Names what to use instead, rather than only that it declined. *)
-    check_mentions "the refusal" ~needle:"Grep" message)
+    check_mentions "the refusal" ~needle:"dune build @ocaml-index" message;
+    (* Names where it looked, so the caller can see which project it means. *)
+    check_mentions "the refusal" ~needle:"_build" message)
+;;
+
+let test_references_with_an_index_gets_past_the_check () =
+  with_workspace (fun config ->
+    let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
+    let _ = write ~config "_build/default/lib/.thing.objs/cctx.ocaml-index" "" in
+    let path = write ~config "a.ml" "let value = 1\n" in
+    (* Past the precondition, so whatever comes back is the language server's
+       answer rather than this tool's refusal. Asserted on which refusal is
+       absent, because the server's own answer depends on a build this test
+       does not do. *)
+    let result = call ~config (args ~question:"references" ~symbol:"value" path) in
+    let message =
+      match Tool_result.failure_class result with
+      | Some _ -> Tool_result.message result
+      | None -> ""
+    in
+    Alcotest.(check bool)
+      ("the index check must not fire -- got: " ^ message)
+      false
+      (mentions ~needle:"dune build @ocaml-index" message))
+;;
+
+let test_the_index_check_is_only_for_references () =
+  with_workspace (fun config ->
+    let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
+    let path = write ~config "a.ml" "let value = 1\n" in
+    (* No _build at all, and hover still gets through: definition and hover
+       read what merlin holds per file and need no cross-file index. *)
+    let result = call ~config (args ~question:"hover" ~line:1 ~symbol:"value" path) in
+    let message =
+      match Tool_result.failure_class result with
+      | Some _ -> Tool_result.message result
+      | None -> ""
+    in
+    Alcotest.(check bool)
+      ("hover must not be gated on the index -- got: " ^ message)
+      false
+      (mentions ~needle:"dune build @ocaml-index" message))
 ;;
 
 (* --- the sandbox bounds the question ------------------------------------ *)
@@ -239,14 +277,86 @@ let test_definition_answers_from_a_real_server () =
         Alcotest.failf "expected one location, got: %s" (Yojson.Safe.to_string other)))
 ;;
 
+let dune_present () = Executable_path.path_has_executable "dune"
+
+(* The gate tests above prove the precondition fires and does not fire. This
+   proves the thing the precondition is for: with an index actually built,
+   references names the uses in the other file, which is what a short list was
+   hiding. Measured standalone at 1 -> 3; asserted here. *)
+let test_references_answers_across_files_once_the_index_exists () =
+  with_env_workspace (fun env config ->
+    Eio_context.set_env env;
+    let root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config (meta ()) in
+    let _ = write ~config "dune-project" "(lang dune 3.22)\n" in
+    let _ = write ~config "lib/dune" "(library (name probe_lib))\n" in
+    let path = write ~config "lib/a.ml" "let shared_name x = x + 1\n" in
+    let _ =
+      write
+        ~config
+        "lib/b.ml"
+        "let use_one = A.shared_name 1\nlet use_two = A.shared_name 2\n"
+    in
+    let build =
+      (* DUNE_BUILD_DIR is set by the wrapper that runs this suite and points at
+         masc's own _build. Inherited, the inner dune would write the fixture's
+         index there -- into a directory it does not own and where nothing
+         looks for it. *)
+      Sys.command
+        (Printf.sprintf
+           "cd %s && env -u DUNE_BUILD_DIR -u DUNE_WORKSPACE dune build @ocaml-index"
+           (Filename.quote root))
+    in
+    Alcotest.(check int) "the index builds" 0 build;
+    Lsp_turn_pool.with_turn_pool (fun () ->
+      let result =
+        call ~config (args ~question:"references" ~line:1 ~symbol:"shared_name" path)
+      in
+      (match Tool_result.failure_class result with
+       | Some _ -> Alcotest.failf "expected an answer, got: %s" (Tool_result.message result)
+       | None -> ());
+      match Yojson.Safe.Util.member "locations" (Tool_result.data result) with
+      | `List locations ->
+        if List.length locations <> 3
+        then
+          Alcotest.failf
+            "expected the definition and both uses, got %d: %s"
+            (List.length locations)
+            (Yojson.Safe.to_string (`List locations));
+        let files =
+          List.sort_uniq
+            String.compare
+            (List.filter_map
+               (fun location ->
+                 match Yojson.Safe.Util.member "path" location with
+                 | `String path -> Some (Filename.basename path)
+                 | _ -> None)
+               locations)
+        in
+        Alcotest.(check (list string)) "in both files" [ "a.ml"; "b.ml" ] files
+      | other ->
+        Alcotest.failf "expected locations, got: %s" (Yojson.Safe.to_string other)))
+;;
+
 let live_server_cases =
   if ocamllsp_present ()
   then
-    [ Alcotest.test_case
-        "definition answers from a real ocamllsp"
-        `Slow
-        test_definition_answers_from_a_real_server
-    ]
+    ([ Alcotest.test_case
+         "definition answers from a real ocamllsp"
+         `Slow
+         test_definition_answers_from_a_real_server
+     ]
+     @
+     if dune_present ()
+     then
+       [ Alcotest.test_case
+           "references crosses files once the index exists"
+           `Slow
+           test_references_answers_across_files_once_the_index_exists
+       ]
+     else (
+       print_endline
+         "[keeper_tool_code_query] dune is not on PATH - skipping the index case";
+       []))
   else (
     print_endline
       "[keeper_tool_code_query] ocamllsp is not on PATH - skipping the case that needs one";
@@ -259,13 +369,23 @@ let () =
     [ ( "offered"
       , [ Alcotest.test_case "the tool is registered" `Quick test_a_keeper_is_offered_the_tool
         ; Alcotest.test_case
-            "two questions, not three"
+            "three questions are offered"
             `Quick
-            test_the_definition_offers_two_questions
+            test_the_definition_offers_three_questions
+        ] )
+    ; ( "reference index"
+      , [ Alcotest.test_case
+            "a missing index names the command"
+            `Quick
+            test_references_without_an_index_says_which_command_builds_it
         ; Alcotest.test_case
-            "references is refused by name"
+            "an index present gets past the check"
             `Quick
-            test_references_is_refused_by_name
+            test_references_with_an_index_gets_past_the_check
+        ; Alcotest.test_case
+            "hover is not gated on it"
+            `Quick
+            test_the_index_check_is_only_for_references
         ] )
     ; ( "sandbox"
       , [ Alcotest.test_case

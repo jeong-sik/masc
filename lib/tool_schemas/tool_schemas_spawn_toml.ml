@@ -1,4 +1,4 @@
-(** The four spawn tools, read from [config/tools/masc_spawn*.toml]
+(** The four spawn tools, read from [config/tools/keeper_spawn*.toml]
     (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Decoded once at module initialization. A missing file or a declaration that
@@ -16,7 +16,7 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
-let start = schema_of_name "masc_spawn"
-let read = schema_of_name "masc_spawn_read"
-let wait = schema_of_name "masc_spawn_wait"
-let stop = schema_of_name "masc_spawn_stop"
+let start = schema_of_name "keeper_spawn"
+let read = schema_of_name "keeper_spawn_read"
+let wait = schema_of_name "keeper_spawn_wait"
+let stop = schema_of_name "keeper_spawn_stop"

@@ -233,7 +233,7 @@ val handle_masc_agent_timeline_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-val handle_masc_spawn_with_outcome
+val handle_keeper_spawn_with_outcome
   :  name:string
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t

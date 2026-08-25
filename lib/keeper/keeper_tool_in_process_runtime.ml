@@ -1600,7 +1600,7 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
    call that finds one finds the other. Outside a turn there is nowhere for a
    process to live that the caller could reach again, and saying that beats
    creating a registry no later call can find. *)
-let handle_masc_spawn_with_outcome ~name ~args =
+let handle_keeper_spawn_with_outcome ~name ~args =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->
     Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args

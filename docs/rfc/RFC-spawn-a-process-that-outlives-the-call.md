@@ -214,7 +214,7 @@ about it.
 
 ### 3.6 What the tool surface exposes
 
-`masc_spawn`, `masc_spawn_read`, `masc_spawn_wait`, `masc_spawn_stop`, each
+`keeper_spawn`, `keeper_spawn_read`, `keeper_spawn_wait`, `keeper_spawn_stop`, each
 mapping to one operation above. The handle crosses as its string form. Every
 error is a typed result rendered as a message that names the next call, in the
 sense `Subset_rewrite` established: an unknown handle says the process is gone

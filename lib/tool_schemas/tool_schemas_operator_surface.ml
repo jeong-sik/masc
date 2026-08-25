@@ -9,7 +9,7 @@
     [supersedes: ["0057"]]. The definitions live here; the generator, its dune rule
     and its regression suite are gone. The three invariants that suite carried
     which had nothing to do with code generation — the masc_config category
-    enum matching its owner, masc_spawn staying unpublished, and the
+    enum matching its owner, keeper_spawn staying unpublished, and the
     Operator_only control trio staying off the Keeper-visible list — moved to
     [test_operator_surface_toml_parity].
 

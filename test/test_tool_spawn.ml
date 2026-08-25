@@ -50,7 +50,7 @@ let string_field result key =
 
 let spawn_handle ctx argv =
   let result =
-    call ctx ~name:"masc_spawn"
+    call ctx ~name:"keeper_spawn"
       (`Assoc [ "argv", `List (List.map (fun a -> `String a) argv) ])
   in
   Alcotest.(check string) "a spawn is running" "running" (string_field result "status");
@@ -65,7 +65,7 @@ let test_a_spawn_answers_with_a_handle_and_the_output_follows () =
   let ctx = context ~sw in
   let handle = spawn_handle ctx [ "printf"; "hello" ] in
   let waited =
-    call ctx ~name:"masc_spawn_wait"
+    call ctx ~name:"keeper_spawn_wait"
       (`Assoc
           [ "handle", `String handle
           ; "until", `String "exit"
@@ -74,7 +74,7 @@ let test_a_spawn_answers_with_a_handle_and_the_output_follows () =
   in
   Alcotest.(check string) "it exited" "exited" (string_field waited "status");
   let read =
-    call ctx ~name:"masc_spawn_read" (`Assoc [ "handle", `String handle ])
+    call ctx ~name:"keeper_spawn_read" (`Assoc [ "handle", `String handle ])
   in
   Alcotest.(check string) "the output is there" "hello" (string_field read "bytes")
 ;;
@@ -87,7 +87,7 @@ let test_a_bound_that_is_reached_says_so_and_keeps_the_handle () =
   let ctx = context ~sw in
   let handle = spawn_handle ctx [ "sleep"; "60" ] in
   let waited =
-    call ctx ~name:"masc_spawn_wait"
+    call ctx ~name:"keeper_spawn_wait"
       (`Assoc
           [ "handle", `String handle
           ; "until", `String "exit"
@@ -98,7 +98,7 @@ let test_a_bound_that_is_reached_says_so_and_keeps_the_handle () =
      back so a caller can read it or wait again with a longer bound. *)
   Alcotest.(check string) "the bound is reported" "timed_out" (string_field waited "status");
   Alcotest.(check string) "and the handle comes back" handle (string_field waited "handle");
-  ignore (call ctx ~name:"masc_spawn_stop" (`Assoc [ "handle", `String handle ]))
+  ignore (call ctx ~name:"keeper_spawn_stop" (`Assoc [ "handle", `String handle ]))
 ;;
 
 let test_a_wait_ends_when_the_program_speaks () =
@@ -109,7 +109,7 @@ let test_a_wait_ends_when_the_program_speaks () =
   let ctx = context ~sw in
   let handle = spawn_handle ctx [ "sh"; "-c"; "printf ready; exec sleep 60" ] in
   let waited =
-    call ctx ~name:"masc_spawn_wait"
+    call ctx ~name:"keeper_spawn_wait"
       (`Assoc
           [ "handle", `String handle
           ; "until", `String "output_contains"
@@ -118,7 +118,7 @@ let test_a_wait_ends_when_the_program_speaks () =
           ])
   in
   Alcotest.(check string) "it matched" "matched" (string_field waited "status");
-  ignore (call ctx ~name:"masc_spawn_stop" (`Assoc [ "handle", `String handle ]))
+  ignore (call ctx ~name:"keeper_spawn_stop" (`Assoc [ "handle", `String handle ]))
 ;;
 
 (* --- what a caller gets wrong --- *)
@@ -136,7 +136,7 @@ let test_a_handle_that_names_nothing_says_what_to_do () =
   @@ fun sw ->
   let ctx = context ~sw in
   let result =
-    call ctx ~name:"masc_spawn_read" (`Assoc [ "handle", `String "other-run-1" ])
+    call ctx ~name:"keeper_spawn_read" (`Assoc [ "handle", `String "other-run-1" ])
   in
   let message = error_message result in
   (* "It failed" leaves a caller retrying the same call. Naming the next move
@@ -154,7 +154,7 @@ let test_text_that_is_not_a_handle_is_named_as_such () =
   @@ fun sw ->
   let ctx = context ~sw in
   let message =
-    error_message (call ctx ~name:"masc_spawn_stop" (`Assoc [ "handle", `String "nonsense" ]))
+    error_message (call ctx ~name:"keeper_spawn_stop" (`Assoc [ "handle", `String "nonsense" ]))
   in
   Alcotest.(check bool)
     ("a malformed handle is not a missing process -- got: " ^ message)
@@ -170,7 +170,7 @@ let test_argv_must_be_strings () =
   let ctx = context ~sw in
   let message =
     error_message
-      (call ctx ~name:"masc_spawn" (`Assoc [ "argv", `List [ `String "echo"; `Int 3 ] ]))
+      (call ctx ~name:"keeper_spawn" (`Assoc [ "argv", `List [ `String "echo"; `Int 3 ] ]))
   in
   (* Dropping the 3 and running [echo] would be a different command than the
      caller wrote. *)
@@ -189,7 +189,7 @@ let test_output_contains_needs_its_needle () =
   let handle = spawn_handle ctx [ "sleep"; "60" ] in
   let message =
     error_message
-      (call ctx ~name:"masc_spawn_wait"
+      (call ctx ~name:"keeper_spawn_wait"
          (`Assoc
              [ "handle", `String handle
              ; "until", `String "output_contains"
@@ -200,7 +200,7 @@ let test_output_contains_needs_its_needle () =
     ("the missing field is named -- got: " ^ message)
     true
     (Astring.String.is_infix ~affix:"needle" message);
-  ignore (call ctx ~name:"masc_spawn_stop" (`Assoc [ "handle", `String handle ]))
+  ignore (call ctx ~name:"keeper_spawn_stop" (`Assoc [ "handle", `String handle ]))
 ;;
 
 let test_another_tool_is_not_this_one () =
@@ -233,7 +233,7 @@ let test_a_keeper_is_offered_all_four () =
          ("a keeper is offered " ^ name)
          true
          (List.exists (String.equal name) offered))
-    [ "masc_spawn"; "masc_spawn_read"; "masc_spawn_wait"; "masc_spawn_stop" ]
+    [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
 ;;
 
 let () =

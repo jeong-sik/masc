@@ -100,7 +100,7 @@ let handle_of args =
   let* text = required_string args "handle" in
   match Spawn_handle.of_string text with
   | Some handle -> Ok handle
-  | None -> Error (Printf.sprintf "%S is not a handle masc_spawn issued" text)
+  | None -> Error (Printf.sprintf "%S is not a handle keeper_spawn issued" text)
 ;;
 
 let handle_start ~tool_name ~start_time ctx args =

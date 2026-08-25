@@ -4820,7 +4820,13 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
                        "line_end": 1, "kind": "Question",
                        "content": "why three?"}:
             raise AssertionError(f"note POST body: {payload!r}")
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        back = send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # The loaded notes now decorate the gutter: line 1 carries the
+        # note anchor mark.
+        if "●".encode() not in back:
+            raise AssertionError(
+                f"the note anchor mark is missing from the gutter: {back!r}"
+            )
         # c: which keeper wrote which lines, through what, and when.
         activity = send_and_wait(
             process, master_fd, output, b"c", b"Edit (turn 7)"

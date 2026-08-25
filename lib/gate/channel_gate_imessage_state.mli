@@ -49,14 +49,10 @@ val resolve_keeper_for_channel_result :
 (** Resolve the keeper bound to [channel_id]. A store read failure stays
     distinct from an unbound conversation. *)
 
-(** Liveness, published by the gateway's poll fiber. Closed sum. *)
-type poll_state =
-  | Not_started  (** The fiber has not completed a poll yet. *)
-  | Polling  (** The most recent poll read chat.db. *)
-  | Degraded of string  (** The most recent poll failed; carries the reason. *)
-
-val poll_state_to_string : poll_state -> string
-val current_poll_state : unit -> poll_state
+(* The liveness variant itself stays internal: outside this module the poll's
+   state is read as [connected ()] or as the [poll_state] string in
+   {!status_json}, and an exported type nothing can obtain a value of is
+   surface without a reader. *)
 
 val record_poll_ok : cursor_rowid:int -> unit
 (** Called after each successful poll. Publishes liveness and the cursor that

@@ -2831,6 +2831,11 @@
  (libraries alcotest masc_tui_frame_presenter))
 
 (test
+ (name test_tui_terminal_title)
+ (modules test_tui_terminal_title)
+ (libraries alcotest masc_tui_terminal_title masc_tui_types))
+
+(test
  (name test_tui_board_selection)
  (modules test_tui_board_selection)
  (libraries alcotest masc_tui_board_selection))

@@ -51,8 +51,9 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
     Call_this_instead
       { call = Spawn
       ; because =
-          "a backgrounded command outlives this call, so its result is a \
-           handle rather than an exit status"
+          "[&] backgrounds nothing here -- the child inherits this call's \
+           output pipe, so the call waits for it anyway, and a timeout leaves \
+           it running with no handle to stop it"
       }
   | `Control_flow -> a_program_belongs_in_a_file "a loop or a branch is a program, not a command line"
   | `Function_def -> a_program_belongs_in_a_file "a function definition is a program, not a command line"

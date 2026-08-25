@@ -6350,7 +6350,12 @@ let main () =
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
             | Resources -> state.resource_focus <- false
-            | Acting | Keepers Keeper_list | Lanes | Approvals -> ()
+            | Acting | Keepers Keeper_list | Lanes -> ()
+            | Approvals ->
+                (* Esc leaves the ask and returns to the list with the cursor
+                   where it was, the way the Changes diff does. *)
+                state.approval_detail_open <- false;
+                state.approval_detail_scroll <- 0
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the
@@ -6460,6 +6465,8 @@ let main () =
                     state.log_scroll
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+            | Approvals when state.approval_detail_open ->
+                state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -6647,6 +6654,9 @@ let main () =
             | Keepers Keeper_calls ->
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
+            | Approvals when state.approval_detail_open ->
+                state.approval_detail_scroll <-
+                  max 0 (state.approval_detail_scroll - 1)
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -6864,6 +6874,13 @@ let main () =
                           launch_github_identity_view state
                             ~mailbox:async_messages k.k_name)
                  | None -> ())
+            | Approvals ->
+                (* The list draws the ask on one row; this is where the whole
+                   thing is readable before [y] answers it. *)
+                if List.length (approval_items state) > 0 then begin
+                  state.approval_detail_open <- true;
+                  state.approval_detail_scroll <- 0
+                end
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -6936,7 +6953,7 @@ let main () =
                         state.changes_tree_diff_path <- None))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Approvals | Verification | Harness
+            | Acting | Lanes | Verification | Harness
             | Repositories | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->

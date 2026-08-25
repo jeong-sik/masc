@@ -105,7 +105,13 @@ let for_surface = function
       ]
       @ listing_meta
   | Approvals ->
-      [ b Navigate "j/k" "move"; b Act "y" "confirm"; b Act "n" "deny" ]
+      [ b Navigate "j/k" "move"
+        (* The list draws each ask on one row. Enter is where a multi-line
+           argument is readable before y answers it. *)
+      ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
+      ; b Act "y" "confirm"
+      ; b Act "n" "deny"
+      ]
       @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"

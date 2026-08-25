@@ -289,6 +289,53 @@ let test_resume_identity_mismatch_fails_closed () =
        | Ok _ -> fail "resume admitted a different conversation")
 ;;
 
+(* Live wire from agy 1.1.12 (2026-08-25): an invocation the CLI refuses
+   produces this single line and nothing else. Before the fix MASC reported
+   [field "conversation_id" must not be empty] and the vendor's own account of
+   the refusal never reached an operator. *)
+let cli_rejection_error =
+  "invalid model selection (--model \"gemini-3.7-flash\" --effort \"\"): \
+   --model gemini-3.7-flash requires --effort (available: low, medium, high)"
+;;
+
+let test_pre_init_error_result_carries_the_cli_reason () =
+  with_fixture
+    [ result
+        ~conversation_id:""
+        ~status:"ERROR"
+        ~response:""
+        ~error:cli_rejection_error
+        ~num_turns:0
+        ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         check string "cli reason" cli_rejection_error detail
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a refused invocation completed a turn")
+;;
+
+let test_pre_init_success_result_stays_a_protocol_error () =
+  with_fixture
+    [ result ~conversation_id:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a success without init was admitted")
+;;
+
+let test_empty_result_id_after_init_fails_closed () =
+  with_fixture
+    [ init (); result ~conversation_id:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an opened conversation accepted a result with no id")
+;;
+
 let test_conversation_callback_precedes_terminal_result () =
   let observed = ref None in
   with_fixture
@@ -749,6 +796,18 @@ let () =
             `Quick
             test_no_deadline_starts_after_init
         ; test_case "process-free admission" `Quick test_admission_is_process_free
+        ; test_case
+            "pre-init error result carries the CLI reason"
+            `Quick
+            test_pre_init_error_result_carries_the_cli_reason
+        ; test_case
+            "pre-init success result stays a protocol error"
+            `Quick
+            test_pre_init_success_result_stays_a_protocol_error
+        ; test_case
+            "empty result id after init fails closed"
+            `Quick
+            test_empty_result_id_after_init_fails_closed
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

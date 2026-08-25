@@ -56,16 +56,16 @@ let test_every_group_is_classified () =
      ever loosened to a catch-all: a new family of tools must not inherit
      "runs without asking" by saying nothing. *)
   let groups =
-    [ Descriptor.Execute_group
-    ; Descriptor.Search_files_group
-    ; Descriptor.Filesystem_group
-    ; Descriptor.Board_group
-    ; Descriptor.Voice_group
-    ; Descriptor.Workspace_group
-    ; Descriptor.Surface_group
-    ; Descriptor.Memory_group
-    ; Descriptor.Meta_group
-    ; Descriptor.Core_group
+    [ Masc.Keeper_tool_group.Execute_group
+    ; Masc.Keeper_tool_group.Search_files_group
+    ; Masc.Keeper_tool_group.Filesystem_group
+    ; Masc.Keeper_tool_group.Board_group
+    ; Masc.Keeper_tool_group.Voice_group
+    ; Masc.Keeper_tool_group.Workspace_group
+    ; Masc.Keeper_tool_group.Surface_group
+    ; Masc.Keeper_tool_group.Memory_group
+    ; Masc.Keeper_tool_group.Meta_group
+    ; Masc.Keeper_tool_group.Core_group
     ]
   in
   check int "every group in the closed type is named here" 10

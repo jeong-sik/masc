@@ -549,22 +549,22 @@ let tool_edit_file_schema =
 let keeper_model_board_post_schema =
   find_schema_exn
     "masc_board_post"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_list_schema =
   find_schema_exn
     "masc_board_list"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_search_schema =
   find_schema_exn
     "masc_board_search"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_post_get_schema =
   find_schema_exn
     "masc_board_post_get"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_memory_search_schema =
   find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas

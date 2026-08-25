@@ -54,6 +54,30 @@ val plain_palette : palette
 (** A palette whose spans are all empty and whose gutters are ASCII. What the
     reader would see with styling stripped. *)
 
+type streaming_render = private {
+  rows : string list;
+  mutable_source_start : int;
+  mutable_row_start : int;
+}
+(** One canonical render together with its earliest append-sensitive suffix.
+
+    Bytes before [mutable_source_start] belong to closed blocks. The first
+    [mutable_row_start] rows are exactly what those bytes contributed to
+    [rows]. Both offsets are zero when the document has no closed block.
+
+    The boundaries come from the same block walk that produced [rows]. They
+    are not a second Markdown scanner. The suffix is normally the final block;
+    it also includes a table or header candidate before an incomplete terminal
+    line that an append can still turn into its delimiter or next row. *)
+
+val render_streaming :
+  palette:palette -> width:int -> string -> streaming_render
+(** Render one growing message and identify the append-sensitive suffix.
+
+    The returned rows are byte-for-byte the same rows as {!render}. The extra
+    offsets let a caller keep closed blocks and render the current block again
+    after more source arrives. *)
+
 val render : palette:palette -> width:int -> string -> string list
 (** Wrap and style one message body into rows of at most [width] cells.
 

@@ -106,6 +106,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s
   { cli_path = execution.cli_path
   ; cwd = base_dir
   ; model = execution.model
+  ; native = Runtime_native_tools.claude_code_default
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
@@ -119,6 +120,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s
   =
   { cli_path = execution.cli_path
   ; model = execution.model
+  ; native = Runtime_native_tools.codex_default
   ; developer_instructions = system_prompt
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =

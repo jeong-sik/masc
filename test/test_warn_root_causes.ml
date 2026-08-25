@@ -65,12 +65,15 @@ let publication_recovery_turn_context ~registry ~keeper_name =
    ("keeper-<name>-agent"). Spelling it out here as [name] made every test in
    this suite that builds a meta fail at construction. Derive it the same way
    production does so a change to the canonical form breaks in one place. *)
-let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
+let make_meta ?(name = "test-keeper") ?tool_groups () : Keeper_meta_contract.keeper_meta =
+  (* [tool_groups] is not part of the persisted-meta JSON schema (the parser
+     always decodes it to [None]); set it on the parsed record directly so a
+     declared keeper's surface can be exercised without schema drift. *)
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name);
              ("agent_name", `String (Keeper_identity.keeper_agent_name name));
              ("trace_id", `String "test-trace-warn")]) with
-  | Ok meta -> meta
+  | Ok meta -> { meta with tool_groups }
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
 let test_web_tools_are_bundle_visible () =
@@ -649,6 +652,70 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})
 
+(* ── RFC-0389: declared keeper's turn payload narrows ─────────────────────── *)
+
+(* Replicates the wire-capture byte measure (keeper_wire_capture.ml): the
+   compact JSON of the exact unredacted tools array sent to the model. *)
+let bundle_schema_bytes (bundle : Keeper_tools_agent_core.tool_bundle) =
+  bundle.tools
+  |> List.map Agent_core.Tool.schema_to_json
+  |> fun raw -> Yojson.Safe.to_string (`List raw) |> String.length
+;;
+
+let bundle_tool_count (bundle : Keeper_tools_agent_core.tool_bundle) =
+  List.length bundle.tools
+;;
+
+let with_bundle ~name ?tool_groups f =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_surface_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~name ?tool_groups () in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+      in
+      with_publication_recovery_registry ~registry_root:dir
+      @@ fun publication_recovery_registry ->
+      let publication_recovery =
+        publication_recovery_turn_context
+          ~registry:publication_recovery_registry
+          ~keeper_name:meta.name
+      in
+      let bundle =
+        Keeper_tools_agent_core_bundle.make_tool_bundle
+          ~config ~meta ~publication_recovery ~ctx_snapshot ()
+      in
+      Fun.protect ~finally:bundle.cleanup (fun () -> f bundle))
+
+(* An undeclared keeper's turn payload keeps the full surface (RFC-0389
+   default [All], pinned byte-identically by test_keeper_tool_schema_bytes);
+   a declared keeper's payload narrows to its groups. This test proves the
+   narrowing is real in the actual turn bundle, not just discovery JSON. *)
+let test_declared_bundle_narrows_turn_payload () =
+  let undeclared_count, undeclared_bytes =
+    with_bundle ~name:"test-undeclared" (fun b ->
+      (bundle_tool_count b, bundle_schema_bytes b))
+  in
+  let declared_count, declared_bytes =
+    with_bundle ~name:"test-declared" ~tool_groups:[ "board" ] (fun b ->
+      (bundle_tool_count b, bundle_schema_bytes b))
+  in
+  check bool "undeclared keeper's payload is non-empty" true (undeclared_count > 0);
+  check bool "declared keeper's payload is smaller than undeclared"
+    true
+    (declared_count < undeclared_count);
+  check bool "declared keeper's schema bytes are smaller than undeclared"
+    true
+    (declared_bytes < undeclared_bytes)
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -670,6 +737,8 @@ let () =
             test_tool_bundle_does_not_emit_full_universe_assignment;
           test_case "assignment telemetry is before-turn scoped" `Quick
             test_tool_assignment_telemetry_is_before_turn_scoped;
+          test_case "declared keeper's turn payload narrows (RFC-0389)" `Quick
+            test_declared_bundle_narrows_turn_payload;
         ] );
       ( "atomic_agent_json",
         [

@@ -110,6 +110,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
     ; model = config.model
+    ; native = Runtime_native_tools.codex_default
     ; developer_instructions = None
     ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s
     ; (* A probe stays bounded even where the turn is not: it answers "can this
@@ -162,6 +163,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
     { cli_path = config.cli_path
     ; cwd
     ; model = config.model
+    ; native = Runtime_native_tools.claude_code_default
     ; system_prompt = None
     ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s
     ; (* A probe stays bounded even where the turn is not: it answers "can this

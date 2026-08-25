@@ -68,6 +68,10 @@ type kind =
                 was not taught — unlabelled beats guessed. *)
       }
   | Said_by_keeper
+  | Autonomous_reply
+      (** What an autonomous turn said after its trace. A blank reply remains
+          a row, but callers can mark it instead of drawing an empty keeper
+          message. *)
   | Delivery_failed of { origin_request_id : string option }
       (** An assistant row the server marked [transport_failure]: the reply
           did not reach its destination. Not keeper speech.
@@ -86,6 +90,9 @@ type kind =
           block carried it: the lines the server kept, and a count of the
           steps it withheld. A blank [content] with a trace behind it used
           to draw as an empty line; this is what was behind it. *)
+  | Memory_activity
+      (** A committed or failed Memory OS journal pass. [row.text] carries
+          exact added/removed claims or typed failure detail. *)
 
 val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to
@@ -143,3 +150,7 @@ val rows_of_json : Yojson.Safe.t -> (decoded, string) result
     all. A single unreadable row is dropped instead: one bad row should not
     cost an operator the rest of the transcript. The count comes back in
     [dropped] so the loss is not silent. *)
+
+val memory_rows_of_json : Yojson.Safe.t -> (decoded, string) result
+(** Decode [/api/v1/keepers/:name/memory-journal]. Entries retain their
+    [recorded_at] timestamp so callers can interleave them with chat rows. *)

@@ -11,18 +11,18 @@ let verdict_because = function
 
    Spelled out per group rather than defaulted, so a group added later stops
    the build here instead of inheriting "runs without asking". *)
-let group_changes_the_world (group : Descriptor.keeper_tool_group) =
+let group_changes_the_world (group : Keeper_tool_group.t) =
   match group with
-  | Descriptor.Execute_group -> true (* runs a program *)
-  | Descriptor.Filesystem_group -> true (* writes files *)
-  | Descriptor.Board_group -> false (* posts inside masc, undoable and visible *)
-  | Descriptor.Search_files_group -> false
-  | Descriptor.Voice_group -> false
-  | Descriptor.Workspace_group -> false
-  | Descriptor.Surface_group -> false
-  | Descriptor.Memory_group -> false
-  | Descriptor.Meta_group -> false
-  | Descriptor.Core_group -> false
+  | Keeper_tool_group.Execute_group -> true (* runs a program *)
+  | Keeper_tool_group.Filesystem_group -> true (* writes files *)
+  | Keeper_tool_group.Board_group -> false (* posts inside masc, undoable and visible *)
+  | Keeper_tool_group.Search_files_group -> false
+  | Keeper_tool_group.Voice_group -> false
+  | Keeper_tool_group.Workspace_group -> false
+  | Keeper_tool_group.Surface_group -> false
+  | Keeper_tool_group.Memory_group -> false
+  | Keeper_tool_group.Meta_group -> false
+  | Keeper_tool_group.Core_group -> false
 
 let descriptor_for tool_name =
   match Descriptor.descriptors_for_internal tool_name with
@@ -40,7 +40,7 @@ let verdict_for ~tool_name ~input =
       | Some true ->
           Run { because = "this call only reads" }
       | Some false | None ->
-          let group = descriptor.Descriptor.keeper_tool_group in
+          let group = descriptor.keeper_tool_group in
           if group_changes_the_world group then
             Ask
               { because =

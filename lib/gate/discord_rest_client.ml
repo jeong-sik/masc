@@ -171,19 +171,8 @@ let build_guild_member_request ~token ~guild_id ~user_id () =
   in
   (url, auth_headers ~token, "")
 
-(* [Safe_ops.parse_json_safe] is the parser for this shape: it trims, treats an
-   empty body as an empty object, repairs UTF-8, and hands back the decoder's
-   message. The copy that used to sit here did none of that and dropped the
-   message, so a malformed connector response arrived as a bare [None]. *)
-let parse_json_safe s = Safe_ops.parse_json_safe ~context:"discord_rest_client" s
-
-let unique_field_opt name = function
-  | `Assoc fields ->
-    (match List.filter (fun (key, _) -> String.equal key name) fields with
-     | [] -> Ok None
-     | [ (_, value) ] -> Ok (Some value)
-     | _ -> Error (Printf.sprintf "duplicate response field %S" name))
-  | _ -> Ok None
+let parse_json_safe s =
+  Gate_rest_json.parse ~context:"discord_rest_client" s
 
 let error_of_non2xx ~request_id ~status ~body =
   match parse_json_safe body with
@@ -191,13 +180,13 @@ let error_of_non2xx ~request_id ~status ~body =
     Http_status { request_id; code = status; body_bytes = String.length body }
   | Ok json ->
       let code =
-        match unique_field_opt "code" json with
-        | Ok (Some (`Int c)) -> c
-        | Ok _ | Error _ -> status
+        match Gate_rest_json.int_field "code" json with
+        | Some c -> c
+        | None -> status
       in
-      (match unique_field_opt "message" json with
-       | Ok (Some (`String _)) -> Discord_api { request_id; code }
-       | Ok _ | Error _ ->
+      (match Gate_rest_json.string_field "message" json with
+       | Some _ -> Discord_api { request_id; code }
+       | None ->
          Http_status
            { request_id; code = status; body_bytes = String.length body })
 
@@ -211,20 +200,13 @@ let parse_response ?request_id ~status ~body () =
         Error
           (Other
              { request_id
-             ; reason = Printf.sprintf "2xx response body is not valid JSON: %s" msg
+             ; reason = Printf.sprintf "2xx response body rejected: %s" msg
              ; body_bytes = String.length body
              })
     | Ok json ->
-        (match unique_field_opt "id" json with
-         | Ok (Some (`String id)) -> Ok id
-         | Error reason ->
-           Error
-             (Other
-                { request_id
-                ; reason
-                ; body_bytes = String.length body
-                })
-         | Ok _ ->
+        (match Gate_rest_json.string_field "id" json with
+         | Some id -> Ok id
+         | None ->
            Error
              (Other
                 { request_id
@@ -240,12 +222,12 @@ let parse_json_response ?request_id ~status ~body () =
   in
   if status >= 200 && status < 300 then
     match parse_json_safe body with
-    | Ok json -> Ok json
+    | Ok json -> Ok (Gate_rest_json.to_yojson json)
     | Error msg ->
       Error
         (Other
            { request_id
-           ; reason = Printf.sprintf "2xx response body is not valid JSON: %s" msg
+           ; reason = Printf.sprintf "2xx response body rejected: %s" msg
            ; body_bytes = String.length body
            })
   else

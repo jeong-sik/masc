@@ -84,6 +84,8 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Navigate "Up / Down" "adjust"
           ~help:"when scrolled back, adjust by one line"
+      ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
+      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]

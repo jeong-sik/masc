@@ -68,10 +68,73 @@ type msg_role =
   | Message_memory
       (** One Memory OS journal pass interleaved by its recorded timestamp. *)
 
+type reasoning_visibility =
+  | Reasoning_hidden
+  | Reasoning_folded
+  | Reasoning_full
+
+type tool_visibility =
+  | Tools_compact
+  | Tools_full
+
+let reasoning_visibility_to_string = function
+  | Reasoning_hidden -> "hidden"
+  | Reasoning_folded -> "folded"
+  | Reasoning_full -> "full"
+;;
+
+let tool_visibility_to_string = function
+  | Tools_compact -> "compact"
+  | Tools_full -> "full"
+;;
+
+(* The chat modes worth a place in the header.
+
+   All three default to showing everything, so at rest the header would read
+   "memory:on reasoning:full tools:full" -- three labels that say nothing is
+   unusual, on every chat, for every operator. They also cost enough width to
+   push the port off the right edge at 170 columns, which is a fact the header
+   was carrying and now would not.
+
+   So only a mode away from its default appears. That is exactly when the
+   operator needs reminding: reasoning is missing from the pane because they
+   hid it, not because the keeper stopped thinking. At rest the header is what
+   it was before any of these modes existed.
+
+   Discovery lives in the footer and the help overlay, which name Ctrl-R and
+   Ctrl-D whether or not a mode is on. *)
+let chat_visibility_summary ~memory_visible ~reasoning ~tools =
+  let parts =
+    List.filter_map Fun.id
+      [ (if memory_visible then None else Some "memory:off")
+      ; (match reasoning with
+         | Reasoning_full -> None
+         | (Reasoning_hidden | Reasoning_folded) as mode ->
+             Some ("reasoning:" ^ reasoning_visibility_to_string mode))
+      ; (match tools with
+         | Tools_full -> None
+         | Tools_compact -> Some "tools:compact")
+      ]
+  in
+  String.concat " " parts
+;;
+
+let next_reasoning_visibility = function
+  | Reasoning_hidden -> Reasoning_folded
+  | Reasoning_folded -> Reasoning_full
+  | Reasoning_full -> Reasoning_hidden
+;;
+
+let toggle_tool_visibility = function
+  | Tools_compact -> Tools_full
+  | Tools_full -> Tools_compact
+;;
+
 (** Request-correlated message history entry. *)
 type msg_entry = {
   me_role: msg_role;
   me_text: string;
+  me_tool_block: Masc_tui_keeper_chat_transcript.tool_block option;
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
@@ -899,9 +962,10 @@ type state = {
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
   mutable msg_older_error: string option;
-  (* Whether this pane folds reasoning blocks to a one-line count. A view
-     preference, not data: toggled by /thinking and never persisted. *)
-  mutable msg_thinking_collapsed: bool;
+  (* Presentation-only defaults come from the CLI and can be changed in the
+     pane without mutating the transcript. *)
+  mutable msg_reasoning_visibility: reasoning_visibility;
+  mutable msg_tool_visibility: tool_visibility;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -1007,7 +1071,15 @@ let next_keeper_message_target (state : state) =
             (List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
 
 (** Create initial state *)
-let create_state ~workspace ~port ~refresh_interval = {
+let create_state
+    ?(reasoning_visibility = Reasoning_full)
+    ?(tool_visibility = Tools_full)
+    ~workspace
+    ~port
+    ~refresh_interval
+    ()
+  =
+  {
   agents = [];
   tasks = [];
   tasks_domain = [];
@@ -1201,7 +1273,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_older_exist = false;
   msg_older_loading = false;
   msg_older_error = None;
-  msg_thinking_collapsed = false;
+  msg_reasoning_visibility = reasoning_visibility;
+  msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];

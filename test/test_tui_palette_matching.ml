@@ -48,7 +48,7 @@ let test_the_caller_owns_the_needle_case () =
 
 let test_the_palette_lists_tasks_and_posts () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.tasks <-
     [ { id = "task-532"

@@ -11,7 +11,19 @@ let describe = function
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
-  | Command.Toggle_thinking -> "toggle-thinking"
+  | Command.Set_thinking mode ->
+      "thinking:"
+      ^ (match mode with
+         | `Cycle -> "cycle"
+         | `Hidden -> "hidden"
+         | `Folded -> "folded"
+         | `Full -> "full")
+  | Command.Set_tools mode ->
+      "tools:"
+      ^ (match mode with
+         | `Toggle -> "toggle"
+         | `Compact -> "compact"
+         | `Full -> "full")
   | Command.Toggle_memory -> "toggle-memory"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
@@ -41,12 +53,18 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt, thinking, memory and image"
+  check (list string) "help, keeper, interrupt, visibility, memory and image"
     [ "help"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
-    ; "toggle-thinking"
+    ; "thinking:cycle"
+    ; "thinking:hidden"
+    ; "thinking:folded"
+    ; "thinking:full"
+    ; "tools:toggle"
+    ; "tools:compact"
+    ; "tools:full"
     ; "toggle-memory"
     ; "image:shots/frame.png"
     ; "image-missing-path"
@@ -58,6 +76,12 @@ let test_pane_commands_parse_by_word () =
        ; "/keeper   "
        ; "/interrupt"
        ; "/thinking"
+       ; "/thinking hidden"
+       ; "/thinking folded"
+       ; "/thinking full"
+       ; "/tools"
+       ; "/tools compact"
+       ; "/tools full"
        ; "/memory"
        ; "/image shots/frame.png"
        ; "/image   "
@@ -72,7 +96,7 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "interrupt"; "thinking"; "memory"; "help" ]
+    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in

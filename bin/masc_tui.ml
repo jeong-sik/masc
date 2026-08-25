@@ -1160,6 +1160,9 @@ type async_msg =
   | Code_note_written of string * (unit, string) result
   | Code_activity_loaded of
       string * (Masc.Tui_decode.ide_region list, string) result
+  (* (question, symbol, answer) — the note the pane shows names both. *)
+  | Code_lsp_answered of
+      string * string * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1837,6 +1840,41 @@ let launch_code_activity_load state ~mailbox ~codebase ~path =
   | None ->
       enqueue_async mailbox
         (Code_activity_loaded (path, Error "Eio switch is unavailable"))
+
+(* Ask the language server about [symbol] on the pane's cursor line. The
+   question rides the surface's workspace axes, so a keeper checkout and a
+   repository ask about their own bytes. *)
+let start_code_lsp_question state ~mailbox ~(question : string)
+    ~(symbol : string) =
+  match state.code_file with
+  | None -> add_event state "error" "no file is open on the Code surface"
+  | Some (path, _) ->
+      state.code_lsp_note <-
+        Some (Printf.sprintf "asking %s about %S" question symbol);
+      let host = server_peer_host in
+      let port = state.port in
+      let line = state.code_file_cursor + 1 in
+      let keeper, repo = code_scope_axes state in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.fetch_lsp_question ?keeper ?repo ~host ~port ~path
+              ~line ~symbol ~question ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Code_lsp_answered (question, symbol, result))
+      in
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+               run ();
+               `Stop_daemon)
+       | None ->
+           enqueue_async mailbox
+             (Code_lsp_answered
+                (question, symbol, Error "Eio switch is unavailable")))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -4845,6 +4883,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             (match state.code_target_line with
              | Some line -> max 0 (line - 1)
              | None -> 0);
+          state.code_file_cursor <- state.code_file_scroll;
+          state.code_lsp_note <- None;
           state.code_target_line <- None;
           state.code_file_hscroll <- 0;
           (* The widest row is the horizontal clamp; measured here, once,
@@ -4924,6 +4964,47 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.code_activity_error <- None;
             state.code_activity_scroll <- 0
         | Error detail -> state.code_activity_error <- Some detail)
+  | Code_lsp_answered (question, symbol, result) ->
+      (match result with
+       | Error detail ->
+           state.code_lsp_note <- Some (symbol ^ ": " ^ detail)
+       | Ok (Masc.Tui_decode.Lsp_hover text) ->
+           state.code_lsp_note <-
+             Some
+               (match text with
+                | Some t ->
+                    symbol ^ ": " ^ Masc.Tui_decode.sanitize_terminal_text t
+                | None -> symbol ^ ": the server has nothing to say here")
+       | Ok (Masc.Tui_decode.Lsp_locations []) ->
+           state.code_lsp_note <-
+             Some (Printf.sprintf "no %s found for %S" question symbol)
+       | Ok (Masc.Tui_decode.Lsp_locations (location :: _)) ->
+           let open Masc.Tui_decode in
+           if location.ll_inside then begin
+             (* Jump there: same file just moves the cursor, another file
+                opens with the line as its target. *)
+             state.code_lsp_note <-
+               Some
+                 (Printf.sprintf "%s: %s:%d" symbol location.ll_path
+                    location.ll_line);
+             match state.code_file with
+             | Some (open_path, rows)
+               when String.equal open_path location.ll_path ->
+                 state.code_file_cursor <-
+                   max 0
+                     (min (location.ll_line - 1) (List.length rows - 1))
+             | Some _ | None ->
+                 state.code_target_line <- Some location.ll_line;
+                 launch_code_file_load state ~mailbox
+                   ~path:location.ll_path
+           end
+           else
+             (* Outside the workspace (stdlib, a package): say where rather
+                than open a path the surface cannot serve. *)
+             state.code_lsp_note <-
+               Some
+                 (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
+                    location.ll_path location.ll_line))
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
@@ -5383,7 +5464,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
-                  state.runtime_surface_error <- None
+                  state.runtime_surface_error <- probe_error
               | Error detail -> state.runtime_surface_error <- Some detail)
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
@@ -6514,6 +6595,37 @@ let main () =
            in
            (match k with
             | "esc" -> close ()
+            | "\r" when
+                (let q = String.trim state.palette_query in
+                 String.starts_with ~prefix:"hover " q
+                 || String.starts_with ~prefix:"def " q) ->
+                (* A typed command, not an entry: the argument is the symbol
+                   the language-server question is asked about, on the Code
+                   pane's cursor line. *)
+                let q = String.trim state.palette_query in
+                let question, symbol =
+                  match String.index_opt q ' ' with
+                  | Some i ->
+                      ( String.sub q 0 i,
+                        String.trim
+                          (String.sub q (i + 1) (String.length q - i - 1)) )
+                  | None -> (q, "")
+                in
+                let question =
+                  if String.equal question "def" then "definition"
+                  else question
+                in
+                close ();
+                if String.equal symbol "" then
+                  add_event state "error"
+                    (question ^ " needs a symbol: :" ^ question ^ " <name>")
+                else if state.view <> Code || Option.is_none state.code_file
+                then
+                  add_event state "error"
+                    "hover/def ask about the file open on the Code surface"
+                else
+                  start_code_lsp_question state ~mailbox:async_messages
+                    ~question ~symbol
             | "\r" ->
                 let matches = Masc_tui_types.palette_matches state in
                 let chosen =
@@ -6760,6 +6872,27 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "K" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file
+                       && not state.code_history_open
+                       && not state.code_diff_open
+                       && not state.code_notes_open
+                       && not state.code_activity_open ->
+           (* Ask the language server what a name on the cursor line is. The
+              palette collects the name: the pane has no character cursor,
+              and the route's address arithmetic wants the literal symbol. *)
+           state.palette_open <- true;
+           state.palette_query <- "hover ";
+           state.palette_cursor <- 0
+       | Some "D" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file
+                       && not state.code_history_open
+                       && not state.code_diff_open
+                       && not state.code_notes_open
+                       && not state.code_activity_open ->
+           state.palette_open <- true;
+           state.palette_query <- "def ";
+           state.palette_cursor <- 0
        | Some "c" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file ->
            (* Which keeper wrote which lines of the open file, through what,
@@ -7272,10 +7405,16 @@ let main () =
                   else
                     match state.code_file with
                     | Some (_, rows) ->
+                        let cursor =
+                          Masc_tui_scroll.cursor_down
+                            ~count:(List.length rows)
+                            state.code_file_cursor
+                        in
+                        state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
-                          min
-                            (max 0 (List.length rows - 1))
-                            (state.code_file_scroll + 1)
+                          Masc_tui_scroll.ensure_visible ~cursor
+                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            state.code_file_scroll
                     | None -> ())
                 else
                   state.code_cursor <-
@@ -7372,7 +7511,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_older
@@ -7484,8 +7623,19 @@ let main () =
                     state.code_history_scroll <-
                       max 0 (state.code_history_scroll - 1)
                   else
-                    state.code_file_scroll <-
-                      max 0 (state.code_file_scroll - 1))
+                    match state.code_file with
+                    | Some (_, rows) ->
+                        let cursor =
+                          Masc_tui_scroll.cursor_up
+                            ~count:(List.length rows)
+                            state.code_file_cursor
+                        in
+                        state.code_file_cursor <- cursor;
+                        state.code_file_scroll <-
+                          Masc_tui_scroll.ensure_visible ~cursor
+                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            state.code_file_scroll
+                    | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
@@ -7566,7 +7716,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_newer

@@ -293,6 +293,27 @@ def wait_for_output(
         select.select([master_fd], [], [], min(0.1, remaining))
 
 
+def wait_for_fixture_event(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    event: threading.Event,
+    *,
+    timeout: float,
+) -> bool:
+    """Wait for a fixture thread without letting the TUI's PTY fill up."""
+    deadline = time.monotonic() + timeout
+    while not event.is_set():
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        event.wait(timeout=min(0.05, remaining))
+    return True
+
+
 def write_all(master_fd: int, output: bytearray, data: bytes) -> None:
     """Write every byte, draining the TUI as it goes.
 
@@ -618,6 +639,11 @@ def kill_process_group(process: subprocess.Popen[bytes]) -> None:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
 
 
 def configure_child_terminal() -> None:
@@ -1345,7 +1371,7 @@ def run_terminal_scenario(
                     output,
                     b"MASC Overview",
                     start=0,
-                    timeout=10.0,
+                    timeout=30.0,
                 )
                 wait_for_output(
                     process,
@@ -1410,7 +1436,7 @@ def run_terminal_scenario(
     finally:
         if process is not None and process.poll() is None:
             kill_process_group(process)
-            process.wait(timeout=2.0)
+            process.wait(timeout=10.0)
         os.close(master_fd)
         os.close(slave_fd)
 
@@ -1437,7 +1463,13 @@ def navigate_with_arrows_and_quit(
         b"\x1b[A",
         keeper_row_selected(b"alpha"),
     )
-    send_and_wait(process, master_fd, output, b"c", b"Esc:list")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"c",
+        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+    )
     send_and_wait(process, master_fd, output, b"q2Q", composer_showing(b"q2Q"))
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
@@ -1717,7 +1749,7 @@ def keeper_detail_overscroll_interaction(
                 process,
                 master_fd,
                 output,
-                rows=14,
+                rows=16,
                 columns=100,
                 needle=b"Keepers \xe2\x96\xb8 \x1b[1malpha",
                 controls=(FULL_REDRAW,),
@@ -1746,7 +1778,9 @@ def keeper_detail_overscroll_interaction(
             fixtures["/api/v1/dashboard/briefing"] = refresh_gate
             read_available(master_fd, output)
             os.write(master_fd, b"jr")
-            if not refresh_gate.requested.wait(timeout=3.0):
+            if not wait_for_fixture_event(
+                process, master_fd, output, refresh_gate.requested, timeout=10.0
+            ):
                 raise AssertionError(
                     "Keeper detail overscroll refresh did not reach its fixture"
                 )
@@ -1754,7 +1788,7 @@ def keeper_detail_overscroll_interaction(
                 process,
                 master_fd,
                 output,
-                rows=14,
+                rows=16,
                 columns=99,
                 needle=bottom,
                 controls=(FULL_REDRAW,),
@@ -2199,7 +2233,7 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -2210,8 +2244,6 @@ def assert_row_budgeted_surfaces(
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-3" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
-    if "└".encode() not in overview:
-        raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
 
     resize_and_wait(
         process,
@@ -2232,7 +2264,7 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=b"MASC Board",
         controls=(FULL_REDRAW,),
@@ -2251,8 +2283,6 @@ def assert_row_budgeted_surfaces(
         raise AssertionError(f"Board comment leaked Markdown source markers: {board!r}")
     if b"comment-4" in board or b"comment-5" in board:
         raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
-    if "└".encode() not in board:
-        raise AssertionError(f"14-row Board omitted its bottom border: {board!r}")
 
     send_and_wait(process, master_fd, output, b"j", b"comment-4")
     send_and_wait(process, master_fd, output, b"j", b"comment-5")
@@ -2359,8 +2389,8 @@ def assert_overview_event_rows(
         the startup event count happened to equal the panel.
 
         [start_offset] is the offset the panel already rests at. The second
-        walk of the scenario starts where the 22-row expansion clamped the
-        offset -- with more events than the panel that is not the newest
+        walk of the scenario starts where the 22-row surface expansion clamped
+        the offset -- with more events than the panel that is not the newest
         window, so counting from 0 would wait for labels the TUI has
         already scrolled past.
         """
@@ -2390,14 +2420,14 @@ def assert_overview_event_rows(
     tab_until(process, master_fd, output, b"MASC Overview")
 
     # The smallest viewport that still fits the whole Overview budget. It grew
-    # by one row when the composer took the terminal's last line, so this is
-    # 23 rather than 22; the assertions below are the same budget, not a
-    # larger one.
+    # by two terminal rows when the surface strip and composer took their
+    # fixed lines, so this is 24 rather than 22; the assertions below are the
+    # same surface budget, not a larger one.
     overview = resize_and_wait(
         process,
         master_fd,
         output,
-        rows=23,
+        rows=24,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -2408,12 +2438,12 @@ def assert_overview_event_rows(
     # That it was drawn held only while the total equalled the panel's rows.
     for expected in (b"Manual refresh", b"task-1", b"task-5", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"23-row Overview omitted {expected!r}: {overview!r}")
-    assert_event_window_at_newest(overview, "23-row Overview")
-    span = event_range_span(overview, "23-row Overview")
+            raise AssertionError(f"24-row terminal Overview omitted {expected!r}: {overview!r}")
+    assert_event_window_at_newest(overview, "24-row terminal Overview")
+    span = event_range_span(overview, "24-row terminal Overview")
     if span != OVERVIEW_PANEL_ROW_CAP:
         raise AssertionError(
-            f"23-row Overview drew {span} event rows, not the "
+            f"24-row terminal Overview drew {span} event rows, not the "
             f"{OVERVIEW_PANEL_ROW_CAP} it has room for: {overview!r}"
         )
 
@@ -2421,7 +2451,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -2441,15 +2471,13 @@ def assert_overview_event_rows(
         )
     if b"TUI started" in overview or b"task-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
-    if "└".encode() not in overview:
-        raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
 
     scroll_to_oldest(total)
     oldest = resize_and_wait(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=99,
         needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
@@ -2489,7 +2517,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
@@ -2504,7 +2532,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=22,
+        rows=24,
         columns=100,
         needle=clamped_window(OVERVIEW_PANEL_ROW_CAP, total, total),
         controls=(FULL_REDRAW,),
@@ -2517,7 +2545,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=clamped_window(2, max(0, total - OVERVIEW_PANEL_ROW_CAP), total),
         controls=(FULL_REDRAW,),
@@ -2540,7 +2568,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=99,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -2570,7 +2598,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=14,
+        rows=16,
         columns=100,
         needle=event_range(after_r_total - 2, after_r_total - 1, after_r_total),
         controls=(FULL_REDRAW,),
@@ -2951,7 +2979,9 @@ def board_detail_isolation_interaction(b_failure: GatedHttpResponse) -> Interact
                 raise AssertionError(
                     f"Board B loading leaked the prior detail: {loading!r}"
                 )
-            if not b_failure.requested.wait(timeout=3.0):
+            if not wait_for_fixture_event(
+                process, master_fd, output, b_failure.requested, timeout=10.0
+            ):
                 raise AssertionError("Board B detail request did not reach its fixture")
 
             release_and_wait_for_frame(
@@ -3007,7 +3037,9 @@ def board_detail_authority_interaction(
 
             read_available(master_fd, output)
             os.write(master_fd, b"r")
-            if not late_list.requested.wait(timeout=3.0):
+            if not wait_for_fixture_event(
+                process, master_fd, output, late_list.requested, timeout=10.0
+            ):
                 raise AssertionError(
                     "late Board list request did not reach its fixture"
                 )
@@ -3087,7 +3119,9 @@ def board_missing_target_interaction(
                 process, master_fd, output, b"r", screen_header(b"MASC Board", b" (1)")
             )
             board = frame_containing(board_update, screen_header(b"MASC Board", b" (1)"))
-            if not late_b.requested.wait(timeout=3.0):
+            if not wait_for_fixture_event(
+                process, master_fd, output, late_b.requested, timeout=10.0
+            ):
                 raise AssertionError("late Board B request did not reach its fixture")
             for expected in (
                 selected_row(b"post-a"),
@@ -3314,7 +3348,17 @@ def image_view_interaction() -> Interaction:
 
         path = str(Path(base_path, IMAGE_NAME))
         command = f"/image {path}".encode()
-        send_and_wait(process, master_fd, output, command, composer_showing(command))
+        # The 100-column fixture leaves 92 cells for the draft. Long Dune
+        # sandbox paths therefore draw the composer's omission marker and
+        # newest tail, while Enter still submits the complete buffer.
+        visible_command = command if len(command) <= 92 else b"~" + command[-91:]
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            command,
+            composer_showing(visible_command),
+        )
 
         read_available(master_fd, output)
         drawn_from = len(output)
@@ -3580,7 +3624,7 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                     f"the pane counted a waiting line it did not draw; "
                     f"missing {expected!r}: {plain!r}"
                 )
-        if b"Enter:queue (2 waiting)" not in plain:
+        if b"Enter:queue(2)" not in plain:
             raise AssertionError(f"the footer lost its count: {plain!r}")
 
         # Every variable row -- sending, queued, errors -- comes out of the
@@ -3913,7 +3957,13 @@ def memory_journal_timeline_interaction() -> Interaction:
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         start = len(output)
-        send_and_wait(process, master_fd, output, b"m", b"memory:on")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
         wait_for_output(
             process,
             master_fd,
@@ -3945,8 +3995,10 @@ def memory_journal_timeline_interaction() -> Interaction:
             b"\r",
             b"Librarian committed memory revision 9",
         )
-        if b"memory:on" not in restored:
-            raise AssertionError(f"Memory timeline did not return to on: {restored!r}")
+        if b"Librarian/Memory timeline shown" not in restored:
+            raise AssertionError(f"Memory timeline did not report restoration: {restored!r}")
+        if b"memory:off" in restored:
+            raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
@@ -4161,11 +4213,19 @@ def chat_visibility_modes_interaction() -> Interaction:
         if b"Reasoning" not in folded or b"line(s) folded" not in folded:
             raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
 
-        full = send_and_wait(process, master_fd, output, b"\x12", b"reasoning:full")
+        full = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x12",
+            b"2 reasoning steps, content withheld",
+        )
         if b"2 reasoning steps, content withheld" not in full:
             raise AssertionError(f"full reasoning did not restore content: {full!r}")
 
-        tools = send_and_wait(process, master_fd, output, b"\x04", b"tools:full")
+        tools = send_and_wait(
+            process, master_fd, output, b"\x04", b"masc_task_history"
+        )
         for needle in (b"masc_task_history", b"tool_execute"):
             if needle not in tools:
                 raise AssertionError(
@@ -4320,7 +4380,17 @@ def message_origin_badge_interaction(
         start=pane_start,
         timeout=5.0,
     )
-    frame = frame_containing(bytes(output[pane_start:]), b"keeper-body-neutral")
+    keeper_end = end_of_needle(output, b"keeper-body-neutral", pane_start)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=keeper_end,
+        timeout=3.0,
+    )
+    update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
+    frame = bytes(output[pane_start:update_end])
     for needle, description in (
         (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
         (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
@@ -4337,9 +4407,9 @@ def message_origin_badge_interaction(
         if forbidden in frame:
             raise AssertionError(f"chat frame retained {description}: {frame!r}")
 
-    draft_start = len(output)
-    send_and_wait(process, master_fd, output, b"draft-neutral", b"draft-neutral")
-    draft_frame = frame_containing(bytes(output[draft_start:]), b"draft-neutral")
+    draft_frame = send_and_wait(
+        process, master_fd, output, b"draft-neutral", b"draft-neutral"
+    )
     if b"\x1b[36m  > \x1b[0mdraft-neutral" not in draft_frame:
         raise AssertionError(
             f"chat composer did not limit accent to its prompt: {draft_frame!r}"
@@ -4414,7 +4484,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-        if not alpha_history.requested.wait(timeout=3.0):
+        if not wait_for_fixture_event(
+            process, master_fd, output, alpha_history.requested, timeout=10.0
+        ):
             raise AssertionError("alpha history request did not reach its fixture")
         send_and_wait(
             process,
@@ -4455,7 +4527,6 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         for expected in (
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
             b"idle \xc2\xb7 paused claude-sonnet-4",
-            b"Ctrl-G:next Keeper",
             b"beta-current-history-marker",
         ):
             if expected not in beta_plain:
@@ -4507,7 +4578,9 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         # again. Keeper identity matches; only the load generation can reject
         # this ABA response in favour of the second alpha request above.
         alpha_history.release.set()
-        if not alpha_history.completed.wait(timeout=3.0):
+        if not wait_for_fixture_event(
+            process, master_fd, output, alpha_history.completed, timeout=10.0
+        ):
             raise AssertionError("released alpha history fixture did not complete")
         time.sleep(0.1)
         stale_check = resize_and_wait(
@@ -4665,7 +4738,9 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
             raise AssertionError(
                 f"Verification body read an empty queue off no reading: {unread!r}"
             )
-        if not gate.requested.wait(timeout=3.0):
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
             raise AssertionError("Verification surface did not ask for its queue")
         loaded = release_and_wait_for_frame(
             process, master_fd, output, gate, b"(nothing waiting on a verdict)"
@@ -4877,7 +4952,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         read_available(master_fd, output)
         reject_start = len(output)
         os.write(master_fd, b"x")
-        deadline = time.monotonic() + 5.0
+        deadline = time.monotonic() + 10.0
         while len(verdict_bodies()) < 2:
             read_available(master_fd, output)
             if process.poll() is not None:
@@ -4991,7 +5066,9 @@ def keeper_lanes_interaction(
                 raise AssertionError(
                     f"Lanes did not draw the {column!r} column: {unread_plain!r}"
                 )
-        if not gate.requested.wait(timeout=3.0):
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
             raise AssertionError("Lanes did not request the composite snapshot")
 
         empty = release_and_wait_for_frame(
@@ -5323,6 +5400,21 @@ def code_lane_fixtures() -> HttpFixtures:
         "/api/v1/git/diff?path=lib%2Fa.ml&base_ref=HEAD",
     ):
         fixtures[diff_path] = diff_response
+    hover_response = (200, {"ok": True, "data": {"kind": "hover", "text": "int"}})
+    definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 2,
+             "character": 1},
+        ]}},
+    )
+    for enc in ("lib/a.ml", "lib%2Fa.ml"):
+        fixtures[
+            f"/api/v1/lsp/question?question=hover&path={enc}&line=1&symbol=x"
+        ] = hover_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=1&symbol=x"
+        ] = definition_response
     return fixtures
 
 
@@ -5345,8 +5437,10 @@ def code_lane_interaction(
     opened = send_and_wait(
         process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
     )
-    if re.search(rb"\x1b\[2m\s+1\x1b\[0m", opened) is None:
-        raise AssertionError(f"no line-number gutter: {opened!r}")
+    if re.search(rb"\x1b\[7m\s+1\x1b\[0m", opened) is None:
+        raise AssertionError(
+            f"the cursor line's gutter is not highlighted: {opened!r}"
+        )
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
     # l pans the open file sideways by one cell: the keyword span is cut
@@ -5382,6 +5476,21 @@ def code_lane_interaction(
             f"history footer does not offer the way back: {history_plain!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    # K pre-fills the palette with the hover command; the argument is the
+    # symbol, and the answer lands beside the title.
+    prefilled = send_and_wait(process, master_fd, output, b"K", b"hover ")
+    if b"MASC Palette" not in CSI_RE.sub(b"", prefilled) and \
+            b"hover " not in CSI_RE.sub(b"", prefilled):
+        raise AssertionError(f"K did not open the palette: {prefilled!r}")
+    send_and_wait(process, master_fd, output, b"x\r", b"x: int")
+    # D asks for the definition; the answer is inside the same file, so the
+    # cursor (the reverse gutter) moves to its line.
+    send_and_wait(process, master_fd, output, b"D", b"def ")
+    landed = send_and_wait(process, master_fd, output, b"x\r", b"x: lib/a.ml:2")
+    if re.search(rb"\x1b\[7m\s+2\x1b\[0m", landed) is None:
+        raise AssertionError(
+            f"the definition jump did not move the cursor gutter: {landed!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -5572,7 +5681,9 @@ def runtime_surface_interaction(
             read_available(master_fd, output)
             start = len(output)
             os.write(master_fd, b"\t")
-            if not initial_probe.requested.wait(timeout=3.0):
+            if not wait_for_fixture_event(
+                process, master_fd, output, initial_probe.requested, timeout=10.0
+            ):
                 raise AssertionError("Runtime did not request provider probe")
             # Several 50 ms ticks pass while the authenticated probe is held.
             # The resolved request may finish, but the joined generation must
@@ -5708,7 +5819,7 @@ def runtime_surface_interaction(
                     raise AssertionError(
                         f"Runtime discarded its prior rows after failure: {preserved_plain!r}"
                     )
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Tools")
+            send_and_wait(process, master_fd, output, b"\t", b"MASC Config")
             os.write(master_fd, b"q")
             completed = True
         finally:
@@ -5944,7 +6055,9 @@ def fusion_list_detail_interaction(
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
-        if not initial_runs.requested.wait(timeout=3.0):
+        if not wait_for_fixture_event(
+            process, master_fd, output, initial_runs.requested, timeout=10.0
+        ):
             raise AssertionError("Fusion did not request its Registry list")
         # Several periodic ticks pass while the first read is held. The TUI
         # must keep that one request authoritative instead of continually

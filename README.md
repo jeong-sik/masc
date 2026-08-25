@@ -35,7 +35,7 @@ are doing; they read and write the same `.masc/` state.
 |---|---|---|
 | **MCP** | Your own agent joins the workspace: claim a task, post to the board, record evidence | Any MCP client over `http://127.0.0.1:8935/mcp` |
 | **Dashboard** | Reading the whole workspace in a browser and taking operator actions | Served at `/dashboard/` by the same process |
-| **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | Built from a source checkout (`masc-tui`) |
+| **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | `masc-tui`, installed beside `masc` or built from source |
 
 ![MASC dashboard overview](docs/screenshots/dashboard/2026-08-25/01-overview.png)
 
@@ -108,9 +108,9 @@ the login and start commands printed by the installer. The login command mints
 a worker bearer for the MCP client; the endpoint does not accept an
 unauthenticated client by default.
 
-A release carries the server binary and the deployment preflight helpers. The
-terminal UI is not among those assets, so a terminal-first setup needs the
-source checkout above.
+A release carries the server binary, the terminal UI, and the deployment
+preflight helpers. The installer puts `masc-tui` next to `masc` and prints the
+command that starts it.
 
 ## MCP client setup
 
@@ -154,8 +154,8 @@ dashboard operations are covered by
 
 `masc-tui` is a terminal client for the same workspace. It reads `.masc/`
 from disk directly, and adds the surfaces that only exist over HTTP when a
-server answers on the configured port. It is built from a source checkout and
-is not attached to binary releases.
+server answers on the configured port. A release install puts it on `PATH`;
+from a source checkout it is one Dune target.
 
 ```bash
 dune build --root . bin/masc_tui.exe
@@ -209,7 +209,7 @@ tables, per-surface behavior, and troubleshooting are in
 | Workspace collaboration | Share Goals, Tasks, claims, transitions, board posts, and verification evidence through MCP | Coordination data does not provide transactional protection for concurrent source edits |
 | Keepers | Run configured agents that react to workspace events and write execution records | Advanced path; behavior depends on the selected runtime and Keeper configuration |
 | Dashboard | Read workspace and runtime state and perform operator actions | Availability and write access depend on the built SPA and auth mode |
-| Terminal UI | Watch Keepers, answer the Gate queue, message a Keeper, and browse repository files and diffs | Source-checkout only; the surface set changes often on `main` |
+| Terminal UI | Watch Keepers, answer the Gate queue, message a Keeper, and browse repository files and diffs | Needs an interactive TTY; the surface set changes often on `main` |
 | Gate and HITL | Apply Always Allow, model judgment, or human approval to supported external effects | Authorization workflow, not a sandbox or credential boundary |
 | Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
 | Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |

@@ -936,6 +936,13 @@ type state = {
   mutable code_file: (string * (string * string) list list) option;
   mutable code_file_error: string option;
   mutable code_file_scroll: int;
+  (* The line the pane's cursor is on (0-based), the anchor a language-server
+     question is asked at. j/k move it; the scroll follows to keep it
+     visible. *)
+  mutable code_file_cursor: int;
+  (* The last language-server answer (or refusal), shown beside the title
+     until the next question or file replaces it. *)
+  mutable code_lsp_note: string option;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -1360,6 +1367,8 @@ let create_state
   code_file = None;
   code_file_error = None;
   code_file_scroll = 0;
+  code_file_cursor = 0;
+  code_lsp_note = None;
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_focus_file = false;

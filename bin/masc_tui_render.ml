@@ -5989,6 +5989,14 @@ let render_runtime_pick (state : state) =
    lexed once at load (masc_tui_code_lexer) and drawn as styled spans.
    fit_width measures cells past the SGR bytes and closes a cut style, so a
    long row truncates without bleeding colour into the margin. *)
+(* The file pane's usable rows: top gap, title, divider, bottom gap, and
+   the footer. One owner — the dispatch keeps the cursor visible against the
+   same number the renderer draws with. *)
+let code_pane_content_height () =
+  let terminal_rows, _ = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  max 1 (rows - 5)
+
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -6106,7 +6114,12 @@ let render_code (state : state) =
           else if notes_showing then "notes: " ^ path
           else if diff_showing then "diff vs HEAD: " ^ path
           else if history_showing then "history: " ^ path
-          else path
+          else (
+            match state.code_lsp_note with
+            | Some note ->
+                path ^ "  " ^ Masc_tui_theme.tone Masc_tui_theme.Accent
+                ^ Terminal_text.single_line note ^ Ansi.reset
+            | None -> path)
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;
@@ -6116,9 +6129,7 @@ let render_code (state : state) =
        ^ (if state.code_focus_file then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    (* Five chrome rows: top gap, title, divider, bottom gap, and the
-       footer this pane must leave room for. *)
-    let content_height = max 1 (rows - 5) in
+    let content_height = code_pane_content_height () in
     (if activity_showing then
        match state.code_activity_error, state.code_activity with
        | Some detail, _ ->
@@ -6334,8 +6345,16 @@ let render_code (state : state) =
                  in
                  (* The gutter stays put; only the code scrolls sideways. *)
                  let body = Message_layout.drop_cells body hscroll in
+                 let row_index = scroll + i in
+                 let gutter_style =
+                   (* The cursor line carries the gutter in reverse video:
+                      a full-row band would sit on top of the lexer's own
+                      colours, and the gutter is the row's stable margin. *)
+                   if row_index = state.code_file_cursor then Ansi.reverse
+                   else Ansi.dim
+                 in
                  box_line pane_buf pane_cols
-                   (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
+                   (Printf.sprintf "%s%4d%s %s" gutter_style (row_index + 1)
                       Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
            done);

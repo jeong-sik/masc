@@ -299,6 +299,12 @@ let stage_release_mirror base_path =
     let name = platform_release_asset () in
     String.sub name 5 (String.length name - 5)
   in
+  (* The terminal UI is a companion the installer refuses to skip, so the mirror
+     has to carry it or every download path fails on a missing asset. The
+     symlink target only has to be an executable file; nothing here runs it. *)
+  let tui = Filename.concat dir ("masc-tui-" ^ suffix) in
+  unlink_if_exists tui;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) tui;
   let helper =
     Filename.concat
       dir
@@ -428,6 +434,14 @@ let test_release_requires_advertised_binary_assets () =
     workflow
     "for arch in macos-arm64 linux-x64 linux-arm64; do";
   assert_contains
+    "release builds the terminal UI"
+    workflow
+    "bin/masc_tui.exe";
+  assert_contains
+    "release requires the terminal UI asset"
+    workflow
+    "masc-tui-$arch";
+  assert_contains
     "release builds the typed deployment preflight helper"
     workflow
     "bin/deployment_preflight_helper.exe";
@@ -481,6 +495,21 @@ let test_installer_prints_authenticated_mcp_next_step () =
 
 let test_installer_fetches_deployment_preflight_companions () =
   let script = install_script () in
+  (* The terminal UI rides the same companion path as the preflight pair. It is
+     pinned here because the release workflow and the installer have to name the
+     same asset, and nothing else compares the two spellings. *)
+  assert_contains
+    "installer derives the platform terminal UI asset"
+    script
+    {|TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"|};
+  assert_contains
+    "installer installs the terminal UI beside the server"
+    script
+    {|TUI_DEST="$PREFIX/masc-tui"|};
+  assert_contains
+    "installer fetches the terminal UI as a companion"
+    script
+    {|install_release_companion "$TUI_ASSET" "$TUI_DEST"|};
   assert_contains
     "installer derives the platform helper asset"
     script

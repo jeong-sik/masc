@@ -232,37 +232,28 @@ different config root.
 |---|---|
 | `runtime.toml` | Provider/model catalog, required `[runtime].default`, runtime lanes, and Keeper assignments |
 | `agent-core-models-overlay.toml` | Optional deployment-specific model capability rows; the embedded Agent Core catalog is used when the file is absent |
-| `keepers/<name>.toml` | Operational Keeper settings |
-| `keepers/<name>/AGENT.md` | Complete Keeper prompt; required for every TOML-backed Keeper |
+| `keepers/<name>.toml` | Everything one Keeper needs: operational settings and its prompt, in `keeper.instructions` |
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
 | `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
 | `.env.local` | Provider environment variables written by current installer and quickstart flows |
 
-A Keeper uses two authored files:
-
-```text
-<base-path>/.masc/config/keepers/reviewer.toml
-<base-path>/.masc/config/keepers/reviewer/AGENT.md
-```
+A Keeper is one authored file, `<base-path>/.masc/config/keepers/reviewer.toml`:
 
 ```toml
-# keepers/reviewer.toml
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "local"
 mention_targets = ["operator"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
-```
 
-```markdown
-<!-- keepers/reviewer/AGENT.md -->
+instructions = """
 You are the review Keeper. Inspect the current change and report concrete
 evidence with file paths and commands.
+"""
 ```
 
-Keeper TOML contains operational settings only. Prompt text belongs in
-`AGENT.md`. Unknown Keeper TOML keys are rejected.
+Unknown Keeper TOML keys are rejected.
 
 Runtime assignment belongs in `runtime.toml`:
 

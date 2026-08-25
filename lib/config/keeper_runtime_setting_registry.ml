@@ -95,6 +95,15 @@ let all =
       ~category:"bootstrap"
       "Enable startup keeper auto-bootstrap"
   ; setting
+      ~range:(int_range ~min:4096 ())
+      ~env_name:"MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES"
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"1048576"
+      ~consumers:[ "Keeper_agent_run spawn registry" ]
+      ~category:"spawn"
+      "Bytes of each spawned process stream kept for reading"
+  ; setting
       ~range:(float_range ~min:0.05 ())
       ~env_name:"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC"
       ~exposure:Env_only

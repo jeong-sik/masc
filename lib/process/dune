@@ -8,6 +8,7 @@
   process_eio
   spawn_handle
   spawn_registry
+  spawn_turn_registry
   process_eio_detached
   process_eio_stderr
   file_lock_eio

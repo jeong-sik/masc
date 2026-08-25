@@ -25,6 +25,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_schedule -> "schedule"
+  | Mod_spawn -> "spawn"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -105,6 +106,10 @@ let dispatch
             ~base_dir:config.base_path ~caller_keeper_name:agent_name
             ~agent_name:requested_agent_name)
         { Tool_agent_timeline.config; agent_name } ~name ~args
+    (* Routed by the descriptor runtime rather than here: a spawn needs the
+       turn's registry and switch together, and those are read where the turn
+       bound them. *)
+    | Mod_spawn -> None
     | Mod_schedule ->
       Tool_schedule.dispatch
         { Tool_schedule.config

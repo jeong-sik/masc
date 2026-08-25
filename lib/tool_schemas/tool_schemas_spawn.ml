@@ -6,6 +6,7 @@ type action =
 
 type definition = {
   action : action;
+  id : string;
   schema : Masc_domain.tool_schema;
   read_only : bool;
 }
@@ -14,13 +15,13 @@ type definition = {
    here: each schema is the whole tool_schema, and the file the model is handed
    is the one that should carry it. *)
 let definitions : definition list =
-  [ { action = Start; schema = Tool_schemas_spawn_toml.start; read_only = false }
-  ; { action = Read; schema = Tool_schemas_spawn_toml.read; read_only = true }
+  [ { action = Start; id = "start"; schema = Tool_schemas_spawn_toml.start; read_only = false }
+  ; { action = Read; id = "read"; schema = Tool_schemas_spawn_toml.read; read_only = true }
     (* Waiting changes nothing, but it is not read-only in the sense a caller
        cares about: it blocks, and a surface that lets a read-only tool block
        for a caller-supplied bound is a surface that can be made to hang. *)
-  ; { action = Wait; schema = Tool_schemas_spawn_toml.wait; read_only = false }
-  ; { action = Stop; schema = Tool_schemas_spawn_toml.stop; read_only = false }
+  ; { action = Wait; id = "wait"; schema = Tool_schemas_spawn_toml.wait; read_only = false }
+  ; { action = Stop; id = "stop"; schema = Tool_schemas_spawn_toml.stop; read_only = false }
   ]
 ;;
 

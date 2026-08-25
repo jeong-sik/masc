@@ -431,7 +431,7 @@ let test_multiple_event_types () =
        (AgentCompleted
           { agent_name = "a"
           ; task_id = "t1"
-          ; result = Ok (mock_response "done")
+          ; response = mock_response "done"
           ; elapsed = 0.1
           }));
   let events = Event_bus.drain sub in

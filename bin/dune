@@ -290,6 +290,11 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_theme)
+ (wrapped false)
+ (modules masc_tui_theme))
+
+(library
  (name masc_tui_paste)
  (wrapped false)
  (modules masc_tui_paste))
@@ -310,6 +315,17 @@
  (wrapped false)
  (modules masc_tui_graphics)
  (libraries base64))
+
+(library
+ (name masc_tui_diff)
+ (wrapped false)
+ (modules masc_tui_diff))
+
+(library
+ (name masc_tui_span)
+ (wrapped false)
+ (modules masc_tui_span)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_message_layout)
@@ -366,6 +382,17 @@
  (wrapped false)
  (modules masc_tui_help)
  (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_roster_pane)
+ (wrapped false)
+ (modules masc_tui_roster_pane))
+
+(library
+ (name masc_tui_keeper_mark)
+ (wrapped false)
+ (modules masc_tui_keeper_mark)
+ (libraries masc))
 
 (library
  (name masc_tui_footer)
@@ -478,6 +505,12 @@
   unix
   yojson))
 
+(library
+ (name masc_tui_terminal_title)
+ (wrapped false)
+ (modules masc_tui_terminal_title)
+ (libraries masc_tui_types))
+
 (executable
  (name masc_tui)
  (modules
@@ -489,18 +522,24 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_theme
+  masc_tui_span
+  masc_tui_diff
   masc
   masc.auth
   masc.masc_random_id
   terminal_size
   masc_tui_credential
   masc_tui_types
+  masc_tui_terminal_title
   masc.runtime
   ;; masc_tui_render names Fusion_types directly to label a run's topology.
   ;; Tui_decode carries the type through fur_topology, but dune does not open a
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.
   masc.fusion_core
   masc_tui_footer
+  masc_tui_roster_pane
+  masc_tui_keeper_mark
   masc_tui_help
   masc_tui_context_state
   masc_tui_frame_presenter

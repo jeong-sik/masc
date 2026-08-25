@@ -263,9 +263,22 @@ let awaiting_approval_notice (state : state) =
                (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
                where))
 
-let footer_line ?status (state : state) ~hints =
-  Masc_tui_footer.line ?status ~dim:Ansi.dim ~reset:Ansi.reset ~port:state.port
-    ~hints ()
+(* The server names itself in every footer, because "which masc is this"
+   is a question every surface can raise and none of them answered: the tail
+   said [Port: 8935] and two checkouts on that port read identically. *)
+let footer_line ?(status = []) (state : state) ~hints =
+  let build =
+    match state.server_identity with
+    | None -> []
+    | Some identity ->
+        [ Masc_tui_footer.Server_build
+            { version = identity.Tui_decode.sid_version
+            ; commit = identity.Tui_decode.sid_binary_commit
+            }
+        ]
+  in
+  Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
+    ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = composer_of_state state in
@@ -393,8 +406,16 @@ let surface_strip (state : state) ~cols =
 
 (* Side-by-side panes share one threshold and one context-pane width, so
    every split surface folds at the same terminal size. *)
-let keeper_split_threshold_cols = 110
-let keeper_roster_pane_cols = 30
+let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
+let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
+
+(* The roster shows when the terminal can spare its columns and the reader
+   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
+   is theirs, and hiding survives a resize because it is a decision rather
+   than a measurement. *)
+let keeper_roster_pane_shown (state : state) ~cols =
+  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -446,11 +467,12 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 let connection_badge : Masc_tui_types.connection_status -> string = function
-  | Connected -> Theme.ok ^ "[connected]" ^ Ansi.reset
-  | Degraded -> Theme.warn ^ "[degraded]" ^ Ansi.reset
-  | Connecting -> Theme.warn ^ "[connecting...]" ^ Ansi.reset
-  | Reconnecting -> Theme.warn ^ "[reconnecting...]" ^ Ansi.reset
-  | Disconnected -> Theme.bad ^ "[disconnected]" ^ Ansi.reset
+  | Connected as status ->
+      Theme.ok ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | (Degraded | Connecting | Reconnecting) as status ->
+      Theme.warn ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | Disconnected as status ->
+      Theme.bad ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
 ;;
 
 let workspace_health_label = function
@@ -1955,13 +1977,8 @@ let keeper_action_color
   | Some Status.Direct_message -> Theme.ok
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
-  match health with
-  | None -> "-"
-  | Some _ when paused -> "\xe2\x97\x8b"
-  | Some value -> (
-      match Tui_decode.keeper_health_to_string value with
-      | "offline" -> "\xc3\x97"
-      | _ -> "\xe2\x97\x8f")
+  Masc_tui_keeper_mark.glyph ~paused
+    (Option.map Tui_decode.keeper_health_reading health)
 
 (* [None] is a roster that was not read, not a health the roster could not
    name: the word says so, and it is the word the header's tally uses for
@@ -2840,7 +2857,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
   framed_top buf cols;
-  framed_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
+  framed_line buf cols (Ansi.dim ^ " Keepers  ^B:hide" ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -2852,14 +2869,28 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
+        (* The same glyph the Keepers surface draws, for the same reading.
+           Without it the pane says a keeper exists and nothing else, so a
+           roster of ten looks identical whether one of them is offline. *)
+        let reading = keeper_reading state k in
+        let glyph =
+          keeper_state_glyph
+            ~paused:reading.Keeper_control.paused
+            ~health:(Keeper_control.health reading)
+        in
         (* Reverse video is the one selection signal every terminal
-           renders, colour or not. *)
+           renders, colour or not, and it owns the whole row: a glyph
+           tinted inside it reads as a second highlight. *)
         let line =
           if selected then
-            Theme.selection ^ " " ^ name
-            ^ String.make (max 0 (cols - 5 - Message_layout.display_width name)) ' '
+            Theme.selection ^ " " ^ glyph ^ " " ^ name
+            ^ String.make
+                (max 0 (cols - 7 - Message_layout.display_width name)) ' '
             ^ Ansi.reset
-          else " " ^ name
+          else
+            " "
+            ^ keeper_action_color (Keeper_control.next_action reading)
+            ^ glyph ^ Ansi.reset ^ " " ^ name
         in
         framed_line buf cols line
     | None -> framed_empty buf cols
@@ -2882,7 +2913,7 @@ let render_keeper_detail (state : state) =
     let footer =
       keeper_action_hints state (Some (keeper_reading state k))
     in
-    if cols < keeper_split_threshold_cols then begin
+    if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
@@ -3064,8 +3095,10 @@ let render_keeper_message (state : state) =
     let status_rows = keeper_message_status_rows state in
     (* Wide terminals keep the roster beside the chat, exactly as the detail
        view does; the chat lays out against its own pane width. *)
-    let split = cols >= keeper_split_threshold_cols in
-    let chat_cols = if split then cols - keeper_roster_pane_cols else cols in
+    let split = keeper_roster_pane_shown state ~cols in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
     if
       not
         (Message_layout.message_viewport_supported ~terminal_rows:rows
@@ -4174,7 +4207,119 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
 
-let render_changes (state : state) =
+module Span = Masc_tui_span
+module Diff = Masc_tui_diff
+
+(* A row of the diff, drawn as layers rather than as one styled string.
+
+   Three styles overlap on every line: the row's background, the gutter's
+   weight, and the text's own colour. Concatenating them would let the
+   gutter's reset close the background, and the line would lose its colour
+   from the marker onward -- the fault [Masc_tui_span] exists for. *)
+let diff_row_span ~width (row : Diff.row) =
+  let background, marker, text =
+    match row with
+    | Diff.Removed line -> (Span.bg Ansi.bg_removed, "-", line)
+    | Diff.Added line -> (Span.bg Ansi.bg_added, "+", line)
+    | Diff.Context line -> (Span.plain, " ", line)
+  in
+  (* Context is dim so the changed lines are what an eye lands on. The marker
+     is bold against the same background, which is what tells the two apart
+     where the terminal has no colour. *)
+  let text_style =
+    match row with
+    | Diff.Context _ -> Span.combine background (Span.weight Ansi.dim)
+    | Diff.Removed _ | Diff.Added _ -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.bold)) (marker ^ " ")
+      ; Span.text text_style (Terminal_text.single_line text)
+      ]
+  in
+  (* Padded to the full width with the row's own background: colour that stops
+     at the last character makes lines of different lengths look like
+     different kinds of line. Truncated first, because padding does not
+     shorten. *)
+  Span.pad_to width background (Span.truncate width composed)
+
+let box_line_span buf cols span =
+  let inner = cols - 4 in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
+
+(* The two halves of one change. A write has no removed half: its before is
+   empty, so every line arrives as an addition, which is what a new file is. *)
+let change_diff_halves (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_kind with
+  | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
+  | Masc.Tui_decode.Fc_written { content } -> ("", content)
+
+let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let before, after = change_diff_halves change in
+  let diff_rows = Diff.rows ~before ~after in
+  let removed, added = Diff.counts diff_rows in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  -%d +%d  %s"
+      (screen_title " MASC Change")
+      (Terminal_text.single_line (change_row_address change))
+      removed added
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (* Facts about the change the rows themselves cannot carry. *)
+  let notes =
+    let turn =
+      Printf.sprintf "  turn %s  task %s  %s"
+        (Option.fold ~none:"-" ~some:string_of_int change.Masc.Tui_decode.fc_turn)
+        (Terminal_text.single_line
+           (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
+        (if change.Masc.Tui_decode.fc_succeeded then "applied"
+         else "the call failed; this is what it tried to write")
+    in
+    match change.Masc.Tui_decode.fc_kind with
+    | Masc.Tui_decode.Fc_edited { replace_all = true; _ } ->
+        (* Every occurrence changed, and the log records the text once. Showing
+           one pair without saying so would undercount the change. *)
+        [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
+    | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_written _ -> [ turn ]
+  in
+  List.iter (fun note -> box_line_styled buf cols ~style:Ansi.dim note) notes;
+  box_divider buf cols;
+  let chrome_rows = 7 + List.length notes - 1 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    box_line_styled buf cols ~style:Ansi.dim
+      "  (the call recorded no text; there is nothing to compare)";
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row -> box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
+    done;
+  if total > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll)
+  else box_line_styled buf cols ~style:Ansi.dim "  esc closes";
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
+  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
@@ -4287,8 +4432,130 @@ let render_changes (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  o:open in editor  r:refresh  Tab:next  q:quit");
+    (footer_line state ~hints:"j/k:scroll  Enter:what was written  d:what the tree holds  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+(* One tree-diff row. Same three layers as the tool-call reading, plus the
+   line numbers git computed -- the part an [Edit] cannot have, because it
+   records two pieces of text and not where in the file they sit. *)
+let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background, marker =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> (Span.bg Ansi.bg_removed, "-")
+    | Masc.Tui_decode.Gd_added -> (Span.bg Ansi.bg_added, "+")
+    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
+  in
+  let gutter =
+    Printf.sprintf "%s %s %s "
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
+      marker
+  in
+  let text_style =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
+    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
+      ; Span.text text_style
+          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+      ]
+  in
+  Span.pad_to width background (Span.truncate width composed)
+
+(* What the tree holds for the file the cursor names. Separate from the
+   tool-call reading by decision, not by accident: one says what the keeper
+   tried to write and the other what survived, and a single view would make
+   whichever it drew look like the whole answer. *)
+let render_changes_tree_diff (state : state)
+    (change : Masc.Tui_decode.file_change) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let diff_rows =
+    match state.changes_tree_diff with
+    | None -> []
+    | Some diff -> diff.Masc.Tui_decode.gd_rows
+  in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  vs HEAD  %s"
+      (screen_title " MASC Tree")
+      (Terminal_text.single_line (change_row_address change))
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    "  old   new     what the working tree holds, against its last commit";
+  box_divider buf cols;
+  (match state.changes_tree_diff_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Theme.bad
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows =
+    7 + if Option.is_some state.changes_tree_diff_error then 2 else 0
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    (* Three different facts, and none of them is the others: not read yet, a
+       failed read, and a file that matches its last commit. *)
+    let empty =
+      match (state.changes_tree_diff, state.changes_tree_diff_error) with
+      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      | None, None -> "  (reading the tree)"
+      | Some diff, None ->
+          if diff.Masc.Tui_decode.gd_has_changes then
+            "  (the tree reports a change and sent no lines)"
+          else "  (this file matches its last commit)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row ->
+          box_line_span buf cols (tree_diff_row_span ~width:(cols - 4) row)
+    done;
+  box_line_styled buf cols ~style:Ansi.dim
+    (if total > content_height then
+       Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll
+     else "  esc closes");
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
+  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+(* The surface has two readings: the list, and one change opened. The open row
+   is held as an index, so a refresh that shortens the list closes the diff
+   rather than drawing a change the answer no longer holds. *)
+let render_changes (state : state) =
+  let opened =
+    match (state.changes_diff_row, state.changes) with
+    | Some row, Some snapshot ->
+        List.nth_opt snapshot.Masc.Tui_decode.fcs_changes row
+    | Some _, None | None, (Some _ | None) -> None
+  in
+  match opened with
+  | Some change ->
+      (* A path being read names the tree reading. Both readings of the same
+         row exist at once; which one is drawn is the operator's last key, not
+         whichever answer arrived last. *)
+      if Option.is_some state.changes_tree_diff_path then
+        render_changes_tree_diff state change
+      else render_changes_diff state change
+  | None -> render_changes_list state
 
 (* Where the gate can deliver.
 
@@ -5346,6 +5613,18 @@ let render_resources (state : state) =
        ~hints:"j/k:move  J/K:scroll text  Enter:read  Esc:list  r:reload  Tab:next");
   finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
+(* How long ago the running binary's commit landed. Coarse on purpose: the
+   question is "is this the build I think it is", and minutes answer it while
+   seconds only look precise. *)
+let binary_age_text = function
+  | None -> "age unknown"
+  | Some seconds when seconds < 60. -> "built just now"
+  | Some seconds when seconds < 3600. ->
+      Printf.sprintf "built %.0fm ago" (seconds /. 60.)
+  | Some seconds when seconds < 86400. ->
+      Printf.sprintf "built %.0fh ago" (seconds /. 3600.)
+  | Some seconds -> Printf.sprintf "built %.0fd ago" (seconds /. 86400.)
+
 (* The Config surface: runtime.toml exactly as the server reads it. The
    text is the truth an editor session starts from; editing itself hands
    the terminal to $EDITOR and posts back through the preview gate. *)
@@ -5367,8 +5646,20 @@ let render_config (state : state) =
              now.Unix.tm_sec)
           Ansi.reset)
        (connection_badge state.connection_status));
+  (* Where this server reads from, and how old the binary serving it is. A
+     stale binary answers every request as confidently as a current one, so
+     the age is the only thing on screen that separates them. *)
+  (match state.server_identity with
+   | None -> box_line buf cols (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
+   | Some identity ->
+       box_line buf cols
+         (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
+            (fit_width identity.Tui_decode.sid_base_path 28)
+            (fit_width identity.Tui_decode.sid_masc_root 32)
+            (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
+            Ansi.reset));
   box_divider buf cols;
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - 7) in
   (match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols (Theme.bad ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
@@ -5465,6 +5756,7 @@ let help_sections : (string * (string * string) list) list =
       ; "r", "refresh the current surface"
       ; "i", "focus the composer (message the shown keeper)"
       ; "?", "this help"
+      ; "Ctrl-B", "show or hide the keeper roster beside a surface"
       ; "Ctrl-T", "release the mouse so you can drag-select and copy"
       ; "q", "quit"
       ] )

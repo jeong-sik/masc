@@ -1,67 +1,49 @@
 (** ANSI escape codes and terminal helpers — split from masc_tui.ml (#3808) *)
 
-(** ANSI escape codes *)
+(** ANSI escape codes.
+
+    The strings themselves live in [Masc_tui_theme] — a pure, test-linkable
+    library — and this module re-exports them under the names the renderer
+    has always used. The contracts (NO_COLOR keeps [reset] and [reverse];
+    [default_fg] leaves bold and dim alone) are documented there. *)
 module Ansi = struct
-  let clear = "\027[2J\027[H"
-  let hide_cursor = "\027[?25l"
-  let show_cursor = "\027[?25h"
+  let clear = Masc_tui_theme.Term.clear
+  let hide_cursor = Masc_tui_theme.Term.hide_cursor
+  let show_cursor = Masc_tui_theme.Term.show_cursor
 
-  (* no-color.org: a non-empty NO_COLOR suppresses styling. Structure --
-     borders, markers, reverse-video selection -- stays, because it carries
-     meaning colour only repeats. MASC_TUI_FORCE_COLOR=1 overrides for a
-     pipeline that strips the variable it wants. *)
-  let colors_enabled =
-    match Sys.getenv_opt "MASC_TUI_FORCE_COLOR" with
-    | Some "1" -> true
-    | Some _ | None ->
-      (match Sys.getenv_opt "NO_COLOR" with
-       | Some value when String.length value > 0 -> false
-       | Some _ | None -> true)
+  let colors_enabled = Masc_tui_theme.colors_enabled
+  let style = Masc_tui_theme.style
 
-  let style code = if colors_enabled then code else ""
+  let reset = Masc_tui_theme.Sgr.reset
+  let bold = Masc_tui_theme.Sgr.bold
+  let dim = Masc_tui_theme.Sgr.dim
+  let underline = Masc_tui_theme.Sgr.underline
 
-  (* Colors. [reset] stays unconditional: reverse-video survives NO_COLOR,
-     and this is what closes it. *)
-  let reset = "\027[0m"
-  let bold = style "\027[1m"
-  let dim = style "\027[2m"
-  (* A third weight between bold and dim. The renderer had only two, so a
-     heading and the paragraph under it could differ by nothing an eye reads
-     as rank. *)
-  let underline = style "\027[4m"
+  let red = Masc_tui_theme.Sgr.red
+  let green = Masc_tui_theme.Sgr.green
+  let yellow = Masc_tui_theme.Sgr.yellow
+  let blue = Masc_tui_theme.Sgr.blue
+  let magenta = Masc_tui_theme.Sgr.magenta
+  let cyan = Masc_tui_theme.Sgr.cyan
+  let white = Masc_tui_theme.Sgr.white
 
-  let red = style "\027[31m"
-  let green = style "\027[32m"
-  let yellow = style "\027[33m"
-  let blue = style "\027[34m"
-  let magenta = style "\027[35m"
-  let cyan = style "\027[36m"
-  let white = style "\027[37m"
+  let default_fg = Masc_tui_theme.Sgr.default_fg
+  let gray = Masc_tui_theme.Sgr.gray
 
-  (* SGR 39 restores the terminal's own text colour. [white] is a colour like
-     any other -- on a light background it is the background -- so a fallback
-     that means "nothing special about this value" has to say default, not
-     white. Unlike [reset] it leaves bold and dim alone, so it can sit inside
-     an emphasised run without flattening it. *)
-  let default_fg = style "\027[39m"
-  let gray = style "\027[90m"
+  let bg_removed = Masc_tui_theme.Sgr.bg_removed
+  let bg_added = Masc_tui_theme.Sgr.bg_added
 
-  (* Cursor movement *)
-  let move_to row col = Printf.sprintf "\027[%d;%dH" row col
+  let move_to = Masc_tui_theme.Term.move_to
+  let reverse = Masc_tui_theme.Sgr.reverse
 
-  (* Reverse video for selection highlight. Kept under NO_COLOR: it is the
-     one selection signal every terminal renders without colour. *)
-  let reverse = "\027[7m"
-
-  (* Box drawing characters *)
-  let box_h = "\xe2\x94\x80"  (* horizontal line *)
-  let box_v = "\xe2\x94\x82"  (* vertical line *)
-  let box_tl = "\xe2\x94\x8c" (* top-left corner *)
-  let box_tr = "\xe2\x94\x90" (* top-right corner *)
-  let box_bl = "\xe2\x94\x94" (* bottom-left corner *)
-  let box_br = "\xe2\x94\x98" (* bottom-right corner *)
-  let box_l = "\xe2\x94\x9c"  (* left tee *)
-  let box_r = "\xe2\x94\xa4"  (* right tee *)
+  let box_h = Masc_tui_theme.Box.h
+  let box_v = Masc_tui_theme.Box.v
+  let box_tl = Masc_tui_theme.Box.tl
+  let box_tr = Masc_tui_theme.Box.tr
+  let box_bl = Masc_tui_theme.Box.bl
+  let box_br = Masc_tui_theme.Box.br
+  let box_l = Masc_tui_theme.Box.l
+  let box_r = Masc_tui_theme.Box.r
 end
 
 (** Semantic styles for state and content syntax.
@@ -73,17 +55,17 @@ end
     code literal) rather than a reading of state. Renderers do not choose raw
     red, yellow, or green themselves. *)
 module Theme = struct
-  let ok = Ansi.green
-  let warn = Ansi.yellow
-  let bad = Ansi.red
-  let info = Ansi.cyan
-  let muted = Ansi.dim
-  let selection = Ansi.reverse
-  let border_focus = Ansi.cyan
+  let ok = Masc_tui_theme.status Masc_tui_theme.Ok
+  let warn = Masc_tui_theme.status Masc_tui_theme.Warn
+  let bad = Masc_tui_theme.status Masc_tui_theme.Bad
+  let info = Masc_tui_theme.status Masc_tui_theme.Info
+  let muted = Masc_tui_theme.status Masc_tui_theme.Muted
+  let selection = Masc_tui_theme.selection
+  let border_focus = Masc_tui_theme.border_focus
 
   module Syntax = struct
-    let keyword = Ansi.yellow
-    let string = Ansi.green
+    let keyword = Masc_tui_theme.Syntax.keyword
+    let string = Masc_tui_theme.Syntax.string_
   end
 end
 

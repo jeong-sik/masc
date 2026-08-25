@@ -2452,13 +2452,15 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
-let test_public_masc_web_fetch_reaches_localhost_after_gate () =
+let test_public_masc_web_fetch_rejects_localhost_after_gate () =
   with_exec_fixture
     ~always_allow:true
     "keeper_tool_dispatch_web_fetch_reaches_localhost"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let fetch_calls = ref 0 in
       Masc.Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+          incr fetch_calls;
           check string "local url forwarded" "http://127.0.0.1:8935/health" url;
           Ok (Some 200, "healthy"))
         (fun () ->
@@ -2472,9 +2474,17 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
               ~input:(`Assoc [ ("url", `String "http://127.0.0.1:8935/health") ])
               ()
           in
-          check string "web fetch local outcome" "success"
+          check string "web fetch local outcome" "failure"
             (outcome_label result.disposition);
-          ()))
+          check bool
+            "localhost rejection is a workflow error"
+            true
+            (result.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+          check bool
+            "localhost rejection names the loopback boundary"
+            true
+            (String_util.contains_substring result.raw_output "loopback address");
+          check int "localhost never reaches HTTP" 0 !fetch_calls))
 
 let test_manual_gate_defers_web_tools_before_network () =
   with_exec_fixture "keeper_tool_dispatch_manual_web_gate"
@@ -4015,16 +4025,16 @@ let find_tool_by_name tools name =
     tools
 ;;
 
-let check_bundle_has_no_inferred_descriptor ~msg tools name =
+let check_bundle_has_canonical_descriptor ~msg tools name =
   match find_tool_by_name tools name with
   | None -> fail (Printf.sprintf "%s: %s not in bundle" msg name)
   | Some t ->
     (match Agent_core.Tool.descriptor t with
-     | None -> ()
-     | Some _ -> fail (Printf.sprintf "%s: %s has inferred descriptor" msg name))
+     | Some _ -> ()
+     | None -> fail (Printf.sprintf "%s: %s lost its canonical descriptor" msg name))
 ;;
 
-let test_model_visible_tools_do_not_infer_agent_core_descriptors () =
+let test_model_visible_tools_keep_canonical_agent_core_descriptors () =
   with_exec_fixture
     "model_visible_agent_core_descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
@@ -4038,7 +4048,7 @@ let test_model_visible_tools_do_not_infer_agent_core_descriptors () =
        in
        List.iter
          (fun name ->
-            check_bundle_has_no_inferred_descriptor ~msg:"model-visible" tools name)
+            check_bundle_has_canonical_descriptor ~msg:"model-visible" tools name)
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
@@ -4797,17 +4807,26 @@ value = { if_revision = %S }
     revision
 ;;
 
-let one_node_async_clock_composition =
+let async_param_memory_composition =
   {|[[compositions]]
-name = "clock-background"
+name = "memory-background"
 execution = "async"
 
+[[compositions.params]]
+name = "query"
+type = "string"
+description = "The exact durable-memory query to run."
+
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "search"
+tool = "keeper_memory_search"
 [compositions.nodes.input]
-kind = "literal"
-value = {}
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "query"
 |}
 ;;
 
@@ -5761,13 +5780,22 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                     failure.effect_disposition)
              | _ -> fail "prior memory effect did not terminalize the bundle");
             let failure_payload = parse_json result.content in
+            let cause = Yojson.Safe.Util.member "cause" failure_payload in
             check string
-              "nested failed node retains producer-owned disposition"
-              "proven_pre_effect"
+              "invalid node is rejected before dispatch"
+              "plan_execution_failed"
+              Yojson.Safe.Util.(member "kind" cause |> to_string);
+            let plan_error = Yojson.Safe.Util.member "error" cause in
+            check string
+              "plan failure retains input validation kind"
+              "input_validation_failed"
+              Yojson.Safe.Util.(member "kind" plan_error |> to_string);
+            check string
+              "plan failure retains the typed policy rejection"
+              "policy_rejection"
               Yojson.Safe.Util.
-                (member "cause" failure_payload
-                 |> member "node"
-                 |> member "failure_effect_disposition"
+                (member "rejection" plan_error
+                 |> member "failure_class"
                  |> to_string);
             match result.abort_turn with
             | Some
@@ -6021,13 +6049,16 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
               fail "official-client provider loop remained retryable after post-effect defer"))
 ;;
 
-let test_async_composition_uses_durable_request_status_surface () =
+let test_async_composition_binds_params_into_durable_status () =
   with_exec_fixture
     ~bind_eio_context:true
-    "composition-async-durable-status"
+    "composition-async-param-durable-status"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let query = "async-param-worker-marker" in
        let skill_catalog =
-         skill_catalog_of_composition ~name:"clock-background" one_node_async_clock_composition
+         skill_catalog_of_composition
+           ~name:"memory-background"
+           async_param_memory_composition
        in
        let tools =
          Masc.Keeper_tools_agent_core_bundle.make_tools
@@ -6039,7 +6070,7 @@ let test_async_composition_uses_durable_request_status_surface () =
            ()
        in
        let async_tool =
-         match find_tool_by_name tools "keeper_compose_clock-background" with
+         match find_tool_by_name tools "keeper_compose_memory-background" with
          | Some tool -> tool
          | None -> fail "async composition tool was not materialized"
        in
@@ -6058,7 +6089,7 @@ let test_async_composition_uses_durable_request_status_surface () =
                (composition_invocation
                   ~completion:Agent_core.Tool_contract.Continue_after_success)
              async_tool
-             (`Assoc [])
+             (`Assoc [ "query", `String query ])
          with
          | Error error -> fail error.Agent_core.Types.message
          | Ok output ->
@@ -6125,8 +6156,24 @@ let test_async_composition_uses_durable_request_status_surface () =
            Yojson.Safe.Util.(member "status" payload |> to_string);
          check string
            "durable structured composition result"
-           "keeper_compose_clock-background"
-           Yojson.Safe.Util.(member "result" payload |> member "composition_tool" |> to_string))
+           "keeper_compose_memory-background"
+           Yojson.Safe.Util.
+             (member "result" payload |> member "composition_tool" |> to_string);
+         match Yojson.Safe.Util.(member "result" payload |> member "actions") with
+         | `List [ action ] ->
+           check string
+             "bound param reaches worker action input"
+             query
+             Yojson.Safe.Util.(member "input" action |> member "query" |> to_string);
+           let memory_result =
+             Yojson.Safe.Util.(member "result" action |> member "data" |> to_string)
+             |> parse_json
+           in
+           check string
+             "worker tool executes with bound query"
+             query
+             Yojson.Safe.Util.(member "query" memory_result |> to_string)
+         | _ -> fail "durable async result lost its single worker action")
 ;;
 
 let test_async_composition_status_preserves_artifact_manifest () =
@@ -6383,8 +6430,8 @@ let () =
         test_model_visible_web_search_dispatches_to_misc_runtime;
       test_case "model-visible WebFetch reaches misc runtime" `Quick
         test_model_visible_web_fetch_dispatches_to_misc_runtime;
-      test_case "public WebFetch reaches localhost after Gate" `Quick
-        test_public_masc_web_fetch_reaches_localhost_after_gate;
+      test_case "public WebFetch rejects localhost after Gate" `Quick
+        test_public_masc_web_fetch_rejects_localhost_after_gate;
       test_case "Manual Gate defers web tools before network" `Quick
         test_manual_gate_defers_web_tools_before_network;
       test_case "approved WebSearch grant executes exact request" `Quick
@@ -6457,8 +6504,8 @@ let () =
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "post-effect deferred composition closes without resume" `Quick
         test_terminal_composition_post_effect_defer_closes_without_resume;
-      test_case "async composition exposes durable status" `Quick
-        test_async_composition_uses_durable_request_status_surface;
+      test_case "async composition binds params into durable status" `Quick
+        test_async_composition_binds_params_into_durable_status;
       test_case "async composition status preserves artifact manifest" `Quick
         test_async_composition_status_preserves_artifact_manifest;
       test_case "terminal composition requires terminal outer invocation" `Quick
@@ -6477,8 +6524,8 @@ let () =
     ("agent_core_descriptor", [
       test_case "catalog flags do not infer Agent Core descriptors" `Quick
         test_catalog_metadata_does_not_infer_agent_core_descriptors;
-      test_case "model-visible aliases do not infer Agent Core descriptors" `Quick
-        test_model_visible_tools_do_not_infer_agent_core_descriptors;
+      test_case "model-visible tools keep canonical Agent Core descriptors" `Quick
+        test_model_visible_tools_keep_canonical_agent_core_descriptors;
       test_case "surface post description reaches the Agent Core bundle" `Quick
         test_surface_post_bundle_names_reader_and_repeat_cost;
     ]);

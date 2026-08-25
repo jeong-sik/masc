@@ -25,7 +25,7 @@ type payload =
   | AgentCompleted of
       { agent_name : string
       ; task_id : string
-      ; result : (api_response, Error.t) result
+      ; response : api_response
       ; elapsed : float
       }
   | AgentYielded of

@@ -172,10 +172,7 @@ let all_sdk_agent_variants : (string * CoreError.t) list =
 ;;
 
 let agent_variants_with_no_runtime_blocker =
-  [ "HookExecutionFailed"
-  ; "TerminalToolEffectFailed"
-  ; "TerminalToolDurabilityFailed"
-  ]
+  [ "HookExecutionFailed" ]
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter

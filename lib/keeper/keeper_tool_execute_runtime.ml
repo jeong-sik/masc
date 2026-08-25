@@ -602,18 +602,52 @@ let handle_tool_execute_typed
                    (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin))
             | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ -> true
           in
+          let costume_findings =
+            Keeper_tool_execute_typed_input.hidden_script_findings
+              ~sandbox:dispatch_sandbox
+              input
+          in
           List.iter
             (fun (shell, finding) ->
                Log.Keeper.info
                  "shell_costume keeper=%s shell=%s finding=%s lowered=%b cmd=%s"
                  meta.name
                  shell
-                 finding
+                 (Keeper_tooling.Shell_costume.finding_tag finding)
                  lowered
                  cmd_for_log)
-            (Keeper_tool_execute_typed_input.hidden_script_findings
-               ~sandbox:dispatch_sandbox
-               input);
+            costume_findings;
+          (* Tell without refusing.  Two thirds of live escapes are [;], which
+             the IR omits on purpose, and none of them is refused: an
+             argv-shaped costume arrives as one opaque program, so the gate has
+             nothing to object to and the call runs.  Refusing them would break
+             work that runs today; saying nothing gives the writer no reason to
+             stop.  The rewrite rides back as metadata, which
+             [Tool_result.with_metadata] documents as a projection that leaves
+             the disposition and payload alone -- the call did what it did, and
+             the answer also says what it should have been. *)
+          let costume_advice =
+            List.filter_map
+              (fun (shell, finding) ->
+                 match finding with
+                 | Keeper_tooling.Shell_costume.Outside_the_subset reason ->
+                   Some
+                     (`Assoc
+                         [ "shell", `String shell
+                         ; ( "finding"
+                           , `String
+                               (Keeper_tooling.Shell_costume.finding_tag finding) )
+                         ; ( "should_have_been"
+                           , `String
+                               (Keeper_tooling.Subset_rewrite.to_string
+                                  (Keeper_tooling.Subset_rewrite.of_reason reason))
+                           )
+                         ])
+                 | Keeper_tooling.Shell_costume.Representable
+                 | Keeper_tooling.Shell_costume.Refused_by_policy _
+                 | Keeper_tooling.Shell_costume.Unparsable _ -> None)
+              costume_findings
+          in
           let dispatch () =
             match !For_testing.dispatch_override with
             | Some override -> override ()
@@ -883,11 +917,19 @@ let handle_tool_execute_typed
                  (match
                     Tool_bridge.attach_artifact_manifest
                       ~base_path:config.base_path
-                      (Tool_result.make_ok
-                         ~tool_name:"tool_execute"
-                         ~start_time:t0
-                         ~data:payload
-                         ())
+                      (let answered =
+                         Tool_result.make_ok
+                           ~tool_name:"tool_execute"
+                           ~start_time:t0
+                           ~data:payload
+                           ()
+                       in
+                       match costume_advice with
+                       | [] -> answered
+                       | advice ->
+                         Tool_result.with_metadata
+                           (`Assoc [ "escaped_shell", `List advice ])
+                           answered)
                   with
                   | Ok result -> Keeper_tool_execution.of_tool_result result
                   | Error _ ->

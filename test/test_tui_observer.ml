@@ -15,6 +15,22 @@ let tool_called_frame =
    \"batch_index\":0,\"batch_size\":2,\"execution_mode\":\"concurrent\",\
    \"tool_name\":\"read_file\",\"tool_use_id\":\"tu-1\",\"turn\":2086}}\n\n"
 
+let agent_completed_frame =
+  "data: {\"type\":\"agent_core:agent_completed\",\"event_type\":\"agent_completed\",\
+   \"event_id\":\"evt-completed\",\"ts_unix\":1787505650.0,\
+   \"correlation_id\":\"trace-1\",\"run_id\":\"run-1\",\
+   \"agent_name\":\"analyst\",\"task_id\":\"task-1\",\
+   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"task-1\",\
+   \"elapsed_s\":1.25,\"success\":true,\"result\":\"ok\"}}\n\n"
+
+let agent_failed_frame =
+  "data: {\"type\":\"agent_core:agent_failed\",\"event_type\":\"agent_failed\",\
+   \"event_id\":\"evt-failed\",\"ts_unix\":1787505651.0,\
+   \"correlation_id\":\"trace-2\",\"run_id\":\"run-2\",\
+   \"agent_name\":\"analyst\",\"task_id\":\"task-2\",\
+   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"task-2\",\
+   \"elapsed_s\":0.5,\"error\":\"boom\"}}\n\n"
+
 let heartbeat_frame =
   "data: {\"type\":\"keeper_heartbeat\",\"name\":\"bandleader\",\
    \"ts_unix\":1787505649.446111,\"phase\":\"turn_running\",\"in_turn\":true,\
@@ -116,6 +132,14 @@ let test_a_tool_call_decodes_with_its_turn_and_batch () =
     [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
     (List.map summary (decode_all [ tool_called_frame ]))
 
+let test_agent_terminal_frames_keep_their_distinct_kinds () =
+  check (list string) "success decodes as one completion"
+    [ "agent_core(analyst,agent_completed,-,turn=-,batch=-)" ]
+    (List.map summary (decode_all [ agent_completed_frame ]));
+  check (list string) "failure decodes as one failure"
+    [ "agent_core(analyst,agent_failed,-,turn=-,batch=-)" ]
+    (List.map summary (decode_all [ agent_failed_frame ]))
+
 let bare_heartbeat_frame =
   "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1787505653.07}\n\n"
 
@@ -216,6 +240,8 @@ let () =
     ; ( "events"
       , [ test_case "a tool call decodes with its turn and batch" `Quick
             test_a_tool_call_decodes_with_its_turn_and_batch
+        ; test_case "agent terminal frames keep their distinct kinds" `Quick
+            test_agent_terminal_frames_keep_their_distinct_kinds
         ; test_case "keeper events decode by name" `Quick
             test_keeper_events_decode_by_name
         ; test_case "a line cut by the chunk boundary is held" `Quick

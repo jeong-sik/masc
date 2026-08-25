@@ -172,6 +172,78 @@ let run_fixture
       ~prompt)
 ;;
 
+(* The CLI restates the conversation id in step_update and result. When it
+   leaves that restatement blank, the turn used to die at attempt=1 with
+   [field "conversation_id" must not be empty] -- 110 turns over five days
+   across three keepers. The id the turn carries comes from init, and a blank
+   restatement makes no claim, so the turn completes. The check itself is not
+   gone: a restatement that names a different conversation still fails. *)
+let result_without_conversation_id
+      ?(status = "SUCCESS")
+      ?(response = "MASC_ANTIGRAVITY_OK\n")
+      ?(num_turns = 1)
+      ()
+  =
+  Printf.sprintf
+    {|{"event":"result","result":{"status":%S,"response":%S,"duration_seconds":5.5,"num_turns":%d,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}|}
+    status
+    response
+    num_turns
+;;
+
+let test_blank_result_conversation_id_completes_the_turn () =
+  with_fixture
+    [ init (); result ~conversation_id:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "identity still comes from init" "conversation-1"
+           turn.conversation_id;
+         check string "text" "MASC_ANTIGRAVITY_OK\n" turn.text)
+;;
+
+let test_missing_result_conversation_id_completes_the_turn () =
+  with_fixture
+    [ init (); result_without_conversation_id () ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "identity still comes from init" "conversation-1"
+           turn.conversation_id)
+;;
+
+let test_blank_step_conversation_id_completes_the_turn () =
+  with_fixture
+    [ init (); step ~conversation_id:"" (); result () ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "identity still comes from init" "conversation-1"
+           turn.conversation_id)
+;;
+
+let test_a_restated_mismatch_still_fails () =
+  with_fixture
+    [ init (); result ~conversation_id:"another-conversation" () ]
+    (fun path ->
+       match run_fixture path with
+       | Ok _ -> fail "a restated identity that disagrees with init must fail"
+       | Error (Runtime_antigravity.Protocol_error { stage; detail }) ->
+         check string "stage" "result event" stage;
+         check bool "detail names the mismatch" true
+           (let needle = "conversation identity mismatch" in
+            let rec found i =
+              i + String.length needle <= String.length detail
+              && (String.sub detail i (String.length needle) = needle
+                  || found (i + 1))
+            in
+            found 0)
+       | Error error -> fail (Runtime_antigravity.error_to_string error))
+;;
+
 let test_stream_events_preserve_available_wire_data () =
   let events = ref [] in
   with_fixture
@@ -795,6 +867,22 @@ let () =
             "no deadline starts after init"
             `Quick
             test_no_deadline_starts_after_init
+        ; test_case
+            "blank restated conversation id completes the turn"
+            `Quick
+            test_blank_result_conversation_id_completes_the_turn
+        ; test_case
+            "missing restated conversation id completes the turn"
+            `Quick
+            test_missing_result_conversation_id_completes_the_turn
+        ; test_case
+            "blank step conversation id completes the turn"
+            `Quick
+            test_blank_step_conversation_id_completes_the_turn
+        ; test_case
+            "a restated identity mismatch still fails"
+            `Quick
+            test_a_restated_mismatch_still_fails
         ; test_case "process-free admission" `Quick test_admission_is_process_free
         ; test_case
             "pre-init error result carries the CLI reason"

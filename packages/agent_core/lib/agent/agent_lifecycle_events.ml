@@ -70,7 +70,7 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
        publish
          "AgentCompleted"
          (AgentCompleted
-            { agent_name; task_id = started_run_id; result = Ok response; elapsed })
+            { agent_name; task_id = started_run_id; response; elapsed })
      | Yielded { turn } ->
        publish
          "AgentYielded"
@@ -80,10 +80,6 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
          "AgentInputRequired"
          (AgentInputRequired { agent_name; task_id = started_run_id; request; elapsed })
      | Failed error ->
-       publish
-         "AgentCompleted"
-         (AgentCompleted
-            { agent_name; task_id = started_run_id; result = Error error; elapsed });
        publish
          "AgentFailed"
          (AgentFailed { agent_name; task_id = started_run_id; error; elapsed }))

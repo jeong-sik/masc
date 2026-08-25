@@ -357,6 +357,27 @@ let explicit_metadata : (string * metadata) list =
     ("masc_schedule_list", read_state_tool);
     ("masc_schedule_get", read_state_tool);
     ("masc_schedule_cancel", broadcast_tool);
+    (* Keeper-only: a spawned process belongs to the turn's switch, and the
+       MCP boundary has no turn to end it, so these are callable from a keeper
+       and absent from the public schema surface. *)
+    ( "keeper_spawn",
+      hidden_runtime_tool
+        "Keeper spawn runtime tool; the process it starts belongs to the turn, so it is \
+         callable from a keeper and hidden from the public MCP schema surface."
+        broadcast_tool );
+    ( "keeper_spawn_read",
+      hidden_runtime_tool
+        "Keeper spawn-read runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "keeper_spawn_wait",
+      hidden_runtime_tool
+        "Keeper spawn-wait runtime tool; it blocks for a caller-stated bound, so it is not \
+         admitted as read-only, and it is hidden from the public MCP schema surface."
+        broadcast_tool );
+    ( "keeper_spawn_stop",
+      hidden_runtime_tool
+        "Keeper spawn-stop runtime tool; callable but hidden from the public MCP schema surface."
+        broadcast_tool );
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
     ("masc_library_list", read_state_tool);

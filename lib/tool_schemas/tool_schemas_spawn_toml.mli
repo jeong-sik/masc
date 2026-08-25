@@ -1,5 +1,5 @@
 (** The four spawn tool declarations, read from
-    [config/tools/masc_spawn*.toml] (RFC
+    [config/tools/keeper_spawn*.toml] (RFC
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Decoded once at module initialization; a missing or undecodable file

@@ -24,6 +24,43 @@ running process, so the gate can express them.
 `&` is the exception. It asks for a process that outlives the call, and there
 is no other call to rewrite it into.
 
+**1.0 And it does not even background. Measured 2026-08-25.**
+
+An argv-shaped `&` is not refused -- it arrives as one opaque program and
+runs. What it does not do is background anything:
+
+```
+sh -c "sleep 5 &"                     Execute returns after 5.0s
+sh -c "sleep 30 &"                    Execute returns after 30.0s
+sh -c "sleep 5 >/dev/null 2>&1 &"     Execute returns after 0.03s
+```
+
+The elapsed time tracks the sleep, not a timeout, and closing the child's
+streams releases the call at once. The shell exits immediately; the call waits
+because the backgrounded child inherited its output pipe and Execute reads to
+EOF. So a writer who reaches for `&` today gets no backgrounding, no handle,
+and no refusal either -- the call blocks for exactly as long as it would have
+without the `&`, and nothing says why.
+
+And a timeout does not clean up after it. With `timeout_sec: 1.0`:
+
+```
+sh -c "sleep 47 & echo started"
+  -> ok:false, status exit 124, output "started\n", execution_time_ms 1003
+  -> sleep 47 is still running after the call, and after the process that
+     made it has exited
+```
+
+The call is reported failed and the process it started survives, with no
+handle, nothing watching it, and nothing able to stop it. That is codex#26382
+from §1.4 -- "a cancelled task kept running and saturated a server" --
+reproduced on this path. So `&` is not merely useless today; the cheapest way
+to leave a process running on this host is to write one and let it time out.
+
+(Measured through `test_keeper_tool_execute_exit_result`'s harness, which
+calls `handle_tool_execute_with_outcome` the way a keeper turn does. The
+orphan was confirmed with `pgrep` after the suite exited.)
+
 **1.1 The result type cannot hold one.**
 
 ```ocaml
@@ -42,8 +79,8 @@ one, and that is not a gap to patch — it is what the record means.
 costumes=1584   background=5
 ```
 
-Five is not a measurement of how much backgrounding is wanted. `&` is refused
-and has no alternative, so a caller that needs it does not ask — it reaches
+Five is not a measurement of how much backgrounding is wanted. `&` has no
+alternative and, per §1.0, does not work, so a caller that needs it does not ask — it reaches
 for something else, and that reach is not recorded as an Execute call at all.
 This is the one construct in the corpus whose count cannot be read as
 priority.
@@ -214,16 +251,20 @@ about it.
 
 ### 3.6 What the tool surface exposes
 
-`masc_spawn`, `masc_spawn_read`, `masc_spawn_wait`, `masc_spawn_stop`, each
+`keeper_spawn`, `keeper_spawn_read`, `keeper_spawn_wait`, `keeper_spawn_stop`, each
 mapping to one operation above. The handle crosses as its string form. Every
 error is a typed result rendered as a message that names the next call, in the
 sense `Subset_rewrite` established: an unknown handle says the process is gone
 rather than that something failed.
 
-The `Background` arm of `Subset_rewrite` already answers `call_this_instead:
-spawn`. It becomes true when this ships; today it names a call that does not
-exist yet, which is the same gap §1 of the parent RFC described in the other
-direction.
+The `Background` arm of `Subset_rewrite` answers `call_this_instead: spawn`,
+and shipping this made it true. Its sentence names `keeper_spawn` exactly --
+the census tag stays `spawn`, because the corpus table in the parent RFC is
+keyed on it, but what the caller reads is the tool as registered. A sentence
+that said "call spawn instead" would send the reader looking for a tool nobody
+has, which is the same gap §1 of the parent RFC described in the other
+direction. `Subset_rewrite` sits below the tool schemas and cannot read them,
+so `test_subset_rewrite` compares the two.
 
 ## 4. Rejected alternatives
 
@@ -276,14 +317,18 @@ Closed by reading, 2026-08-25:
 - `dispatch_result` has fourteen non-test consumers, measured, which is the
   cost §4 declines to pay.
 
+**Whose switch?** -- answered, 2026-08-25. `Spawn_registry` takes `sw` as an
+argument, so the caller decides, and the caller the tools use is
+`Spawn_turn_registry`: the turn's. A registry held longer would keep answering
+for processes its switch already ended, and would need a retention bound to
+stop the table growing -- a cap with nothing to say. Binding it to the turn
+removes the question instead: a handle from an earlier turn finds no entry,
+and "the process ended with its turn" is what the caller is told. The MCP
+endpoint declines the four tools for the same reason -- it has no turn, only
+the server root, which owns its switch for the life of the server.
+
 Open:
 
-- **Whose switch?** A turn's switch ends when the turn does, which is the
-  behaviour codex#10767 complains about. A keeper's switch outlives turns,
-  which is what a dev server needs and also what makes #26382 possible if
-  teardown is wrong. This RFC does not choose; the first implementation takes
-  the switch as an argument and the caller decides, and the decision needs its
-  own evidence before a default exists.
 - **Does `Output_contains` need more than a literal?** A regexp would invite
   inferring meaning from output, which the workspace rules forbid elsewhere
   for good reason. Left literal until a case shows up that a literal cannot

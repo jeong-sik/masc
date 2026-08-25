@@ -2648,6 +2648,27 @@ let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
   assert (str_contains (Tool_result.message result) "Unknown argument(s): totally_bogus")
 )
 
+let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [("title", `String "Identity contract test")])
+  in
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [ ("task_id", `String "task-001")
+        ; ("action", `String "claim")
+        ; ("agent_name", `String "another-agent")
+        ])
+  in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "Unknown argument(s): agent_name")
+)
+
 (* Test handle_done returns owner guidance when another agent owns the task *)
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in

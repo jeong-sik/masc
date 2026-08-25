@@ -325,12 +325,15 @@ let test_masc_transition_schema () =
             (List.mem_assoc "evaluator_runtime" props);
           Alcotest.(check bool) "no configured_llm_verdict input" false
             (List.mem_assoc "configured_llm_verdict" props);
+          Alcotest.(check bool) "no caller-controlled agent_name input" false
+            (List.mem_assoc "agent_name" props);
           Alcotest.(check bool) "has handoff_context" true
             (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
-          Alcotest.(check bool) "agent_name required" true (List.mem (`String "agent_name") reqs);
+          Alcotest.(check bool) "agent_name is not caller input" false
+            (List.mem (`String "agent_name") reqs);
           Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs);
           Alcotest.(check bool) "action required" true (List.mem (`String "action") reqs)
       | None -> Alcotest.fail "masc_transition missing required field"

@@ -30,7 +30,7 @@ START_PATH="${BASE_PATH:-$PWD}"
 cleanup_contract_task() {
   local exit_status=$?
   if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
-    call_tool 1999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"GP1 contract cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+    call_tool 1999 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"cancel",notes:"GP1 contract cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
   fi
   exit "$exit_status"
 }
@@ -99,7 +99,7 @@ echo "  task_id=$task_id"
 
 # ── Step 3/10: claim ──
 echo "[3/10] masc_transition (producer claim)"
-r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
+r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
 if require_ok "$r3"; then
   step_pass
 else
@@ -154,7 +154,7 @@ done_summary="GP1 contract flow verified end to end via live MCP transcript"
 
 # ── Step 8/10: producer cannot bypass verification with direct done ──
 echo "[8/10] masc_transition (direct done rejection)"
-r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 if require_ok "$r8" >/dev/null 2>&1; then
   step_fail "direct done unexpectedly succeeded"
   echo "$r8"
@@ -168,7 +168,7 @@ fi
 
 # ── Step 9/10: producer submits typed evidence for verification ──
 echo "[9/10] masc_transition (submit_for_verification)"
-r9="$(call_tool 1009 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r9="$(call_tool 1009 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 if require_ok "$r9"; then
   step_pass
 else

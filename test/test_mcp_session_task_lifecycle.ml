@@ -182,8 +182,7 @@ let test_session_task_lifecycle () =
       call
         (tool_request ~id:4 ~name:"masc_transition"
            (`Assoc
-             [ ("agent_name", `String "session-task-smoke")
-             ; ("task_id", `String claimed_task.id)
+             [ ("task_id", `String claimed_task.id)
              ; ("action", `String "submit_for_verification")
              ; ( "notes"
                , `String

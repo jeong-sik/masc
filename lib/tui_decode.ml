@@ -3756,6 +3756,7 @@ type ask_resolution =
     }
 
 type ask_row = {
+  ar_keeper : string;
   ar_id : string;
   ar_asked_at : float;
   ar_context : string option;
@@ -3764,7 +3765,7 @@ type ask_row = {
 }
 
 type asks_snapshot = {
-  asn_keeper : string;
+  asn_keeper : string option;
   asn_open_count : int;
   asn_rows : ask_row list;
 }
@@ -3859,6 +3860,7 @@ let decode_ask_resolution json =
   | other -> Error (Printf.sprintf "asks: unknown resolution state '%s'" other)
 
 let decode_ask_row json =
+  let* ar_keeper = ask_string json "keeper" in
   let* ar_id = ask_string json "ask_id" in
   let* ar_asked_at = ask_float json "asked_at" in
   let* question_items = ask_list json "questions" in
@@ -3866,6 +3868,7 @@ let decode_ask_row json =
   let* ar_resolution = decode_ask_resolution (member "resolution" json) in
   Ok
     {
+      ar_keeper;
       ar_id;
       ar_asked_at;
       ar_context = ask_string_opt json "context";
@@ -3874,7 +3877,7 @@ let decode_ask_row json =
     }
 
 let decode_asks_snapshot json =
-  let* asn_keeper = ask_string json "keeper" in
+  let asn_keeper = ask_string_opt json "keeper" in
   let* asn_open_count = ask_int json "open_count" in
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in

@@ -1594,7 +1594,10 @@ let launch_code_entries_load state ~mailbox =
   let dir = state.code_dir in
   let run () =
     let result =
-      try Masc_tui_http.fetch_workspace_entries ~host ~port ~path:dir with
+      try
+        Masc_tui_http.fetch_workspace_entries ?keeper:state.code_keeper ~host
+          ~port ~path:dir ()
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -1614,7 +1617,10 @@ let launch_code_file_load state ~mailbox ~path =
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.fetch_workspace_file ~host ~port ~path with
+      try
+        Masc_tui_http.fetch_workspace_file ?keeper:state.code_keeper ~host
+          ~port ~path ()
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -1638,8 +1644,8 @@ let launch_code_history_load state ~mailbox ~path =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_git_log ~host ~port ~path
-          ~limit:code_history_limit
+        Masc_tui_http.fetch_git_log ?keeper:state.code_keeper ~host ~port
+          ~path ~limit:code_history_limit ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -4568,7 +4574,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           in
           state.code_file <- Some (path, rows);
           state.code_file_error <- None;
-          state.code_file_scroll <- 0;
+          (* The jump that asked for this file may have named a line; the
+             reset and the jump live together so neither overwrites the
+             other. Consumed once -- the next plain open starts at the top. *)
+          state.code_file_scroll <-
+            (match state.code_target_line with
+             | Some line -> max 0 (line - 1)
+             | None -> 0);
+          state.code_target_line <- None;
           state.code_focus_file <- true;
           (* A new file starts on its content; the old file's history would
              caption the wrong bytes. *)
@@ -6360,6 +6373,15 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
+                else if Option.is_some state.code_keeper then begin
+                  (* Above a keeper workspace's root sits the project tree
+                     the surface started on. *)
+                  state.code_keeper <- None;
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
@@ -6463,6 +6485,13 @@ let main () =
                   let parent = Filename.dirname state.code_dir in
                   state.code_dir <-
                     (if String.equal parent "." then "" else parent);
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end
+                else if Option.is_some state.code_keeper then begin
+                  state.code_keeper <- None;
                   state.code_cursor <- 0;
                   state.code_entries <- [];
                   state.code_entries_error <- None;
@@ -7155,6 +7184,52 @@ let main () =
                         state.changes_tree_diff_path <- Some path;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
+       | Some "v" when state.view = Changes ->
+           (* View the selected change on the Code surface. The clone-relative
+              address resolves through the same ?keeper= axis the git-diff
+              read uses, so the bytes shown are the keeper's own checkout --
+              not a same-named file in the project tree. Absolute-path writes
+              have no such address; the row says so instead of guessing. *)
+           (match state.changes with
+            | None -> add_event state "error" "no changes loaded yet"
+            | Some snapshot -> (
+                match
+                  List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                    state.changes_scroll
+                with
+                | None -> add_event state "error" "no change under the cursor"
+                | Some change -> (
+                    match change_bundle_relative_path change with
+                    | None ->
+                        add_event state "error"
+                          "an absolute-path write has no address in the \
+                           keeper's workspace; o opens it in $EDITOR"
+                    | Some path ->
+                        let keeper = change.Masc.Tui_decode.fc_keeper in
+                        state.code_keeper <- Some keeper;
+                        let parent = Filename.dirname path in
+                        state.code_dir <-
+                          (if String.equal parent "." then "" else parent);
+                        state.code_entries <- [];
+                        state.code_entries_error <- None;
+                        state.code_cursor <- 0;
+                        state.code_file <- None;
+                        state.code_file_error <- None;
+                        state.code_focus_file <- false;
+                        (* The line is found in the local copy when one
+                           exists (a Docker keeper's bundle is not on this
+                           filesystem); a miss opens at the top, which is
+                           visibly the top rather than a wrong answer. *)
+                        state.code_target_line <-
+                          (let local = change_absolute_path ~base_path change in
+                           if Sys.file_exists local then
+                             Some (change_line ~path:local change)
+                           else None);
+                        state.view <- Code;
+                        launch_code_entries_load state
+                          ~mailbox:async_messages;
+                        launch_code_file_load state ~mailbox:async_messages
+                          ~path)))
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which is the top of the visible page. *)

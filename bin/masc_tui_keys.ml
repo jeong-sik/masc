@@ -153,6 +153,9 @@ let for_surface = function
           ~help:"what the call wrote, as a diff"
       ; b Act "Left / Esc" "back" ~help:"close the diff"
       ; b Act "d" "tree diff" ~help:"what the tree holds now"
+      ; b Act "v" "view code"
+          ~help:"the file on the Code surface, read from the keeper's own \
+                 workspace"
       ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
       ]
       @ listing_meta

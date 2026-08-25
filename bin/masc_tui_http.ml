@@ -287,13 +287,23 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     states in its answer the window it actually covered. *)
 (** One directory level of the workspace ([/api/v1/workspace/children];
     an empty [path] asks [/workspace/tree] for the root). *)
-let fetch_workspace_entries ~(host : string) ~(port : int) ~(path : string) :
+(* The workspace routes resolve [?keeper=] to that keeper's playground root
+   (resolve_workspace_base), which is how a Changes row's clone-relative
+   address ("repos/<id>/<path>") becomes readable here. No keeper means the
+   project workspace, as before. *)
+let keeper_query_suffix = function
+  | None -> ""
+  | Some keeper -> "&keeper=" ^ percent_encode_query_value keeper
+
+let fetch_workspace_entries ?keeper ~(host : string) ~(port : int)
+    ~(path : string) () :
     (Masc.Tui_decode.workspace_tree_node list, string) result =
   let route =
-    if String.equal path "" then "/api/v1/workspace/tree?depth=0&limit=200"
-    else
-      Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
-        (percent_encode_query_value path)
+    (if String.equal path "" then "/api/v1/workspace/tree?depth=0&limit=200"
+     else
+       Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
+         (percent_encode_query_value path))
+    ^ keeper_query_suffix keeper
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail
@@ -307,11 +317,12 @@ let fetch_workspace_entries ~(host : string) ~(port : int) ~(path : string) :
       | json -> Masc.Tui_decode.decode_workspace_tree json)
 
 (** The whole file at [path] ([/api/v1/workspace/file]). *)
-let fetch_workspace_file ~(host : string) ~(port : int) ~(path : string) :
-    (string, string) result =
+let fetch_workspace_file ?keeper ~(host : string) ~(port : int)
+    ~(path : string) () : (string, string) result =
   let route =
-    Printf.sprintf "/api/v1/workspace/file?path=%s"
+    Printf.sprintf "/api/v1/workspace/file?path=%s%s"
       (percent_encode_query_value path)
+      (keeper_query_suffix keeper)
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail
@@ -325,12 +336,13 @@ let fetch_workspace_file ~(host : string) ~(port : int) ~(path : string) :
       | json -> Masc.Tui_decode.decode_workspace_file json)
 
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
-let fetch_git_log ~(host : string) ~(port : int) ~(path : string)
-    ~(limit : int) : (Masc.Tui_decode.git_log_row list, string) result =
+let fetch_git_log ?keeper ~(host : string) ~(port : int) ~(path : string)
+    ~(limit : int) () : (Masc.Tui_decode.git_log_row list, string) result =
   let route =
-    Printf.sprintf "/api/v1/git/log?path=%s&limit=%d"
+    Printf.sprintf "/api/v1/git/log?path=%s&limit=%d%s"
       (percent_encode_query_value path)
       limit
+      (keeper_query_suffix keeper)
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail

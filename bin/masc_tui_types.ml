@@ -881,6 +881,13 @@ type state = {
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
+  (* Whose workspace the surface reads: [None] is the project tree, [Some k]
+     is keeper k's playground (the ?keeper= axis the git-diff read already
+     uses), which is where a Changes row's clone-relative path resolves. *)
+  mutable code_keeper: string option;
+  (* Set by the jump that opens a file at a line; consumed (once) when the
+     file arrives, because the load handler owns the scroll reset. *)
+  mutable code_target_line: int option;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -1254,6 +1261,8 @@ let create_state
   code_history_error = None;
   code_history_open = false;
   code_history_scroll = 0;
+  code_keeper = None;
+  code_target_line = None;
   changes_keeper = None;
   changes = None;
   changes_error = None;

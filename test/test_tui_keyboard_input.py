@@ -4916,6 +4916,19 @@ def changes_keeper_and_arrow_detail_interaction(
     listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
     if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
         raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
+    # v opens the row's file on the Code surface, read through the keeper's
+    # own workspace (?keeper=alpha), so the header names whose tree it is
+    # and the bytes arrive lexed.
+    code = send_and_wait(
+        process, master_fd, output, b"v", b"\x1b[33mlet\x1b[0m"
+    )
+    code_plain = CSI_RE.sub(b"", code).decode("utf-8")
+    if "alpha ▸ repos/masc/lib" not in code_plain:
+        raise AssertionError(
+            f"the Code header does not name the keeper workspace: {code_plain!r}"
+        )
+    if "example.ml" not in code_plain:
+        raise AssertionError(f"the jumped file is not open: {code_plain!r}")
     os.write(master_fd, b"q")
 
 
@@ -6174,6 +6187,27 @@ def run_keyboard_regression(executable: str) -> None:
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
     changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
+    # The v jump reads the row's file through the keeper axis; both query
+    # encodings of the slash are served, as the workspace fixtures do.
+    code_children = (
+        200,
+        [
+            {"path": "repos/masc/lib/example.ml", "label": "example.ml",
+             "depth": 0, "parent": "repos/masc/lib", "hasChildren": False,
+             "diff": None, "keeperId": None, "hueIndex": None},
+        ],
+    )
+    code_file = (200, {"ok": True, "content": "let a = 2\n"})
+    for children_path in (
+        "/api/v1/workspace/children?path=repos/masc/lib&limit=500&keeper=alpha",
+        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=500&keeper=alpha",
+    ):
+        changes_navigation_fixtures[children_path] = code_children
+    for file_path in (
+        "/api/v1/workspace/file?path=repos/masc/lib/example.ml&keeper=alpha",
+        "/api/v1/workspace/file?path=repos%2Fmasc%2Flib%2Fexample.ml&keeper=alpha",
+    ):
+        changes_navigation_fixtures[file_path] = code_file
     run_terminal_scenario(
         executable,
         description="Changes keeper switch and arrow detail navigation",

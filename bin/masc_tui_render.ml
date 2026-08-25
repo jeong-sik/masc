@@ -283,6 +283,13 @@ let awaiting_approval_notice (state : state) =
    is a question every surface can raise and none of them answered: the tail
    said [Port: 8935] and two checkouts on that port read identically. *)
 let footer_line ?(status = []) (state : state) ~hints =
+  (* An armed "/" search shows its query where every surface already looks
+     for its keys. One seam instead of a per-surface indicator. *)
+  let hints =
+    match state.search with
+    | Some query -> "/" ^ query ^ "  " ^ hints
+    | None -> hints
+  in
   let build =
     match state.server_identity with
     | None -> []
@@ -2349,15 +2356,15 @@ let render_keeper_list (state : state) =
   let heading =
     Printf.sprintf " %sMASC Keepers (%d)%s" Ansi.bold (List.length state.keepers)
       Ansi.reset
-    ^ (match state.roster_search with
+    ^ (match state.search with
        | Some query ->
            Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" Ansi.cyan
              (Terminal_text.single_line query) Ansi.reset Ansi.reset
        | None ->
-           if state.roster_search_last = "" then ""
+           if state.search_last = "" then ""
            else
              Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
-               (Terminal_text.single_line state.roster_search_last)
+               (Terminal_text.single_line state.search_last)
                Ansi.reset)
     ^ (match keeper_roster_summary readings with
        | [] -> ""

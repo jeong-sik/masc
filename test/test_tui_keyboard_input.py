@@ -4413,6 +4413,14 @@ def keeper_lanes_interaction(
             re.compile(rb"\x1b\[7m[^\x1b\n]*beta"),
         )
         send_and_wait(process, master_fd, output, b"k", banded_alpha)
+        # "/" arms the row search on any surface with row texts: the footer
+        # shows the query, typing jumps the cursor live, Enter keeps the
+        # query for n. The list itself never narrows.
+        send_and_wait(process, master_fd, output, b"/", b"/  j/k:scroll")
+        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
+        send_and_wait(process, master_fd, output, b"bet", banded_beta)
+        send_and_wait(process, master_fd, output, b"\rk", banded_alpha)
+        send_and_wait(process, master_fd, output, b"n", banded_beta)
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",

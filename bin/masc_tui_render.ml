@@ -5855,7 +5855,9 @@ let render_code (state : state) =
        ^ (if state.code_focus_file then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    let content_height = max 1 (rows - 4) in
+    (* Five chrome rows: top gap, title, divider, bottom gap, and the
+       footer this pane must leave room for. *)
+    let content_height = max 1 (rows - 5) in
     (match state.code_file_error, state.code_file with
      | Some detail, _ ->
          box_line pane_buf pane_cols

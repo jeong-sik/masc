@@ -290,6 +290,12 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_keys)
+ (wrapped false)
+ (modules masc_tui_keys)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_theme)
  (wrapped false)
  (modules masc_tui_theme))
@@ -539,6 +545,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_keys
   masc_tui_theme
   masc_tui_terminal_palette
   masc_tui_terminal_probe

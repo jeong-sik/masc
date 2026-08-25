@@ -885,6 +885,14 @@ Each non-empty paint is sent as one synchronized-output update (CSI 2026) so
 terminals supporting the protocol reveal the frame atomically. `MASC_TUI_SYNC=off`
 omits that envelope; row-diff correctness does not depend on protocol support.
 
+Apple Terminal uses a conservative profile because it does not advertise the
+optional synchronized-output or Kitty keyboard protocols. Synchronized output,
+Kitty keyboard mode, and dynamic OSC window titles default off when
+`TERM_PROGRAM=Apple_Terminal`; `MASC_TUI_SYNC=on`,
+`MASC_TUI_KITTY_KEYBOARD=on`, and `MASC_TUI_TITLE=on` explicitly opt them back
+in. Other terminals keep the existing defaults, and each setting also accepts
+`off`.
+
 Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
 complete repaint.

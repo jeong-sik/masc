@@ -2464,6 +2464,64 @@ let test_decode_server_identity_takes_an_integer_age () =
     Alcotest.(check (option (float 0.001))) "an int age still reads"
       (Some 60.0) identity.Tui_decode.sid_binary_commit_age_s
 
+(* GET /api/v1/prompts. Shaped from the live server: sixteen rows, each
+   carrying the file value, any override, and what is effective. The row has
+   to survive a prompt with no file on disk and one with no description --
+   both exist in the registry -- because a row that fails to decode takes the
+   whole list down with it. *)
+let prompts_payload =
+  `Assoc
+    [ ("prompts",
+       `List
+         [ `Assoc
+             [ ("key", `String "keeper");
+               ("category", `String "keeper");
+               ("description", `String "The keeper's standing instructions");
+               ("effective", `String "You are a keeper.\nWork the task.");
+               ("has_override", `Bool false);
+               ("file_exists", `Bool true);
+               ("file_path", `String "config/prompts/keeper.md");
+             ];
+           `Assoc
+             [ ("key", `String "judge.board");
+               ("effective", `String "overridden text");
+               ("has_override", `Bool true);
+               ("file_exists", `Bool false);
+             ];
+         ]);
+    ]
+
+let test_decode_prompts_reads_the_live_shape () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    Alcotest.(check int) "two rows" 2 (List.length snapshot.Tui_decode.ps_rows);
+    let first = List.hd snapshot.Tui_decode.ps_rows in
+    Alcotest.(check string) "key" "keeper" first.Tui_decode.pr_key;
+    Alcotest.(check string) "the effective text keeps its line break"
+      "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
+    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override
+
+let test_decode_prompts_survives_a_sparse_row () =
+  match Tui_decode.decode_prompts prompts_payload with
+  | Error detail -> Alcotest.fail detail
+  | Ok snapshot ->
+    let second = List.nth snapshot.Tui_decode.ps_rows 1 in
+    Alcotest.(check string) "a row with no description reads empty" ""
+      second.Tui_decode.pr_description;
+    Alcotest.(check bool) "and its override is carried" true
+      second.Tui_decode.pr_has_override;
+    Alcotest.(check bool) "as is the absent file" false
+      second.Tui_decode.pr_file_exists
+
+let test_decode_prompts_rejects_a_row_with_no_key () =
+  (* The key is what a write is addressed to. A row without one cannot be
+     edited, so it is a decode failure rather than a row drawn as blank. *)
+  let json = `Assoc [ ("prompts", `List [ `Assoc [ ("category", `String "x") ] ]) ] in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "a keyless prompt row must not decode"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -2704,6 +2762,15 @@ let () =
           test_x10_clicks_and_drags_stay_unclaimed;
         Alcotest.test_case "agrees with the SGR decoder" `Quick
           test_x10_and_sgr_agree_on_the_wheel;
+      ] );
+    ( "prompts",
+      [
+        Alcotest.test_case "reads the live shape" `Quick
+          test_decode_prompts_reads_the_live_shape;
+        Alcotest.test_case "survives a sparse row" `Quick
+          test_decode_prompts_survives_a_sparse_row;
+        Alcotest.test_case "rejects a row with no key" `Quick
+          test_decode_prompts_rejects_a_row_with_no_key;
       ] );
     ( "server_identity",
       [

@@ -1133,6 +1133,7 @@ type async_msg =
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
+  | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Resources_listed of ((string * string) list, string) result
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -1753,6 +1754,25 @@ let launch_runtime_config_load state ~mailbox =
       enqueue_async mailbox
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
+let launch_prompts_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_prompts ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Prompts_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+
 let launch_keeper_config_view state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
@@ -2267,7 +2287,9 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
-   | Config -> launch_runtime_config_load state ~mailbox
+   | Config ->
+       if state.config_prompts then launch_prompts_load state ~mailbox
+       else launch_runtime_config_load state ~mailbox
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
@@ -4535,6 +4557,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_config_view <- Some (keeper_name, lines);
             state.keeper_config_view_error <- None
         | Error detail -> state.keeper_config_view_error <- Some detail)
+  | Prompts_loaded result ->
+      (match result with
+       | Ok snapshot ->
+           state.prompts_snapshot <- Some snapshot;
+           state.prompts_error <- None
+       | Error detail -> state.prompts_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok view ->
@@ -5676,6 +5704,67 @@ let main () =
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in
+  (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
+     actually gets, and the server persists what comes back. The effective
+     text is the stem rather than the file's, because an overridden prompt is
+     what the keeper reads and editing the file underneath it would change
+     nothing the operator can see. *)
+  let selected_prompt () =
+    match state.prompts_snapshot with
+    | None -> None
+    | Some snapshot ->
+        List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor
+  in
+  let handle_prompt_edit () =
+    match selected_prompt () with
+    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | Some row -> (
+      match Masc_tui_editor.editor_command () with
+      | None ->
+        add_event state "error"
+          "no $EDITOR set; export EDITOR to edit prompts here"
+      | Some _ -> (
+        match
+          Masc_tui_editor.roundtrip ~restore:restore_terminal
+            ~reenter:reenter_terminal row.Tui_decode.pr_effective
+        with
+        | None ->
+          add_event state "system"
+            (row.Tui_decode.pr_key ^ ": prompt unchanged")
+        | Some edited ->
+          (match
+             Masc_tui_http.post_prompt_override ~host:server_peer_host
+               ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
+           with
+           | Ok _ ->
+             add_event state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
+             launch_prompts_load state ~mailbox:async_messages
+           | Error detail ->
+             add_event state "error"
+               (row.Tui_decode.pr_key ^ ": save failed: " ^ detail))))
+  in
+  (* Clearing is not editing to empty: it returns the prompt to the file's
+     words, which is a different outcome from an override holding "". *)
+  let handle_prompt_clear () =
+    match selected_prompt () with
+    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | Some row ->
+      if not row.Tui_decode.pr_has_override then
+        add_event state "system"
+          (row.Tui_decode.pr_key ^ ": no override to clear")
+      else (
+        match
+          Masc_tui_http.post_prompt_clear ~host:server_peer_host
+            ~port:state.port ~key:row.Tui_decode.pr_key
+        with
+        | Ok _ ->
+          add_event state "system"
+            (row.Tui_decode.pr_key ^ ": override cleared");
+          launch_prompts_load state ~mailbox:async_messages
+        | Error detail ->
+          add_event state "error"
+            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail))
+  in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
     | None -> ()
@@ -6558,6 +6647,14 @@ let main () =
                     state.log_scroll
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+            | Config when state.config_prompts ->
+                let count =
+                  match state.prompts_snapshot with
+                  | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
+                  | None -> 0
+                in
+                if state.prompts_cursor < count - 1 then
+                  state.prompts_cursor <- state.prompts_cursor + 1
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
@@ -6752,6 +6849,8 @@ let main () =
             | Keepers Keeper_calls ->
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
+            | Config when state.config_prompts ->
+                state.prompts_cursor <- max 0 (state.prompts_cursor - 1)
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -7298,6 +7397,14 @@ let main () =
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+       | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
+           (* One surface, two files the server reads: runtime.toml and the
+              prompt registry. [p] moves between them and loads the list the
+              first time it is asked for. *)
+           state.config_prompts <- not state.config_prompts;
+           state.prompts_cursor <- 0;
+           if state.config_prompts && state.prompts_snapshot = None then
+             launch_prompts_load state ~mailbox:async_messages
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -7365,11 +7472,17 @@ let main () =
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
-            | Config -> handle_runtime_config_edit ()
+            | Config ->
+                if state.config_prompts then handle_prompt_edit ()
+                else handle_runtime_config_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
+       | Some "x" | Some "X"
+         when state.view = Config && state.config_prompts
+              && not compact_viewport ->
+           handle_prompt_clear ()
        | Some "b" when state.view = Connectors && not compact_viewport ->
            handle_connector_bind ()
        | Some "u" when state.view = Connectors && not compact_viewport ->

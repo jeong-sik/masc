@@ -695,6 +695,27 @@ type server_identity = {
 
 val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
 
+type prompt_row = {
+  pr_key : string;
+  pr_category : string;
+  pr_description : string;
+  pr_effective : string;
+      (** What a turn actually gets: the override when there is one, the file
+          otherwise. This is the text an editor should open. *)
+  pr_has_override : bool;
+      (** Whether the effective text came from an override rather than the
+          file. The two are different facts: an operator editing an
+          overridden prompt is editing the override, and clearing it returns
+          the file's words rather than emptying the prompt. *)
+  pr_file_exists : bool;
+  pr_file_path : string;
+}
+
+type prompts_snapshot = { ps_rows : prompt_row list }
+(** GET /api/v1/prompts. *)
+
+val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
+
 type log_kind =
   | Log_turn
   | Log_heartbeat

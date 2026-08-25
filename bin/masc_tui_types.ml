@@ -705,6 +705,13 @@ type state = {
   mutable resource_content_error: string option;
   mutable resource_scroll: int;
   mutable resource_focus: bool;
+  (* The Config surface owns the files the server reads. runtime.toml is one;
+     the prompt registry is the other, and a prompt is edited the same way —
+     $EDITOR over the effective text, the server persists what comes back. *)
+  mutable config_prompts: bool;
+  mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
+  mutable prompts_error: string option;
+  mutable prompts_cursor: int;
   mutable runtime_config_view: (string * string list) option;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
@@ -1135,6 +1142,10 @@ let create_state
   resource_content_error = None;
   resource_scroll = 0;
   resource_focus = false;
+  config_prompts = false;
+  prompts_snapshot = None;
+  prompts_error = None;
+  prompts_cursor = 0;
   runtime_config_view = None;
   runtime_config_view_error = None;
   config_scroll = 0;

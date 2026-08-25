@@ -164,7 +164,12 @@ let for_surface = function
   | Runtime -> b Navigate "j/k" "scroll" :: listing_meta
   | Config ->
       [ b Navigate "j/k" "scroll"
-      ; b Act "e" "edit" ~help:"edit runtime.toml; the server previews before it writes"
+        (* The surface owns the two files the server reads. Which one [e]
+           opens depends on which list is showing, so the row says both. *)
+      ; b Navigate "p" "runtime.toml / prompts"
+      ; b Act "e" "edit"
+          ~help:"runtime.toml previews before it writes; a prompt saves as an override"
+      ; b Act "x" "clear override" ~help:"on a prompt: back to the file's words"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ]

@@ -378,11 +378,6 @@ type observer_status =
     }
 
 (** One event off the feed, kept for the Acting surface. *)
-type acting_entry = {
-  ae_at : float;  (** when the TUI received it *)
-  ae_event : Masc_tui_observer.event;
-}
-
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
    about four events a second, so this is a few minutes of scrollback; what
    falls off the end is counted in [acting_dropped], not lost in silence.
@@ -997,7 +992,7 @@ type state = {
           holds it after a stream closes, so reopening the feed and calling
           tools reuse it rather than minting one per attempt. Cleared when
           the server refuses it. *)
-  mutable acting: acting_entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
   mutable acting_undecodable_last: string option;  (** why, for the most recent one *)

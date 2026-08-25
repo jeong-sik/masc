@@ -89,16 +89,20 @@ let test_one_reply_does_not_bury_the_actions_it_sits_between () =
   check int "everything still holds every frame" 402
     (List.filter (Acting.visible Acting.Everything) events |> List.length)
 
-(* The row a stream frame draws: the keeper and the clock come from the frame,
-   not from the "server"/--:--:-- placeholder Other falls back to. *)
-let test_a_stream_frame_draws_its_keeper_and_its_clock () =
+(* The row a stream frame draws: a real keeper and what the frame was, not the
+   "server" placeholder with an empty detail that Other falls back to. The
+   clock is the feed's, not the frame's -- the decoder still keeps the frame's
+   own timestamp, and test_tui_observer pins that; it is the row that follows
+   the order the screen scrolls through. *)
+let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
   let row =
-    Acting.row_of_event ~duration_ms:None
+    Acting.row_of_event ~at:100. ~duration_ms:None
       (Observer.Keeper_chat_stream_frame
          { keeper = "test-keeper"; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
   in
   check string "keeper" "test-keeper" row.Acting.keeper;
-  check bool "clock is the server's" true (Float.equal row.Acting.at 1787507570.5);
+  check bool "the row wears the feed's clock, not the frame's" true
+    (Float.equal row.Acting.at 100.);
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
     row.Acting.detail
 
@@ -147,29 +151,28 @@ let test_trimming_keeps_the_order_it_was_given () =
   let kept, dropped = Acting.retain ~actions:2 ~quiet:1 ~event_of:Fun.id ring in
   check (list string) "newest of each class, in arrival order"
     [ "a"; "b"; "c" ]
-    (List.map (fun e -> (Acting.row_of_event ~duration_ms:None e).Acting.keeper) kept);
+    (List.map (fun e -> (Acting.row_of_event ~at:100. ~duration_ms:None e).Acting.keeper) kept);
   check int "the rest is counted" 2 dropped
 
-(* The screen orders by arrival and labels by the event's own clock, and two
-   of the event kinds carry no clock. So the column an operator reads to check
-   the order was blank on those rows -- 925 of the 927 on the screen that
-   prompted this. Arrival is recorded beside the event; a row with no clock
-   says that instead of nothing. *)
-let test_a_row_with_no_clock_of_its_own_shows_when_it_arrived () =
+(* The screen is a feed: rows are held and drawn in the order they arrived,
+   so the clock the caller hands in is that arrival. Reading each event's own
+   timestamp put two clocks on one screen, and the two kinds that carry none
+   drew --:--:-- -- on 925 of the 927 rows that prompted this, which is the
+   column an operator would have read to check the order. *)
+let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
   let received = 1787507570.5 in
-  let at_of event =
-    (Acting.row_of_event ~duration_ms:None event
-    |> Acting.with_received_clock ~received)
-      .Acting.at
-  in
-  check bool "an unknown type shows arrival rather than --:--:--" true
-    (Float.equal (at_of (Observer.Other "internal_agent_runs_changed")) received);
-  check bool "a snapshot shows arrival too" true
-    (Float.equal (at_of (Observer.Snapshot "execution_snapshot")) received);
-  (* An event that names its own moment keeps it: the operator wants to know
-     when the turn settled, not when this process heard about it. *)
-  check bool "a settlement keeps the clock it carried" true
-    (Float.equal (at_of (settled "largo")) 100.)
+  let at_of event = (Acting.row_of_event ~at:received ~duration_ms:None event).Acting.at in
+  List.iter
+    (fun (name, event) ->
+       check bool (name ^ " wears the arrival clock") true
+         (Float.equal (at_of event) received))
+    [ ("an unknown type", Observer.Other "internal_agent_runs_changed")
+    ; ("a snapshot", Observer.Snapshot "execution_snapshot")
+      (* These two carried a clock of their own before, and it is no longer
+         what the row shows -- the row shows the order it sits in. *)
+    ; ("a settlement", settled "largo")
+    ; ("a heartbeat", heartbeat "bandleader")
+    ]
 
 let test_a_call_and_its_return_read_as_one_pair () =
   let started =
@@ -191,7 +194,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
   in
   check string "the call names its tool, batch slot, turn, and task"
     "\xe2\x96\xb6 analyst call | read_file [1/2] \xc2\xb7 turn 2086 \xc2\xb7 task-494"
-    (text (Acting.row_of_event ~duration_ms:None started));
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None started));
   let duration =
     Acting.duration_of_completion ~before:[ heartbeat "x"; started ] completed
   in
@@ -199,7 +202,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
     (Some 32.) duration;
   check string "and the row carries the pairing"
     "\xe2\x9c\x93 analyst returned | read_file \xc2\xb7 32ms [1/2] \xc2\xb7 task-494"
-    (text (Acting.row_of_event ~duration_ms:duration (Observer.Agent_core completed)))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:duration (Observer.Agent_core completed)))
 
 let test_a_return_with_no_start_held_has_no_duration () =
   let completed =
@@ -222,15 +225,15 @@ let test_a_return_with_no_start_held_has_no_duration () =
        completed);
   check string "the row then shows the tool alone"
     "\xe2\x9c\x93 analyst returned | read_file"
-    (text (Acting.row_of_event ~duration_ms:None (Observer.Agent_core completed)))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)))
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
     "\xe2\x96\xa0 largo turn settled | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
-    (text (Acting.row_of_event ~duration_ms:None (settled "largo")));
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
   check string "a heartbeat in a turn says how long it has been in it"
     "\xc2\xb7 bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
-    (text (Acting.row_of_event ~duration_ms:None (heartbeat "bandleader")))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
 
 let test_agent_terminal_rows_keep_success_and_failure_distinct () =
   let completed =
@@ -239,10 +242,10 @@ let test_agent_terminal_rows_keep_success_and_failure_distinct () =
   let failed = agent_core ~kind:Observer.Agent_failed ~task:"task-2" "analyst" in
   check string "a successful run is one completed row"
     "\xe2\x96\xa0 analyst agent done | task-1"
-    (text (Acting.row_of_event ~duration_ms:None completed));
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None completed));
   check string "a failed run is one failed row"
     "\xe2\x9c\x97 analyst agent failed | task-2"
-    (text (Acting.row_of_event ~duration_ms:None failed))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None failed))
 
 let test_a_lane_named_event_is_attributed_by_its_trace () =
   let on_lane =
@@ -282,16 +285,16 @@ let () =
             test_actions_hide_what_says_nothing_a_row_can_act_on
         ; test_case "one reply does not bury the actions it sits between" `Quick
             test_one_reply_does_not_bury_the_actions_it_sits_between
-        ; test_case "a stream frame draws its keeper and its clock" `Quick
-            test_a_stream_frame_draws_its_keeper_and_its_clock
+        ; test_case "a stream frame draws its keeper and what it was" `Quick
+            test_a_stream_frame_draws_its_keeper_and_what_it_was
         ; test_case "a long reply does not evict the log it streams into" `Quick
             test_a_long_reply_does_not_evict_the_log_it_streams_into
         ; test_case "the old arrival trim would have lost them" `Quick
             test_the_old_arrival_trim_would_have_lost_them
         ; test_case "trimming keeps the order it was given" `Quick
             test_trimming_keeps_the_order_it_was_given
-        ; test_case "a row with no clock of its own shows when it arrived" `Quick
-            test_a_row_with_no_clock_of_its_own_shows_when_it_arrived
+        ; test_case "every row wears the clock the feed ordered it by" `Quick
+            test_every_row_wears_the_clock_the_feed_ordered_it_by
         ; test_case "a call and its return read as one pair" `Quick
             test_a_call_and_its_return_read_as_one_pair
         ; test_case "a return with no start held has no duration" `Quick

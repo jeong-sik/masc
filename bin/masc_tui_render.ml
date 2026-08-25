@@ -3526,15 +3526,15 @@ let render_keeper_message (state : state) =
           let request_label = Keeper_chat.compact_request_id request_id in
           let entry ?(markdown_source = Message_layout.Markdown_streaming) style
               role_label body =
-            let role_label =
-              Message_layout.align_role_label ~column:role_label_column
-                ("↳ " ^ role_label)
-            in
+            (* One alignment, on the label the row actually carries. Aligning
+               the continuation mark and then aligning the result again pays
+               the badge's width twice, so the second call trims what the
+               first had already fitted. *)
             ({ style;
                timestamp = "live";
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
-                   ~style role_label;
+                   ~style ("↳ " ^ role_label);
                request_label;
                body;
                markdown_source;

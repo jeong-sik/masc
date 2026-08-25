@@ -1011,9 +1011,23 @@ let test_planning_refresh_reconciles_navigation_identity () =
   check int "HTTP surface application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
-  check int "refresh loop no longer checks the stale planning snapshot" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"List.find_opt")
+  (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
+     lookups from the key loop: the loop re-derived the Planning selection from
+     whichever snapshot it happened to hold, and a reorder between refreshes
+     moved the cursor onto a different goal. Reconciliation belongs to
+     [Planning_selection.reconcile], pinned above.
+
+     That absence was guarded by counting [List.find_opt] in [main], which is a
+     2,700-line key dispatcher: #30603 added a repository lookup for the PR-URL
+     jump and turned this red on a call with nothing to do with Planning. What
+     the loop must not do is reach into the snapshot's goal list itself; the two
+     reads it legitimately makes both go through [planning_visible_goals], so
+     that projection is the permitted path and anything else is the bug coming
+     back. *)
+  check int "refresh loop reads planning goals only through the visible projection" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
 ;;
 
 let test_overview_events_use_scroll_projection () =

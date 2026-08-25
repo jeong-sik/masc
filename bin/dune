@@ -423,10 +423,15 @@
  (libraries masc))
 
 (library
+ (name masc_tui_code_lexer)
+ (wrapped false)
+ (modules masc_tui_code_lexer))
+
+(library
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_code_lexer masc_tui_message_layout))
 
 (library
  (name masc_tui_composer)

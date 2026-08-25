@@ -113,20 +113,6 @@ let parse_trace_history fields =
   | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
 
-let canonical_multimodal_policy_opt raw =
-  match multimodal_policy_of_string raw with
-  | Some policy when String.equal raw (multimodal_policy_to_string policy) ->
-    Some policy
-  | Some _ | None -> None
-;;
-
-let parse_multimodal_policy fields =
-  let* raw = string_field fields "multimodal_policy" in
-  match canonical_multimodal_policy_opt raw with
-  | Some policy -> Ok policy
-  | None -> invalidf "multimodal_policy has non-canonical value %S" raw
-;;
-
 let canonical_proactive_outcome_opt raw =
   let outcome = proactive_cycle_outcome_of_string raw in
   if String.equal raw (proactive_cycle_outcome_to_string outcome)
@@ -170,22 +156,11 @@ let proactive_outcome_repair_value raw =
      | outcome -> Some (proactive_cycle_outcome_to_string outcome))
 ;;
 
-let multimodal_policy_repair_value raw =
-  match canonical_multimodal_policy_opt raw with
-  | Some _ -> None
-  | None ->
-    (match multimodal_policy_of_string raw with
-     | Some policy -> Some (multimodal_policy_to_string policy)
-     | None -> Some (multimodal_policy_to_string default_multimodal_policy))
-;;
-
 (* Persisted enumerated fields repairable in place.  A field belongs here
    only when an unrecognized value has exactly one sane fallback; anything
    else keeps failing loud. *)
 let repairable_enum_fields =
-  [ "last_proactive_outcome", proactive_outcome_repair_value
-  ; "multimodal_policy", multimodal_policy_repair_value
-  ]
+  [ "last_proactive_outcome", proactive_outcome_repair_value ]
 ;;
 
 let repair_non_canonical_enum_fields json =
@@ -346,7 +321,6 @@ let decode_current_meta fields =
   in
   let* trace_id_raw = string_field fields "trace_id" in
   let* trace_id = parse_trace_id trace_id_raw in
-  let* multimodal_policy = parse_multimodal_policy fields in
   let* trace_history = parse_trace_history fields in
   let* last_handoff_ts = float_field fields "last_handoff_ts" in
   let* created_at = string_field fields "created_at" in
@@ -466,7 +440,6 @@ let decode_current_meta fields =
       ; allowed_paths = []
       ; mention_targets = []
       ; proactive = { enabled = default_proactive_enabled }
-      ; multimodal_policy
       ; always_allow = None
       ; created_at
       ; updated_at

@@ -16,7 +16,6 @@ type keeper_profile_defaults = {
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
   autonomous_wake_prompt : string option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;

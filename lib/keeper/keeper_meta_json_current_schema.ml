@@ -21,7 +21,6 @@ type field =
   | Instructions
   | Autonomous_instructions
   | Trace_id
-  | Multimodal_policy
   | Trace_history
   | Last_handoff_ts
   | Created_at
@@ -63,7 +62,6 @@ let all_fields =
   ; Instructions
   ; Autonomous_instructions
   ; Trace_id
-  ; Multimodal_policy
   ; Trace_history
   ; Last_handoff_ts
   ; Created_at
@@ -106,7 +104,6 @@ let field_name = function
   | Instructions -> "instructions"
   | Autonomous_instructions -> "autonomous_instructions"
   | Trace_id -> "trace_id"
-  | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"
   | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"

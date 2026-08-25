@@ -11,7 +11,6 @@ type field =
   | Instructions
   | Autonomous_instructions
   | Trace_id
-  | Multimodal_policy
   | Trace_history
   | Last_handoff_ts
   | Created_at

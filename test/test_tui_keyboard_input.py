@@ -664,7 +664,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "instructions": "",
         "autonomous_instructions": None,
         "trace_id": f"trace-{name}",
-        "multimodal_policy": "inherit",
         "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",

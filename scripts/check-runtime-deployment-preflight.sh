@@ -326,7 +326,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     schema: "masc.keeper_meta.v1", name: "fixture",
     agent_name: "keeper-fixture-agent",
     instructions: "self-test fixture", autonomous_instructions: null,
-    trace_id: "trace-fixture", multimodal_policy: "inherit",
+    trace_id: "trace-fixture",
     trace_history: [], last_handoff_ts: 0.0,
     created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",
     total_turns: 0, total_input_tokens: 0, total_output_tokens: 0,

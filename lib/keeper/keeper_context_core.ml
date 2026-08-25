@@ -40,7 +40,7 @@ let context_of_agent_core_checkpoint (cp : Agent_core.Checkpoint.t) : working_co
   sync_agent_core_context { checkpoint }
 
 let checkpoint_for_persistence
-    ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
+    ~(runtime_id : string)
     ~(keeper_name : string)
     ~(session : session_context)
     ~(agent_name : string)
@@ -49,19 +49,19 @@ let checkpoint_for_persistence
   let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
-     Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
+     keeper whose runtime cannot take an image, evict any inline image to a handle-only placeholder BEFORE
      it is persisted, so a reloaded checkpoint can never re-materialise an
      [Image] and re-trigger the RFC-0265 reroute. Store-only here — checkpoint
      writes must not block the turn fiber on a vision provider call (eager
      extraction is site 1's job). Also the migration path for images persisted
-     by pre-existing checkpoints. No-op for Inherit/Reroute (safe-by-default).
-     [multimodal_policy]/[keeper_name] are required so every checkpoint write
-     path is compiler-forced to declare its policy (N-of-M closure). *)
+     by pre-existing checkpoints. A runtime that takes the image itself keeps
+     it. [runtime_id]/[keeper_name] are required so every checkpoint write path
+     is compiler-forced to name the runtime it persists for (N-of-M closure). *)
   let checkpoint_messages =
     List.map
       (Keeper_vision_ingest.evict_message
          ~mode:Keeper_vision_ingest.Store_only
-         ~policy:multimodal_policy
+         ~delegate:(Keeper_vision_ingest.delegates_media ~runtime_id)
          ~keeper_name)
       checkpoint_messages
   in
@@ -82,7 +82,7 @@ let checkpoint_for_persistence
       }
 
 let save_agent_core_checkpoint_classified
-    ~multimodal_policy
+    ~runtime_id
     ~keeper_name
     ~session
     ~agent_name
@@ -90,7 +90,7 @@ let save_agent_core_checkpoint_classified
   =
   match
     checkpoint_for_persistence
-      ~multimodal_policy
+      ~runtime_id
       ~keeper_name
       ~session
       ~agent_name
@@ -108,7 +108,7 @@ let save_agent_core_checkpoint_classified
 
 let save_agent_core_checkpoint_if_source_with
     ~save_agent_core_history
-    ~multimodal_policy
+    ~runtime_id
     ~keeper_name
     ~session
     ~agent_name
@@ -117,7 +117,7 @@ let save_agent_core_checkpoint_if_source_with
   =
   match
     checkpoint_for_persistence
-      ~multimodal_policy
+      ~runtime_id
       ~keeper_name
       ~session
       ~agent_name
@@ -164,7 +164,7 @@ module For_testing = struct
 end
 
 let save_agent_core_checkpoint
-    ~multimodal_policy
+    ~runtime_id
     ~keeper_name
     ~session
     ~agent_name
@@ -172,7 +172,7 @@ let save_agent_core_checkpoint
   =
   match
     save_agent_core_checkpoint_classified
-      ~multimodal_policy
+      ~runtime_id
       ~keeper_name
       ~session
       ~agent_name

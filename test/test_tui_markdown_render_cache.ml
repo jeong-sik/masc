@@ -1,12 +1,25 @@
 open Alcotest
 
 module Cache = Masc_tui_markdown_render_cache
+module Markdown = Masc_tui_markdown
 
 let counted_renderer calls ~width text =
   incr calls;
   [ Printf.sprintf "%d:%s" width text ]
 
 let stable identity text = Cache.Stable_source { identity; text }
+
+let growing_renderer calls ~width text =
+  calls := text :: !calls;
+  Markdown.render_streaming ~palette:Markdown.plain_palette ~width text
+
+let render_growing cache calls ?(theme_revision = 1)
+    ?(palette_generation = 0) ?(width = 40) identity text =
+  Cache.render_growing cache ~theme_revision ~palette_generation ~width
+    ~renderer:(growing_renderer calls) ~identity ~text
+
+let full_markdown ~width text =
+  Markdown.render ~palette:Markdown.plain_palette ~width text
 
 let render cache calls ?(theme_revision = 1) ?(palette_generation = 0)
     ?(width = 40) source =
@@ -75,6 +88,115 @@ let test_retention_is_bounded_and_recent () =
   check int "capacity remains exact" 2
     (Cache.For_testing.retained_entries cache)
 
+let assert_incremental_matches_full ~label ~width chunks =
+  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let calls = ref [] in
+  let source = Buffer.create 256 in
+  List.iteri
+    (fun index chunk ->
+      Buffer.add_string source chunk;
+      let text = Buffer.contents source in
+      let actual = render_growing cache calls ~width label text in
+      check (list string)
+        (Printf.sprintf "%s at chunk %d %S" label index chunk)
+        (full_markdown ~width text) actual)
+    chunks
+
+let one_byte_chunks text =
+  List.init (String.length text) (fun index -> String.make 1 text.[index])
+
+let test_every_chunk_matches_the_canonical_full_render () =
+  let source =
+    "Intro [inline](https://example.invalid/x).\n\
+     ```ocaml\n\
+     (* open\n\
+        still open *)\n\
+     let x = 1\n\
+     ```\n\
+     ~~~text\n\
+     | fenced | pipes |\n\
+     | --- | --- |\n\
+     ~~~\n\
+     | name | value |\n\
+     | --- | ---: |\n\
+     | a | 1 |\n\
+     | much-wider | 12345 |\n\
+     After the table.\n\
+     Earlier [docs][ref].\n\
+     [ref]: https://example.invalid/docs\n"
+  in
+  List.iter
+    (fun width ->
+      assert_incremental_matches_full
+        ~label:(Printf.sprintf "one-byte-%d" width) ~width
+        (one_byte_chunks source))
+    [ 18; 40; 72 ];
+  assert_incremental_matches_full ~label:"utf8" ~width:24
+    [ "한"; "글"; " **굵"; "게**\n"; "| 열 | 값 |\n"; "| -- | -- |\n"
+    ; "| 하나 | 둘 |\n"; "다음 줄"
+    ]
+
+let test_closed_blocks_are_not_rendered_again () =
+  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let calls = ref [] in
+  let source = Buffer.create 64 in
+  let append chunk =
+    Buffer.add_string source chunk;
+    let text = Buffer.contents source in
+    let actual = render_growing cache calls "entry-a" text in
+    check (list string) ("full rows after " ^ chunk)
+      (full_markdown ~width:40 text) actual
+  in
+  append "alpha\n";
+  append "beta\n";
+  append "gamma";
+  append " delta";
+  let unchanged = Buffer.contents source in
+  ignore (render_growing cache calls "entry-a" unchanged : string list);
+  check (list string) "each later render starts at the previous mutable block"
+    [ "alpha\n"; "alpha\nbeta\n"; "beta\ngamma"; "gamma delta" ]
+    (List.rev !calls)
+
+let test_growing_retention_is_bounded_and_recent () =
+  let cache = Cache.create ~capacity:2 ~equal:String.equal in
+  let calls = ref [] in
+  ignore (render_growing cache calls "entry-a" "a" : string list);
+  ignore (render_growing cache calls "entry-b" "b" : string list);
+  ignore (render_growing cache calls "entry-a" "a" : string list);
+  ignore (render_growing cache calls "entry-c" "c" : string list);
+  ignore (render_growing cache calls "entry-b" "b" : string list);
+  check int "least recently used growing entry was rendered again" 4
+    (List.length !calls);
+  check int "growing capacity remains exact" 2
+    (Cache.For_testing.retained_growing_entries cache)
+
+let test_growing_keys_and_non_prefix_snapshots_reset () =
+  let cache = Cache.create ~capacity:4 ~equal:String.equal in
+  let calls = ref [] in
+  let source = "alpha\nbeta" in
+  ignore (render_growing cache calls "entry-a" source : string list);
+  calls := [];
+  ignore (render_growing cache calls ~width:41 "entry-a" source : string list);
+  ignore
+    (render_growing cache calls ~width:41 ~theme_revision:2 "entry-a" source
+      : string list);
+  ignore
+    (render_growing cache calls ~width:41 ~theme_revision:2
+       ~palette_generation:1 "entry-a" source
+      : string list);
+  ignore
+    (render_growing cache calls ~width:41 ~theme_revision:2
+       ~palette_generation:1 "entry-b" source
+      : string list);
+  ignore
+    (render_growing cache calls ~width:41 ~theme_revision:2
+       ~palette_generation:1 "entry-b" "replacement"
+      : string list);
+  check (list string)
+    "width, theme, palette, identity, and a non-prefix snapshot render in full"
+    [ source; source; source; source; "replacement" ]
+    (List.rev !calls)
+
 let () =
   run "tui_markdown_render_cache"
     [ ( "cache"
@@ -88,5 +210,13 @@ let () =
             test_streaming_source_never_reuses_partial_rows
         ; test_case "retention is bounded and recent" `Quick
             test_retention_is_bounded_and_recent
+        ; test_case "every chunk matches the full renderer" `Quick
+            test_every_chunk_matches_the_canonical_full_render
+        ; test_case "closed blocks are not rendered again" `Quick
+            test_closed_blocks_are_not_rendered_again
+        ; test_case "growing retention is bounded and recent" `Quick
+            test_growing_retention_is_bounded_and_recent
+        ; test_case "growing invalidation resets from the full source" `Quick
+            test_growing_keys_and_non_prefix_snapshots_reset
         ] )
     ]

@@ -771,7 +771,9 @@ let test_official_client_recovery_uses_real_admin_route () =
       ~owner_epoch:"11111111-1111-4111-8111-111111111111"
       ~runtime_id:"codex.codex"
       ~tool_surface_sha256:
-        (Official_client_session_store.tool_surface_sha256 [])
+        (Official_client_session_store.tool_surface_sha256
+           ~native_posture:Runtime_native_tools.codex_default
+           [])
       ~updated_at:1.0
     |> Result.get_ok
   in

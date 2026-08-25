@@ -50,6 +50,9 @@ type msg_role =
           which is why an agent's broadcast and the operator's own line were
           indistinguishable. *)
   | Message_keeper
+  | Message_autonomous
+      (** A keeper reply produced by an autonomous turn rather than a message
+          sent from this chat. *)
   | Message_status
   | Message_error
   | Message_tool
@@ -62,6 +65,8 @@ type msg_role =
           the lines the server kept and the count it withheld. Drawn with the
           live pane's thinking style, so a turn the keeper ran on its own and
           one watched live read alike. *)
+  | Message_memory
+      (** One Memory OS journal pass interleaved by its recorded timestamp. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -144,12 +149,30 @@ type board_comment = {
     renders as itself rather than disappearing. *)
 type schedule_row = {
   sch_schedule_id: string;
+  sch_schedule_instance_id: string;
   sch_status: string;
+  sch_dispatch_status: string;
   sch_source: string;
+  sch_requested_by: string;
+  sch_scheduled_by: string;
+  sch_requested_at_iso: string;
   sch_due_at_iso: string option;
+  sch_next_due_at_iso: string option;
+  sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
+  sch_payload_digest: string;
+  sch_payload_kind: string option;
+  sch_payload_support: string;
+  sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
   sch_payload_summary: string option;
+  sch_last_wake_status: string option;
+  sch_last_wake_started_at_iso: string option;
+  sch_last_wake_error: string option;
+  sch_queue_projection_status: string option;
+  sch_queue_pending_count: int option;
+  sch_reaction_projection_status: string option;
+  sch_reaction_latest_at_iso: string option;
 }
 
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
@@ -175,6 +198,10 @@ type board_mode =
           both fields and no second input mode is needed. Sending is a
           two-step arm, not a key: [esc] offers send-or-discard, so a stray
           Enter during writing cannot publish. *)
+
+type board_focus =
+  | Board_posts_pane
+  | Board_detail_pane
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -408,6 +435,7 @@ type surface =
   | Harness
   | Fusion
   | Repositories
+  | Code
   | Changes
   | Connectors
   | Runtime
@@ -432,6 +460,7 @@ let surface_ring : (surface * string) list =
     (Harness, "Harness");
     (Fusion, "Fusion");
     (Repositories, "Repos");
+    (Code, "Code");
     (Changes, "Changes");
     (Connectors, "Connectors");
     (Runtime, "Runtime");
@@ -507,7 +536,8 @@ let surface_needs : surface -> surface_needs = function
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
   | Lanes | Approvals | Schedules | Verification | Harness | Fusion
-  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools ->
+  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Tools ->
       nothing
 
 (** How far a surface's list can scroll, given the terminal's height.
@@ -534,6 +564,7 @@ type scrolled = {
    move it here in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 let runtime_listing_chrome ~error = listing_chrome ~error + 2
+let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -581,9 +612,10 @@ type state = {
   (* [/] on the roster: a search that moves the cursor, not a filter that
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
-     [roster_search_last] feeds n/N after Enter. *)
-  mutable roster_search: string option;
-  mutable roster_search_last: string;
+     [search_last] feeds n/N after Enter. Every surface that answers
+     {!surface_row_texts} searches through the same pair. *)
+  mutable search: string option;
+  mutable search_last: string;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
      read is stamped with the keeper it answers for, so a cursor move cannot
      show one keeper's instructions under another's name. *)
@@ -680,6 +712,7 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
+  mutable board_focus: board_focus;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -714,6 +747,7 @@ type state = {
   mutable schedules_error: string option;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
+  mutable schedule_detail_id: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -722,6 +756,7 @@ type state = {
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable lanes_error: string option;
   mutable lanes_scroll: int;
+  mutable lanes_cursor: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -731,17 +766,30 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
+  mutable connectors_cursor: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
+  mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
   mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
+  mutable repositories_cursor: int;
+  (* Code surface: one directory level at a time through the lazy /children
+     route; the file arrives whole and is lexed once at load. *)
+  mutable code_dir: string;
+  mutable code_entries: Tui_decode.workspace_tree_node list;
+  mutable code_entries_error: string option;
+  mutable code_cursor: int;
+  mutable code_file: (string * (string * string) list list) option;
+  mutable code_file_error: string option;
+  mutable code_file_scroll: int;
+  mutable code_focus_file: bool;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -767,6 +815,7 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  mutable harness_cursor: int;
   mutable fusion_runs: Tui_decode.fusion_snapshot option;
   mutable fusion_error: string option;
   mutable fusion_cursor: int;
@@ -802,9 +851,11 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
+  mutable verification_cursor: int;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
+  mutable system_logs_cursor: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
@@ -828,6 +879,9 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  mutable msg_memory_visible: bool;
+  mutable msg_memory_error: string option;
+  mutable msg_memory_dropped: int;
   (* Every full-history GET captures this generation. Keeper identity alone is
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
@@ -966,8 +1020,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
-  roster_search = None;
-  roster_search_last = "";
+  search = None;
+  search_last = "";
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -1034,6 +1088,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;
+  board_focus = Board_detail_pane;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
@@ -1051,11 +1106,13 @@ let create_state ~workspace ~port ~refresh_interval = {
   schedules_error = None;
   schedule_cursor = 0;
   schedule_scroll = 0;
+  schedule_detail_id = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
   lanes_error = None;
   lanes_scroll = 0;
+  lanes_cursor = 0;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -1064,15 +1121,26 @@ let create_state ~workspace ~port ~refresh_interval = {
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
+  connectors_cursor = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
+  runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
   runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
+  repositories_cursor = 0;
+  code_dir = "";
+  code_entries = [];
+  code_entries_error = None;
+  code_cursor = 0;
+  code_file = None;
+  code_file_error = None;
+  code_file_scroll = 0;
+  code_focus_file = false;
   changes_keeper = None;
   changes = None;
   changes_error = None;
@@ -1085,6 +1153,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  harness_cursor = 0;
   fusion_runs = None;
   fusion_error = None;
   fusion_cursor = 0;
@@ -1108,7 +1177,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   verification = None;
   verification_error = None;
   verification_scroll = 0;
+  verification_cursor = 0;
   system_logs_scroll = 0;
+  system_logs_cursor = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
@@ -1121,6 +1192,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_memory_visible = true;
+  msg_memory_error = None;
+  msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
@@ -1204,6 +1278,8 @@ type clamped_scroll =
   | Overview_events of int
   | Task_detail of int
   | Board_read of int
+  | Message_scroll of int
+  | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
@@ -1214,6 +1290,8 @@ let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
+  | Message_scroll value -> state.msg_scroll <- value
+  | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
@@ -1224,10 +1302,13 @@ let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
   function
   | System_logs ->
-      listing ~error:state.system_logs_error
-        (match state.system_logs with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.sys_entries)
+      Some
+        { sc_count =
+            (match state.system_logs with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.sys_entries)
+        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
+        }
   | Verification ->
       listing ~error:state.verification_error
         (match state.verification with
@@ -1282,7 +1363,80 @@ let scrolled_surface (state : state) : surface -> scrolled option =
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
-  | Fusion | Resources ->
+  | Fusion | Resources | Code ->
+      None
+
+(* The text a "/" search reads for each row: the identifiers an operator
+   would type, not the drawn bytes. [Some texts] means the surface is
+   searchable and [texts] is the same decoded list the row cursor names, in
+   the same order -- a match index is a cursor position. [None] keeps "/"
+   closed on that surface. *)
+let surface_row_texts (state : state) : surface -> string list option = function
+  | Keepers Keeper_list ->
+      Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+  | Lanes ->
+      Option.map
+        (fun s ->
+          List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+        state.lanes
+  | Verification ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+              ^ r.Tui_decode.vr_submitted_by)
+            s.Tui_decode.vs_requests)
+        state.verification
+  | Harness ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
+            s.Tui_decode.hs_verdicts)
+        state.harness
+  | Repositories ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
+            s.Tui_decode.rs_repositories)
+        state.repositories
+  | Connectors ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
+            s.Tui_decode.cs_connectors)
+        state.connectors
+  | Runtime ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c ->
+              c.Tui_decode.rcr_lane_id ^ " "
+              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+            s.Tui_decode.rss_candidates)
+        state.runtime_surface
+  | System_logs ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun e ->
+              e.Tui_decode.sl_module ^ " "
+              ^ Option.value ~default:"" e.Tui_decode.sl_keeper
+              ^ " " ^ e.Tui_decode.sl_message)
+            s.Tui_decode.sys_entries)
+        state.system_logs
+  | Code ->
+      Some
+        (List.map
+           (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
+           state.code_entries)
+  (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion | Resources | Changes | Config | Tools ->
       None
 
 let keeper_message_status_rows (state : state) =
@@ -1316,6 +1470,8 @@ let keeper_message_status_rows (state : state) =
      past the terminal, and the presenter drops whatever ran off the bottom. *)
   + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
+  + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
@@ -1345,6 +1501,8 @@ let approval_items (state : state) =
 type palette_action =
   | Palette_goto of surface
   | Palette_chat of string
+  | Palette_task of string
+  | Palette_board_post of string
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1367,6 +1525,13 @@ let palette_entries (state : state) =
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
       state.keepers
+  @ List.map
+      (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
+      state.tasks
+  @ List.map
+      (fun (p : board_post) ->
+        ("post " ^ p.bp_title, Palette_board_post p.bp_id))
+      state.board_posts
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)

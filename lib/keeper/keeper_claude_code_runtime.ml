@@ -384,8 +384,18 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       | Error detail ->
         Error (config_error ~field:"official_client_session.claim" detail)
     in
+    let* native_posture =
+      Host.resolve_native_posture
+        ~base_path
+        ~keeper_name
+        ~client_label:"Claude Code"
+        ~default:Runtime_native_tools.claude_code_default
+        ~none_supported:true
+    in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
-    let tool_surface_sha256 = Session_store.tool_surface_sha256 tools in
+    let tool_surface_sha256 =
+      Session_store.tool_surface_sha256 ~native_posture tools
+    in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -429,6 +439,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
       { cli_path = config.cli_path
       ; cwd = base_path
       ; model = config.model
+      ; native = native_posture
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
       ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and

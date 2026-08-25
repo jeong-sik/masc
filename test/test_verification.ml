@@ -2147,6 +2147,105 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
 
+(* #29596: the per-item cap bounds one artifact, not their sum. A submission of
+   many sub-cap artifacts still built a request no verifier_exact slot could
+   carry — 12 artifacts, every one [truncated=false], 1,005,015 bytes in the
+   atom that stalled task-465 (2026-08-25). Each artifact here is far under the
+   cap and none is truncated; only their total crosses it. *)
+let test_transport_projection_bounds_the_evidence_total () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir = Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let each = cap / 3 in
+    let names = [ "a"; "b"; "c"; "d"; "e" ] in
+    List.iter
+      (fun name ->
+        Fs_compat.save_file
+          (Filename.concat artifact_dir (name ^ "-proof.json"))
+          (String.make each 'x'))
+      names;
+    let request_id = "vrf-transport-total" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        (List.map (fun name -> "artifact:" ^ name ^ "-proof.json") names)
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available { items; _ } as access ->
+      List.iter
+        (fun item ->
+          match item with
+          | VS.Evidence_artifact { truncated; _ } ->
+            Alcotest.(check bool) "no item is truncated on its own" false truncated
+          | VS.Evidence_note _ | VS.Evidence_invalid_reference
+          | VS.Evidence_artifact_unreadable _ -> ())
+        items;
+      Alcotest.(check bool)
+        "the stored snapshot carries every byte"
+        true
+        (String.length
+           (Yojson.Safe.to_string (VS.submitted_evidence_access_to_yojson access))
+         > cap);
+      let transport =
+        Yojson.Safe.to_string (VS.submitted_evidence_access_transport_to_yojson access)
+      in
+      Alcotest.(check bool)
+        "the judge request stays inside the cap"
+        true
+        (String.length transport <= cap + 4_096);
+      let rendered =
+        match VS.submitted_evidence_access_transport_to_yojson access with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List rendered -> List.map (function
+               | `Assoc item -> item
+               | _ -> Alcotest.fail "transport item must be an object") rendered
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let carried = List.filter (List.mem_assoc "content") rendered in
+      let withheld = List.filter (List.mem_assoc "content_omitted") rendered in
+      Alcotest.(check int) "every artifact is still listed" 5 (List.length rendered);
+      Alcotest.(check bool)
+        "the ones that fit keep their content"
+        true
+        (List.length carried > 0);
+      Alcotest.(check bool)
+        "the ones past the cap are withheld"
+        true
+        (List.length withheld > 0);
+      Alcotest.(check int)
+        "each artifact is carried or withheld, never both"
+        5
+        (List.length carried + List.length withheld);
+      List.iter
+        (fun item ->
+          Alcotest.(check bool)
+            "a withheld artifact still names its reference"
+            true
+            (List.mem_assoc "reference" item && List.mem_assoc "bytes" item))
+        withheld
+    | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
+;;
+
 (* #29615: a truncated artifact's prefix must not travel to the judge. The
    persistence serializer keeps it for the audit record; the transport
    projection replaces it with the size, the fact, and how to read the real
@@ -2721,6 +2820,8 @@ let () =
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
       Alcotest.test_case "transport projection omits truncated prefix" `Quick
         test_transport_projection_omits_truncated_prefix;
+      Alcotest.test_case "transport projection bounds the evidence total" `Quick
+        test_transport_projection_bounds_the_evidence_total;
       Alcotest.test_case "truncated snapshot items names over-cap artifacts"
         `Quick
         test_truncated_snapshot_items_names_only_truncated_artifacts;

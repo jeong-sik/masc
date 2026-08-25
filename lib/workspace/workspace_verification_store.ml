@@ -230,13 +230,76 @@ let submitted_evidence_item_transport_to_yojson = function
       ]
 ;;
 
+(* The per-item cap above bounds one artifact. Nothing bounded their sum, so a
+   submission of many sub-cap artifacts still built a request no slot could
+   carry: 12 artifacts, every one [truncated=false], 204,834 bytes of content
+   in one measured bundle and 1,005,015 in the atom that stalled task-465
+   (2026-08-25). #29615 closed the single-22MB-artifact shape; this closes the
+   many-small-artifacts shape behind it.
+
+   The ceiling is the per-item cap itself rather than a new number: the whole
+   evidence block is now bounded by what one artifact was already allowed to
+   be. That bounds the request; it does not promise a fit for every slot,
+   because a slot's remaining budget also depends on the conversation in front
+   of it — that is a routing concern and is not decided here. *)
+let evidence_transport_max_bytes = verification_evidence_max_bytes
+
+(* Withheld for the aggregate budget, not for its own size. The judge is given
+   the same three things a per-item withholding gives it — the reference, the
+   real size, and the instruction to read the file — so the shape it has to
+   understand does not grow. *)
+let submitted_evidence_item_withheld_to_yojson = function
+  | Evidence_artifact { reference; content = _; bytes; truncated = _ } ->
+    `Assoc
+      [ "kind", `String "artifact"
+      ; "reference", `String reference
+      ; "bytes", `Int bytes
+      ; "truncated", `Bool false
+      ; "content_omitted", `Bool true
+      ; ( "content_note"
+        , `String
+            (Printf.sprintf
+               "file is %d bytes; the evidence block for this request is \
+                capped at %d bytes and this item is past the cap, so its \
+                content is withheld; read ranges of the actual file with the \
+                listed verification tools"
+               bytes
+               evidence_transport_max_bytes) )
+      ]
+  | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _) as
+    item ->
+    (* Only a full-content artifact can be withheld for the aggregate budget;
+       the rest carry no content to withhold. *)
+    submitted_evidence_item_transport_to_yojson item
+;;
+
+let submitted_evidence_items_transport_to_yojson items =
+  let rendered, _ =
+    List.fold_left
+      (fun (acc, spent) item ->
+        match item with
+        | Evidence_artifact { content; truncated = false; _ } ->
+          let weight = String.length content in
+          if spent + weight > evidence_transport_max_bytes
+          then submitted_evidence_item_withheld_to_yojson item :: acc, spent
+          else submitted_evidence_item_transport_to_yojson item :: acc, spent + weight
+        | Evidence_note _
+        | Evidence_artifact _
+        | Evidence_invalid_reference
+        | Evidence_artifact_unreadable _ ->
+          submitted_evidence_item_transport_to_yojson item :: acc, spent)
+      ([], 0)
+      items
+  in
+  List.rev rendered
+;;
+
 let submitted_evidence_access_transport_to_yojson = function
   | Evidence_available { request; items } ->
     `Assoc
       [ "access", `String "available"
       ; "request", request_header_to_yojson request
-      ; "items"
-      , `List (List.map submitted_evidence_item_transport_to_yojson items)
+      ; "items", `List (submitted_evidence_items_transport_to_yojson items)
       ]
   | Evidence_unavailable { request_id; reason } ->
     `Assoc

@@ -43,8 +43,26 @@ val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
 (** [true] iff either the HTTP protocol-version header or body
     per-request [_meta] declares a stateless MCP revision. *)
 
+type header_rejection =
+  | Mirrored_header_mismatch of string
+      (** The body parsed and disagrees with a header. The request id is
+          readable, so the response echoes it. *)
+  | Unreadable_body of string
+      (** A header opted into the stateless revision but the body is not a
+          JSON object. There is no id to echo. *)
+  | Unsupported_version of { requested : string }
+      (** Not a header disagreement: this server does not speak that
+          revision. Answered with [-32022] and the supported list. *)
+
+val header_rejection_body : string -> header_rejection -> string
+(** [header_rejection_body body_str rejection] is the complete JSON-RPC error
+    response for [rejection]: [-32020] echoing the request id read from
+    [body_str], [-32600] with a null id, or the [-32022] body carrying this
+    server's supported versions. Both transports call this so they cannot
+    answer the same rejection differently. *)
+
 val validate_2026_request_headers :
-  Httpun.Request.t -> string -> (unit, string) result
+  Httpun.Request.t -> string -> (unit, header_rejection) result
 (** Enforces the 2026-07-28 mirrored-header contract when a request
     opts into a stateless MCP revision. Legacy requests return [Ok ()].
     Modern requests require [MCP-Protocol-Version], matching body

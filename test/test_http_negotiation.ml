@@ -1,4 +1,5 @@
 open Alcotest
+module Transport_headers = Server_mcp_transport_http_headers
 
 let test_accepts_sse_header () =
   let open Mcp_transport_protocol.Http_negotiation in
@@ -262,7 +263,7 @@ let test_validate_2026_request_headers () =
   in
   (match Transport.validate_2026_request_headers ok_request (stateless_body ()) with
   | Ok () -> ()
-  | Error msg -> failf "expected valid 2026 headers, got %s" msg);
+  | Error _ -> fail "these headers mirror the body and must be accepted");
   let tool_call_request =
     Httpun.Request.create
       ~headers:
@@ -280,7 +281,7 @@ let test_validate_2026_request_headers () =
        (stateless_body ~method_:"tools/call" ~name:"masc_status" ())
    with
   | Ok () -> ()
-  | Error msg -> failf "expected valid Mcp-Name headers, got %s" msg);
+  | Error _ -> fail "Mcp-Name mirrors params.name and must be accepted");
   let mismatch_request =
     Httpun.Request.create
       ~headers:
@@ -294,9 +295,13 @@ let test_validate_2026_request_headers () =
   in
   match Transport.validate_2026_request_headers mismatch_request (stateless_body ()) with
   | Ok () -> fail "expected mismatched Mcp-Method to reject"
-  | Error msg ->
-      check bool "mentions header mismatch" true
-        (String_util.contains_substring msg "HeaderMismatch")
+  (* The constructor, not a substring of the message. The kind is what decides
+     the wire code, and a message reworded for a human used to be able to
+     change what this test proved. *)
+  | Error (Transport_headers.Mirrored_header_mismatch msg) ->
+      check bool "names the header that disagreed" true
+        (String_util.contains_substring msg "Mcp-Method")
+  | Error _ -> fail "a readable body disagreeing with a header is a mirrored mismatch"
 
 let test_stateless_headers_do_not_emit_session_id () =
   let module Transport = Server_mcp_transport_http in

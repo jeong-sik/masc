@@ -353,20 +353,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             let response = Httpun.Response.create ~headers `Bad_request in
             safe_respond_with_string reqd response body;
             Error ()
-        | Error (Server_mcp_request_context.Header_mismatch msg) ->
+        | Error (Server_mcp_request_context.Header_mismatch rejection) ->
             let body =
-              Yojson.Safe.to_string
-                (`Assoc
-                  [
-                    ("jsonrpc", `String "2.0");
-                    ( "error",
-                      `Assoc
-                        [
-                          ("code", `Int (-32001));
-                          ("message", `String msg);
-                        ] );
-                    ("id", `Null);
-                  ])
+              Server_mcp_transport_http_headers.header_rejection_body body_str
+                rejection
             in
             let headers =
               Httpun.Headers.of_list

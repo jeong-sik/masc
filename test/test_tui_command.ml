@@ -25,6 +25,7 @@ let describe = function
          | `Compact -> "compact"
          | `Full -> "full")
   | Command.Toggle_memory -> "toggle-memory"
+  | Command.Inspect_context -> "inspect-context"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
      these two and the match was not swept, which is exactly the miss the
@@ -53,7 +54,7 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt, visibility, memory and image"
+  check (list string) "help, keeper, interrupt, visibility, memory, context and image"
     [ "help"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
@@ -66,6 +67,7 @@ let test_pane_commands_parse_by_word () =
     ; "tools:compact"
     ; "tools:full"
     ; "toggle-memory"
+    ; "inspect-context"
     ; "image:shots/frame.png"
     ; "image-missing-path"
     ]
@@ -83,6 +85,7 @@ let test_pane_commands_parse_by_word () =
        ; "/tools compact"
        ; "/tools full"
        ; "/memory"
+       ; "/context"
        ; "/image shots/frame.png"
        ; "/image   "
        ])
@@ -96,7 +99,8 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"; "help" ]
+    [ "task"; "keeper"; "interrupt"; "thinking"; "tools"; "memory"
+    ; "context"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in

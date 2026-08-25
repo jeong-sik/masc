@@ -581,12 +581,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Error
-                                 (Server_mcp_request_context.Header_mismatch msg)
+                                 (Server_mcp_request_context.Header_mismatch rejection)
                                ->
                                  let body =
-                                   Printf.sprintf
-                                     {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"},"id":null}|}
-                                     (String.escaped msg)
+                                   Server_mcp_transport_http_headers.header_rejection_body body_str
+                                     rejection
                                  in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)

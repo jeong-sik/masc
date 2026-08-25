@@ -208,6 +208,9 @@ let for_surface = function
           ~help:"close the history, then the file, then climb one directory"
       ; b Navigate "h/l" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
+      ; b Act "c" "activity"
+          ~help:"which keeper wrote which lines, through what, and when \
+                 (repository scope)"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"

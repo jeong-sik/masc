@@ -12,6 +12,7 @@ type t =
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
   | Set_tools of [ `Toggle | `Compact | `Full ]
   | Toggle_memory
+  | Inspect_context
   | View_image of string
   | View_image_missing_path
   | Unknown of string
@@ -52,6 +53,10 @@ let catalog =
   ; { word = "memory"
     ; args = ""
     ; summary = "show or hide Librarian/Memory journal rows"
+    }
+  ; { word = "context"
+    ; args = ""
+    ; summary = "inspect the last observed provider input"
     }
   ; { word = "image"; args = "<path>"; summary = "draw an image file on the terminal" }
   ; { word = "help"; args = ""; summary = "this list" }
@@ -116,6 +121,7 @@ let parse text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Toggle_memory
+    | "context", _ -> Inspect_context
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path
     | word, _ -> Unknown word

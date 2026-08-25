@@ -24,13 +24,14 @@ count_rule_excluding() {
   local pattern="$1"
   local exclude_regex="$2"
   shift 2
+  # Keep file:count output even when a rule names exactly one file.
   # grep -Ev returns 1 when all lines are filtered; avoid tripping pipefail.
   if [ -n "$exclude_regex" ]; then
-    { rg -c --no-heading "$pattern" "$@" 2>/dev/null || true; } \
+    { rg -c --with-filename --no-heading "$pattern" "$@" 2>/dev/null || true; } \
       | { grep -Ev "$exclude_regex" || true; } \
       | awk -F: '{sum += $2} END {print sum+0}'
   else
-    { rg -c --no-heading "$pattern" "$@" 2>/dev/null || true; } \
+    { rg -c --with-filename --no-heading "$pattern" "$@" 2>/dev/null || true; } \
       | awk -F: '{sum += $2} END {print sum+0}'
   fi
 }
@@ -61,6 +62,22 @@ check_rule() {
     echo "OK[$name]: $current occurrences (baseline $baseline)."
   fi
 }
+
+# A one-file rg invocation omits the filename unless --with-filename is
+# explicit. The count parser consumes file:count records, so keep both the
+# included and excluded single-file shapes covered (#30520).
+count_rule_self_test_pattern='SSOT-count-rule-single-file-fixture'
+count_rule_self_test_included="$(count_rule_excluding \
+  "$count_rule_self_test_pattern" '' scripts/check-ssot.sh)"
+count_rule_self_test_excluded="$(count_rule_excluding \
+  "$count_rule_self_test_pattern" 'scripts/check-ssot\.sh' scripts/check-ssot.sh)"
+if [ "$count_rule_self_test_included" -eq 1 ] \
+  && [ "$count_rule_self_test_excluded" -eq 0 ]; then
+  echo "OK[count-rule-self-test]: single-file include/exclude counts covered."
+else
+  echo "ERROR[count-rule-self-test]: expected include=1/exclude=0, got include=$count_rule_self_test_included/exclude=$count_rule_self_test_excluded." >&2
+  fail=1
+fi
 
 # SSOT-R1 — .masc path concat bypasses Workspace_utils.masc_dir helper.
 # Tracked: #8355 (37 files at filing; current ratchet from main).
@@ -132,13 +149,9 @@ else
 fi
 
 # SSOT-R8 — TUI state colours are semantic Theme tokens, not renderer-local
-# ANSI choices. Syntax colours have their own Theme.Syntax namespace, so the
-# renderer has no reason to reach for raw red/yellow/green either.
-check_rule "R8-tui-status-color" 0 \
-  "Theme.ok / Theme.warn / Theme.bad (or Theme.Syntax for code content)" \
-  'Ansi\.(red|yellow|green)' \
-  '' \
-  bin/masc_tui_render.ml
+# ANSI choices. test/test_tui_http_ast.ml enforces this with OCaml's parser and
+# typed Longident traversal so comments and literal syntax cannot create a
+# second, heuristic source grammar here.
 
 # SSOT-R9 — conversation-role style is owned beside Theme. The renderer may
 # branch on row kind, but it must not map a role directly to an ANSI style.
@@ -308,6 +321,6 @@ check_rule "R13-tui-footer-fact-literal" 0 \
 echo ""
 echo "SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):"
 echo "  Script: scripts/check-ssot.sh"
-echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411"
+echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411 #30507 #30520"
 
 exit "$fail"

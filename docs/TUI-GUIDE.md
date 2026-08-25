@@ -6,9 +6,10 @@ status: runbook
 
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
-rotate with `Tab` in this order: Overview, Acting, Keepers, Lanes, Approvals,
-Board, Planning, Schedules, Verification, Harness, Fusion, Repositories,
-Connectors, Runtime, Tools, System Logs.
+rotate with `Tab` in the order `surface_ring` spells in
+`bin/masc_tui_types.ml`: Overview, Acting, Keepers, Lanes, Approvals, Board,
+Planning, Schedules, Verify, Harness, Fusion, Repos, Code, Changes, Connectors,
+Runtime, Config, Resources, Tools, Logs.
 
 ## Quick Start
 
@@ -718,9 +719,14 @@ than slowly. The pane then answers three more questions in place:
 - `m` swaps it for the notes anchored to the file — who left each one, its
   kind, the line span, and the task it rides with. Notes are keyed by the
   server-minted codebase slug, which only a Repositories row carries, so
-  `m` answers in repository scope and says why not in the others.
+  `m` answers in repository scope and says why not in the others. Inside
+  the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
+  Decision / Question / Bookmark); the acting identity is the bearer's.
+- `c` swaps it for the recorded keeper activity — which keeper wrote which
+  lines, through what tool call (or manual note), and when. Same
+  repository-scope rule as the notes.
 
-One overlay at a time — opening any of the three closes the other two, so
+One overlay at a time — opening any of them closes the others, so
 `j`/`k` always has one owner. `Esc` closes the overlay first, then the
 file, then climbs directories.
 
@@ -826,6 +832,8 @@ Per surface:
 | `H` | Code, file open | The commits that touched the file |
 | `d` | Code, file open | The working tree's diff against HEAD |
 | `m` | Code, file open, repository scope | The notes anchored to the file |
+| `w` | Code, notes view | Add a note through the `$EDITOR` form |
+| `c` | Code, file open, repository scope | The recorded keeper edits over the file |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
@@ -877,6 +885,14 @@ nor re-probes the terminal size.
 Each non-empty paint is sent as one synchronized-output update (CSI 2026) so
 terminals supporting the protocol reveal the frame atomically. `MASC_TUI_SYNC=off`
 omits that envelope; row-diff correctness does not depend on protocol support.
+
+Apple Terminal uses a conservative profile because it does not advertise the
+optional synchronized-output or Kitty keyboard protocols. Synchronized output,
+Kitty keyboard mode, and dynamic OSC window titles default off when
+`TERM_PROGRAM=Apple_Terminal`; `MASC_TUI_SYNC=on`,
+`MASC_TUI_KITTY_KEYBOARD=on`, and `MASC_TUI_TITLE=on` explicitly opt them back
+in. Other terminals keep the existing defaults, and each setting also accepts
+`off`.
 
 Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a

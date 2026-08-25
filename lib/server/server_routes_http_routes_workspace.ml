@@ -1027,6 +1027,156 @@ let add_routes router =
                    json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
          request reqd)
 
+  |> Http.Router.get "/api/v1/lsp/question" (fun request reqd ->
+       (* Ask the language server about a name: definition or hover, at the
+          occurrence-th start of [symbol] on a 1-based line. The same
+          question surface the keeper_code_query tool offers, over the same
+          [Lsp_position] arithmetic, reached through the workspace axes
+          (?keeper= / ?repo_id=) this file already resolves.
+
+          Token-gated where the file reads above are public: answering
+          spawns a language server. The pool is request-scoped
+          ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
+          a resident server holds 12-155 MB; a spawn costs tens of
+          milliseconds plus the first question's indexing. *)
+       with_token_permission_auth
+         ~permission:Masc_domain.CanBroadcast
+         (fun state _identity _req reqd ->
+            let uri = Uri.of_string request.target in
+            let base, _source = resolve_workspace_base ~state ~uri in
+            let param name = Uri.get_query_param uri name in
+            let bad message =
+              json_response ~status:`Bad_request request reqd
+                (json_error message)
+            in
+            let open struct
+              let ( let* ) r f =
+                match r with
+                | Ok v -> f v
+                | Error message -> `Failed message
+            end in
+            let outcome =
+              let* question =
+                match param "question" with
+                | Some "definition" -> Ok Lsp_questions.Definition
+                | Some "hover" -> Ok Lsp_questions.Hover
+                | Some other ->
+                  Error
+                    (Printf.sprintf
+                       "question must be definition or hover, got %S" other)
+                | None -> Error "question parameter is required"
+              in
+              let* raw_path =
+                match param "path" with
+                | Some p when String.trim p <> "" -> Ok p
+                | _ -> Error "path parameter is required"
+              in
+              let* line_number =
+                match Option.bind (param "line") int_of_string_opt with
+                | Some n when n >= 1 -> Ok n
+                | Some _ -> Error "line is 1-based and must be >= 1"
+                | None -> Error "line parameter is required (1-based)"
+              in
+              let* symbol =
+                match param "symbol" with
+                | Some sym when String.trim sym <> "" -> Ok (String.trim sym)
+                | _ -> Error "symbol parameter is required"
+              in
+              let* occurrence =
+                match param "occurrence" with
+                | None -> Ok 1
+                | Some raw ->
+                  (match int_of_string_opt raw with
+                   | Some n when n >= 1 -> Ok n
+                   | Some _ | None ->
+                     Error "occurrence is 1-based and must be >= 1")
+              in
+              let* file =
+                match resolve_workspace_file base raw_path with
+                | Ok file -> Ok file
+                | Error _ -> Error "Invalid path"
+              in
+              let path = file.lexical_path in
+              let line_index = line_number - 1 in
+              let* language = Lsp_position.language_of ~path in
+              let* line = Lsp_position.line_of_file ~path ~line_index in
+              let* character =
+                Lsp_position.column_of ~line ~symbol ~occurrence ~line_number
+              in
+              let* workspace_root =
+                Lsp_position.project_root_of ~language ~path ~boundary:base
+              in
+              `Ask (question, language, workspace_root, path, line_index,
+                    character)
+            in
+            match outcome with
+            | `Failed message -> bad message
+            | `Ask (question, language, workspace_root, path, line_index,
+                    character) ->
+              Lsp_turn_pool.with_turn_pool (fun () ->
+                match Lsp_turn_pool.get_opt () with
+                | None ->
+                  json_response ~status:`Service_unavailable request reqd
+                    (json_error
+                       "no Eio environment for a language-server pool here")
+                | Some pool ->
+                  (match
+                     Lsp_questions.ask pool ~language ~workspace_root ~path
+                       ~line:line_index ~character ~question
+                   with
+                   | Error error ->
+                     json_response ~status:`Bad_gateway request reqd
+                       (json_error
+                          (Format.asprintf "%a" Lsp_questions.pp_error error))
+                   | Ok answer ->
+                     let location_json (l : Lsp_questions.location) =
+                       (* 1-based out, the way the caller asked. A location
+                          outside the workspace (stdlib, a vendored package)
+                          keeps its absolute path and says which side it fell
+                          on, instead of a relative path that resolves to the
+                          wrong file. *)
+                       let boundary = Fs_compat.realpath_lenient base in
+                       let answered =
+                         Fs_compat.realpath_lenient l.Lsp_questions.path
+                       in
+                       let prefix = boundary ^ Filename.dir_sep in
+                       let inside =
+                         String.starts_with ~prefix answered
+                       in
+                       let shown =
+                         if inside then
+                           String.sub answered (String.length prefix)
+                             (String.length answered - String.length prefix)
+                         else answered
+                       in
+                       `Assoc
+                         [ ("path", `String shown)
+                         ; ("inside_workspace", `Bool inside)
+                         ; ("line", `Int (l.Lsp_questions.line + 1))
+                         ; ("character", `Int (l.Lsp_questions.character + 1))
+                         ]
+                     in
+                     let data =
+                       match answer with
+                       | Lsp_questions.Locations locations ->
+                         `Assoc
+                           [ ("kind", `String "locations")
+                           ; ( "locations"
+                             , `List (List.map location_json locations) )
+                           ]
+                       | Lsp_questions.Hover_text text ->
+                         `Assoc
+                           [ ("kind", `String "hover")
+                           ; ( "text"
+                             , match text with
+                               | Some t -> `String t
+                               | None -> `Null )
+                           ]
+                     in
+                     json_response ~status:`OK request reqd
+                       (`Assoc [ ("ok", `Bool true); ("data", data) ]))))
+         request reqd)
+
   |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
        with_public_read
          (fun state _req reqd ->

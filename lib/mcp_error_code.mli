@@ -27,6 +27,7 @@ type t =
                               client SHOULD resume via Last-Event-ID. *)
   | Session_evicted       (** -32006 — session lifecycle terminated by server
                               policy (oldest-eviction at cap, idle timeout). *)
+  | Header_mismatch
   | Unsupported_protocol_version
         (** -32022 — the request declared a protocol version this server does
             not implement.
@@ -102,6 +103,12 @@ val jsonrpc_error_body : t -> message:string -> string
 (** [jsonrpc_error_body t ~message] returns a complete JSON-RPC 2.0 error
     response string with [id:null].  Replaces scattered [Printf.sprintf]
     templates that baked raw integer literals into JSON bodies. *)
+
+val jsonrpc_error_body_with_id :
+  t -> id:Yojson.Safe.t -> message:string -> string
+(** Same body as {!jsonrpc_error_body} with the caller's [id] instead of null.
+    For a rejection raised after the request id has been read, which JSON-RPC
+    2.0 §5 requires to echo it -- see {!allows_null_request_id}. *)
 
 val unsupported_protocol_version_body :
   requested:string -> supported:string list -> string

@@ -3953,6 +3953,177 @@ def memory_journal_timeline_interaction() -> Interaction:
     return interact
 
 
+def context_inspector_fixtures() -> HttpFixtures:
+    fixtures = keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+        200,
+        {"keeper": "alpha", "entries": []},
+    )
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = (
+        200,
+        {
+            "entries": [
+                {
+                    "record": {
+                        "execution_ids": [],
+                        "keeper": "alpha",
+                        "agent_name": "keeper-alpha",
+                        "turn_kind": "direct",
+                        "trace_id": "trace-context",
+                        "absolute_turn": 42,
+                        "turn_ref": "trace-context#42",
+                        "blocks": [
+                            {
+                                "block": "keeper_instructions",
+                                "bytes": 24,
+                                "digest": "a" * 64,
+                            },
+                            {
+                                "block": "dynamic_context",
+                                "bytes": 36,
+                                "digest": "b" * 64,
+                            },
+                            {
+                                "block": "memory_os_recall",
+                                "bytes": 31,
+                                "digest": "c" * 64,
+                            },
+                        ],
+                        "input_components": [
+                            {"component": "prompt.keeper_instructions", "bytes": 24},
+                            {"component": "prompt.dynamic_context", "bytes": 36},
+                            {"component": "prompt.memory_os_recall", "bytes": 31},
+                            {"component": "tool_schemas", "bytes": 2048},
+                            {"component": "message_user", "bytes": 512},
+                            {"component": "message_assistant_text", "bytes": 768},
+                            {"component": "message_tool_result", "bytes": 256},
+                        ],
+                        "runtime_profile": "anthropic.claude-opus-5",
+                        "request_runtime_profile": "anthropic.claude-opus-5",
+                        "request_body_bytes": 4608,
+                        "transmitted_atoms": 7,
+                        "total_atoms": 9,
+                        "model_input_measurement": "wire_shape",
+                        "raw_trace_run_ref": None,
+                        "selected_model": "claude-opus-5",
+                        "context_window": 200000,
+                        "input_tokens": 50000,
+                        "output_tokens": 1200,
+                        "cache_read_input_tokens": 32000,
+                        "ts": 1787600000.0,
+                    },
+                    "diff_vs_prev": None,
+                }
+            ]
+        },
+    )
+    fixtures["/api/v1/keepers/alpha/last-prompt"] = (
+        200,
+        {
+            "keeper": "alpha",
+            "dashboard_surface": "/api/v1/keepers/:name/last-prompt",
+            "captured_at": 1787600000.0,
+            "trace_id": "trace-context",
+            "absolute_turn": 42,
+            "blocks": [
+                {
+                    "id": "keeper_instructions",
+                    "bytes": 24,
+                    "text": "Keeper instruction text",
+                },
+                {
+                    "id": "dynamic_context",
+                    "bytes": 36,
+                    "text": "exact dynamic context from the turn",
+                },
+                {
+                    "id": "memory_os_recall",
+                    "bytes": 31,
+                    "text": "remember the operator preference",
+                },
+            ],
+            "assembled": "Keeper instruction text\nexact dynamic context from the turn\nremember the operator preference",
+            "assembled_bytes": 93,
+        },
+    )
+    return fixtures
+
+
+def context_inspector_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview"
+        )
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        send_and_wait(
+            process, master_fd, output, b"/context", composer_showing(b"/context")
+        )
+        composition = send_and_wait(
+            process, master_fd, output, b"\r", b"Input composition"
+        )
+        composition_plain = CSI_RE.sub(b"", composition)
+        for needle in (
+            b"claude-opus-5",
+            b"50.0k / 200.0k tokens",
+            b"Tool schemas",
+            b"User messages",
+            b"Tool results",
+            b"Conversation history  7 / 9 atoms",
+        ):
+            if needle not in composition_plain:
+                raise AssertionError(
+                    f"Context composition omitted {needle!r}: {composition!r}"
+                )
+
+        prompt = send_and_wait(process, master_fd, output, b"2", b"Exact turn-added prompt text")
+        prompt_plain = CSI_RE.sub(b"", prompt)
+        for needle in (b"Keeper instructions", b"Dynamic context", b"Memory recall"):
+            if needle not in prompt_plain:
+                raise AssertionError(f"Prompt block list omitted {needle!r}: {prompt!r}")
+
+        send_and_wait(process, master_fd, output, b"j", b"Dynamic context")
+        exact = send_and_wait(
+            process, master_fd, output, b"\r", b"exact dynamic context from the turn"
+        )
+        if b"Base prompt" in CSI_RE.sub(b"", exact):
+            raise AssertionError(f"Exact block view retained the list disclosure: {exact!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"Exact turn-added prompt text")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        help_frame = send_and_wait(process, master_fd, output, b"?", b"Slash commands")
+        if b"/context" not in CSI_RE.sub(b"", help_frame):
+            raise AssertionError(f"Help did not disclose /context: {help_frame!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_visibility_modes_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -4574,6 +4745,17 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
                        "line_end": 1, "kind": "Question",
                        "content": "why three?"}:
             raise AssertionError(f"note POST body: {payload!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # c: which keeper wrote which lines, through what, and when.
+        activity = send_and_wait(
+            process, master_fd, output, b"c", b"Edit (turn 7)"
+        )
+        activity_plain = CSI_RE.sub(b"", activity).decode("utf-8")
+        for needle in ("activity: note.ml", "L1", "alpha"):
+            if needle not in activity_plain:
+                raise AssertionError(
+                    f"the activity view missed {needle!r}: {activity_plain!r}"
+                )
         send_and_wait(process, master_fd, output, b"\x1b", b"let")
         os.write(master_fd, b"q")
 
@@ -6284,6 +6466,12 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="Keeper provider-input Context Inspector",
+        interact=context_inspector_interaction(),
+        http_fixtures=context_inspector_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper chat visibility modes",
         interact=chat_visibility_modes_interaction(),
         http_fixtures={
@@ -6451,6 +6639,17 @@ def run_keyboard_regression(executable: str) -> None:
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = notes_response
+    repositories_fixtures[
+        "/api/v1/ide/regions?codebase=github.com_jeong-sik_masc&file_path=note.ml"
+    ] = (
+        200,
+        {"ok": True, "data": [
+            {"file_path": "note.ml", "line_start": 1, "line_end": 1,
+             "keeper_id": "alpha",
+             "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
+             "timestamp_ms": 1787600000000},
+        ]},
+    )
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
     ] = (

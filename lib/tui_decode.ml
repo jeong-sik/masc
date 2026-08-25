@@ -3398,3 +3398,53 @@ let decode_ide_annotations json =
   else
     let* rows_json = required_list_field json "data" in
     decode_list "data" decode_ide_annotation rows_json
+
+(* ── IDE regions: which keeper wrote which lines, and through what ──── *)
+
+type ide_region = {
+  ir_line_start : int;
+  ir_line_end : int;
+  ir_keeper : string;
+  (* The write's provenance, flattened to the words the row prints: the
+     tool and turn for a tool-call write, the note for a manual one. An
+     unknown source type shows its own word rather than killing the list. *)
+  ir_source : string;
+  ir_at_ms : float;
+}
+
+let decode_ide_region json =
+  let* ir_line_start = required_int_field json "line_start" in
+  let* ir_line_end = required_int_field json "line_end" in
+  let* ir_keeper = required_string_field json "keeper_id" in
+  let* ir_at_ms =
+    match member "timestamp_ms" json with
+    | `Intlit s -> (
+        match Float.of_string_opt s with
+        | Some f -> Ok f
+        | None -> Error "timestamp_ms is not a number")
+    | `Int n -> Ok (float_of_int n)
+    | bad -> field_type_error "timestamp_ms" "an integer" bad
+  in
+  let* ir_source =
+    match member "source" json with
+    | `Assoc _ as source -> (
+        let* source_type = required_string_field source "type" in
+        match source_type with
+        | "tool_call" ->
+            let* tool = required_string_field source "tool_name" in
+            let* turn = required_int_field source "turn" in
+            Ok (Printf.sprintf "%s (turn %d)" tool turn)
+        | "manual" ->
+            let* note = required_string_field source "note" in
+            Ok ("manual: " ^ note)
+        | other -> Ok other)
+    | bad -> field_type_error "source" "an object" bad
+  in
+  Ok { ir_line_start; ir_line_end; ir_keeper; ir_source; ir_at_ms }
+
+let decode_ide_regions json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "regions answered ok=false"
+  else
+    let* rows_json = required_list_field json "data" in
+    decode_list "data" decode_ide_region rows_json

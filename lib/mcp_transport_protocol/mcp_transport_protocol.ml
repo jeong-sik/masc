@@ -147,6 +147,43 @@ let validate_initialize_params params =
    their own value.  Adding the field unconditionally is safe for earlier
    revisions: they treat an unknown result member as ignorable, and the
    negotiated version is not threaded down to this builder. *)
+(* Every result identifies the server (2026-07-28 basic/index, per-response
+   protocol fields). Built here from [Build_version], the leaf every layer can
+   reach, rather than restated: [Runtime_build_version] exists because a
+   connector that could not reach the version carried a literal and it drifted.
+
+   Injected in [make_response] for the same reason [resultType] is -- 22 call
+   sites cannot each remember it. A handler that sets its own [_meta] keeps it;
+   this only adds the key when absent.
+
+   The spec marks this self-reported and not verified: for display, logging,
+   and debugging, never for a behavioural or security decision. *)
+let server_info_meta_key = "io.modelcontextprotocol/serverInfo"
+
+let server_info_meta_value =
+  `Assoc
+    [ ("name", `String "masc")
+    ; ("title", `String "MASC MCP Server")
+    ; ("version", `String Build_version.current)
+    ]
+
+let with_server_info = function
+  | `Assoc fields ->
+    let meta =
+      match List.assoc_opt "_meta" fields with
+      | Some (`Assoc meta) when List.mem_assoc server_info_meta_key meta ->
+        None
+      | Some (`Assoc meta) ->
+        Some (`Assoc ((server_info_meta_key, server_info_meta_value) :: meta))
+      | Some _ -> None
+      | None -> Some (`Assoc [ (server_info_meta_key, server_info_meta_value) ])
+    in
+    (match meta with
+     | None -> `Assoc fields
+     | Some meta ->
+       `Assoc (("_meta", meta) :: List.remove_assoc "_meta" fields))
+  | other -> other
+
 let make_response ~id result =
   let result =
     match result with
@@ -154,6 +191,7 @@ let make_response ~id result =
       `Assoc (("resultType", `String "complete") :: fields)
     | other -> other
   in
+  let result = with_server_info result in
   `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", id);

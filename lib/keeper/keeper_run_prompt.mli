@@ -44,6 +44,15 @@ val assemble_extra_system_context :
     is handled at the MASC lane boundary. *)
 
 val ends_with_tool_results : Agent_core.Types.message list -> bool
+
+val is_later_round_of_this_turn :
+  injected_this_turn:bool -> Agent_core.Types.message list -> bool
+(** Whether this dispatch is a later round of a turn already under way — what
+    the per-round block filter asks. {!ends_with_tool_results} alone answers a
+    question about the replayed history: a keeper whose previous turn ended on
+    a tool result replays that shape into the first round of its next turn, so
+    the filter fired on turns that had injected nothing yet.
+    [injected_this_turn] carries the half the history cannot. *)
 (** Whether the conversation's last message is a Tool-role message — i.e. the
     next provider round immediately continues a tool loop.
 

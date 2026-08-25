@@ -271,7 +271,50 @@ let test_allows_null_request_id_only_for_unreadable_id () =
      by the [_meta] key instead does parse the body, and would have to carry
      the id. *)
   Alcotest.(check bool) "Unsupported_protocol_version" true
-    (C.allows_null_request_id C.Unsupported_protocol_version)
+    (C.allows_null_request_id C.Unsupported_protocol_version);
+  (* Header_mismatch is the "future rejection driven by the _meta key" this
+     comment anticipated. It compares the header against params._meta, so the
+     body parsed and the id is readable -- it does not get a null one. A
+     request whose body is not JSON is reported as Invalid_request instead. *)
+  Alcotest.(check bool) "Header_mismatch" false
+    (C.allows_null_request_id C.Header_mismatch)
+;;
+
+(* Non-ASCII used to leave here as OCaml decimal escapes -- "한" as \236... --
+   and \2 is not an escape JSON knows, so the body did not parse. Header and
+   tool names reach these messages straight off the request. *)
+let test_error_body_is_parseable_json_for_any_message () =
+  List.iter
+    (fun message ->
+      let body = C.jsonrpc_error_body C.Header_mismatch ~message in
+      match Yojson.Safe.from_string body with
+      | `Assoc fields ->
+        let error = List.assoc "error" fields in
+        Alcotest.(check string)
+          "the message survives the round trip"
+          message
+          (Yojson.Safe.Util.(error |> member "message" |> to_string))
+      | _ -> Alcotest.failf "not a JSON object: %s" body
+      | exception Yojson.Json_error e ->
+        Alcotest.failf "%S produced unparseable JSON (%s): %s" message e body)
+    [ "plain ascii"; "Mcp-Method 한글"; {|quote " and \ backslash|} ]
+;;
+
+let test_error_body_with_id_echoes_the_request_id () =
+  let body =
+    C.jsonrpc_error_body_with_id C.Header_mismatch ~id:(`Int 42)
+      ~message:"Mcp-Method header value does not match body method"
+  in
+  Alcotest.(check string)
+    "the id the caller read comes back"
+    "42"
+    (Yojson.Safe.to_string
+       Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "id"));
+  Alcotest.(check int)
+    "and the code is the one 2026-07-28 allocates"
+    (-32020)
+    Yojson.Safe.Util.(
+      Yojson.Safe.from_string body |> member "error" |> member "code" |> to_int)
 ;;
 
 let test_allows_null_request_id_rejects_answered_requests () =
@@ -297,6 +340,10 @@ let () =
           test_case "round-trip (well-known)" `Quick test_round_trip_well_known;
           test_case "unsupported protocol version body (MCP 2026-07-28)" `Quick
             test_unsupported_protocol_version_body_shape;
+          test_case "error body is JSON for any message" `Quick
+            test_error_body_is_parseable_json_for_any_message;
+          test_case "error body with id echoes it" `Quick
+            test_error_body_with_id_echoes_the_request_id;
           test_case "unknown returns None" `Quick
             test_of_wire_unknown_returns_none;
           test_case "Quiet round-trip drops payload" `Quick

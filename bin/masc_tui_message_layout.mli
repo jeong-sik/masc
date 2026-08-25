@@ -149,16 +149,19 @@ val chat_input_prompt_prefix : string
 
 val chat_input_prompt_cells : int
 
-val chat_role_label_width : pane_cells:int -> string list -> int
-(** The badge width for a pane showing these labels: the widest one, floored
-    at {!chat_role_label_column} so a narrow terminal is unchanged and capped
-    at a quarter of the pane so one long name cannot crowd out the messages. *)
+val chat_role_label_width : pane_cells:int -> int
+(** The badge budget for a pane this wide. It does not read the labels: body
+    width is taken from what the badge leaves, so measuring the loaded
+    messages made every body re-wrap whenever a differently-named speaker
+    posted. Capped at a quarter of the pane so a narrow terminal still has
+    room to read. *)
 
 val align_role_label : ?column:int -> string -> string
-(** Pad or truncate to [column], defaulting to {!chat_role_label_column}. Pass
-    the width {!chat_role_label_width} answered for the pane. *)
-(** Pad (or ellipsis-truncate) a metadata role label to one fixed cell column,
-    so [timestamp] [From] origin badges align down the pane. *)
+(** Right-align a role label in [column] cells, defaulting to
+    {!chat_role_label_column}; pass the budget {!chat_role_label_width}
+    answered for the pane. A label that does not fit loses its head, not its
+    tail: these read [agent · surface] and share long prefixes, so the end is
+    what tells two of them apart. *)
 
 val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool

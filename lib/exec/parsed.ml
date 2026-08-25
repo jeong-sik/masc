@@ -15,11 +15,9 @@ type reason_too_complex =
   | `Subshell
   | `Arith_expansion
   | `Control_flow
-  | `Logic_op
   | `Function_def
   | `Glob_brace
   | `Background
-  | `Command_separator
   | `Redirect
   | `Unknown_construct of string
   ]

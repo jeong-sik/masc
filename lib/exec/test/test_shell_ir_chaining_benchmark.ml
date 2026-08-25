@@ -3,9 +3,13 @@
 open Masc_exec
 open Masc_exec_bash_parser
 
+(* NDT-OK: a benchmark measures wall clock, so reading it is the whole point
+   rather than a decision taken on it. Nothing here branches on the number --
+   it is printed for a person to read, and no assertion depends on it. *)
 let time_it f =
   let t0 = Unix.gettimeofday () in
   let res = f () in
+  (* NDT-OK: the closing read of the same measurement. *)
   let t1 = Unix.gettimeofday () in
   (res, (t1 -. t0) *. 1000.0)
 ;;

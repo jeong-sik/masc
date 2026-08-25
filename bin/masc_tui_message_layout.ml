@@ -6,12 +6,22 @@ type style =
   | Tool
   | Thinking
 
+type markdown_source =
+  | Markdown_stable of {
+      keeper_name : string;
+      request_id : string;
+      observed_at : float;
+      entry_index : int;
+    }
+  | Markdown_streaming
+
 type entry = {
   style : style;
   timestamp : string;
   role_label : string;
   request_label : string;
   body : string;
+  markdown_source : markdown_source;
 }
 
 type metadata =
@@ -552,7 +562,7 @@ let rows_of_entry ?markdown ~inner_width ~previous entry =
      plain text it always was. *)
   let body_chunks =
     match markdown with
-    | Some render -> render ~width:body_width entry.body
+    | Some render -> render ~entry ~width:body_width
     | None ->
         entry.body |> String.split_on_char '\n'
         |> List.concat_map (split_cells ~max_cells:body_width)
@@ -663,6 +673,42 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
             older
     in
     min requested (max 0 (count 0 (List.rev entries) - height))
+  end
+
+(* Clamp and slice from the rows one walk already measured. The separate
+   [clamp_scroll] then [scrolled_rows] calls traverse the same newest prefix;
+   with a bounded render cache, a prefix larger than the cache can evict its
+   own later hits during the second traversal. Keeping the rows from this walk
+   avoids a frame-local cache of another size and makes every visited entry
+   pay for layout once. *)
+let clamped_scrolled_rows ?markdown ~inner_width ~height ~requested entries =
+  if requested <= 0 then
+    requested, visible_rows ?markdown ~inner_width ~height entries
+  else begin
+    let inner_width = max 1 inner_width in
+    let window_height = max 0 height in
+    let bound_height = max 1 height in
+    let enough = requested + bound_height in
+    let rec collect gathered gathered_count = function
+      | [] -> gathered, gathered_count
+      | _ when gathered_count >= enough -> gathered, gathered_count
+      | entry :: older ->
+          let rows =
+            rows_of_entry ?markdown ~inner_width
+              ~previous:(List.nth_opt older 0) entry
+          in
+          collect (rows @ gathered) (gathered_count + List.length rows) older
+    in
+    let gathered, gathered_count = collect [] 0 (List.rev entries) in
+    let from_bottom =
+      min requested (max 0 (gathered_count - bound_height))
+    in
+    let bottom = max 0 (gathered_count - from_bottom) in
+    let first = max 0 (bottom - window_height) in
+    ( from_bottom
+    , List.filteri
+        (fun index _ -> index >= first && index < bottom)
+        gathered )
   end
 
 let last_page_start ~height row_costs =

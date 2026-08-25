@@ -69,11 +69,11 @@ const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const DEFAULT_LOG_LIMIT = 200
 const logLimit = signal(DEFAULT_LOG_LIMIT)
-const categoryFilter = signal<LogCategory | ''>('')
 // Client-side display-kind filter for the primary toolbar chips
-// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). Complementary to the
-// backend categoryFilter above: kind slices the streamed rows in the view
-// without re-querying, so switching kind is instant.
+// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). The chips are the only
+// classification control: each kind is a projection of the producer's typed
+// category (see log-classification.ts), so a chip click yields exactly the
+// rows the server category filter would for the kind's categories.
 const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
@@ -136,14 +136,6 @@ const LOG_LEVELS: readonly LogLevel[] = ['DEBUG', 'INFO', 'WARN', 'ERROR']
 function isLogLevel(value: string): value is LogLevel {
   return LOG_LEVELS.some(level => level === value)
 }
-
-const LOG_CATEGORY_OPTIONS: readonly {
-  value: LogCategory | ''
-  label: string
-}[] = [
-  { value: '', label: '전체 카테고리' },
-  ...(Object.keys(CATEGORY_LABELS) as LogCategory[]).map(value => ({ value, label: value })),
-]
 
 function categoryLabel(category: LogCategory): string {
   return CATEGORY_LABELS[category]
@@ -452,7 +444,6 @@ function baseLogsRequest(): LogsRequest {
     limit: logLimit.value,
     level: levelFilter.value,
     module: appliedModuleFilter.value || undefined,
-    category: categoryFilter.value || undefined,
     excludeCategories: hideFsmTransitions.value ? ['fsm'] : undefined,
   }
 }
@@ -892,7 +883,6 @@ export function LogViewer() {
     const unsubscribeLevel = levelFilter.subscribe(restart)
     const unsubscribeModule = appliedModuleFilter.subscribe(restart)
     const unsubscribeLimit = logLimit.subscribe(restart)
-    const unsubscribeCategory = categoryFilter.subscribe(restart)
     const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
@@ -903,7 +893,6 @@ export function LogViewer() {
       unsubscribeLevel()
       unsubscribeModule()
       unsubscribeLimit()
-      unsubscribeCategory()
       unsubscribeHideFsm()
       unsubscribeAutoRefresh()
       logResource.cancel()
@@ -938,7 +927,6 @@ export function LogViewer() {
     : '0.0'
   const currentFilterLabel =
     LOG_KIND_FILTERS.find(filter => filter.value === kindFilter.value)?.label
-    ?? LOG_CATEGORY_OPTIONS.find(option => option.value === categoryFilter.value)?.label
     ?? '전체'
   // kindFilter is a preact signal: reading .value subscribes this render,
   // so a plain derivation recomputes on kind change without a memo dep.
@@ -1011,20 +999,6 @@ export function LogViewer() {
                   ]}
                   onInput=${(value: string) => {
                     if (isLogLevel(value)) levelFilter.value = value
-                  }}
-                />
-
-                <${Select}
-                  class="logs-select px-3 py-2 text-xs"
-                  name="log-category"
-                  ariaLabel="카테고리"
-                  value=${categoryFilter.value}
-                  options=${LOG_CATEGORY_OPTIONS}
-                  onInput=${(value: string) => {
-                    const category = LOG_CATEGORY_OPTIONS.find(
-                      option => option.value === value,
-                    )?.value
-                    if (category !== undefined) categoryFilter.value = category
                   }}
                 />
 

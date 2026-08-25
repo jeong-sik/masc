@@ -318,6 +318,11 @@
  (libraries uucp uuseg))
 
 (library
+ (name masc_tui_markdown_render_cache)
+ (wrapped false)
+ (modules masc_tui_markdown_render_cache))
+
+(library
  (name masc_tui_send_disposition)
  (wrapped false)
  (modules masc_tui_send_disposition))
@@ -371,6 +376,12 @@
  (name masc_tui_board_selection)
  (wrapped false)
  (modules masc_tui_board_selection))
+
+(library
+ (name masc_tui_planning_detail)
+ (wrapped false)
+ (modules masc_tui_planning_detail)
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_planning_selection)
@@ -507,6 +518,7 @@
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_graphics
+  masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
   masc_tui_paste_spill
@@ -520,6 +532,7 @@
   masc_tui_board_selection
   masc_tui_keeper_selection
   masc_tui_planning_selection
+  masc_tui_planning_detail
   masc_tui_task_selection
   masc_tui_render_schedule
   masc_tui_tool_tree

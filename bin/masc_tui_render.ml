@@ -14,10 +14,12 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Markdown = Masc_tui_markdown
+module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
 
 (* Every surface lays out against a viewport one row shorter than the
@@ -93,6 +95,56 @@ let chat_markdown_palette : Markdown.palette =
 
 let chat_markdown ~width body =
   Markdown.render ~palette:chat_markdown_palette ~width body
+
+(* The palette above is compiled into this binary today. The revisions remain
+   explicit inputs because #30196 can make the terminal palette runtime state;
+   that owner will advance [chat_markdown_palette_generation] instead of
+   teaching the cache which colour fields matter. *)
+let chat_markdown_theme_revision = 1
+let chat_markdown_palette_generation = 0
+let chat_markdown_cache_capacity = 128
+
+type chat_markdown_identity = {
+  cmi_style : Message_layout.style;
+  cmi_keeper_name : string;
+  cmi_request_id : string;
+  cmi_observed_at : float;
+  cmi_entry_index : int;
+}
+
+let equal_chat_markdown_identity left right =
+  left.cmi_style = right.cmi_style
+  && String.equal left.cmi_keeper_name right.cmi_keeper_name
+  && String.equal left.cmi_request_id right.cmi_request_id
+  && Float.equal left.cmi_observed_at right.cmi_observed_at
+  && left.cmi_entry_index = right.cmi_entry_index
+
+let chat_markdown_cache =
+  Markdown_cache.create ~capacity:chat_markdown_cache_capacity
+    ~equal:equal_chat_markdown_identity
+
+let cached_chat_markdown ~(entry : Message_layout.entry) ~width =
+  let source =
+    match entry.markdown_source with
+    | Message_layout.Markdown_stable
+        { keeper_name; request_id; observed_at; entry_index } ->
+        Markdown_cache.Stable_source
+          { identity =
+              { cmi_style = entry.style;
+                cmi_keeper_name = keeper_name;
+                cmi_request_id = request_id;
+                cmi_observed_at = observed_at;
+                cmi_entry_index = entry_index;
+              };
+            text = entry.body;
+          }
+    | Message_layout.Markdown_streaming ->
+        Markdown_cache.Streaming_source entry.body
+  in
+  Markdown_cache.render chat_markdown_cache
+    ~theme_revision:chat_markdown_theme_revision
+    ~palette_generation:chat_markdown_palette_generation ~width
+    ~renderer:chat_markdown ~source
 
 (* Conversation colour names the source, not the prose. A keeper can return a
    page of Markdown; painting every byte green turns syntax, emphasis, links,
@@ -1589,6 +1641,20 @@ let render_planning_list (state : state) =
       ~cols buf
 
 (** Render the Planning surface (detail view). *)
+(* Border, header, divider, title, phase, due, metric, blank, divider,
+   border, footer: the eleven rows the detail draws whatever the goal says.
+   A lifecycle arm and a refused request each add one more when they are
+   there, so the block is measured against them rather than against a
+   constant that would push the footer off a full screen. *)
+let planning_detail_fixed_rows = 11
+
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> Theme.ok
+  | Planning_detail.Refused -> Theme.bad
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> Theme.warn
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 let render_planning_detail (state : state)
     ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1654,7 +1720,36 @@ let render_planning_detail (state : state)
    | None -> ());
   box_divider buf cols;
 
-  for _ = 1 to rows - 16 do
+  (* The verdict and the keeper's note: the two things the list draws under
+     the cursor and the detail used to leave out, so opening a goal showed
+     less than the row it was opened from. They wrap, so this is what the
+     surface's scroll moves through. *)
+  let body =
+    Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
+  in
+  let chrome_rows =
+    planning_detail_fixed_rows
+    + (match armed with Some _ -> 1 | None -> 0)
+    + (match state.goal_action_error with Some _ -> 1 | None -> 0)
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length body) ~height:content_height
+      state.planning_scroll
+  in
+  let drawn =
+    body
+    |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  in
+  List.iter
+    (fun (line : Planning_detail.line) ->
+      box_line buf cols
+        (Printf.sprintf "  %s%s%s"
+           (planning_detail_tone line.Planning_detail.tone)
+           (fit_width line.Planning_detail.text (cols - 6))
+           Ansi.reset))
+    drawn;
+  for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
   done;
 
@@ -1662,8 +1757,8 @@ let render_planning_detail (state : state)
 
   Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
-  finish_surface state ~surface_key:"planning-detail" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~clamped:(Planning_detail_scroll scroll)
+      ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this
@@ -3000,8 +3095,11 @@ let render_keeper_message (state : state) =
     let history_height = max 0 (rows - 7 - status_rows) in
     let messages = chat_rows_for state keeper_name in
     let layout_entries =
-      List.map
-        (fun message ->
+      (* The position distinguishes rows whose durable timestamp and request
+         fields tie. A history reorder can only cause a miss: the exact body is
+         another cache-key field, so an index never authorizes stale rows. *)
+      List.mapi
+        (fun entry_index message ->
           let style, role_label =
             match message.me_role with
             | Message_user speaker -> Message_layout.User, speaker
@@ -3029,6 +3127,13 @@ let render_keeper_message (state : state) =
              request_label =
                Keeper_chat.compact_request_id message.me_request_id;
              body;
+             markdown_source =
+               Message_layout.Markdown_stable
+                 { keeper_name = message.me_keeper_name;
+                   request_id = message.me_request_id;
+                   observed_at = message.me_at;
+                   entry_index;
+                 };
            }
             : Message_layout.entry))
         messages
@@ -3053,6 +3158,7 @@ let render_keeper_message (state : state) =
                role_label;
                request_label;
                body;
+               markdown_source = Message_layout.Markdown_streaming;
              }
               : Message_layout.entry)
           in
@@ -3091,14 +3197,10 @@ let render_keeper_message (state : state) =
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
-    let scroll =
-      Message_layout.clamp_scroll ~markdown:chat_markdown ~inner_width
-        ~height:history_height state.msg_scroll layout_entries
-    in
-    let visible_rows =
-      Message_layout.scrolled_rows ~markdown:chat_markdown ~inner_width
-        ~height:history_height
-        ~from_bottom:scroll layout_entries
+    let scroll, visible_rows =
+      Message_layout.clamped_scrolled_rows ~markdown:cached_chat_markdown
+        ~inner_width ~height:history_height ~requested:state.msg_scroll
+        layout_entries
     in
 
     if visible_rows = [] then begin

@@ -1,10 +1,5 @@
-(** The spawn tool surface: which four tools exist, what each one's schema is,
-    and which of them only reads.
-
-    [Tool_spawn] dispatches on {!action} and looks a tool up by name, so both
-    the variant and the record's fields are visible here. [definitions] is not:
-    the list is what {!schemas} and {!find_definition} are built from, and a
-    caller walking it would be re-deriving one of those two. *)
+(** The spawn tool surface: which four tools exist, what each one declares, and
+    which of them a caller may treat as read-only. *)
 
 type action =
   | Start
@@ -12,18 +7,22 @@ type action =
   | Wait
   | Stop
 
+(** [read_only] is the caller's question, not the store's: [Wait] changes
+    nothing and is still [false], because a surface that lets a read-only tool
+    block for a caller-supplied bound is a surface that can be made to hang.
+    The reason lives with the value in [tool_schemas_spawn.ml]. *)
 type definition =
   { action : action
   ; schema : Masc_domain.tool_schema
   ; read_only : bool
-        (** Whether the tool only observes. [Wait] is [false] despite changing
-            nothing: it blocks for a caller-supplied bound, and a surface that
-            lets a read-only tool block is one that can be made to hang. *)
   }
 
+(** Every spawn schema, in declaration order. This is what a tool surface
+    advertises. *)
 val schemas : Masc_domain.tool_schema list
-(** Every spawn schema, in declaration order. *)
 
+(** [find_definition name] is the declaration whose schema carries [name], or
+    [None] when no spawn tool answers to it. Dispatch matches on the returned
+    [action] rather than on the name again, so a renamed tool moves in one
+    place. *)
 val find_definition : string -> definition option
-(** [find_definition name] is the definition whose schema carries [name], or
-    [None] when no spawn tool answers to it. *)

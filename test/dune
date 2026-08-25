@@ -3203,6 +3203,16 @@
   yojson))
 
 (test
+ (name test_skill_catalog_snapshot_service)
+ (modules test_skill_catalog_snapshot_service)
+ (libraries
+  alcotest
+  masc.skill_snapshot_service
+  masc.skill_snapshot
+  masc.skill_config
+  unix))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))

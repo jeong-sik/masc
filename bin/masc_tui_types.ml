@@ -623,6 +623,7 @@ type surface_needs = {
   needs_planning : bool;
   needs_system_logs : bool;
   needs_keeper_chat : bool;
+  needs_asks : bool;
 }
 
 let nothing =
@@ -633,6 +634,7 @@ let nothing =
     needs_planning = false;
     needs_system_logs = false;
     needs_keeper_chat = false;
+    needs_asks = false;
   }
 
 (* Each datum is read by the one surface that draws it, so a refresh spends a
@@ -663,7 +665,12 @@ let surface_needs : surface -> surface_needs = function
   | Board -> { nothing with needs_board = true }
   | Planning -> { nothing with needs_planning = true }
   | System_logs -> { nothing with needs_system_logs = true }
-  | Lanes | Approvals | Schedules | Verification | Harness | Fusion
+  (* Approvals is where a human answers things, so the questions Keepers put
+     to one belong on the same surface: an operator should not have to know
+     that "may I run this" and "which way should I go" arrived through
+     different machinery. *)
+  | Approvals -> { nothing with needs_asks = true }
+  | Lanes | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
       nothing
@@ -888,6 +895,11 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* Questions Keepers put to a human, drawn beside the approvals. [None]
+     means nothing has been read yet, which is not the same as a fleet with
+     no open questions. *)
+  mutable asks_snapshot: Masc.Tui_decode.asks_snapshot option;
+  mutable asks_error: string option;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -1389,6 +1401,8 @@ let create_state
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  asks_snapshot = None;
+  asks_error = None;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_yolo_names = [];

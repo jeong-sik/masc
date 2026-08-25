@@ -1057,6 +1057,7 @@ type http_surface_results = {
   (* [None] on surfaces that do not draw them. Each is read by one surface, and
      leaving it out keeps whatever that surface last observed rather than
      dropping it. *)
+  http_asks: (Tui_decode.asks_snapshot, string) result option;
   http_board: (board_post list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
@@ -3602,6 +3603,18 @@ let apply_approvals_load state = function
         ~set_error:(fun value -> state.approvals_error <- value)
         err
 
+(* A read that fails leaves the last snapshot in place rather than blanking
+   the pane: an operator mid-decision should not lose the question they were
+   reading because one refresh could not reach the server. *)
+let apply_asks_load state = function
+  | Ok snapshot ->
+      state.asks_snapshot <- Some snapshot;
+      state.asks_error <- None
+  | Error err ->
+      remember_surface_error state ~surface:"asks" ~current_error:state.asks_error
+        ~set_error:(fun value -> state.asks_error <- value)
+        err
+
 let apply_approval_observation state observation =
   if Approval.Flow.is_current state.approval_flow observation.ao_generation then
     apply_approvals_load state observation.ao_result
@@ -3827,6 +3840,10 @@ let load_http_surfaces ~host ~port ~approval_generation
          { ao_generation; ao_result = load_approvals ~host ~port })
       approval_generation
   in
+  let http_asks =
+    when_needed needs.needs_asks (fun () ->
+        Masc_tui_http.fetch_keeper_asks ~host ~port ())
+  in
   let http_board =
     when_needed needs.needs_board (fun () -> load_board_list ~host ~port)
   in
@@ -3851,6 +3868,7 @@ let load_http_surfaces ~host ~port ~approval_generation
   { http_overview
   ; http_transport
   ; http_approvals
+  ; http_asks
   ; http_board
   ; http_planning
   ; http_system_logs
@@ -3863,6 +3881,7 @@ let apply_http_surfaces state results =
   apply_overview_load state results.http_overview;
   Option.iter (apply_transport_load state) results.http_transport;
   Option.iter (apply_approval_observation state) results.http_approvals;
+  Option.iter (apply_asks_load state) results.http_asks;
   Option.iter (apply_board_list_load state) results.http_board;
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;

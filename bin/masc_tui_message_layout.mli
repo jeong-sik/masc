@@ -156,7 +156,12 @@ val chat_role_label_width : pane_cells:int -> int
     posted. Capped at a quarter of the pane so a narrow terminal still has
     room to read. *)
 
-val align_role_label : ?column:int -> string -> string
+val speaker_mark : style -> string
+(** One glyph per speaker. Colour says the same thing more legibly, and
+    NO_COLOR removes colour, so this is what still answers "who said this"
+    when there is none. *)
+
+val align_role_label : ?column:int -> style:style -> string -> string
 (** Right-align a role label in [column] cells, defaulting to
     {!chat_role_label_column}; pass the budget {!chat_role_label_width}
     answered for the pane. A label that does not fit loses its head, not its

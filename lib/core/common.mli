@@ -41,9 +41,6 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
-val skills_dirname : string
-(** Directory segment for the operator-placed Agent Skills tree. *)
-
 val skills_rel : string
 (** [.masc/skills] relative to [base_path]. The form a keeper allowlist entry
     takes, since those are resolved against [base_path]. *)

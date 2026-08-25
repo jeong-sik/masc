@@ -91,6 +91,11 @@ let summary = function
       "composite(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
       Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
+  | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
+      Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
+  | Observer.Event (Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ })
+    ->
+      Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -159,6 +164,42 @@ let test_keeper_events_decode_by_name () =
        (decode_all
           [ heartbeat_frame; bare_heartbeat_frame; turn_complete_frame
           ; keeper_tool_call_frame ]))
+
+(* Shapes taken from the server: keeper_chat_broadcast.ml names the keeper in
+   "name", keeper_waiting_inventory_broadcast.ml in "keeper_name". *)
+let chat_stream_delta_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"rondo\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507570.5,\
+   \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
+
+let chat_stream_custom_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"rondo\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507571.5,\
+   \"ag_ui_event\":{\"type\":\"CUSTOM\",\"name\":\"KEEPER_TOOL_RESULT_READY\"}}\n\n"
+
+let waiting_inventory_frame =
+  "data: {\"type\":\"keeper_waiting_inventory_changed\",\
+   \"keeper_name\":\"lane-smith\",\"queue_kind\":\"board\",\
+   \"ts_unix\":1787507572.5}\n\n"
+
+(* These two arrived as Other before: the Acting screen drew them with no
+   time, no keeper and no detail, because Other keeps only the type name. The
+   keeper and the timestamp were in the frame the whole time. *)
+let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
+  check (list string) "stream frames and a queue change decode by their own fields"
+    [ "stream(rondo,TEXT_MESSAGE_CONTENT)"
+    ; "stream(rondo,CUSTOM KEEPER_TOOL_RESULT_READY)"
+    ; "waiting(lane-smith,board)"
+    ]
+    (List.map summary
+       (decode_all
+          [ chat_stream_delta_frame; chat_stream_custom_frame
+          ; waiting_inventory_frame ]));
+  check bool "the stream frame carries the server's clock, not zero" true
+    (match decode_all [ chat_stream_delta_frame ] with
+     | [ Observer.Event (Observer.Keeper_chat_stream_frame { at; _ }) ] ->
+         Float.equal at 1787507570.5
+     | _ -> false)
 
 let test_a_line_cut_by_the_chunk_boundary_is_held () =
   let at = String.index tool_called_frame '{' + 40 in
@@ -244,6 +285,8 @@ let () =
             test_agent_terminal_frames_keep_their_distinct_kinds
         ; test_case "keeper events decode by name" `Quick
             test_keeper_events_decode_by_name
+        ; test_case "the chat stream and waiting queue keep their keeper and clock"
+            `Quick test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "what this build was not taught keeps its name" `Quick

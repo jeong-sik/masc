@@ -5636,7 +5636,10 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
       | Masc_tui_observer.Keeper_composite_changed _
-      | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Snapshot _
+      | Masc_tui_observer.Keeper_chat_appended _
+      | Masc_tui_observer.Keeper_chat_stream_frame _
+      | Masc_tui_observer.Keeper_waiting_inventory_changed _
+      | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None
     in

@@ -54,6 +54,10 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "internal_agent_runs_changed"
+    ; Observer.Keeper_chat_stream_frame
+        { keeper = "rondo"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
+    ; Observer.Keeper_waiting_inventory_changed
+        { keeper = "lane-smith"; queue_kind = Some "board"; at = 100. }
     ]
   in
   let under filter =
@@ -61,9 +65,42 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all eight" 8 (under Acting.Everything);
+  check int "everything keeps all ten" 10 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
+
+(* A reply sends one stream frame per token, so a single keeper answering fills
+   the retained ring on its own. Before these frames were decoded they arrived
+   as Other, which the actions filter admits, and a screen asked for actions
+   showed hundreds of rows with no time, no keeper and no detail -- two real
+   actions among them. Counted here rather than described. *)
+let test_one_reply_does_not_bury_the_actions_it_sits_between () =
+  let frames =
+    List.init 400 (fun index ->
+        Observer.Keeper_chat_stream_frame
+          { keeper = "rondo"
+          ; frame = Some "TEXT_MESSAGE_CONTENT"
+          ; at = 100. +. float_of_int index
+          })
+  in
+  let events = (settled "largo" :: frames) @ [ agent_core ~tool:"read_file" "analyst" ] in
+  check int "actions are the two the keeper took" 2
+    (List.filter (Acting.visible Acting.Actions) events |> List.length);
+  check int "everything still holds every frame" 402
+    (List.filter (Acting.visible Acting.Everything) events |> List.length)
+
+(* The row a stream frame draws: the keeper and the clock come from the frame,
+   not from the "server"/--:--:-- placeholder Other falls back to. *)
+let test_a_stream_frame_draws_its_keeper_and_its_clock () =
+  let row =
+    Acting.row_of_event ~duration_ms:None
+      (Observer.Keeper_chat_stream_frame
+         { keeper = "rondo"; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
+  in
+  check string "keeper" "rondo" row.Acting.keeper;
+  check bool "clock is the server's" true (Float.equal row.Acting.at 1787507570.5);
+  check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
+    row.Acting.detail
 
 let test_a_call_and_its_return_read_as_one_pair () =
   let started =
@@ -174,6 +211,10 @@ let () =
     [ ( "rows"
       , [ test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on
+        ; test_case "one reply does not bury the actions it sits between" `Quick
+            test_one_reply_does_not_bury_the_actions_it_sits_between
+        ; test_case "a stream frame draws its keeper and its clock" `Quick
+            test_a_stream_frame_draws_its_keeper_and_its_clock
         ; test_case "a call and its return read as one pair" `Quick
             test_a_call_and_its_return_read_as_one_pair
         ; test_case "a return with no start held has no duration" `Quick

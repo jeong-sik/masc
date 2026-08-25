@@ -334,7 +334,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       cleanup_dir admitted_base;
       cleanup_dir divergent_base)
     (fun () ->
-      with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
       Workspace.reset_default_config_cache ();
@@ -350,7 +349,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       let divergent_root =
         Filename.concat divergent_base (Keeper_sandbox.host_root_rel_of_meta ~meta)
       in
-      with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
       with_env "MASC_BASE_PATH" (Some divergent_base) @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" (Some divergent_base) @@ fun () ->
       Workspace.reset_default_config_cache ();

@@ -258,26 +258,10 @@ let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   Alcotest.(check string)
     "default base path ignores parent base path override in tests"
     (canonical_path repo)
-    (Server_mcp_transport_http.default_base_path () |> canonical_path)
-
-let test_default_base_path_preserves_base_path_override_with_opt_in () =
-  with_temp_dir "base-path-default-optin" @@ fun root ->
-  let base_path = Filename.concat root "base" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
-  mkdir_p repo;
-  Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
-  Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
-  with_cwd repo @@ fun () ->
-  with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  Alcotest.(check string) "base path override preserved with opt-in"
-    (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let test_default_base_path_ignores_base_path_override_without_local_masc () =
@@ -288,7 +272,6 @@ let test_default_base_path_ignores_base_path_override_without_local_masc () =
   Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   Alcotest.(check string)
     "default base path ignores base path override without local .masc"
@@ -303,7 +286,6 @@ let test_default_base_path_uses_cwd_when_unset () =
   mkdir_p home;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" None @@ fun () ->
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "HOME" (Some home) @@ fun () ->
   Alcotest.(check string) "default base path uses cwd"
@@ -340,9 +322,6 @@ let () =
           Alcotest.test_case
             "default base path ignores parent base path override in tests"
             `Quick test_default_base_path_ignores_parent_base_path_override_in_tests;
-          Alcotest.test_case
-            "default base path preserves base path override with opt-in"
-            `Quick test_default_base_path_preserves_base_path_override_with_opt_in;
           Alcotest.test_case
             "default base path ignores base path override without local .masc"
             `Quick test_default_base_path_ignores_base_path_override_without_local_masc;

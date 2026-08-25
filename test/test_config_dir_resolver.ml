@@ -183,7 +183,6 @@ let test_inputs_from_env_honors_base_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-base" @@ fun root ->
   let base = Filename.concat root "base" in
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
@@ -202,7 +201,6 @@ let test_inputs_from_env_survives_deleted_cwd () =
   Unix.mkdir parent 0o755;
   Unix.mkdir doomed 0o755;
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
-  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->

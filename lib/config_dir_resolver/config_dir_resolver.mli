@@ -182,9 +182,11 @@ val config_signature_exists : string -> bool
 (** {1 Env introspection}
 
     Sanitized env var readers that strip inherited test values when running
-    under a test executable. [MASC_BASE_PATH] uses
-    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config paths use
-    [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
+    under a test executable. [MASC_BASE_PATH] is stripped unconditionally —
+    the only thing an opt-out buys is a test executable writing into a live
+    workspace. Config paths still honour
+    [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE], which decides where settings are
+    read from rather than where state is written. *)
 
 val current_env_base_path_opt : unit -> string option
 

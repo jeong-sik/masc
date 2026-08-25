@@ -15,7 +15,6 @@ val parse_gitdir_to_main_root : string -> string option
 val find_git_root : string -> string option
 val normalize_base_path : string -> string
 val running_under_test_executable : unit -> bool
-val test_base_path_override_env : string
 val cache_resolved_base_path : string -> unit
 val resolve_masc_base_path : string -> string
 val resolve_server_default_base_path : string -> string

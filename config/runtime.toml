@@ -1062,7 +1062,12 @@ supports-reasoning-budget = false
 # Reasoning is inherent/default-on and no explicit thinking-control field is
 # accepted on this wire. The native provider keeps the catalog's Ollama control.
 thinking-control-format = "none"
-reasoning-streaming-format = "delta:reasoning_content"
+# Measured 2026-08-25 against ollama.com/v1/chat/completions with stream=true:
+# the delta keys are content / reasoning / role. The field is "reasoning", not
+# "reasoning_content", so the previous value read a key the server never sends
+# and this runtime's thinking arrived empty. Nothing failed loudly because
+# delta.content is unaffected.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
 supports-multimodal-inputs = true
 

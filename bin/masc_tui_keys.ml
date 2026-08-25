@@ -147,7 +147,12 @@ let for_surface = function
       ; b Act "Left / Esc" "back"
       ]
       @ listing_meta
-  | Repositories -> b Navigate "j/k" "scroll" :: listing_meta
+  | Repositories ->
+      [ b Navigate "j/k" "scroll"
+      ; b Act "Enter" "browse"
+          ~help:"open this repository's tree on the Code surface"
+      ]
+      @ listing_meta
   | Changes ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"

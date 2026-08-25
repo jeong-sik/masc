@@ -295,7 +295,14 @@ let keeper_query_suffix = function
   | None -> ""
   | Some keeper -> "&keeper=" ^ percent_encode_query_value keeper
 
-let fetch_workspace_entries ?keeper ~(host : string) ~(port : int)
+(* The other workspace axis: [?repo_id=] resolves to one of the project's
+   registered repositories (resolve_workspace_base), the address a
+   Repositories row carries. *)
+let repo_query_suffix = function
+  | None -> ""
+  | Some repo_id -> "&repo_id=" ^ percent_encode_query_value repo_id
+
+let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) () :
     (Masc.Tui_decode.workspace_tree_node list, string) result =
   let route =
@@ -304,6 +311,7 @@ let fetch_workspace_entries ?keeper ~(host : string) ~(port : int)
        Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
          (percent_encode_query_value path))
     ^ keeper_query_suffix keeper
+    ^ repo_query_suffix repo
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail
@@ -317,12 +325,13 @@ let fetch_workspace_entries ?keeper ~(host : string) ~(port : int)
       | json -> Masc.Tui_decode.decode_workspace_tree json)
 
 (** The whole file at [path] ([/api/v1/workspace/file]). *)
-let fetch_workspace_file ?keeper ~(host : string) ~(port : int)
+let fetch_workspace_file ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) () : (string, string) result =
   let route =
-    Printf.sprintf "/api/v1/workspace/file?path=%s%s"
+    Printf.sprintf "/api/v1/workspace/file?path=%s%s%s"
       (percent_encode_query_value path)
       (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail
@@ -336,13 +345,15 @@ let fetch_workspace_file ?keeper ~(host : string) ~(port : int)
       | json -> Masc.Tui_decode.decode_workspace_file json)
 
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
-let fetch_git_log ?keeper ~(host : string) ~(port : int) ~(path : string)
-    ~(limit : int) () : (Masc.Tui_decode.git_log_row list, string) result =
+let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
+    ~(path : string) ~(limit : int) () :
+    (Masc.Tui_decode.git_log_row list, string) result =
   let route =
-    Printf.sprintf "/api/v1/git/log?path=%s&limit=%d%s"
+    Printf.sprintf "/api/v1/git/log?path=%s&limit=%d%s%s"
       (percent_encode_query_value path)
       limit
       (keeper_query_suffix keeper)
+      (repo_query_suffix repo)
   in
   match http_get ~host ~port ~path:route with
   | Error detail -> Error detail

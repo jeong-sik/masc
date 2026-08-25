@@ -1599,6 +1599,14 @@ let launch_resource_read state ~mailbox ~uri =
    HTTP GETs forked off the render loop, answered on the async mailbox and
    stamped with what they answer for, so a slow reply cannot dress a newer
    selection. *)
+(* The scope, as the two optional query axes the fetchers take. The match
+   is exhaustive: a fourth scope must decide its axis here. *)
+let code_scope_axes state =
+  match state.code_scope with
+  | Code_scope_project -> (None, None)
+  | Code_scope_keeper keeper -> (Some keeper, None)
+  | Code_scope_repo repo -> (None, Some repo)
+
 let launch_code_entries_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -1606,8 +1614,9 @@ let launch_code_entries_load state ~mailbox =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_workspace_entries ?keeper:state.code_keeper ~host
-          ~port ~path:dir ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+          ~path:dir ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1629,8 +1638,8 @@ let launch_code_file_load state ~mailbox ~path =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_workspace_file ?keeper:state.code_keeper ~host
-          ~port ~path ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1655,8 +1664,9 @@ let launch_code_history_load state ~mailbox ~path =
   let run () =
     let result =
       try
-        Masc_tui_http.fetch_git_log ?keeper:state.code_keeper ~host ~port
-          ~path ~limit:code_history_limit ()
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+          ~limit:code_history_limit ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -6497,10 +6507,10 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
-                else if Option.is_some state.code_keeper then begin
-                  (* Above a keeper workspace's root sits the project tree
-                     the surface started on. *)
-                  state.code_keeper <- None;
+                else if state.code_scope <> Code_scope_project then begin
+                  (* Above a keeper's or a repository's root sits the
+                     project tree the surface started on. *)
+                  state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_entries <- [];
                   state.code_entries_error <- None;
@@ -6614,8 +6624,8 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
-                else if Option.is_some state.code_keeper then begin
-                  state.code_keeper <- None;
+                else if state.code_scope <> Code_scope_project then begin
+                  state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_entries <- [];
                   state.code_entries_error <- None;
@@ -7212,10 +7222,35 @@ let main () =
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
+            | Repositories -> (
+                (* Enter opens the repository's own tree on the Code surface,
+                   through the ?repo_id= axis its row already names. *)
+                match state.repositories with
+                | None -> ()
+                | Some snapshot -> (
+                    match
+                      List.nth_opt
+                        snapshot.Masc.Tui_decode.rs_repositories
+                        state.repositories_cursor
+                    with
+                    | None -> ()
+                    | Some repo ->
+                        state.code_scope <-
+                          Code_scope_repo repo.Masc.Tui_decode.rp_id;
+                        state.code_dir <- "";
+                        state.code_cursor <- 0;
+                        state.code_entries <- [];
+                        state.code_entries_error <- None;
+                        state.code_file <- None;
+                        state.code_file_error <- None;
+                        state.code_focus_file <- false;
+                        state.view <- Code;
+                        launch_code_entries_load state
+                          ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Verification | Harness
-            | Repositories | Connectors | Runtime | Config | Resources | Tools
+            | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
@@ -7340,7 +7375,7 @@ let main () =
                            keeper's workspace; o opens it in $EDITOR"
                     | Some path ->
                         let keeper = change.Masc.Tui_decode.fc_keeper in
-                        state.code_keeper <- Some keeper;
+                        state.code_scope <- Code_scope_keeper keeper;
                         let parent = Filename.dirname path in
                         state.code_dir <-
                           (if String.equal parent "." then "" else parent);

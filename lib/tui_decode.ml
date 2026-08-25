@@ -1499,6 +1499,7 @@ type runtime_surface_snapshot = {
 }
 
 type repository = {
+  rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   rp_local_path : string;
   rp_default_branch : string;
@@ -2193,6 +2194,7 @@ let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
            join_runtime_surface ~probe:(Some probe) ~probe_error:None ~resolved)
 
 let decode_repository json =
+  let* rp_id = required_string_field json "id" in
   let* rp_name = required_string_field json "name" in
   let* rp_local_path = required_string_field json "local_path" in
   let* rp_default_branch = required_string_field json "default_branch" in
@@ -2205,8 +2207,8 @@ let decode_repository json =
     | bad -> field_type_error "auto_sync" "a bool or null" bad
   in
   Ok
-    { rp_name; rp_local_path; rp_default_branch; rp_status; rp_keepers
-    ; rp_auto_sync
+    { rp_id; rp_name; rp_local_path; rp_default_branch; rp_status
+    ; rp_keepers; rp_auto_sync
     }
 
 let decode_repository_snapshot json =

@@ -510,15 +510,9 @@ let extract_uri params =
   | _ -> None
 ;;
 
-let path_of_file_uri uri =
-  let parsed = Uri.of_string uri in
-  match Uri.scheme parsed with
-  | Some "file" ->
-    (match Uri.host parsed with
-     | None | Some "" | Some "localhost" -> Uri.path parsed |> Uri.pct_decode
-     | Some _ -> uri)
-  | _ -> uri
-;;
+(* Moved to [Lsp_uri] so the Keeper surface spells a [file://] URI the same way
+   this proxy reads one. *)
+let path_of_file_uri = Lsp_uri.path_of_file_uri
 
 (** [fpath_within ~base path] is [Some rel] when the normalized absolute
     [path] sits inside normalized absolute [base].  The returned relative path

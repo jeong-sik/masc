@@ -184,6 +184,8 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_lsp_questions
+  test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync
@@ -521,6 +523,8 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_lsp_questions
+  test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge
   test_enum_mirror_sync

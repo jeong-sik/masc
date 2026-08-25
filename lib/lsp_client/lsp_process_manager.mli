@@ -19,10 +19,31 @@ type spawn_error =
 
 val pp_spawn_error : Format.formatter -> spawn_error -> unit
 
+(** The languages this client knows. One variant rather than one string match
+    per question, so a language cannot have a command and no project markers:
+    every per-language function below is an exhaustive match. *)
+type language =
+  | Ocaml
+  | Typescript
+  | Javascript
+  | Python
+  | Rust
+  | Go
+
+val lang_id_of_language : language -> string
+
+(** The executable and argv that start this language's server. *)
+val command_of_language : language -> string * string list
+
+(** Files whose directory is a project root for this language, nearest first.
+    {!Lsp_project_root} walks a file's ancestors looking for these. *)
+val project_markers_of_language : language -> string list
+
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 val command_for_lang : string -> (string * string list) option
 
-(** Detect language from file extension. *)
+(** Detect language from file extension, as the wire id the IDE proxy speaks.
+    ["unknown"] for a file no server here covers. *)
 val lang_of_path : string -> string
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)

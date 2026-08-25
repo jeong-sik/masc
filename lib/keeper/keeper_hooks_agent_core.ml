@@ -501,7 +501,14 @@ let make_hooks
              TOML — a built-in or a composition — which is itself the answer. *)
           (match Tool_help_registry.definition_source tool_name with
            | Some rel -> rel
-           | None -> "-")
+           | None ->
+             (* A composition tool ships no TOML: its definition is the
+                SKILL.md the catalog read to create it. *)
+             (match
+                Keeper_tool_composition_catalog.skill_source_of_tool_name tool_name
+              with
+              | Some rel -> rel
+              | None -> "-"))
           input_keys
           input_shape
           outcome_s

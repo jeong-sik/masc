@@ -133,6 +133,13 @@ val parse : string -> (t, error) result
 val entries : t -> entry list
 val find : t -> string -> entry option
 val tool_name : entry -> string
+
+val skill_source_of_tool_name : string -> string option
+(** The SKILL.md a composition tool name came from, relative to the masc
+    directory (["skills/<name>/SKILL.md"]), or [None] for a name that is not a
+    composition tool. Composed rather than looked up: the tool exists only
+    because that file was read, so the path is a fact about how it got here,
+    not a guess that it is there. *)
 (** Stable model-visible name for this materialized composition. *)
 
 val execution_mode_to_string : execution_mode -> string

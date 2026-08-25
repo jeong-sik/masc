@@ -114,6 +114,24 @@ let tool_name_prefix = "keeper_compose_"
 let maximum_tool_name_bytes = 64
 let maximum_composition_name_bytes = maximum_tool_name_bytes - String.length tool_name_prefix
 let tool_name entry = tool_name_prefix ^ entry.name
+
+(* Where the definition behind a composition tool lives, relative to the masc
+   directory. Composed from the name rather than looked up, and that is sound
+   here in a way it would not be for a shipped asset: this tool exists only
+   because a SKILL.md at that path was read into the catalog. A name without
+   the prefix is some other tool and answers [None]. *)
+let skill_source_of_tool_name name =
+  if String.starts_with ~prefix:tool_name_prefix name
+  then (
+    let skill =
+      String.sub
+        name
+        (String.length tool_name_prefix)
+        (String.length name - String.length tool_name_prefix)
+    in
+    if String.equal skill "" then None else Some ("skills/" ^ skill ^ "/SKILL.md"))
+  else None
+;;
 let plan_execute_tool_name = "keeper_plan_execute"
 let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"

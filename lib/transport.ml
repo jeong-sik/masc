@@ -576,8 +576,14 @@ module Rest = struct
       |> List.map (fun (path, methods) -> (path, `Assoc (List.rev methods)))
     in
     let server_url =
-      if String.trim host = "" || port <= 0 then "/"
-      else Printf.sprintf "http://%s:%d" host port
+      (* "servers" is the address a reader of this document dials, and [host]
+         defaults to MASC_HOST -- the server's bind setting, whose own help
+         text offers 0.0.0.0. Fold it the way every other advertised address
+         is folded (#30383). The HTTP callers pass a Host header instead,
+         which a client is equally free to send as "0.0.0.0:8935". *)
+      let advertised = Masc_network_defaults.normalize_advertised_host host in
+      if advertised = "" || port <= 0 then "/"
+      else Printf.sprintf "http://%s:%d" advertised port
     in
     `Assoc
       [

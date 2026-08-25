@@ -9,7 +9,7 @@ import {
   markLiveSendRequestAccepted,
   setActiveStream,
 } from './keeper-state'
-import { keeperThreads } from './keeper-state'
+import { keeperThreads, keeperToolApprovals } from './keeper-state'
 import {
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
@@ -50,6 +50,7 @@ describe('Keeper operation stream projection', () => {
     _resetActiveKeeperStreamsForTests()
     _clearTrackedKeeperChatOperationsForTests()
     keeperThreads.value = {}
+    keeperToolApprovals.value = {}
   })
 
   it('streams text into the selected assistant entry', () => {
@@ -132,6 +133,67 @@ describe('Keeper operation stream projection', () => {
     })).toBeNull()
 
     // The reply is still the one being streamed into.
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
+  })
+
+  // task-343 regression: before the approval card existed, REQUESTED decoded
+  // and then vanished (console.debug above) — the operator saw nothing while
+  // the keeper held the call, and the wait retired itself 180s later as a
+  // denial nobody chose. The stream projection must mint a pending approval
+  // row the chat surface can draw and answer.
+  it('mints a pending approval row on KEEPER_TOOL_APPROVAL_REQUESTED', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: {
+        tool_call_id: 'call-approve-1',
+        tool_call_name: 'Execute',
+        args: '{"argv":["ls","-la"]}',
+        question: 'Execute ls -la 를 실행할까요?',
+      },
+    })).toBeNull()
+
+    const pending = keeperToolApprovals.value.sangsu?.['call-approve-1']
+    expect(pending).toBeDefined()
+    expect(pending?.toolName).toBe('Execute')
+    expect(pending?.question).toBe('Execute ls -la 를 실행할까요?')
+    expect(pending?.args).toBe('{"argv":["ls","-la"]}')
+    expect(pending?.settled).toBe(false)
+    expect(pending?.answering).toBe(false)
+  })
+
+  it('retires the approval row on KEEPER_TOOL_APPROVAL_SETTLED', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: {
+        tool_call_id: 'call-settle-1',
+        tool_call_name: 'Execute',
+        args: '{}',
+        question: 'run it?',
+      },
+    })
+    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeDefined()
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { tool_call_id: 'call-settle-1', outcome: 'Approved' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeUndefined()
+  })
+
+  it('keeps the stream alive when a settle names a call this view never drew', () => {
+    assistantEntry()
+    // A wait answered from another window settles without a local REQUESTED;
+    // the drop must be a no-op, not a stream-ending error.
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { tool_call_id: 'call-unknown-1', outcome: 'Denied' },
+    })).toBeNull()
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
   })
 

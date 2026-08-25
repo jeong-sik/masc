@@ -14,7 +14,8 @@ import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { keeperThreads } from '../../keeper-state'
+import { keeperThreads, keeperToolApprovals } from '../../keeper-state'
+import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from '../../keeper-actions'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
@@ -530,6 +531,58 @@ function keeperPendingApprovals(keeperName: string) {
   return queue?.filter((a) => a.keeper_name === keeperName) ?? null
 }
 
+// The in-chat tool approval surface (task-343). Distinct from the pendcue
+// above: that links to the Gate approval queue (a different SSOT); these are
+// the tool calls this keeper's approval gate is holding right now, and the
+// answer is given here — approve/deny POSTs straight to the wait that owns
+// the call. Before this card the request decoded and then vanished into
+// console.debug, and the operator's first signal was the 180s timeout
+// reported as a denial nobody chose.
+function ToolApprovalCards({ keeperName }: { keeperName: string }): VNode | null {
+  // Re-hydrate on mount: a wait whose REQUESTED event this view never saw
+  // (dashboard opened mid-hold, or the stream watcher died) still deserves a
+  // card, because the wait still retires itself on a timer.
+  useEffect(() => {
+    void hydrateKeeperToolApprovals()
+  }, [keeperName])
+  const byId = keeperToolApprovals.value[keeperName] ?? {}
+  const pending = Object.values(byId).filter(approval => !approval.settled)
+  if (pending.length === 0) return null
+  return html`
+    <div class="tool-approval-stack" data-testid="keeper-tool-approval-stack" role="region" aria-label="도구 승인 대기">
+      ${pending.map(approval => html`
+        <div class="tool-approval-card" data-testid="keeper-tool-approval-card" data-tool-call-id=${approval.toolCallId}>
+          <div class="tool-approval-card-head">
+            <span class="tool-approval-card-dot" aria-hidden="true"></span>
+            <span class="mono">${approval.toolName}</span>
+          </div>
+          <div class="tool-approval-card-q">${approval.question}</div>
+          ${approval.args && approval.args !== '{}'
+            ? html`<pre class="tool-approval-card-args">${approval.args}</pre>`
+            : null}
+          <div class="tool-approval-card-actions">
+            <button
+              type="button"
+              class="btn"
+              data-testid="keeper-tool-approval-approve"
+              disabled=${approval.answering}
+              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.toolCallId, 'approve')}
+            >승인</button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-testid="keeper-tool-approval-deny"
+              disabled=${approval.answering}
+              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.toolCallId, 'deny')}
+            >거절</button>
+            ${approval.answering ? html`<span class="tool-approval-card-wait">전송 중…</span>` : null}
+          </div>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 export function KeeperWorkspaceChat({
   keeper,
   mobile = false,
@@ -634,6 +687,7 @@ export function KeeperWorkspaceChat({
             </button>
           `
         : null}
+      <${ToolApprovalCards} keeperName=${keeper.name} />
       <div class="kw-chat-body">
         <${KeeperConversationPanel}
           keeperName=${keeper.name}

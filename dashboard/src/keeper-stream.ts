@@ -37,6 +37,8 @@ import {
   keeperStreamStartedAt,
   liveSendOwnsRequest,
   setRecordValue,
+  upsertKeeperToolApproval,
+  dropKeeperToolApproval,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import {
@@ -787,6 +789,38 @@ export function applyKeeperStreamEvent(
           'streaming',
           keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
         )
+        return null
+      }
+      if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
+        if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
+        const toolName = event.value.tool_call_name
+        const question = event.value.question
+        if (!toolName) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_name'
+        if (!question) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing question'
+        upsertKeeperToolApproval(keeperName, {
+          toolCallId,
+          toolName,
+          args: event.value.args,
+          question,
+          askedAtMs: Date.now(),
+          timeoutSec: null,
+          answering: false,
+          answeredDecision: null,
+          answeredOutcome: null,
+          settled: false,
+        })
+        return null
+      }
+      if (event.name === 'KEEPER_TOOL_APPROVAL_SETTLED') {
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
+        if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
+        const outcome = event.value.outcome
+        if (!outcome) return 'KEEPER_TOOL_APPROVAL_SETTLED missing outcome'
+        // A settle for a call this view never drew (e.g. answered from another
+        // window, or a re-hydrated wait whose REQUESTED predates this view)
+        // still retires nothing here; dropping is the no-op it should be.
+        dropKeeperToolApproval(keeperName, toolCallId)
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {

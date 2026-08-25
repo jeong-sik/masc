@@ -50,6 +50,25 @@ let every_dispatched_operation_has_a_schema () =
       Alcotest.(check string) ("schema for " ^ name) name schema.Masc_domain.name)
     Tool_schemas_misc.mcp_runtime_operations
 
+(* Asking and reading back are two tools because they are two acts: one writes
+   a question, the other only looks. Both have to be reachable, and the read
+   one must not claim it writes. *)
+let the_ask_status_schema_loads () =
+  let schema = Tool_schemas_operator_surface.ask_status in
+  Alcotest.(check string) "tool name" "masc_ask_status" schema.Masc_domain.name;
+  Alcotest.(check bool) "description is not empty" true
+    (String.trim schema.Masc_domain.description <> "")
+
+let both_ask_tools_are_dispatched () =
+  List.iter
+    (fun name ->
+      match Tool_schemas_misc.mcp_runtime_operation_of_tool_name name with
+      | None -> Alcotest.failf "%s is not in the MCP runtime dispatch vocabulary" name
+      | Some operation ->
+          Alcotest.(check string) ("canonical name for " ^ name) name
+            (Tool_schemas_misc.mcp_runtime_tool_name operation))
+    [ "masc_ask"; "masc_ask_status" ]
+
 let () =
   Alcotest.run "masc_ask tool surface"
     [
@@ -58,11 +77,15 @@ let () =
           Alcotest.test_case "the ask schema loads" `Quick the_ask_schema_loads;
           Alcotest.test_case "modes match the boundary" `Quick
             the_schema_offers_only_modes_the_boundary_parses;
+          Alcotest.test_case "the ask_status schema loads" `Quick
+            the_ask_status_schema_loads;
         ] );
       ( "dispatch",
         [
           Alcotest.test_case "the tool name round trips" `Quick
             the_tool_name_round_trips_through_the_dispatch_vocabulary;
+          Alcotest.test_case "both ask tools are dispatched" `Quick
+            both_ask_tools_are_dispatched;
           Alcotest.test_case "every dispatched operation has a schema" `Quick
             every_dispatched_operation_has_a_schema;
         ] );

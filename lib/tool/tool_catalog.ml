@@ -331,6 +331,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_list", read_state_tool);
     ("masc_board_sub_board_get", read_state_tool);
     ("masc_ask", broadcast_tool);
+    ("masc_ask_status", read_state_tool);
     ("masc_board_post", broadcast_tool);
     ("masc_board_post_update", broadcast_tool);
     ("masc_board_comment", broadcast_tool);

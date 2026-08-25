@@ -68,7 +68,7 @@ let measured ~surface =
    2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
    surface by 567 bytes (count unchanged at 82). *)
 let all_surface_golden_count = 86
-let all_surface_golden_bytes = 72_834
+let all_surface_golden_bytes = 72_787
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

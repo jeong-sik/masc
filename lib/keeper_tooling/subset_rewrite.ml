@@ -111,10 +111,24 @@ let field_name = function
   | Connector -> "connector"
 ;;
 
+(* The category the census counts. RFC execute-subset-dispositions §3.7 keys
+   its corpus table on these, so they stay put when what the caller types is
+   renamed. *)
 let call_name = function
   | Write_then_execute -> "write-then-execute"
   | Execute_twice -> "execute-twice"
   | Spawn -> "spawn"
+;;
+
+(* What the caller types. Two of these are patterns over calls the caller
+   already has, so they read as descriptions and the hyphens say so. [Spawn]
+   became one concrete tool, so it is named exactly -- "call spawn instead"
+   sent the reader looking for a tool nobody has. This library cannot see the
+   tool schemas, so a test at a layer that sees both holds the two together. *)
+let call_instruction = function
+  | Write_then_execute -> "write-then-execute"
+  | Execute_twice -> "execute-twice"
+  | Spawn -> "keeper_spawn"
 ;;
 
 let tag = function
@@ -127,6 +141,6 @@ let to_string = function
   | Move_to_field { field; because } ->
     Printf.sprintf "use the %s field: %s" (field_name field) because
   | Call_this_instead { call; because } ->
-    Printf.sprintf "call %s instead: %s" (call_name call) because
+    Printf.sprintf "call %s instead: %s" (call_instruction call) because
   | Unrepresentable { construct = _; because } -> because
 ;;

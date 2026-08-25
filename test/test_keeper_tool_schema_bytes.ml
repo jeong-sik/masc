@@ -89,7 +89,11 @@ let measured ~surface =
    merge order alone produced a number that matched neither. A byte count
    pinned in one file and moved from another has no way to notice that; what
    notices is running this file, which is the same thing all four of today's
-   red causes needed. *)
+   red causes needed.
+
+   The count did not move: the surface is the same tools describing themselves
+   more fully, which is the distinction this pair of numbers exists to draw.
+   (Phrasing from #30611, which reached the same re-pin independently.) *)
 let all_surface_golden_count = 87
 let all_surface_golden_bytes = 74_521
 

@@ -1,7 +1,12 @@
 (* The precedence table, asserted. Each case raises one flag on top of all
-   the flags below it in the order, and the higher one must win — exactly
-   the dispatch's arm order in masc_tui.ml. If a dispatch arm moves, this
-   is the alarm that says the mirror moved too. *)
+   the flags below it in the order, and the higher one must win.
+
+   What this does not do: read masc_tui.ml. The ladder it checks is the one
+   [Masc_tui_mode] declares, so moving a dispatch arm leaves these cases
+   passing while the derivation says the wrong thing. Keeping the two
+   together is a person's job until the dispatch consumes this module, or
+   until an {!Ast_grep} case reads the arm order out of the source the way
+   [test_keeper_keepalive_launch_order_ast] does. *)
 
 open Masc_tui_mode
 

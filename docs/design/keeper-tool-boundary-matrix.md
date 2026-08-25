@@ -154,6 +154,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_definition_source.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_definition_source.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_runtime_schemas.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_runtime_schemas.mli` - tool-surface-policy
 - `lib/keeper_tool_name/keeper_tool_name.ml` - tool-surface-policy

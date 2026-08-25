@@ -3255,17 +3255,21 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
-      (* Three modes, because both features put one here: memory arrived on
-         main (#30401) while this branch was open, and dropping either would
-         hide a state the operator can change from this screen. *)
-      Printf.sprintf "%s  %s  %smemory:%s reasoning:%s tools:%s  (port %d)%s"
+      (* Both features put a mode indicator here: memory arrived on main
+         (#30401) while this branch was open. Neither is dropped, but only a
+         mode away from its default is spelled -- see
+         [Tui_types.chat_visibility_summary] for why. *)
+      let modes =
+        chat_visibility_summary ~memory_visible:state.msg_memory_visible
+          ~reasoning:state.msg_reasoning_visibility
+          ~tools:state.msg_tool_visibility
+      in
+      Printf.sprintf "%s  %s  %s%s(port %d)%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
         Ansi.dim
-        (if state.msg_memory_visible then "on" else "off")
-        (reasoning_visibility_to_string state.msg_reasoning_visibility)
-        (tool_visibility_to_string state.msg_tool_visibility)
+        (if String.equal modes "" then "" else modes ^ "  ")
         state.port Ansi.reset
     in
     let target_registered =

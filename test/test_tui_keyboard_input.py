@@ -890,7 +890,12 @@ def with_workspace_identity(
     filled in. A raw or callable response is left alone -- a scenario that
     writes its own health body owns what it says.
     """
-    merged: dict[str, HttpFixture] = dict(fixtures or {})
+    # In place, not a copy: a scenario keeps the dict it handed over and swaps
+    # a response into it mid-run (a lane read that starts failing, a board list
+    # that arrives late). A copy leaves the server reading the original, and
+    # nine scenarios waited out their timeouts for a response that had already
+    # been written somewhere the server could not see.
+    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
     paths = {
         "cwd": base_path,
         "effective_base_path": base_path,

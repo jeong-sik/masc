@@ -6317,7 +6317,8 @@ let render_code (state : state) =
                && not state.code_diff_open && not state.code_notes_open
              then "h/l:pan  "
              else "")
-            (if state.code_focus_file then "d:diff  H:history  m:notes  "
+            (if state.code_notes_open then "w:add  d:diff  H:history  m:notes  "
+             else if state.code_focus_file then "d:diff  H:history  m:notes  "
              else "")
             (if
                state.code_history_open || state.code_diff_open

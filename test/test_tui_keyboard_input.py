@@ -1101,12 +1101,20 @@ def board_selection_http_fixtures() -> HttpFixtures:
         board_selection_post("b", "Bravo", "list-body-b"),
         board_selection_post("c", "Charlie", "list-body-c"),
     ]
-    detail_post = board_selection_post("b", "Bravo", "detail-body-bravo")
+    bravo_body = "detail-body-bravo\n" + "\n".join(
+        f"bravo-{index:02d}" for index in range(1, 46)
+    )
+    bravo_detail = board_selection_post("b", "Bravo", bravo_body)
+    charlie_detail = board_selection_post("c", "Charlie", "detail-body-charlie")
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/board"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-b?format=flat"] = (
         200,
-        {"post": detail_post, "comments": []},
+        {"post": bravo_detail, "comments": []},
+    )
+    fixtures["/api/v1/board/post-c?format=flat"] = (
+        200,
+        {"post": charlie_detail, "comments": []},
     )
     return fixtures
 
@@ -2782,13 +2790,25 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         tab_until(process, master_fd, output, b"MASC Keepers")
         tab_until(process, master_fd, output, b"MASC Approvals")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (3)"))
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=180,
+            needle=screen_header(b"MASC Board", b" (3)"),
+            final_cursor=b"\x1b[?25l",
+        )
         selected_b = selected_row(b"post-b")
         selected_a = selected_row(b"post-a")
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
         send_and_wait(process, master_fd, output, b"\x17", b"Board (3)  [j/k]")
-        send_and_wait(process, master_fd, output, b"\x17", b"j/k:scroll")
+        send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
+        send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
+        send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
+        send_and_wait(process, master_fd, output, b"\x1b[6~", b"bravo-25")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))
         if not selected_b.search(board) or selected_a.search(board):
@@ -3737,6 +3757,47 @@ def autonomous_turn_history_fixture() -> HttpResponse:
     )
 
 
+def memory_journal_fixture() -> HttpResponse:
+    return (
+        200,
+        {
+            "keeper": "alpha",
+            "returned": 1,
+            "undecodable_lines": 0,
+            "entries": [
+                {
+                    "ok": True,
+                    "outcome": "committed",
+                    "recorded_at": 1787348490.35,
+                    "revision": 9,
+                    "source": {"kind": "librarian", "trace_id": "trace-memory"},
+                    "change": {
+                        "added": [
+                            {
+                                "category": "fact",
+                                "claim": "the Runtime probe shares one provider endpoint",
+                            }
+                        ],
+                        "removed": [
+                            {
+                                "category": "constraint",
+                                "claim": "probe every model separately",
+                            }
+                        ],
+                        "retained": 3,
+                    },
+                    "dropped": [
+                        {
+                            "memory_id": "memory-old-probe-rule",
+                            "reason": "superseded by provider grouping",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+
 def autonomous_turn_history_interaction() -> Interaction:
     """The chat pane draws what an autonomous turn did, not a blank line."""
 
@@ -3773,6 +3834,58 @@ def autonomous_turn_history_interaction() -> Interaction:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def memory_journal_timeline_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        start = len(output)
+        send_and_wait(process, master_fd, output, b"m", b"memory:on")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Librarian committed memory revision 9",
+            start=start,
+            timeout=5.0,
+        )
+        visible = bytes(output[start:])
+        for needle in (
+            b"+ [fact] the Runtime probe shares one provider endpoint",
+            b"- [constraint] probe every model separately",
+            b"drop memory-old-probe-rule",
+            b"superseded by provider grouping",
+        ):
+            if needle not in visible:
+                raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
+
+        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
+        if b"Librarian committed memory revision 9" in hidden:
+            raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
+
+        send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
+        restored = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Librarian committed memory revision 9",
+        )
+        if b"memory:on" not in restored:
+            raise AssertionError(f"Memory timeline did not return to on: {restored!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
@@ -4202,13 +4315,19 @@ def keeper_calls_interaction() -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         pane_start = len(output)
-        send_and_wait(process, master_fd, output, b"t", b"Keeper Calls: alpha")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"t",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls",
+        )
         wait_for_output(
             process, master_fd, output, b"tool_execute", start=pane_start, timeout=5.0
         )
         pane = bytes(output[pane_start:])
         for needle, what in (
-            (b"Keeper Calls: alpha (2)", "the count"),
+            (b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 calls (2)", "the count"),
             ("ok \u00b7 latest 8s ago".encode(), "the freshness verdict"),
             ("\u2713 Read".encode(), "the returned call"),
             (b"28ms", "its duration"),
@@ -4331,8 +4450,8 @@ def keeper_lanes_interaction(
         unread_plain = CSI_RE.sub(b"", unread).decode("utf-8")
         for column in (
             "KEEPER",
-            "PHASE",
-            "TURN",
+            "LIFECYCLE",
+            "TURN STEP",
             "IDLE",
             "LAST OUTCOME",
             "DIAGNOSIS",
@@ -4394,6 +4513,27 @@ def keeper_lanes_interaction(
             b"r",
             b"new_phase",
         )
+        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
+        if banded_alpha.search(populated) is None:
+            raise AssertionError(
+                f"Lanes did not band the cursor row: {populated!r}"
+            )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            re.compile(rb"\x1b\[7m[^\x1b\n]*beta"),
+        )
+        send_and_wait(process, master_fd, output, b"k", banded_alpha)
+        # "/" arms the row search on any surface with row texts: the footer
+        # shows the query, typing jumps the cursor live, Enter keeps the
+        # query for n. The list itself never narrows.
+        send_and_wait(process, master_fd, output, b"/", b"/  j/k:scroll")
+        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
+        send_and_wait(process, master_fd, output, b"bet", banded_beta)
+        send_and_wait(process, master_fd, output, b"\rk", banded_alpha)
+        send_and_wait(process, master_fd, output, b"n", banded_beta)
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",
@@ -4848,6 +4988,109 @@ def runtime_surface_interaction(
     return interact
 
 
+SCHEDULES_PATH = "/api/v1/dashboard/scheduled-automation"
+
+
+def schedule_detail_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures[SCHEDULES_PATH] = (
+        200,
+        {
+            "status": "ok",
+            "schedule_store_read_error": None,
+            "request_count": 1,
+            "truncated": False,
+            "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            "requests": [
+                {
+                    "schedule_instance_id": "instance-proof-701",
+                    "schedule_id": "schedule-proof-701",
+                    "status": "running",
+                    "dispatch_status": "running",
+                    "source": "operator",
+                    "requested_by": {
+                        "id": "operator-701",
+                        "kind": "human_operator",
+                        "display_name": "Operator Proof",
+                    },
+                    "scheduled_by": {
+                        "id": "keeper-701",
+                        "kind": "automated_actor",
+                        "display_name": None,
+                    },
+                    "requested_at_iso": "2026-08-25T09:00:00Z",
+                    "due_at_iso": "2026-08-25T10:00:00Z",
+                    "next_due_at_iso": "2026-08-25T10:30:00Z",
+                    "expires_at_iso": "2026-08-26T10:00:00Z",
+                    "recurrence_summary": "every 30 minutes",
+                    "payload_digest": "digest-proof-701",
+                    "payload_kind": "keeper_wake",
+                    "payload_support": "supported",
+                    "payload_dispatch_tool": "keeper_wake",
+                    "payload_target": "alpha",
+                    "payload_summary": "Run the detailed scheduled sweep.",
+                    "last_wake": {
+                        "status": "succeeded",
+                        "started_at_iso": "2026-08-25T09:30:00Z",
+                        "error": None,
+                    },
+                    "keeper_queue_evidence": {
+                        "projection_status": "matched_pending",
+                        "pending_count": 2,
+                    },
+                    "keeper_reaction_evidence": {
+                        "projection_status": "matched_recorded",
+                        "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
+                    },
+                }
+            ],
+        },
+    )
+    return fixtures
+
+
+def schedule_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Schedules")
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", b"instance-proof-701"
+        )
+        plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"Dispatch",
+            b"Operator Proof (human_operator)",
+            b"keeper_wake",
+            b"digest-proof-701",
+            b"PgUp/PgDn:page",
+        ):
+            if needle not in plain:
+                raise AssertionError(f"Schedule detail omitted {needle!r}: {plain!r}")
+        evidence = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"matched_pending"
+        )
+        evidence_plain = CSI_RE.sub(b"", evidence)
+        for needle in (
+            b"LAST WAKE",
+            b"DELIVERY EVIDENCE",
+            b"pending=2",
+            b"matched_recorded",
+        ):
+            if needle not in evidence_plain:
+                raise AssertionError(
+                    f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b[5~", b"instance-proof-701")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 FUSION_RUNS_PATH = "/api/v1/dashboard/fusion-runs"
 
 
@@ -4947,7 +5190,7 @@ def fusion_list_detail_interaction(
     fixtures: HttpFixtures,
     initial_runs: GatedHttpResponse,
 ) -> Interaction:
-    """Select by run id across reorder, then read panel rows before judge."""
+    """Select by run id across reorder, then show the result before evidence."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -5019,15 +5262,38 @@ def fusion_list_detail_interaction(
 
         detail = send_and_wait(process, master_fd, output, b"\r", b"judge-proof-501")
         detail_plain = CSI_RE.sub(b"", detail)
-        ordered = [
-            detail_plain.find(b"panel-answer-first-501"),
-            detail_plain.find(b"panel-failure-second-501"),
-            detail_plain.find(b"judge-proof-501"),
-        ]
-        if any(index < 0 for index in ordered) or ordered != sorted(ordered):
+        judge_index = detail_plain.find(b"judge-proof-501")
+        first_panel_index = detail_plain.find(b"panel-answer-first-501")
+        if judge_index < 0 or (
+            first_panel_index >= 0 and judge_index > first_panel_index
+        ):
             raise AssertionError(
-                f"Fusion detail did not preserve panel-to-judge order: {detail_plain!r}"
+                f"Fusion detail did not put the result before panel evidence: {detail_plain!r}"
             )
+        for needle in (
+            b"RESULT",
+            b"QUESTION",
+            b"PANEL RESPONSES",
+            b"PgUp/PgDn:page",
+        ):
+            if needle not in detail_plain:
+                raise AssertionError(
+                    f"Fusion detail omitted the {needle!r} summary: {detail_plain!r}"
+                )
+        panel = send_and_wait(
+            process, master_fd, output, b"\x1b[6~", b"panel-failure-second-501"
+        )
+        panel_plain = CSI_RE.sub(b"", panel)
+        for needle in (
+            b"panel-answer-first-501",
+            b"panel-failure-second-501",
+            b"1 answered / 1 failed",
+            b"10 input / 20 output tokens",
+        ):
+            if needle not in panel_plain:
+                raise AssertionError(
+                    f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
+                )
         if (
             b"wrong-alpha-judge-501" in detail_plain
             or b"wrong-new-judge-501" in detail_plain
@@ -5353,6 +5619,7 @@ def run_keyboard_regression(executable: str) -> None:
     runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
         runtime_http_fixtures()
     )
+    schedule_fixtures = schedule_detail_http_fixtures()
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
     run_terminal_scenario(
         executable,
@@ -5430,6 +5697,15 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="Keeper Memory journal timeline",
+        interact=memory_journal_timeline_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": (200, []),
+            "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper message origin badges",
         interact=message_origin_badge_interaction,
         http_fixtures={
@@ -5474,6 +5750,12 @@ def run_keyboard_regression(executable: str) -> None:
         ),
         refresh=0.05,
         http_fixtures=runtime_fixtures,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Schedule operational detail and page navigation",
+        interact=schedule_detail_interaction(),
+        http_fixtures=schedule_fixtures,
     )
     run_terminal_scenario(
         executable,

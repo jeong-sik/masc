@@ -1,7 +1,5 @@
 pub mod bridge;
 pub mod client;
-pub mod masc_bridge;
-pub mod masc_client;
 pub mod reconnect;
 
 use bevy::prelude::*;
@@ -38,17 +36,6 @@ impl Plugin for SsePlugin {
                 bridge::poll_sse_events.run_if(in_state(ViewerMode::Trpg)),
             )
             .add_systems(OnExit(ViewerMode::Trpg), client::teardown_sse);
-
-        // ── MASC SSE (shared event log resource) ──
-        app.init_resource::<masc_bridge::MascEventLog>();
-
-        // ── MASC modes: Monitor, Social, Experiment ──
-        let masc_modes = [ViewerMode::Monitor, ViewerMode::Social, ViewerMode::Experiment];
-        for mode in masc_modes {
-            app.add_systems(OnEnter(mode), masc_client::setup_masc_sse)
-                .add_systems(Update, masc_bridge::poll_masc_events.run_if(in_state(mode)))
-                .add_systems(OnExit(mode), masc_client::teardown_masc_sse);
-        }
 
         // ── Sync async connection status into ECS (runs every frame) ──
         app.add_systems(Update, reconnect::sync_connection_status);

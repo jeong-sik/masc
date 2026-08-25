@@ -79,6 +79,14 @@ val create_token_without_expiry :
   string -> agent_name:string -> role:agent_role ->
   (string * agent_credential, masc_error) result
 
+val create_token_expiring_in :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, masc_error) result
+(** [create_token_expiring_in config ~agent_name ~role ~hours] returns a fresh
+    raw token whose credential expires [hours] from now, ignoring the auth
+    config's own window. Rejects a window outside 1..8760 hours rather than
+    raising, so a caller that computes the number can report the refusal. *)
+
 (** {1 Shared-token rotation} *)
 
 type rotation_outcome = {

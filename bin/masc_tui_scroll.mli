@@ -20,3 +20,15 @@ val normalize : count:int -> height:int -> int -> int
 
 val down : count:int -> height:int -> int -> int
 val up : count:int -> height:int -> int -> int
+
+(** A row cursor over the same list. The cursor names a row, the scroll names
+    a window; a keypress moves the cursor and the window follows with
+    {!ensure_visible}. The same stale-value rule applies: moving normalises
+    first, so a list that shrank answers from its last row, not from a row
+    that no longer exists. *)
+
+val cursor_down : count:int -> int -> int
+val cursor_up : count:int -> int -> int
+
+val ensure_visible : cursor:int -> height:int -> int -> int
+(** The smallest move of [scroll] that keeps [cursor] inside the window. *)

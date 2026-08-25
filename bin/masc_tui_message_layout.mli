@@ -15,10 +15,18 @@ type markdown_source =
           (** Position in the current ordered history. It distinguishes two
               rows whose timestamp and request fields are equal. *)
     }
+  | Markdown_growing of {
+      keeper_name : string;
+      request_id : string;
+      entry_index : int;
+          (** Position in the current live trail. Together with the full
+              request identity it distinguishes interleaved reply stretches. *)
+    }
   | Markdown_streaming
 (** Whether a chat entry's Markdown source can be reused. Completed history
     rows carry their source facts and position in the current ordered history.
-    A live row is still growing and must bypass any render cache. *)
+    A growing reply keeps only its closed top-level blocks. Other live rows can
+    change non-append-only facts and continue to bypass every render cache. *)
 
 type entry = {
   style : style;

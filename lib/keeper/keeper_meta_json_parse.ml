@@ -480,6 +480,7 @@ let decode_current_meta fields =
       ; runtime
       ; agent_core_env
       ; keeper_id
+      ; tool_groups = None
       }
     in
     Ok meta

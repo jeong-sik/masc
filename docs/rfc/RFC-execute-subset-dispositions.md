@@ -391,10 +391,17 @@ the successful result, so the caller learns what the call should have been
 while the call still does what it did. That is the same "a refusal is a
 rewrite" shape as §3.1, applied where there is no refusal to carry it.
 
-Shipped. The rewrite rides back on the answer as `escaped_shell` metadata --
+Shipped. The rewrite rides back in the answer's payload as `escaped_shell` --
 `shell`, `finding`, and `should_have_been`, one entry per costume the gate
-would have refused. The disposition and the payload are untouched, so a call
+would have refused. `ok`, the status and the streams are untouched, so a call
 that worked still reads as a call that worked.
+
+It went into `metadata` first, which was the wrong shelf. A completed result's
+model-visible text is the serialized `data`, and every read of `_meta` in
+agent_core discards it -- `agent_tools.ml` answers `Ok { content; _meta = _ }`
+at the point a tool result becomes conversation. Metadata reaches observers
+and an MCP wire client; it does not reach the keeper this sentence is written
+for. Telling the caller means putting it where the caller reads.
 
 
 Two entries of the first draft do not survive it.
@@ -430,7 +437,7 @@ Revised order:
    no shell; none change what they do.
 5. **Tell without refusing** -- shipped, and not in the first draft at all:
    it exists because step 4 left the largest live category untouched. The
-   rewrite rides back as `escaped_shell` metadata on the answer.
+   rewrite rides back as an `escaped_shell` field in the answer's payload.
 6. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus. The
    count says this is last on traffic, not that it is unnecessary --
    backgrounding has no alternative today, so a caller that needs it cannot

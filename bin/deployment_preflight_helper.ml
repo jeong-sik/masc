@@ -897,8 +897,44 @@ let turn_record_store =
   }
 ;;
 
+(* The official-client session store decodes with the same exact-field
+   contract the memory snapshot and TurnRecord use, and it lives on disk per
+   keeper. A refused row does not start a fresh session -- [load] documents
+   that malformed state is an error and never degrades -- so the keeper's
+   provider conversation stops resuming and the surrounding adapters have no
+   state to plan a claim from. It was the one exact-field decoder with a
+   durable store and no entry here (#29666). *)
+let official_client_session_store =
+  { store = "official-client session state"
+  ; on_refusal =
+      "the keeper cannot resume its provider conversation and every adapter        that plans a claim reads the same refusal"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+         in
+         Ok
+           (files_under keepers_dir ~keep:(fun name ->
+              not (Filename.check_suffix name ".json"))
+            |> List.fold_left
+                 (fun report keeper_dir ->
+                    let keeper_name = Filename.basename keeper_dir in
+                    match
+                      Masc.Keeper_official_client_session_store.load
+                        ~base_path
+                        ~keeper_name
+                    with
+                    | Ok None -> report
+                    | Ok (Some _) -> count_row report (Ok ())
+                    | Error detail ->
+                      count_row report (Error (keeper_name ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
+  ; official_client_session_store
   ; memory_os_current_store
   ; disposition_receipt_store
   ; board_posts_store

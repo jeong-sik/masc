@@ -2682,42 +2682,42 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
-       (* [developer_instructions] is several sections joined by a blank
-          line: the system prompt, the native-posture note RFC-0390 sends on
-          every Codex turn (#30408), and each developer message. Only one of
-          them is the context envelope, so pick it out. Parsing the whole
-          string worked only while this fixture happened to leave one section
-          standing, and the posture note arriving in front of it took the test
-          red on main. *)
-       let context_envelope =
-         let paragraphs instructions =
-           let rec collect acc current = function
-             | [] -> List.rev (String.concat "\n" (List.rev current) :: acc)
-             | "" :: rest ->
-               collect (String.concat "\n" (List.rev current) :: acc) [] rest
-             | line :: rest -> collect acc (line :: current) rest
-           in
-           collect [] [] (String.split_on_char '\n' instructions)
-         in
-         let parsed =
-           paragraphs start_instructions
-           |> List.filter_map (fun section ->
-                match Yojson.Safe.from_string section with
-                | json -> Some json
-                | exception Yojson.Json_error _ -> None)
-           |> List.filter (fun json ->
-                Yojson.Safe.Util.member "schema" json
-                = `String Keeper_official_client_context_codec.schema)
-         in
-         match parsed with
-         | [ envelope ] -> envelope
-         | [] ->
-           fail
-             ("no context envelope in the developer instructions: "
-              ^ start_instructions)
-         | _ :: _ :: _ ->
-           fail "more than one context envelope in the developer instructions"
+       (* This fixture has two non-empty instruction sections, in this order:
+          the Native_read posture note and the typed dynamic-context envelope.
+          Read both from their production owners. Searching for a JSON-looking
+          paragraph would let the posture note disappear or move unnoticed. *)
+       let posture_note =
+         match
+           Keeper_codex_runtime.For_testing.native_posture_note
+             Runtime_native_tools.Native_read
+         with
+         | [] -> fail "Native_read posture note disappeared"
+         | sections -> String.concat "\n\n" sections
        in
+       let instruction_prefix = posture_note ^ "\n\n" in
+       let prefix_bytes = String.length instruction_prefix in
+       let context_envelope_text =
+         if String.length start_instructions < prefix_bytes then
+           fail "developer instructions are shorter than the posture prefix"
+         else (
+           check string
+             "Native_read posture note is the developer-instruction prefix"
+             instruction_prefix
+             (String.sub start_instructions 0 prefix_bytes);
+           String.sub start_instructions prefix_bytes
+             (String.length start_instructions - prefix_bytes))
+       in
+       let expected_context_envelope =
+         { (Agent_core.Types.system_msg dynamic_context) with
+           metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         }
+         |> Keeper_official_client_host.encode_history_message
+       in
+       check string
+         "dynamic context uses the canonical instruction envelope"
+         expected_context_envelope
+         context_envelope_text;
+       let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
        check string
          "dynamic context envelope schema"

@@ -1,0 +1,29 @@
+name = "masc_ask_status"
+description = """
+Read the questions you asked and whatever came back.
+
+An answer does not interrupt you. It lands in the durable log whenever the \
+operator gets to it, from whichever surface they were at, and this is how you \
+find it.
+
+A question you asked and never read is worse than not asking: the operator \
+spent attention on a decision that went nowhere. Read this when you return to \
+work that was waiting on a choice.
+
+Each row says whether the question is still open, was answered, or was \
+withdrawn. An answered row carries the choice ids that were picked -- match \
+them against the choices you offered, not against their labels."""
+additional_properties = false
+
+[[params]]
+name = "ask_id"
+type = "string"
+description = """
+One ask by id. Omit this to get every question of yours that is still open."""
+
+[[params]]
+name = "include_resolved"
+type = "boolean"
+description = """
+Also return questions already answered or withdrawn. Defaults to false, which \
+returns only what is still waiting on the operator."""

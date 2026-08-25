@@ -199,6 +199,16 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   let composition_names =
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
+  let instruction_skill_names =
+    if
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.exists (fun (skill : Keeper_skill_catalog.skill) ->
+        match skill.surface with
+        | Keeper_skill_catalog.Instruction -> true
+        | Keeper_skill_catalog.Composition _ -> false)
+    then [ Keeper_tool_composition_catalog.skill_tool_name ]
+    else []
+  in
   (* The shared async controls join the surface when any skill declares an
      async composition. *)
   let control_names =
@@ -216,7 +226,7 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: (descriptor_names @ composition_names @ control_names))
+     :: (descriptor_names @ composition_names @ instruction_skill_names @ control_names))
 ;;
 
 let validate_current_task_skill_admission

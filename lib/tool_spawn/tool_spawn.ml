@@ -100,7 +100,7 @@ let handle_of args =
   let* text = required_string args "handle" in
   match Spawn_handle.of_string text with
   | Some handle -> Ok handle
-  | None -> Error (Printf.sprintf "%S is not a handle masc_spawn issued" text)
+  | None -> Error (Printf.sprintf "%S is not a handle keeper_spawn issued" text)
 ;;
 
 let handle_start ~tool_name ~start_time ctx args =
@@ -218,5 +218,3 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Tool_schemas_spawn.Stop; _ } -> handle handle_stop
   | None -> None
 ;;
-
-let schemas = Tool_schemas_spawn.schemas

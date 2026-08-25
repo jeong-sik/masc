@@ -132,12 +132,12 @@ let test_config_category_enum_matches_its_owner () =
     Tool_schemas_specs_types.config_category_enum_strings
 ;;
 
-let test_masc_spawn_is_not_published () =
+let test_keeper_spawn_is_not_published () =
   check
     bool
-    "masc_spawn absent from the misc schema set"
+    "keeper_spawn absent from the misc schema set"
     false
-    (has_schema "masc_spawn" Tool_schemas_misc.schemas)
+    (has_schema "keeper_spawn" Tool_schemas_misc.schemas)
 ;;
 
 (* pause / resume / pause_status are Operator_only: reached through
@@ -179,7 +179,7 @@ let () =
             "the config category enum matches its owner"
             `Quick
             test_config_category_enum_matches_its_owner
-        ; test_case "masc_spawn is not published" `Quick test_masc_spawn_is_not_published
+        ; test_case "keeper_spawn is not published" `Quick test_keeper_spawn_is_not_published
         ; test_case
             "control operations stay off the published list"
             `Quick

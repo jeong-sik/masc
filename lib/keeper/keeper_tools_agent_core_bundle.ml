@@ -280,7 +280,11 @@ let make_tool_bundle_for_descriptors
                (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
              let on_failed =
                match descriptor.runtime_handler with
-               | Keeper_tool_descriptor.Tool_execute ->
+               (* A spawn that started leaves a process running with no
+                  handle in the caller's hands if the call then fails, which
+                  is the same shape of loss Execute has. *)
+               | Keeper_tool_descriptor.Tool_execute
+               | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch ->
                  Some mark_terminal_effect_failed
                | ( Keeper_tool_descriptor.Tool_search_files
                  | Keeper_tool_descriptor.Tool_read_file

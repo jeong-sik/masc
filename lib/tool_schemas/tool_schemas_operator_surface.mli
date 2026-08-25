@@ -12,7 +12,7 @@
     filename so that a value bound to the wrong declaration fails there. It
     also carries the three invariants that suite held which had nothing to do
     with code generation: the masc_config category enum matching its owner,
-    masc_spawn staying unpublished, and the Operator_only control trio staying
+    keeper_spawn staying unpublished, and the Operator_only control trio staying
     off the Keeper-visible list. *)
 
 val broadcast : Masc_domain.tool_schema

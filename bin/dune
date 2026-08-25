@@ -296,6 +296,11 @@
  (libraries masc_tui_types))
 
 (library
+ (name masc_tui_theme)
+ (wrapped false)
+ (modules masc_tui_theme))
+
+(library
  (name masc_tui_paste)
  (wrapped false)
  (modules masc_tui_paste))
@@ -524,6 +529,7 @@
  (package masc)
  (libraries
   masc_tui_keys
+  masc_tui_theme
   masc_tui_span
   masc_tui_diff
   masc

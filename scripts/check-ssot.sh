@@ -148,6 +148,15 @@ check_rule "R9-tui-chat-theme-owner" 0 \
   '' \
   bin/masc_tui_render.ml
 
+# SSOT-R10 — Theme is the only production owner of projected background SGR
+# bytes. Existing diff backgrounds and the new RGB/indexed serializer remain
+# literal in masc_tui_theme.ml; callers pass typed projected colours instead.
+check_rule "R10-tui-projected-background" 0 \
+  "Masc_tui_theme.Sgr.background" \
+  '48;(2|5)' \
+  'bin/masc_tui_theme\.mli?:' \
+  bin lib
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch
@@ -156,6 +165,6 @@ check_rule "R9-tui-chat-theme-owner" 0 \
 echo ""
 echo "SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):"
 echo "  Script: scripts/check-ssot.sh"
-echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462"
+echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30411"
 
 exit "$fail"

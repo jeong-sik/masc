@@ -48,6 +48,8 @@
   (ws-direct-core (>= 0.1.0))
   (ws-direct-gluten (>= 0.1.0))
   (ws-direct-eio (>= 0.1.0))
+  ; Native stdout colour capability detection links the system terminfo API.
+  (conf-ncurses :build)
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))

@@ -46,6 +46,26 @@ let test_conditional_tokens_agree_with_the_flag () =
     (if Masc_tui_theme.colors_enabled then "x" else "")
     (Masc_tui_theme.style "x")
 
+let test_projected_background_bytes () =
+  let expected bytes = if Masc_tui_theme.colors_enabled then bytes else "" in
+  let rgb = Masc_tui_terminal_palette.make_rgb ~red:12 ~green:34 ~blue:56 in
+  check str "truecolor background"
+    (expected "\027[48;2;12;34;56m")
+    (Masc_tui_theme.Sgr.background
+       (Some (Masc_tui_terminal_palette.Rgb rgb)));
+  check str "indexed background"
+    (expected "\027[48;5;52m")
+    (Masc_tui_theme.Sgr.background
+       (Some (Masc_tui_terminal_palette.Indexed 52)));
+  check str "unsupported level keeps the default background" ""
+    (Masc_tui_theme.Sgr.background None);
+  List.iter
+    (fun index ->
+      check str "out-of-range index keeps the default background" ""
+        (Masc_tui_theme.Sgr.background
+           (Some (Masc_tui_terminal_palette.Indexed index))))
+    [ -1; 256 ]
+
 let test_status_names_the_exact_hues () =
   let open Masc_tui_theme in
   check str "ok is green" Sgr.green (status Ok);
@@ -127,6 +147,8 @@ let () =
     ; ( "conditional"
       , [ Alcotest.test_case "every colour agrees with the flag" `Quick
             test_conditional_tokens_agree_with_the_flag
+        ; Alcotest.test_case "projected backgrounds own their bytes" `Quick
+            test_projected_background_bytes
         ; Alcotest.test_case "the flag reflects the environment" `Quick
             test_the_shim_is_the_same_strings
         ] )

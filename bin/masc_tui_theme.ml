@@ -30,6 +30,19 @@ module Sgr = struct
   let default_fg = style "\027[39m"
   let gray = style "\027[90m"
 
+  let background = function
+    | Some (Masc_tui_terminal_palette.Rgb color) ->
+      style
+        (Printf.sprintf "\027[48;2;%d;%d;%dm"
+           (Masc_tui_terminal_palette.red color)
+           (Masc_tui_terminal_palette.green color)
+           (Masc_tui_terminal_palette.blue color))
+    | Some (Masc_tui_terminal_palette.Indexed index)
+      when index >= 0 && index <= 255 ->
+      style (Printf.sprintf "\027[48;5;%dm" index)
+    | Some (Masc_tui_terminal_palette.Indexed _) | None -> ""
+  ;;
+
   let bg_removed = style "\027[48;5;52m"
   let bg_added = style "\027[48;5;22m"
 

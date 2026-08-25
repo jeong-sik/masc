@@ -130,6 +130,7 @@
   (re_export masc.repo_manager)
   (re_export masc.dashboard)
   (re_export masc.operator)
+  (re_export masc.lsp_client)
   (re_export masc.server)
   (re_export masc.runtime)
   (re_export masc.provider_tool_support)

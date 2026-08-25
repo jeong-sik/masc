@@ -112,6 +112,11 @@ let surface_rows () =
   let terminal_rows, _columns = get_terminal_size () in
   max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
 
+(* Page keys move almost one visible body, leaving a few rows of overlap so
+   the reader keeps their place across the jump. Individual renderers clamp
+   the result against their exact wrapped-line count. *)
+let surface_page_rows () = max 1 (surface_rows () - 8)
+
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
@@ -3186,8 +3191,14 @@ let apply_board_post_load state request result =
     | Ok (post, comments) when String.equal post.bp_id post_id ->
         state.board_detail <-
           Board_detail.complete state.board_detail request (Ok (post, comments));
-        replace_board_posts state
-          (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
+        (* A detail response enriches one list row; it does not rank the list.
+           Moving the completed post to the front made rapid j/k navigation
+           snap back to row zero as asynchronous responses arrived. *)
+        state.board_posts <-
+          List.map
+            (fun current ->
+              if String.equal current.bp_id post_id then post else current)
+            state.board_posts
     | Ok (post, _) ->
         fail
           (Printf.sprintf
@@ -5518,6 +5529,18 @@ let main () =
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
            state.resource_focus <- not state.resource_focus
+       | Some ("h" | "H")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_posts_pane
+            | Board_list | Board_compose -> ())
+       | Some ("l" | "L")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_detail_pane
+            | Board_list | Board_compose -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -5551,6 +5574,57 @@ let main () =
                        ~tool_call_id:held.kta_tool_call_id ~allow:false
                  | None -> ())
             | _ -> ())
+       | Some ("pageup" | "pagedown") ->
+           let page = surface_page_rows () in
+           let direction = if key = Some "pagedown" then 1 else -1 in
+           (match state.view with
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     let count = List.length state.board_posts in
+                     state.board_cursor <-
+                       max 0
+                         (min (count - 1) (state.board_cursor + (direction * page)))
+                 | Board_read _ ->
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:(direction * page)
+                      | Board_detail_pane ->
+                          state.board_scroll <-
+                            max 0 (state.board_scroll + (direction * page)))
+                 | Board_compose -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let count =
+                       match state.fusion_runs with
+                       | None -> 0
+                       | Some snapshot -> List.length snapshot.fus_runs
+                     in
+                     state.fusion_cursor <-
+                       max 0
+                         (min (count - 1) (state.fusion_cursor + (direction * page)))
+                 | Fusion_detail _ ->
+                     state.fusion_scroll <-
+                       max 0 (state.fusion_scroll + (direction * page)))
+            | Schedules ->
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <-
+                    max 0 (state.schedule_scroll + (direction * page))
+                else
+                  let count =
+                    match state.schedules with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.scs_rows
+                  in
+                  state.schedule_cursor <-
+                    max 0
+                      (min (count - 1)
+                         (state.schedule_cursor + (direction * page)))
+            | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
+            | Verification | Harness | Repositories | Changes | Connectors
+            | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_from_masc_dir state base_path;

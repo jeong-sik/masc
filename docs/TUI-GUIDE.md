@@ -98,8 +98,9 @@ device-flow login and streams its (redacted) output into the pane; when
 the stream ends the pane re-reads the identity observation.
 
 Reading a board post on a wide terminal keeps the post list beside it.
-`Ctrl-W` switches focus between the list and the post. `j`/`k` then move the
-focused pane. The open post remains marked when the detail has focus.
+`Ctrl-W` toggles focus; `h` selects the list and `l` selects the post. `j`/`k`
+then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
+remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. The
@@ -613,9 +614,10 @@ local guess from the status column. The payload target column names who the
 wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
-`Enter` opens the selected schedule. The detail names its stable ID, status,
-due time, recurrence, source, target, and full payload summary. `Esc` returns
-to the list; `j`/`k` scroll a long payload.
+`Enter` opens the selected schedule. The detail includes schedule and instance
+identity, dispatch state, requesting actors, timestamps, recurrence, payload
+kind/tool/digest/summary, last wake, and queue/reaction evidence. `Esc` returns
+to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
@@ -634,10 +636,12 @@ silently change what `Enter` opens.
 
 The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
-`source=fusion` with the same `fusion_run_id`. `recorded` draws every panel
-answer or failure in server order, followed by the judge decision, resolved
-answer, and reason. It does not calculate a majority, minimum answer count,
-timeout verdict, cost verdict, or any other local conclusion.
+`source=fusion` with the same `fusion_run_id`. `recorded` puts the judge result,
+resolved answer, and reason first, followed by the question and every panel
+answer or failure in server order. The panel header summarizes answered/failed
+counts and tokens; it does not calculate a majority, minimum answer count,
+timeout verdict, cost verdict, or any other local conclusion. `PgUp`/`PgDn`
+scroll a page at a time.
 
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not
@@ -729,6 +733,8 @@ Per surface:
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
+| `h` / `l` | Wide Board read | Focus post list / post detail |
+| `PgUp` / `PgDn` | Board, Schedules, Fusion | Move the active list or detail by a page |
 | `Enter` | Schedules | Open schedule details |
 | `Enter` | Planning | Open goal detail |
 | `Enter` | Fusion | Open exact run evidence detail |

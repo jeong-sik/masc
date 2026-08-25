@@ -147,12 +147,30 @@ type board_comment = {
     renders as itself rather than disappearing. *)
 type schedule_row = {
   sch_schedule_id: string;
+  sch_schedule_instance_id: string;
   sch_status: string;
+  sch_dispatch_status: string;
   sch_source: string;
+  sch_requested_by: string;
+  sch_scheduled_by: string;
+  sch_requested_at_iso: string;
   sch_due_at_iso: string option;
+  sch_next_due_at_iso: string option;
+  sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
+  sch_payload_digest: string;
+  sch_payload_kind: string option;
+  sch_payload_support: string;
+  sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
   sch_payload_summary: string option;
+  sch_last_wake_status: string option;
+  sch_last_wake_started_at_iso: string option;
+  sch_last_wake_error: string option;
+  sch_queue_projection_status: string option;
+  sch_queue_pending_count: int option;
+  sch_reaction_projection_status: string option;
+  sch_reaction_latest_at_iso: string option;
 }
 
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
@@ -1230,6 +1248,8 @@ type clamped_scroll =
   | Overview_events of int
   | Task_detail of int
   | Board_read of int
+  | Message_scroll of int
+  | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
@@ -1240,6 +1260,8 @@ let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
+  | Message_scroll value -> state.msg_scroll <- value
+  | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value

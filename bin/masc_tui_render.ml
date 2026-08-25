@@ -1477,11 +1477,14 @@ let render_board_read (state : state) (list_post : board_post) =
   let buf = Buffer.create 4096 in
   let footer =
     let pane_hint =
-      if cols >= keeper_split_threshold_cols then "  Ctrl-W:switch pane" else ""
+      if cols >= keeper_split_threshold_cols then
+        "  h/l:pane  Ctrl-W:switch"
+      else ""
     in
     footer_line state
       ~hints:
-        (Printf.sprintf "j/k:%s%s  Esc:back  c:reply  r:refresh  Tab:next"
+        (Printf.sprintf
+           "j/k:%s  PgUp/PgDn:page%s  Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Board_posts_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -1985,20 +1988,83 @@ let render_schedule_list (state : state) =
 
   Buffer.add_string buf
     (footer_line state
-       ~hints:"j/k:move  Enter:details  x:cancel  r:refresh  Tab:next");
+       ~hints:
+         "j/k:move  PgUp/PgDn:page  Enter:details  x:cancel  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
+
+let schedule_detail_lines ~width (row : schedule_row) =
+  let field label value =
+    ( Ansi.reset
+    , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
+  in
+  let optional value = Option.value ~default:"\xe2\x80\x94" value in
+  let timestamp value =
+    match value with
+    | None -> "\xe2\x80\x94"
+    | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+  in
+  let queue =
+    match row.sch_queue_projection_status, row.sch_queue_pending_count with
+    | None, None -> "\xe2\x80\x94"
+    | Some status, None -> status
+    | None, Some count -> Printf.sprintf "pending=%d" count
+    | Some status, Some count -> Printf.sprintf "%s  pending=%d" status count
+  in
+  let reaction =
+    match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
+    | None, None -> "\xe2\x80\x94"
+    | Some status, None -> status
+    | None, Some at -> Tui_decode.short_timestamp_for_terminal at
+    | Some status, Some at ->
+        Printf.sprintf "%s  %s" status
+          (Tui_decode.short_timestamp_for_terminal at)
+  in
+  let summary =
+    Option.value ~default:"(no payload summary)" row.sch_payload_summary
+  in
+  [ Ansi.bold, "  SCHEDULE"
+  ; field "Schedule" row.sch_schedule_id
+  ; field "Instance" row.sch_schedule_instance_id
+  ; field "Status" row.sch_status
+  ; field "Dispatch" row.sch_dispatch_status
+  ; field "Source" row.sch_source
+  ; field "Requested by" row.sch_requested_by
+  ; field "Scheduled by" row.sch_scheduled_by
+  ; field "Requested"
+      (Tui_decode.short_timestamp_for_terminal row.sch_requested_at_iso)
+  ; field "Due" (timestamp row.sch_due_at_iso)
+  ; field "Next due" (timestamp row.sch_next_due_at_iso)
+  ; field "Expires" (timestamp row.sch_expires_at_iso)
+  ; field "Recurrence" row.sch_recurrence_summary
+  ; Ansi.dim, ""
+  ; Ansi.bold, "  PAYLOAD"
+  ; field "Kind" (optional row.sch_payload_kind)
+  ; field "Support" row.sch_payload_support
+  ; field "Dispatch tool" (optional row.sch_payload_dispatch_tool)
+  ; field "Target" (optional row.sch_payload_target)
+  ; field "Digest" row.sch_payload_digest
+  ; Ansi.bold, "  Summary"
+  ]
+  @ (Message_layout.wrap_body ~markdown:chat_markdown
+       ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
+    |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  LAST WAKE"
+    ; field "Status" (optional row.sch_last_wake_status)
+    ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
+    ; field "Error" (optional row.sch_last_wake_error)
+    ; Ansi.dim, ""
+    ; Ansi.bold, "  DELIVERY EVIDENCE"
+    ; field "Queue" queue
+    ; field "Reaction" reaction
+    ]
 
 let render_schedule_detail (state : state) (row : schedule_row) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
-  let due =
-    match row.sch_due_at_iso with
-    | Some iso -> Tui_decode.short_timestamp_for_terminal iso
-    | None -> "\xe2\x80\x94"
-  in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
@@ -2006,40 +2072,24 @@ let render_schedule_detail (state : state) (row : schedule_row) =
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let field label value =
-    box_line buf cols
-      (Printf.sprintf "  %s%-11s%s %s" Ansi.dim label Ansi.reset
-         (Terminal_text.single_line value))
-  in
-  field "Schedule" row.sch_schedule_id;
-  field "Due" due;
-  field "Recurrence" row.sch_recurrence_summary;
-  field "Source" row.sch_source;
-  field "Target" (Option.value ~default:"\xe2\x80\x94" row.sch_payload_target);
-  box_divider buf cols;
-  box_line buf cols (Ansi.bold ^ "  Payload" ^ Ansi.reset);
-  let payload = Option.value ~default:"(no payload summary)" row.sch_payload_summary in
-  let payload_lines =
-    Message_layout.wrap_body ~markdown:chat_markdown
-      ~max_cells:(max 1 (cols - 8)) ~sanitize:Terminal_text.single_line payload
-  in
-  let content_height = max 1 (rows - 13) in
-  let max_scroll = max 0 (List.length payload_lines - content_height) in
+  let lines = schedule_detail_lines ~width:(max 1 (cols - 4)) row in
+  let content_height = max 1 (rows - 6) in
+  let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.schedule_scroll max_scroll) in
   for index = 0 to content_height - 1 do
-    match List.nth_opt payload_lines (scroll + index) with
-    | Some line -> box_line buf cols ("  " ^ line)
+    match List.nth_opt lines (scroll + index) with
+    | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  if max_scroll > 0 then
-    box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "  [%d/%d]" (scroll + 1) (max_scroll + 1));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state
-       ~hints:"j/k:scroll  Esc:list  x:cancel  r:refresh  Tab:next");
-  finish_surface state ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols
-    buf
+       ~hints:
+         (Printf.sprintf
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Esc:list  x:cancel  r:refresh  Tab:next"
+            scroll max_scroll));
+  finish_surface state ~clamped:(Schedule_detail_scroll scroll)
+    ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
 let render_schedules (state : state) =
   match state.schedule_detail_id, state.schedules with
@@ -3611,6 +3661,7 @@ let render_keeper_message (state : state) =
         (zip (frame_lines left_buf) (frame_lines chat_buf))
     end;
     finish_frame_with_strip state ~surface_key:"keeper-message"
+      ~clamped:(Message_scroll scroll)
       ~cursor:
         (Frame_presenter.Visible_at
            { row = input_row; column = cursor_column })
@@ -4055,7 +4106,9 @@ let render_fusion_list (state : state) =
     done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:move  Enter:detail  r:refresh  Tab:next  q:quit");
+    (footer_line state
+       ~hints:
+         "j/k:move  PgUp/PgDn:page  Enter:detail  r:refresh  Tab:next  q:quit");
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 let fusion_wrapped_block ~width ~indent text =
@@ -4077,11 +4130,11 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let run_lines =
-    [ fusion_run_status_color run.fur_status, "  Status: " ^ status
+    [ Ansi.bold, "  RUN"
+    ; fusion_run_status_color run.fur_status, "  Status: " ^ status
     ; Ansi.reset, "  Keeper: " ^ Terminal_text.single_line run.fur_keeper
-    ; Ansi.reset, "  Preset: " ^ Terminal_text.single_line run.fur_preset
     ; ( Ansi.reset
-    , "  Topology: "
+    , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
     ; Ansi.dim, "  Started: " ^ fusion_run_clock run
     ]
@@ -4104,6 +4157,19 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
     | Fusion_evidence_recorded, Some evidence ->
+        let answered, failed, input_tokens, output_tokens =
+          List.fold_left
+            (fun (answered, failed, input_tokens, output_tokens) result ->
+              match result with
+              | Fusion_panel_answered answer ->
+                  ( answered + 1
+                  , failed
+                  , input_tokens + answer.fpa_input_tokens
+                  , output_tokens + answer.fpa_output_tokens )
+              | Fusion_panel_failed _ ->
+                  answered, failed + 1, input_tokens, output_tokens)
+            (0, 0, 0, 0) evidence.fe_panel
+        in
         let panel_lines =
           evidence.fe_panel
           |> List.mapi (fun index result ->
@@ -4149,10 +4215,23 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         in
         [ Theme.ok, "  Evidence: recorded"
         ; Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
+        ; Ansi.dim, ""
+        ; Ansi.magenta, "  RESULT"
         ]
-        @ fusion_labeled_block ~width ~label:"Question" evidence.fe_question
+        @ judge_lines
+        @ [ Ansi.dim, ""
+          ; Ansi.bold, "  QUESTION"
+          ]
+        @ fusion_wrapped_block ~width ~indent:"    " evidence.fe_question
+        @ [ Ansi.dim, ""
+          ; Ansi.bold, "  PANEL RESPONSES"
+          ; ( Ansi.dim
+            , Printf.sprintf
+                "  %d answered / %d failed  \xc2\xb7  %d input / %d output tokens"
+                answered failed input_tokens output_tokens )
+          ]
         @ [ Ansi.dim, "" ]
-        @ panel_lines @ [ Ansi.dim, "" ] @ judge_lines
+        @ panel_lines
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
@@ -4211,7 +4290,8 @@ let render_fusion_detail (state : state) run_id =
   Buffer.add_string buf
     (footer_line state
        ~hints:
-         (Printf.sprintf "j/k:scroll (%d/%d)  Esc:back  r:refresh  Tab:next"
+         (Printf.sprintf
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Esc:back  r:refresh  Tab:next"
             scroll max_scroll));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf

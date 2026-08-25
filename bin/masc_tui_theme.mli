@@ -34,10 +34,13 @@ val recede : Masc_tui_terminal_palette.t option -> string
 
     So this computes instead of naming: the terminal's own text stepped
     toward the terminal's own background, projected through what the process
-    can emit. A terminal that did not answer the palette query -- a
-    multiplexer, an emulator without the reply -- falls back to [Sgr.dim],
-    which is what every row drew before this existed. Disabled colours
-    produce [""]. *)
+    can emit. A terminal that did not answer the palette query falls back to
+    [Sgr.dim], which is what every row drew before this existed -- and on a
+    light terminal that is still the wrong direction. Nothing here can tell
+    which it is: a multiplexer passes no OSC answer through, so the page is
+    unknown rather than dark. Closing that needs the terminal asked a
+    different way, by DECSET 996 and 2031, which tmux does answer and this
+    does not yet send. Disabled colours produce [""]. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is

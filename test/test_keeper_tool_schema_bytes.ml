@@ -94,8 +94,16 @@ let measured ~surface =
    The count did not move: the surface is the same tools describing themselves
    more fully, which is the distinction this pair of numbers exists to draw.
    (Phrasing from #30611, which reached the same re-pin independently.) *)
+
+(* 2026-08-26: 74,521 -> 74,507. #30658 rewrote [masc_goal_upsert]'s
+   description from "Goal metadata and parent linkage" to "flat Goal
+   metadata"; the schema carries no parent field, so the old sentence named
+   something the tool never took. Fourteen characters, and again the count
+   held. This is the fourth re-pin in two days, each from a description edit
+   in a file whose author had no reason to run this one. #30679 asks whether
+   a byte count pinned by hand is the right shape for that. *)
 let all_surface_golden_count = 87
-let all_surface_golden_bytes = 74_521
+let all_surface_golden_bytes = 74_507
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

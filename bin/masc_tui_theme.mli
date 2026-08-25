@@ -13,6 +13,22 @@ module For_testing : sig
     -> bool
   (** Pure environment-policy fixture. Only [force_color = Some "1"]
       overrides a non-empty [no_color]. *)
+
+  val user_message_background_rgb
+    :  Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb
+  (** Pure low-contrast blend derived from the terminal's default background.
+      Light backgrounds blend 4 percent toward black; dark backgrounds blend
+      12 percent toward white. *)
+
+  val user_message_background
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for the production semantic token. *)
 end
 
 val colors_enabled : bool
@@ -23,6 +39,11 @@ val colors_enabled : bool
 
 val style : string -> string
 (** [style code] is [code] with colours enabled and [""] without. *)
+
+val user_message_background : Masc_tui_terminal_palette.t option -> string
+(** A low-contrast background derived from a known terminal palette and
+    projected through the process stdout capability. Missing palette,
+    disabled colours, and unsupported projection all produce [""]. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is

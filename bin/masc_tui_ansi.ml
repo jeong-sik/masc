@@ -75,6 +75,19 @@ end
     for its badge/gutter and body styles instead of rebuilding that mapping.
     Both human and Keeper prose deliberately keep the terminal's foreground. *)
 module Chat_theme = struct
+  type snapshot =
+    { palette_generation : int
+    ; user_background : string
+    }
+
+  type body_context =
+    { opening : string
+    ; markdown_close : string
+    ; inline_restore : string
+    ; palette_generation : int
+    ; ambient_background : bool
+    }
+
   let origin : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User -> Ansi.cyan
     | Masc_tui_message_layout.Keeper -> Ansi.blue
@@ -88,6 +101,60 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Status -> Theme.warn
     | Masc_tui_message_layout.Error -> Theme.bad
     | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking -> Ansi.dim
+
+  let snapshot_cache : snapshot option Atomic.t = Atomic.make None
+
+  let rec snapshot () =
+    let palette_snapshot = Masc_tui_terminal_palette.snapshot () in
+    let palette_generation =
+      Masc_tui_terminal_palette.snapshot_generation palette_snapshot
+    in
+    let previous = Atomic.get snapshot_cache in
+    match previous with
+    | Some snapshot when snapshot.palette_generation = palette_generation ->
+      snapshot
+    | Some _ | None ->
+      let next =
+        { palette_generation
+        ; user_background =
+            Masc_tui_theme.user_message_background
+              (Masc_tui_terminal_palette.snapshot_palette palette_snapshot)
+        }
+      in
+      if Atomic.compare_and_set snapshot_cache previous (Some next) then next
+      else snapshot ()
+  ;;
+
+  let body_context snapshot style =
+    let opening = body style in
+    match style, snapshot.user_background with
+    | Masc_tui_message_layout.User, background
+      when String.length background > 0 ->
+      let ambient = Ansi.reset ^ background in
+      { opening = ambient
+      ; markdown_close = ambient
+      ; inline_restore = ambient
+      ; palette_generation = snapshot.palette_generation
+      ; ambient_background = true
+      }
+    | Masc_tui_message_layout.User, _ ->
+      { opening
+      ; markdown_close = Ansi.reset
+      ; inline_restore = Ansi.reset ^ opening
+      ; palette_generation = snapshot.palette_generation
+      ; ambient_background = false
+      }
+    | ( Masc_tui_message_layout.Keeper
+      | Masc_tui_message_layout.Status
+      | Masc_tui_message_layout.Error
+      | Masc_tui_message_layout.Tool
+      | Masc_tui_message_layout.Thinking ), _ ->
+      { opening
+      ; markdown_close = Ansi.reset
+      ; inline_restore = Ansi.reset ^ opening
+      ; palette_generation = 0
+      ; ambient_background = false
+      }
 end
 
 (** A screen title.

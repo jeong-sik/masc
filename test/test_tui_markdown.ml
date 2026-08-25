@@ -65,6 +65,26 @@ let test_strong_and_emphasis () =
   check_rows "single marker is emphasis" [ "a <i>soft</i> word" ]
     (render "a *soft* word")
 
+let test_inline_closers_restore_the_ambient_row () =
+  let restoring : Markdown.palette =
+    { tagged with
+      strong = ("<b>", "<restore>")
+    ; code = ("<c>", "<restore>")
+    ; link_text = ("<a>", "<restore>")
+    ; link_target = ("<u>", "<restore>")
+    }
+  in
+  check_rows "strong, code, and both link spans restore the row"
+    [ "<b>bold<restore> <c>code<restore> \
+       <a>docs<restore><u>https://x<restore>"
+    ]
+    (render ~width:80 ~palette:restoring
+       "**bold** `code` [docs](https://x)");
+  check_rows "a wrapped strong span restores every physical row"
+    [ "<b>abcde<restore>"; "<b>f<restore>" ]
+    (render ~width:5 ~palette:restoring "**abcdef**")
+;;
+
 (* An unpaired marker is a character a keeper typed. Treating it as an opener
    swallows the rest of the line into a style that never closes. *)
 let test_unpaired_marker_stays_literal () =
@@ -422,6 +442,8 @@ let () =
             test_inline_code_loses_its_backticks
         ; Alcotest.test_case "strong and emphasis" `Quick
             test_strong_and_emphasis
+        ; Alcotest.test_case "inline closers restore the ambient row" `Quick
+            test_inline_closers_restore_the_ambient_row
         ; Alcotest.test_case "an unpaired marker stays literal" `Quick
             test_unpaired_marker_stays_literal
         ; Alcotest.test_case "snake_case keeps its underscores" `Quick

@@ -155,6 +155,55 @@ let test_keeper_chat_uses_current_async_contract () =
      >= 1)
 ;;
 
+let test_user_message_background_has_one_render_snapshot () =
+  let render_path = "bin/masc_tui_render.ml" in
+  let ansi_path = "bin/masc_tui_ansi.ml" in
+  check int "Chat theme reads one atomic palette snapshot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"snapshot" ~callee:"Masc_tui_terminal_palette.snapshot");
+  check int "Chat theme publishes one generation-keyed cache update" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"snapshot" ~callee:"Atomic.compare_and_set");
+  check int "Chat theme projects the semantic background only on a cache miss"
+    1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"snapshot"
+       ~callee:"Masc_tui_theme.user_message_background");
+  check int "only the two User contexts read the palette generation" 2
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"body_context" ~callees:[]
+       ~fields:[ "palette_generation" ]);
+  check int "one palette snapshot spans layout and draw" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_message" ~callee:"Chat_theme.snapshot");
+  check int "layout derives one body context per entry" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"cached_chat_markdown"
+       ~callee:"Chat_theme.body_context");
+  check int "draw derives one body context per row" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_chat_row" ~callee:"Chat_theme.body_context");
+  check int "cache key reads the role-aware palette generation" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
+       ~fields:[ "palette_generation" ]);
+  check int "bare links and the gutter restore the captured row" 2
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
+       ~fields:[ "inline_restore" ]);
+  check int "Markdown palette has no hard-coded reset closer" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~callees:[] ~identifiers:[ "Ansi.reset" ]);
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " restores the captured Markdown context") 1
+        (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+           ~module_path:render_path ~binding_name ~callees:[]
+           ~fields:[ "markdown_close" ]))
+    [ "chat_markdown"; "chat_markdown_streaming" ]
+;;
+
 let test_operator_approvals_use_current_contract () =
   check int "operator summary endpoint is exact" 1
     (Ast_grep.count_string_literals
@@ -1391,6 +1440,10 @@ let () =
           "keeper chat uses current async contract"
           `Quick
           test_keeper_chat_uses_current_async_contract;
+        test_case
+          "user message background has one render snapshot"
+          `Quick
+          test_user_message_background_has_one_render_snapshot;
         test_case
           "operator approvals use current contract"
           `Quick

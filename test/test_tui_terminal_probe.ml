@@ -209,16 +209,30 @@ let test_graphics_refusal_is_a_complete_answer () =
 
 let test_process_palette_preserves_none () =
   Masc_tui_terminal_palette.set_current None;
+  let unknown_snapshot = Masc_tui_terminal_palette.snapshot () in
   check bool "unknown remains None" true
     (Option.is_none (Masc_tui_terminal_palette.current ()));
+  check bool "snapshot preserves unknown" true
+    (Option.is_none
+       (Masc_tui_terminal_palette.snapshot_palette unknown_snapshot));
   let known =
     Masc_tui_terminal_probe.decode ~palette_requested:true
       (foreground ^ background ^ graphics_ok)
     |> palette
   in
   Masc_tui_terminal_palette.set_current (Some known);
+  let known_snapshot = Masc_tui_terminal_palette.snapshot () in
   check bool "the same authority is readable" true
     (Option.is_some (Masc_tui_terminal_palette.current ()));
+  check int "generation advances with the atomic write"
+    (Masc_tui_terminal_palette.snapshot_generation unknown_snapshot + 1)
+    (Masc_tui_terminal_palette.snapshot_generation known_snapshot);
+  check bool "a captured snapshot cannot tear after a later write" true
+    (Option.is_none
+       (Masc_tui_terminal_palette.snapshot_palette unknown_snapshot));
+  check bool "the new snapshot carries the new palette" true
+    (Option.is_some
+       (Masc_tui_terminal_palette.snapshot_palette known_snapshot));
   Masc_tui_terminal_palette.set_current None
 ;;
 

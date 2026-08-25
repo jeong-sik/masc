@@ -54,10 +54,10 @@ let finish_frame ?clamped ~surface_key ~cursor ~rows ~cols buf :
    should keep the alignment that made it worth fencing. Colours stay inside
    the palette the renderer already uses, so a chat row is still recognisably
    one of this TUI's rows. *)
-let chat_markdown_palette : Markdown.palette =
-  { strong = (Ansi.bold, Ansi.reset)
-  ; emphasis = (Ansi.dim, Ansi.reset)
-  ; code = (Ansi.cyan, Ansi.reset)
+let chat_markdown_palette ~closing : Markdown.palette =
+  { strong = (Ansi.bold, closing)
+  ; emphasis = (Ansi.dim, closing)
+  ; code = (Ansi.cyan, closing)
   (* Bold alone. [white] is a colour like any other -- on a light background
      it is the background -- so painting a heading with it hid the heading on
      exactly the terminals that read it as text. Bold already says heading. *)
@@ -67,41 +67,41 @@ let chat_markdown_palette : Markdown.palette =
      two above. One span for every level drew a document with no shape. *)
   ; heading =
       (fun level ->
-        if level <= 1 then (Ansi.bold ^ Ansi.underline, Ansi.reset)
-        else if level = 2 then (Ansi.bold, Ansi.reset)
-        else (Ansi.bold ^ Ansi.dim, Ansi.reset))
-  ; quote = (Ansi.dim, Ansi.reset)
-  ; link_text = (Ansi.blue, Ansi.reset)
-  ; link_target = (Ansi.dim, Ansi.reset)
-  ; rule = (Ansi.gray, Ansi.reset)
+        if level <= 1 then (Ansi.bold ^ Ansi.underline, closing)
+        else if level = 2 then (Ansi.bold, closing)
+        else (Ansi.bold ^ Ansi.dim, closing))
+  ; quote = (Ansi.dim, closing)
+  ; link_text = (Ansi.blue, closing)
+  ; link_target = (Ansi.dim, closing)
+  ; rule = (Ansi.gray, closing)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
   (* Reverse video uses the terminal's own foreground and background, so the
      language banner stays legible on both light and dark themes. *)
-  ; code_header = (Ansi.reverse, Ansi.reset)
-  ; code_border = (Ansi.gray, Ansi.reset)
+  ; code_header = (Ansi.reverse, closing)
+  ; code_border = (Ansi.gray, closing)
   ; quote_gutter = "\xe2\x96\x8f "
-  ; table_header = (Ansi.bold, Ansi.reset)
+  ; table_header = (Ansi.bold, closing)
   ; table_gutter = " \xe2\x94\x82 "
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)
-  ; code_keyword = (Theme.Syntax.keyword, Ansi.reset)
-  ; code_string = (Theme.Syntax.string, Ansi.reset)
-  ; code_comment = (Ansi.gray, Ansi.reset)
-  ; code_number = (Ansi.magenta, Ansi.reset)
-  ; code_type = (Ansi.bold ^ Ansi.blue, Ansi.reset)
+  ; code_keyword = (Theme.Syntax.keyword, closing)
+  ; code_string = (Theme.Syntax.string, closing)
+  ; code_comment = (Ansi.gray, closing)
+  ; code_number = (Ansi.magenta, closing)
+  ; code_type = (Ansi.bold ^ Ansi.blue, closing)
   }
 
-let chat_markdown ~width body =
-  Markdown.render ~palette:chat_markdown_palette ~width body
+let chat_markdown ~context ~width body =
+  Markdown.render
+    ~palette:(chat_markdown_palette ~closing:context.Chat_theme.markdown_close)
+    ~width body
 
-(* The palette above is compiled into this binary today. The revisions remain
-   explicit inputs because #30196 can make the terminal palette runtime state;
-   that owner will advance [chat_markdown_palette_generation] instead of
-   teaching the cache which colour fields matter. *)
+(* The semantic Markdown palette itself is compiled into this binary. The
+   generation travels separately because only a user row's ambient terminal
+   background changes its closing strings. *)
 let chat_markdown_theme_revision = 1
-let chat_markdown_palette_generation = 0
 let chat_markdown_cache_capacity = 128
 
 type chat_markdown_identity = {
@@ -123,10 +123,14 @@ let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity
     ~equal:equal_chat_markdown_identity
 
-let chat_markdown_streaming ~width body =
-  Markdown.render_streaming ~palette:chat_markdown_palette ~width body
+let chat_markdown_streaming ~context ~width body =
+  Markdown.render_streaming
+    ~palette:(chat_markdown_palette ~closing:context.Chat_theme.markdown_close)
+    ~width body
 
-let cached_chat_markdown ~(entry : Message_layout.entry) ~width =
+let cached_chat_markdown ~theme ~(entry : Message_layout.entry) ~width =
+  let context = Chat_theme.body_context theme entry.style in
+  let palette_generation = context.palette_generation in
   match entry.markdown_source with
   | Message_layout.Markdown_stable
       { keeper_name; request_id; observed_at; entry_index } ->
@@ -144,23 +148,23 @@ let cached_chat_markdown ~(entry : Message_layout.entry) ~width =
       in
       Markdown_cache.render chat_markdown_cache
         ~theme_revision:chat_markdown_theme_revision
-        ~palette_generation:chat_markdown_palette_generation ~width
-        ~renderer:chat_markdown ~source
+        ~palette_generation ~width ~renderer:(chat_markdown ~context) ~source
   | Message_layout.Markdown_growing
       { keeper_name; request_id; entry_index } ->
       Markdown_cache.render_growing chat_markdown_cache
         ~theme_revision:chat_markdown_theme_revision
-        ~palette_generation:chat_markdown_palette_generation ~width
-        ~renderer:chat_markdown_streaming
+        ~palette_generation ~width
+        ~renderer:(chat_markdown_streaming ~context)
         ~identity:
           { cmi_style = entry.style;
             cmi_keeper_name = keeper_name;
             cmi_request_id = request_id;
             cmi_observed_at = None;
             cmi_entry_index = entry_index;
-          }
+        }
         ~text:entry.body
-  | Message_layout.Markdown_streaming -> chat_markdown ~width entry.body
+  | Message_layout.Markdown_streaming ->
+      chat_markdown ~context ~width entry.body
 
 (* Conversation colour names the source, not the prose. A keeper can return a
    page of Markdown; painting every byte green turns syntax, emphasis, links,
@@ -183,20 +187,21 @@ let tool_projection_mode (state : state) =
   | Tools_compact -> Keeper_chat_transcript.Compact
   | Tools_full -> Keeper_chat_transcript.Full
 
-let render_chat_row buf cols (row : Message_layout.row) =
+let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Body ->
       (* The two indent cells the layout reserves become a gutter in the
          block's own colour, so where one block ends and the next begins
          reads at a glance instead of from the headings alone. *)
       let text = row.text in
+      let context = Chat_theme.body_context theme row.style in
       let dress rest =
         (* A pasted URL reads as a link, not prose. Closed by restoring the
            row's own style — a bare reset would strip it from everything
            after the link. *)
         Masc_tui_message_layout.dress_bare_links
           ~open_style:(Ansi.underline ^ Ansi.blue)
-          ~close_style:(Ansi.reset ^ Chat_theme.body row.style)
+          ~close_style:context.inline_restore
           rest
       in
       if
@@ -204,13 +209,18 @@ let render_chat_row buf cols (row : Message_layout.row) =
         && Char.equal text.[1] ' '
       then (
         let rest = String.sub text 2 (String.length text - 2) in
-        box_line buf cols
-          (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
-             (Chat_theme.origin row.style) Ansi.reset
-             (Chat_theme.body row.style) (dress rest) Ansi.reset))
+        if context.ambient_background then
+          box_line_styled buf cols ~style:context.opening
+            (Printf.sprintf "%s\xe2\x94\x82%s %s"
+               (Chat_theme.origin row.style) context.inline_restore
+               (dress rest))
+        else
+          box_line buf cols
+            (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
+               (Chat_theme.origin row.style) Ansi.reset
+               (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
-        box_line_styled buf cols ~style:(Chat_theme.body row.style)
-          (dress text)
+        box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
       box_line_styled buf cols ~style:Ansi.dim
         (Printf.sprintf "[%s]" timestamp)
@@ -3247,6 +3257,7 @@ let render_keeper_message (state : state) =
     finish_frame_with_strip state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->
+    let chat_theme = Chat_theme.snapshot () in
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
       (* Both features put a mode indicator here: memory arrived on main
@@ -3468,7 +3479,8 @@ let render_keeper_message (state : state) =
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
     let scroll, visible_rows =
-      Message_layout.clamped_scrolled_rows ~markdown:cached_chat_markdown
+      Message_layout.clamped_scrolled_rows
+        ~markdown:(cached_chat_markdown ~theme:chat_theme)
         ~inner_width ~height:history_height ~requested:state.msg_scroll
         layout_entries
     in
@@ -3482,7 +3494,7 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row chat_buf chat_cols)
+        (render_chat_row ~theme:chat_theme chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do

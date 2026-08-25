@@ -228,7 +228,7 @@ let test_lifetime_flags_refuse_to_pick_for_the_operator () =
 let test_login_url_uses_uri_components () =
   with_temp_dir "auth-login-uri" @@ fun base_path ->
   match
-    Auth_login.mint ~base_path ~host:"::1" ~port:8935
+    Auth_login.mint ~base_path ~host:"2001:db8::1" ~port:8935
       ~agent_name:"agent +&" ~role:Masc_domain.Worker
       ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry ()
   with
@@ -236,14 +236,37 @@ let test_login_url_uses_uri_components () =
     failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
   | Ok report ->
     let dashboard = Uri.of_string report.dashboard_url in
-    check (option string) "IPv6 host" (Some "::1") (Uri.host dashboard);
+    check (option string) "IPv6 host" (Some "2001:db8::1") (Uri.host dashboard);
     check (option int) "port" (Some 8935) (Uri.port dashboard);
     check string "dashboard path" "/dashboard" (Uri.path dashboard);
     check (option string) "agent query round-trip" (Some "agent +&")
       (Uri.get_query_param dashboard "agent");
     let mcp = Uri.of_string report.mcp_url in
-    check (option string) "MCP IPv6 host" (Some "::1") (Uri.host mcp);
+    check (option string) "MCP IPv6 host" (Some "2001:db8::1") (Uri.host mcp);
     check string "MCP path" "/mcp" (Uri.path mcp)
+
+(* --host is the flag for the address to *bind*, and its own help text offers
+   0.0.0.0. These two URLs are what the operator opens and pastes, so a
+   wildcard has to become something dialable before it is printed. Asserting
+   both because they are built separately and only one used to be checked. *)
+let test_login_urls_do_not_advertise_a_bind_wildcard () =
+  with_temp_dir "auth-login-wildcard" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"0.0.0.0" ~port:8935 ~agent_name:"agent"
+      ~role:Masc_domain.Worker ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+    failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+    check (option string) "dashboard URL names a reachable host"
+      (Some "127.0.0.1")
+      (Uri.host (Uri.of_string report.dashboard_url));
+    check (option string) "MCP URL names a reachable host" (Some "127.0.0.1")
+      (Uri.host (Uri.of_string report.mcp_url));
+    check (option string) "the token still rides the dashboard URL"
+      (Some report.bearer_token)
+      (Uri.get_query_param (Uri.of_string report.dashboard_url) "token")
 
 (* What login persists is what a local client can read back. Asserting the
    round trip rather than the path keeps the two sides free to move together
@@ -284,6 +307,8 @@ let () =
             test_login_rejects_a_window_outside_the_bound;
           test_case "URL uses URI components" `Quick
             test_login_url_uses_uri_components;
+          test_case "URLs do not advertise a bind wildcard" `Quick
+            test_login_urls_do_not_advertise_a_bind_wildcard;
           test_case "persisted token round-trips" `Quick
             test_persisted_token_round_trips;
         ] );
